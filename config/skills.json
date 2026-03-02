@@ -1,0 +1,20 @@
+{
+  "ticktick": {
+    "enabled": true,
+    "config": {}
+  },
+  "gmail": {
+    "enabled": true,
+    "config": {
+      "watchFolders": ["INBOX"]
+    }
+  },
+  "digest": {
+    "enabled": true,
+    "config": {}
+  },
+  "telegram": {
+    "enabled": true,
+    "config": {}
+  }
+}

@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  raven-core:
+    build:
+      context: .
+      dockerfile: Dockerfile.core
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - DATABASE_PATH=/app/data/raven.db
+      - SESSION_PATH=/app/data/sessions
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  raven-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_CORE_WS_URL=ws://localhost:3001/ws
+      - NEXT_PUBLIC_CORE_API_URL=http://localhost:3001/api
+      - CORE_INTERNAL_URL=http://raven-core:3001
+    depends_on:
+      raven-core:
+        condition: service_healthy
+    restart: unless-stopped

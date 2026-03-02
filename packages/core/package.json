@@ -1,0 +1,30 @@
+{
+  "name": "@raven/core",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "node --watch --experimental-strip-types src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-code": "^1.0.0",
+    "@fastify/cors": "^10.0.0",
+    "@fastify/websocket": "^11.0.0",
+    "@raven/shared": "*",
+    "better-sqlite3": "^11.7.0",
+    "croner": "^9.0.0",
+    "dotenv": "^16.4.0",
+    "fastify": "^5.2.0",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.7.0"
+  }
+}
