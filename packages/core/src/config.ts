@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import 'dotenv/config';
 
 const envSchema = z.object({
-  ANTHROPIC_API_KEY: z.string().min(1),
+  ANTHROPIC_API_KEY: z.string().default(''),  // Empty = use `claude` CLI auth (MAX plan)
   CLAUDE_MODEL: z.string().default('claude-sonnet-4-5-20250514'),
   RAVEN_PORT: z.coerce.number().default(3001),
   RAVEN_TIMEZONE: z.string().default('UTC'),
