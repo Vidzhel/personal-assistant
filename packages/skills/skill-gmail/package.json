@@ -1,0 +1,20 @@
+{
+  "name": "@raven/skill-gmail",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@raven/shared": "*",
+    "imapflow": "^1.0.0",
+    "mailparser": "^3.7.0"
+  },
+  "devDependencies": {
+    "@types/mailparser": "^3.4.0",
+    "typescript": "^5.7.0"
+  }
+}

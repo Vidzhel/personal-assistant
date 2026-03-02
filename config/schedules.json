@@ -1,0 +1,10 @@
+[
+  {
+    "id": "morning-digest",
+    "name": "Morning Digest",
+    "cron": "0 8 * * *",
+    "taskType": "morning-digest",
+    "skillName": "digest",
+    "enabled": true
+  }
+]

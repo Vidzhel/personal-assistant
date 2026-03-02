@@ -1,0 +1,23 @@
+{
+  "name": "raven",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/shared",
+    "packages/core",
+    "packages/web",
+    "packages/skills/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w packages/shared && npm run build -w packages/core",
+    "build:all": "npm run build -w packages/shared && npm run build -w packages/core && npm run build -ws --if-present",
+    "dev:core": "npm run dev -w packages/core",
+    "dev:web": "npm run dev -w packages/web",
+    "start:core": "npm run start -w packages/core",
+    "lint": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
