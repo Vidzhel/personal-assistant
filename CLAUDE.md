@@ -63,6 +63,12 @@ docker-compose up --build    # full stack
 - Types in `packages/shared/src/types/`
 - One concern per file - keep files focused and under 300 lines
 
+## Git Workflow
+
+- Claude manages this project: track changes, commit, and push to repository
+- Always commit meaningful changes with descriptive messages
+- Push to remote to persist work across sessions
+
 ## Testing
 
 Run core without skills to verify infrastructure:
@@ -76,3 +82,5 @@ curl http://localhost:3001/api/health
 - Runtime: Node.js 22+ on WSL2 (Linux), Windows host accessible
 - Docker available for containerized deployment
 - SQLite for persistence (single file at `data/raven.db`)
+- User has MAX plan for Claude - SDK uses `claude` CLI auth, NOT ANTHROPIC_API_KEY
+- Telegram and TickTick desktop apps installed on Windows side
