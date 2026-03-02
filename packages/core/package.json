@@ -9,7 +9,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@anthropic-ai/claude-code": "^1.0.0",
+    "@anthropic-ai/claude-code": "^2.1.7",
     "@fastify/cors": "^10.0.0",
     "@fastify/websocket": "^11.0.0",
     "@raven/shared": "*",
