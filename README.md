@@ -41,7 +41,7 @@ npm run dev:web     # Start the dashboard (separate terminal)
 cp .env.example .env
 # Edit .env with your API keys
 
-docker-compose up --build
+docker compose up --build
 ```
 
 - Dashboard: http://localhost:3000
