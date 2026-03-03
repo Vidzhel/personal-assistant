@@ -10,6 +10,7 @@ const envSchema = z.object({
   RAVEN_TIMEZONE: z.string().default('UTC'),
   RAVEN_DIGEST_TIME: z.string().default('08:00'),
   RAVEN_MAX_CONCURRENT_AGENTS: z.coerce.number().default(3),
+  RAVEN_AGENT_MAX_TURNS: z.coerce.number().default(25),
   RAVEN_MAX_BUDGET_USD_PER_DAY: z.coerce.number().default(5.0),
   DATABASE_PATH: z.string().default('./data/raven.db'),
   SESSION_PATH: z.string().default('./data/sessions'),

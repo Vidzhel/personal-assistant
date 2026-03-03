@@ -15,9 +15,15 @@
     "dev:core": "npm run dev -w packages/core",
     "dev:web": "npm run dev -w packages/web",
     "start:core": "npm run start -w packages/core",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "engines": {
     "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.18"
   }
 }

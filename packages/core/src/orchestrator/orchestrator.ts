@@ -90,7 +90,14 @@ export class Orchestrator {
         on: (type: string, handler: (event: unknown) => void) => this.eventBus.on(type as import('@raven/shared').RavenEventType, handler),
         off: (type: string, handler: (event: unknown) => void) => this.eventBus.off(type as import('@raven/shared').RavenEventType, handler),
       },
-      db: { run() {}, get() { return undefined; }, all() { return []; } },
+      db: (() => {
+        const db = getDb();
+        return {
+          run: (sql: string, ...p: unknown[]) => db.prepare(sql).run(...p),
+          get: <T>(sql: string, ...p: unknown[]) => db.prepare(sql).get(...p) as T | undefined,
+          all: <T>(sql: string, ...p: unknown[]) => db.prepare(sql).all(...p) as T[],
+        };
+      })(),
       config: {},
       logger: log,
       getSkillData: async () => null,
