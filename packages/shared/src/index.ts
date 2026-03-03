@@ -1,3 +1,3 @@
-export * from './types/index.js';
-export { generateId } from './utils/id.js';
-export { createLogger } from './utils/logger.js';
+export * from './types/index.ts';
+export { generateId } from './utils/id.ts';
+export { createLogger } from './utils/logger.ts';

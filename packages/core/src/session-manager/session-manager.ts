@@ -1,5 +1,5 @@
 import { createLogger, generateId, type AgentSession } from '@raven/shared';
-import { getDb } from '../db/database.js';
+import { getDb } from '../db/database.ts';
 
 const log = createLogger('session-manager');
 
@@ -45,10 +45,7 @@ export class SessionManager {
 
   linkSdkSession(sessionId: string, sdkSessionId: string): void {
     const db = getDb();
-    db.prepare('UPDATE sessions SET sdk_session_id = ? WHERE id = ?').run(
-      sdkSessionId,
-      sessionId,
-    );
+    db.prepare('UPDATE sessions SET sdk_session_id = ? WHERE id = ?').run(sdkSessionId, sessionId);
   }
 
   updateStatus(sessionId: string, status: AgentSession['status']): void {

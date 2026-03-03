@@ -6,7 +6,7 @@ vi.mock('@anthropic-ai/claude-code', () => ({
 }));
 
 // Mock config before importing
-vi.mock('../config.js', () => {
+vi.mock('../config.ts', () => {
   const config = {
     ANTHROPIC_API_KEY: 'test-key',
     CLAUDE_MODEL: 'claude-sonnet-4-5-20250514',
@@ -27,10 +27,10 @@ vi.mock('../config.js', () => {
 });
 
 import { query } from '@anthropic-ai/claude-code';
-import { AgentManager } from '../agent-manager/agent-manager.js';
-import { EventBus } from '../event-bus/event-bus.js';
-import { SkillRegistry } from '../skill-registry/skill-registry.js';
-import { McpManager } from '../mcp-manager/mcp-manager.js';
+import { AgentManager } from '../agent-manager/agent-manager.ts';
+import { EventBus } from '../event-bus/event-bus.ts';
+import { SkillRegistry } from '../skill-registry/skill-registry.ts';
+import { McpManager } from '../mcp-manager/mcp-manager.ts';
 import type { RavenEvent, AgentTaskRequestEvent } from '@raven/shared';
 
 const mockQuery = vi.mocked(query);
@@ -105,6 +105,7 @@ describe('AgentManager', () => {
 
   it('failed task emits agent:task:complete with success false', async () => {
     mockQuery.mockImplementation(async function* () {
+      yield* []; // satisfy require-yield
       throw new Error('Claude Code process exited with code 1');
     } as unknown as typeof query);
 
@@ -145,28 +146,33 @@ describe('AgentManager', () => {
 
     // Should have the "Starting..." thinking message + the assistant message
     const assistantMsgs = messages.filter(
-      (m) => (m as unknown as { payload: { messageType: string } }).payload.messageType === 'assistant',
+      (m) =>
+        (m as unknown as { payload: { messageType: string } }).payload.messageType === 'assistant',
     );
     expect(assistantMsgs.length).toBeGreaterThanOrEqual(1);
   });
 
   it('priority ordering: high tasks run before normal', async () => {
-    const taskOrder: string[] = [];
-    let resolveFirst: () => void;
-    let resolveSecond: () => void;
-    const firstPromise = new Promise<void>((r) => { resolveFirst = r; });
-    const secondPromise = new Promise<void>((r) => { resolveSecond = r; });
+    const _taskOrder: string[] = [];
+    let _resolveFirst: () => void;
+    let _resolveSecond: () => void;
+    const _firstPromise = new Promise<void>((r) => {
+      _resolveFirst = r;
+    });
+    const _secondPromise = new Promise<void>((r) => {
+      _resolveSecond = r;
+    });
 
     // Make query block until we release it
-    let callCount = 0;
+    let _callCount = 0;
     mockQuery.mockImplementation(async function* () {
-      callCount++;
+      _callCount++;
       // Each call records its task via the prompt (which is the task prompt)
       yield { type: 'result', subtype: 'success', result: 'done' };
     } as unknown as typeof query);
 
     // Create a new manager with concurrency 1 so tasks queue
-    vi.doMock('../config.js', () => ({
+    vi.doMock('../config.ts', () => ({
       getConfig: () => ({
         RAVEN_MAX_CONCURRENT_AGENTS: 1,
         RAVEN_AGENT_MAX_TURNS: 25,

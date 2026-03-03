@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { ApiDeps } from '../server.js';
+import type { ApiDeps } from '../server.ts';
 
 export function registerHealthRoute(app: FastifyInstance, deps: ApiDeps): void {
   app.get('/api/health', async () => {

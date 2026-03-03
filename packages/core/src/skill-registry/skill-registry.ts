@@ -1,12 +1,21 @@
-import { createLogger, type RavenSkill, type SkillContext, type McpServerConfig, type SubAgentDefinition } from '@raven/shared';
-import type { SkillsConfig } from '../config.js';
+import {
+  createLogger,
+  type RavenSkill,
+  type SkillContext,
+  type McpServerConfig,
+  type SubAgentDefinition,
+} from '@raven/shared';
 
 const log = createLogger('skill-registry');
 
 export class SkillRegistry {
   private skills = new Map<string, RavenSkill>();
 
-  async registerSkill(skill: RavenSkill, config: Record<string, unknown>, baseContext: Omit<SkillContext, 'config'>): Promise<void> {
+  async registerSkill(
+    skill: RavenSkill,
+    config: Record<string, unknown>,
+    baseContext: Omit<SkillContext, 'config'>,
+  ): Promise<void> {
     const name = skill.manifest.name;
     log.info(`Registering skill: ${name}`);
 

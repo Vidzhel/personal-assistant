@@ -54,8 +54,12 @@ export function StatusCards({ health, projectCount, scheduleCount }: StatusCards
           className="p-4 rounded-lg"
           style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
         >
-          <p className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>{card.label}</p>
-          <p className="text-xl font-semibold" style={{ color: card.color }}>{card.value}</p>
+          <p className="text-xs mb-1" style={{ color: 'var(--text-muted)' }}>
+            {card.label}
+          </p>
+          <p className="text-xl font-semibold" style={{ color: card.color }}>
+            {card.value}
+          </p>
         </div>
       ))}
     </div>

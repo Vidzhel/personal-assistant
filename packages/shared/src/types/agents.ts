@@ -1,4 +1,4 @@
-import type { McpServerConfig, SubAgentDefinition, Priority } from './events.js';
+import type { McpServerConfig, SubAgentDefinition, Priority } from './events.ts';
 
 export interface AgentSession {
   id: string;

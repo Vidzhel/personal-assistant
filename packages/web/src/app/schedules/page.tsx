@@ -14,16 +14,23 @@ export default function SchedulesPage() {
     <div className="p-8 space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Schedules</h1>
-        <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Recurring tasks and automated jobs.</p>
+        <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
+          Recurring tasks and automated jobs.
+        </p>
       </div>
 
       <div className="space-y-3">
         {schedules.map((s) => (
-          <div key={s.id} className="p-4 rounded-lg flex justify-between items-center" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+          <div
+            key={s.id}
+            className="p-4 rounded-lg flex justify-between items-center"
+            style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
+          >
             <div>
               <h3 className="font-semibold">{s.name}</h3>
               <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-                <span className="font-mono">{s.cron}</span> &middot; {s.skillName} &middot; {s.timezone}
+                <span className="font-mono">{s.cron}</span> &middot; {s.skillName} &middot;{' '}
+                {s.timezone}
               </p>
             </div>
             <span
@@ -37,7 +44,11 @@ export default function SchedulesPage() {
             </span>
           </div>
         ))}
-        {schedules.length === 0 && <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No schedules configured.</p>}
+        {schedules.length === 0 && (
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+            No schedules configured.
+          </p>
+        )}
       </div>
     </div>
   );

@@ -1,5 +1,13 @@
-import type { RavenSkill, SkillManifest, SkillContext, McpServerConfig, SubAgentDefinition, DigestSection, AgentTaskPayload } from '@raven/shared';
-import { ImapWatcher } from './imap-watcher.js';
+import type {
+  RavenSkill,
+  SkillManifest,
+  SkillContext,
+  McpServerConfig,
+  SubAgentDefinition,
+  DigestSection,
+  AgentTaskPayload,
+} from '@raven/shared';
+import { ImapWatcher } from './imap-watcher.ts';
 
 class GmailSkill implements RavenSkill {
   manifest: SkillManifest = {
@@ -65,14 +73,21 @@ class GmailSkill implements RavenSkill {
   getAgentDefinitions(): Record<string, SubAgentDefinition> {
     return {
       'gmail-agent': {
-        description: 'Reads and manages Gmail emails. Use this agent for email summaries, searching emails, and drafting replies.',
-        prompt: 'You are a Gmail agent within Raven. Use the Gmail MCP tools to read, search, and manage emails. Be concise and return structured data.',
+        description:
+          'Reads and manages Gmail emails. Use this agent for email summaries, searching emails, and drafting replies.',
+        prompt:
+          'You are a Gmail agent within Raven. Use the Gmail MCP tools to read, search, and manage emails. Be concise and return structured data.',
         tools: ['mcp__gmail_gmail__*', 'Read', 'Grep'],
       },
     };
   }
 
-  async handleScheduledTask(_taskType: string, _context: SkillContext): Promise<AgentTaskPayload | void> {}
+  async handleScheduledTask(
+    _taskType: string,
+    _context: SkillContext,
+  ): Promise<AgentTaskPayload | undefined> {
+    return undefined;
+  }
 
   async getDataForDigest(): Promise<DigestSection> {
     return {

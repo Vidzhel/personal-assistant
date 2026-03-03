@@ -30,7 +30,9 @@ export default function ProjectsPage() {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold">Projects</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Each project has its own chat session and skill context.</p>
+          <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
+            Each project has its own chat session and skill context.
+          </p>
         </div>
         <button
           onClick={() => setShowCreate(!showCreate)}
@@ -42,17 +44,26 @@ export default function ProjectsPage() {
       </div>
 
       {showCreate && (
-        <div className="p-4 rounded-lg space-y-3" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+        <div
+          className="p-4 rounded-lg space-y-3"
+          style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
+        >
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Project name"
             className="w-full px-3 py-2 rounded text-sm outline-none"
-            style={{ background: 'var(--bg)', color: 'var(--text)', border: '1px solid var(--border)' }}
+            style={{
+              background: 'var(--bg)',
+              color: 'var(--text)',
+              border: '1px solid var(--border)',
+            }}
           />
           <div>
-            <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>Skills:</p>
+            <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
+              Skills:
+            </p>
             <div className="flex gap-2 flex-wrap">
               {skills.map((s) => (
                 <button
@@ -74,7 +85,11 @@ export default function ProjectsPage() {
               ))}
             </div>
           </div>
-          <button onClick={handleCreate} className="px-4 py-2 rounded text-sm" style={{ background: 'var(--accent)', color: 'white' }}>
+          <button
+            onClick={handleCreate}
+            className="px-4 py-2 rounded text-sm"
+            style={{ background: 'var(--accent)', color: 'white' }}
+          >
             Create
           </button>
         </div>
@@ -89,10 +104,18 @@ export default function ProjectsPage() {
             style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
           >
             <h3 className="font-semibold">{p.name}</h3>
-            {p.description && <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>{p.description}</p>}
+            {p.description && (
+              <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
+                {p.description}
+              </p>
+            )}
             <div className="flex gap-1 mt-3 flex-wrap">
               {p.skills.map((s) => (
-                <span key={s} className="text-xs px-2 py-0.5 rounded" style={{ background: 'var(--bg-hover)', color: 'var(--accent)' }}>
+                <span
+                  key={s}
+                  className="text-xs px-2 py-0.5 rounded"
+                  style={{ background: 'var(--bg-hover)', color: 'var(--accent)' }}
+                >
                   {s}
                 </span>
               ))}
@@ -100,7 +123,9 @@ export default function ProjectsPage() {
           </Link>
         ))}
         {projects.length === 0 && (
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>No projects yet. Create one to start chatting with Raven.</p>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+            No projects yet. Create one to start chatting with Raven.
+          </p>
         )}
       </div>
     </div>

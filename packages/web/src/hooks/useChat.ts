@@ -18,19 +18,18 @@ export function useChat(projectId: string) {
   useEffect(() => {
     for (const msg of wsMessages) {
       if (msg.type === 'event') {
-        const event = msg.data as { type: string; payload?: { messageType?: string; content?: string; taskId?: string } };
+        const event = msg.data as {
+          type: string;
+          payload?: { messageType?: string; content?: string; taskId?: string };
+        };
         const content = event.payload?.content;
         const taskId = event.payload?.taskId;
         if (event.type === 'agent:message' && content) {
           setChatMessages((prev) => {
-            const existing = prev.find(
-              (m) => m.role === 'assistant' && m.id === taskId,
-            );
+            const existing = prev.find((m) => m.role === 'assistant' && m.id === taskId);
             if (existing) {
               return prev.map((m) =>
-                m.id === taskId
-                  ? { ...m, content: m.content + content }
-                  : m,
+                m.id === taskId ? { ...m, content: m.content + content } : m,
               );
             }
             return [

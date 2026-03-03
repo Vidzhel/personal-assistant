@@ -1,7 +1,5 @@
-import { createLogger, type McpServerConfig } from '@raven/shared';
-import type { SkillRegistry } from '../skill-registry/skill-registry.js';
-
-const log = createLogger('mcp-manager');
+import type { McpServerConfig } from '@raven/shared';
+import type { SkillRegistry } from '../skill-registry/skill-registry.ts';
 
 /**
  * MCP Manager resolves MCP server configs from skills on demand.

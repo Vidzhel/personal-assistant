@@ -1,10 +1,10 @@
 import { createLogger, generateId } from '@raven/shared';
-import type { AgentTask, AgentTaskRequestEvent, McpServerConfig, SubAgentDefinition } from '@raven/shared';
-import type { EventBus } from '../event-bus/event-bus.js';
-import type { McpManager } from '../mcp-manager/mcp-manager.js';
-import type { SkillRegistry } from '../skill-registry/skill-registry.js';
-import { runAgentTask } from './agent-session.js';
-import { getConfig } from '../config.js';
+import type { AgentTask, AgentTaskRequestEvent } from '@raven/shared';
+import type { EventBus } from '../event-bus/event-bus.ts';
+import type { McpManager } from '../mcp-manager/mcp-manager.ts';
+import type { SkillRegistry } from '../skill-registry/skill-registry.ts';
+import { runAgentTask } from './agent-session.ts';
+import { getConfig } from '../config.ts';
 
 const log = createLogger('agent-manager');
 
@@ -63,7 +63,8 @@ export class AgentManager {
 
   private processQueue(): void {
     while (this.running.size < this.maxConcurrent && this.queue.length > 0) {
-      const task = this.queue.shift()!;
+      const task = this.queue.shift();
+      if (!task) break;
       const promise = this.runTask(task).finally(() => {
         this.running.delete(task.id);
         this.processQueue();

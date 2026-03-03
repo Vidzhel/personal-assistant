@@ -1,4 +1,4 @@
-import type { AgentMessageEvent, RavenEvent, AgentSession } from './index.js';
+import type { AgentMessageEvent, RavenEvent, AgentSession } from './index.ts';
 
 export type WsMessageToClient =
   | { type: 'agent:message'; data: AgentMessageEvent['payload'] }

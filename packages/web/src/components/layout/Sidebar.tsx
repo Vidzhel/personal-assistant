@@ -16,16 +16,22 @@ export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="w-56 h-screen flex flex-col border-r" style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}>
+    <aside
+      className="w-56 h-screen flex flex-col border-r"
+      style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}
+    >
       <div className="p-4 border-b" style={{ borderColor: 'var(--border)' }}>
         <h1 className="text-lg font-bold tracking-tight" style={{ color: 'var(--accent)' }}>
           RAVEN
         </h1>
-        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Personal Assistant</p>
+        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+          Personal Assistant
+        </p>
       </div>
       <nav className="flex-1 p-2 space-y-1">
         {nav.map((item) => {
-          const active = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
+          const active =
+            pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
           return (
             <Link
               key={item.href}

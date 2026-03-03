@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import 'dotenv/config';
 
 const envSchema = z.object({
-  ANTHROPIC_API_KEY: z.string().default(''),  // Empty = use `claude` CLI auth (MAX plan)
+  ANTHROPIC_API_KEY: z.string().default(''), // Empty = use `claude` CLI auth (MAX plan)
   CLAUDE_MODEL: z.string().default('claude-sonnet-4-5-20250514'),
   RAVEN_PORT: z.coerce.number().default(3001),
   RAVEN_TIMEZONE: z.string().default('UTC'),
@@ -36,6 +36,7 @@ let config: AppConfig;
 export function loadConfig(): AppConfig {
   const result = envSchema.safeParse(process.env);
   if (!result.success) {
+    // eslint-disable-next-line no-console -- runs before logger init
     console.error('Invalid configuration:', result.error.format());
     process.exit(1);
   }

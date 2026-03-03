@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildSystemPrompt, buildSubAgentPrompt } from '../agent-manager/prompt-builder.js';
+import { buildSystemPrompt, buildSubAgentPrompt } from '../agent-manager/prompt-builder.ts';
 import type { AgentTask, Project } from '@raven/shared';
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {

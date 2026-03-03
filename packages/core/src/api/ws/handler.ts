@@ -2,14 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import { createLogger } from '@raven/shared';
 import type { RavenEvent, WsMessageFromClient } from '@raven/shared';
-import type { EventBus } from '../../event-bus/event-bus.js';
+import type { EventBus } from '../../event-bus/event-bus.ts';
 
 const log = createLogger('ws');
 
-export function registerWebSocketHandler(
-  app: FastifyInstance,
-  eventBus: EventBus,
-): void {
+export function registerWebSocketHandler(app: FastifyInstance, eventBus: EventBus): void {
   app.get('/ws', { websocket: true }, (socket: WebSocket) => {
     const subscribedChannels = new Set<string>();
     log.info('WebSocket client connected');
@@ -48,14 +45,9 @@ export function registerWebSocketHandler(
     });
 
     const forwardEvent = (event: RavenEvent) => {
-      const channel = event.projectId
-        ? `project:${event.projectId}`
-        : 'global';
+      const channel = event.projectId ? `project:${event.projectId}` : 'global';
 
-      if (
-        subscribedChannels.has(channel) ||
-        subscribedChannels.has('global')
-      ) {
+      if (subscribedChannels.has(channel) || subscribedChannels.has('global')) {
         try {
           socket.send(JSON.stringify({ type: 'event', data: event }));
         } catch {

@@ -18,10 +18,7 @@ export function buildSystemPrompt(task: AgentTask, project?: Project): string {
   return parts.join('\n');
 }
 
-export function buildSubAgentPrompt(
-  skillName: string,
-  taskPrompt: string,
-): string {
+export function buildSubAgentPrompt(skillName: string, taskPrompt: string): string {
   return [
     `You are a specialized ${skillName} agent within the Raven personal assistant system.`,
     `Complete the following task using the tools available to you.`,

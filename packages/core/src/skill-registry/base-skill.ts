@@ -30,7 +30,9 @@ export abstract class BaseSkill implements RavenSkill {
   async handleScheduledTask(
     _taskType: string,
     _context: SkillContext,
-  ): Promise<AgentTaskPayload | void> {}
+  ): Promise<AgentTaskPayload | undefined> {
+    return undefined;
+  }
 
   async getDataForDigest(): Promise<DigestSection> {
     return {

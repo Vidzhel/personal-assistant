@@ -1,5 +1,13 @@
-import type { RavenSkill, SkillManifest, SkillContext, McpServerConfig, SubAgentDefinition, DigestSection, AgentTaskPayload, NotificationEvent } from '@raven/shared';
-import { TelegramBot } from './bot.js';
+import type {
+  RavenSkill,
+  SkillManifest,
+  SkillContext,
+  McpServerConfig,
+  SubAgentDefinition,
+  AgentTaskPayload,
+  NotificationEvent,
+} from '@raven/shared';
+import { TelegramBot } from './bot.ts';
 
 class TelegramSkill implements RavenSkill {
   manifest: SkillManifest = {
@@ -28,9 +36,9 @@ class TelegramSkill implements RavenSkill {
         const { channel, title, body } = notifEvent.payload;
         if (channel === 'telegram' || channel === 'all') {
           const text = `*${escapeMarkdown(title)}*\n\n${escapeMarkdown(body)}`;
-          this.bot?.sendMessage(text, 'MarkdownV2').catch((err) =>
-            context.logger.error(`Telegram send failed: ${err}`),
-          );
+          this.bot
+            ?.sendMessage(text, 'MarkdownV2')
+            .catch((err) => context.logger.error(`Telegram send failed: ${err}`));
         }
       });
 
@@ -42,9 +50,9 @@ class TelegramSkill implements RavenSkill {
           const text = e.payload.success
             ? e.payload.result.slice(0, 4000)
             : 'Task failed. Check the dashboard for details.';
-          this.bot?.sendMessage(text).catch((err) =>
-            context.logger.error(`Telegram send failed: ${err}`),
-          );
+          this.bot
+            ?.sendMessage(text)
+            .catch((err) => context.logger.error(`Telegram send failed: ${err}`));
         }
       });
 
@@ -74,7 +82,12 @@ class TelegramSkill implements RavenSkill {
     return {};
   }
 
-  async handleScheduledTask(_taskType: string, _context: SkillContext): Promise<AgentTaskPayload | void> {}
+  async handleScheduledTask(
+    _taskType: string,
+    _context: SkillContext,
+  ): Promise<AgentTaskPayload | undefined> {
+    return undefined;
+  }
 }
 
 function escapeMarkdown(text: string): string {

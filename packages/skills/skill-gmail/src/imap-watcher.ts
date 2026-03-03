@@ -75,12 +75,15 @@ export class ImapWatcher {
 
       try {
         // Listen for new messages
-        this.client.on('exists', async (data: { path: string; count: number; prevCount: number }) => {
-          if (data.count > data.prevCount) {
-            this.logger.info(`New mail in ${data.path} (${data.count - data.prevCount} new)`);
-            await this.fetchNewMessages(data.path, data.prevCount + 1, data.count);
-          }
-        });
+        this.client.on(
+          'exists',
+          async (data: { path: string; count: number; prevCount: number }) => {
+            if (data.count > data.prevCount) {
+              this.logger.info(`New mail in ${data.path} (${data.count - data.prevCount} new)`);
+              await this.fetchNewMessages(data.path, data.prevCount + 1, data.count);
+            }
+          },
+        );
 
         // IDLE - this keeps the connection alive and receives push notifications
         this.logger.info(`Watching ${folder} via IDLE`);

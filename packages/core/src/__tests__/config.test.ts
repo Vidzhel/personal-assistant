@@ -25,7 +25,7 @@ describe('config', () => {
     delete process.env.SESSION_PATH;
     delete process.env.ANTHROPIC_API_KEY;
 
-    const { loadConfig } = await import('../config.js');
+    const { loadConfig } = await import('../config.ts');
     const config = loadConfig();
 
     expect(config.RAVEN_PORT).toBe(3001);
@@ -43,7 +43,7 @@ describe('config', () => {
     process.env.LOG_LEVEL = 'debug';
     process.env.RAVEN_MAX_CONCURRENT_AGENTS = '5';
 
-    const { loadConfig } = await import('../config.js');
+    const { loadConfig } = await import('../config.ts');
     const config = loadConfig();
 
     expect(config.RAVEN_PORT).toBe(4000);
@@ -60,7 +60,7 @@ describe('config', () => {
       throw new Error('process.exit called');
     });
 
-    const { loadConfig } = await import('../config.js');
+    const { loadConfig } = await import('../config.ts');
     expect(() => loadConfig()).toThrow('process.exit called');
     expect(exitSpy).toHaveBeenCalledWith(1);
 
@@ -68,13 +68,13 @@ describe('config', () => {
   });
 
   it('getConfig throws if loadConfig not called', async () => {
-    const { getConfig } = await import('../config.js');
+    const { getConfig } = await import('../config.ts');
     expect(() => getConfig()).toThrow('Config not loaded');
   });
 
   it('ANTHROPIC_API_KEY defaults to empty string', async () => {
     delete process.env.ANTHROPIC_API_KEY;
-    const { loadConfig } = await import('../config.js');
+    const { loadConfig } = await import('../config.ts');
     const config = loadConfig();
     expect(config.ANTHROPIC_API_KEY).toBe('');
   });

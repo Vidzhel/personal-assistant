@@ -1,15 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { Orchestrator } from '../orchestrator/orchestrator.js';
-import { EventBus } from '../event-bus/event-bus.js';
-import { SkillRegistry } from '../skill-registry/skill-registry.js';
-import { McpManager } from '../mcp-manager/mcp-manager.js';
-import { initDatabase, getDb } from '../db/database.js';
+import { Orchestrator } from '../orchestrator/orchestrator.ts';
+import { EventBus } from '../event-bus/event-bus.ts';
+import { SkillRegistry } from '../skill-registry/skill-registry.ts';
+import { McpManager } from '../mcp-manager/mcp-manager.ts';
+import { initDatabase, getDb } from '../db/database.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { RavenEvent, RavenSkill, SkillContext } from '@raven/shared';
+import type { RavenEvent, RavenSkill } from '@raven/shared';
 
-function makeSkill(name: string, mcpServers: Record<string, { command: string; args: string[] }> = {}): RavenSkill {
+function makeSkill(
+  name: string,
+  mcpServers: Record<string, { command: string; args: string[] }> = {},
+): RavenSkill {
   return {
     manifest: {
       name,
@@ -18,7 +21,13 @@ function makeSkill(name: string, mcpServers: Record<string, { command: string; a
       description: `${name} skill`,
       capabilities: ['mcp-server'],
       defaultSchedules: [
-        { id: `${name}-sched`, name: `${name} schedule`, cron: '0 8 * * *', taskType: `${name}-task`, enabled: true },
+        {
+          id: `${name}-sched`,
+          name: `${name} schedule`,
+          cron: '0 8 * * *',
+          taskType: `${name}-task`,
+          enabled: true,
+        },
       ],
     },
     initialize: vi.fn().mockResolvedValue(undefined),
@@ -42,7 +51,7 @@ describe('Orchestrator', () => {
   let eventBus: EventBus;
   let skillRegistry: SkillRegistry;
   let mcpManager: McpManager;
-  let orchestrator: Orchestrator;
+  let _orchestrator: Orchestrator;
 
   beforeEach(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-orch-'));
@@ -54,12 +63,16 @@ describe('Orchestrator', () => {
 
   afterEach(() => {
     eventBus.removeAllListeners();
-    try { getDb().close(); } catch { /* */ }
+    try {
+      getDb().close();
+    } catch {
+      /* */
+    }
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
   it('user:chat:message emits agent:task:request with empty mcpServers', async () => {
-    orchestrator = new Orchestrator(eventBus, skillRegistry, mcpManager);
+    _orchestrator = new Orchestrator(eventBus, skillRegistry, mcpManager);
 
     // Create a project in DB
     const db = getDb();
@@ -92,14 +105,18 @@ describe('Orchestrator', () => {
     const gmailSkill = makeSkill('gmail', {
       gmail_api: { command: 'node', args: ['gmail-mcp.js'] },
     });
-    await skillRegistry.registerSkill(gmailSkill, {}, {
-      eventBus: { emit: vi.fn(), on: vi.fn(), off: vi.fn() },
-      db: { run: vi.fn(), get: vi.fn(), all: vi.fn() },
-      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-      getSkillData: vi.fn().mockResolvedValue(null),
-    });
+    await skillRegistry.registerSkill(
+      gmailSkill,
+      {},
+      {
+        eventBus: { emit: vi.fn(), on: vi.fn(), off: vi.fn() },
+        db: { run: vi.fn(), get: vi.fn(), all: vi.fn() },
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+        getSkillData: vi.fn().mockResolvedValue(null),
+      },
+    );
 
-    orchestrator = new Orchestrator(eventBus, skillRegistry, mcpManager);
+    _orchestrator = new Orchestrator(eventBus, skillRegistry, mcpManager);
 
     const taskRequestPromise = new Promise<RavenEvent>((resolve) => {
       eventBus.on('agent:task:request', (e) => resolve(e));
@@ -127,14 +144,18 @@ describe('Orchestrator', () => {
 
   it('schedule:triggered delegates to skill handleScheduledTask', async () => {
     const digestSkill = makeSkill('digest');
-    await skillRegistry.registerSkill(digestSkill, {}, {
-      eventBus: { emit: vi.fn(), on: vi.fn(), off: vi.fn() },
-      db: { run: vi.fn(), get: vi.fn(), all: vi.fn() },
-      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-      getSkillData: vi.fn().mockResolvedValue(null),
-    });
+    await skillRegistry.registerSkill(
+      digestSkill,
+      {},
+      {
+        eventBus: { emit: vi.fn(), on: vi.fn(), off: vi.fn() },
+        db: { run: vi.fn(), get: vi.fn(), all: vi.fn() },
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+        getSkillData: vi.fn().mockResolvedValue(null),
+      },
+    );
 
-    orchestrator = new Orchestrator(eventBus, skillRegistry, mcpManager);
+    _orchestrator = new Orchestrator(eventBus, skillRegistry, mcpManager);
 
     const taskRequestPromise = new Promise<RavenEvent>((resolve) => {
       eventBus.on('agent:task:request', (e) => resolve(e));
@@ -153,8 +174,7 @@ describe('Orchestrator', () => {
     } as RavenEvent);
 
     // Wait for async handler
-    const event = await taskRequestPromise;
-    const payload = (event as unknown as { payload: Record<string, unknown> }).payload;
+    await taskRequestPromise;
     expect(digestSkill.handleScheduledTask).toHaveBeenCalledWith(
       'digest-task',
       expect.objectContaining({
@@ -168,7 +188,7 @@ describe('Orchestrator', () => {
   });
 
   it('schedule:triggered with unknown taskType logs warning and does not emit', async () => {
-    orchestrator = new Orchestrator(eventBus, skillRegistry, mcpManager);
+    _orchestrator = new Orchestrator(eventBus, skillRegistry, mcpManager);
 
     const handler = vi.fn();
     eventBus.on('agent:task:request', handler);

@@ -1,4 +1,12 @@
-import type { RavenSkill, SkillManifest, SkillContext, McpServerConfig, SubAgentDefinition, DigestSection, AgentTaskPayload } from '@raven/shared';
+import type {
+  RavenSkill,
+  SkillManifest,
+  SkillContext,
+  McpServerConfig,
+  SubAgentDefinition,
+  DigestSection,
+  AgentTaskPayload,
+} from '@raven/shared';
 
 class TickTickSkill implements RavenSkill {
   manifest: SkillManifest = {
@@ -40,21 +48,28 @@ class TickTickSkill implements RavenSkill {
   getAgentDefinitions(): Record<string, SubAgentDefinition> {
     return {
       'ticktick-agent': {
-        description: 'Manages tasks in TickTick. Use this agent for creating, listing, updating, or organizing tasks.',
-        prompt: 'You are a TickTick task management agent within Raven. Use the TickTick MCP tools to manage tasks. Be concise and return structured data.',
+        description:
+          'Manages tasks in TickTick. Use this agent for creating, listing, updating, or organizing tasks.',
+        prompt:
+          'You are a TickTick task management agent within Raven. Use the TickTick MCP tools to manage tasks. Be concise and return structured data.',
         tools: ['mcp__ticktick_ticktick__*', 'Read', 'Grep'],
       },
     };
   }
 
-  async handleScheduledTask(_taskType: string, _context: SkillContext): Promise<AgentTaskPayload | void> {}
+  async handleScheduledTask(
+    _taskType: string,
+    _context: SkillContext,
+  ): Promise<AgentTaskPayload | undefined> {
+    return undefined;
+  }
 
   async getDataForDigest(): Promise<DigestSection> {
     return {
       skillName: 'ticktick',
       title: 'Tasks',
       priority: 1,
-      markdownContent: 'Use the TickTick agent to fetch today\'s tasks and overdue items.',
+      markdownContent: "Use the TickTick agent to fetch today's tasks and overdue items.",
     };
   }
 }

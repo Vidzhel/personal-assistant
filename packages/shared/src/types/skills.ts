@@ -1,9 +1,4 @@
-import type {
-  McpServerConfig,
-  SubAgentDefinition,
-  AgentTaskRequestEvent,
-  Priority,
-} from './events.js';
+import type { McpServerConfig, SubAgentDefinition, AgentTaskRequestEvent } from './events.ts';
 
 export interface SkillManifest {
   name: string;
@@ -85,6 +80,6 @@ export interface RavenSkill {
   handleScheduledTask(
     taskType: string,
     context: SkillContext,
-  ): Promise<AgentTaskPayload | void>;
+  ): Promise<AgentTaskPayload | undefined>;
   getDataForDigest?(): Promise<DigestSection>;
 }

@@ -4,13 +4,11 @@ import {
   type NewEmailEvent,
   type ScheduleTriggeredEvent,
   type UserChatMessageEvent,
-  type McpServerConfig,
-  type SubAgentDefinition,
 } from '@raven/shared';
-import type { EventBus } from '../event-bus/event-bus.js';
-import type { SkillRegistry } from '../skill-registry/skill-registry.js';
-import type { McpManager } from '../mcp-manager/mcp-manager.js';
-import { getDb } from '../db/database.js';
+import type { EventBus } from '../event-bus/event-bus.ts';
+import type { SkillRegistry } from '../skill-registry/skill-registry.ts';
+import type { McpManager } from '../mcp-manager/mcp-manager.ts';
+import { getDb } from '../db/database.ts';
 
 const log = createLogger('orchestrator');
 
@@ -87,8 +85,10 @@ export class Orchestrator {
     const payload = await skill.handleScheduledTask(taskType, {
       eventBus: {
         emit: (event: unknown) => this.eventBus.emit(event as import('@raven/shared').RavenEvent),
-        on: (type: string, handler: (event: unknown) => void) => this.eventBus.on(type as import('@raven/shared').RavenEventType, handler),
-        off: (type: string, handler: (event: unknown) => void) => this.eventBus.off(type as import('@raven/shared').RavenEventType, handler),
+        on: (type: string, handler: (event: unknown) => void) =>
+          this.eventBus.on(type as import('@raven/shared').RavenEventType, handler),
+        off: (type: string, handler: (event: unknown) => void) =>
+          this.eventBus.off(type as import('@raven/shared').RavenEventType, handler),
       },
       db: (() => {
         const db = getDb();
@@ -121,7 +121,8 @@ export class Orchestrator {
     // Look up the project to know which skills are enabled
     const db = getDb();
     const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as
-      | { skills: string } | undefined;
+      | { skills: string }
+      | undefined;
 
     const enabledSkills = project
       ? (JSON.parse(project.skills) as string[])
@@ -143,7 +144,7 @@ export class Orchestrator {
         taskId,
         prompt: message,
         skillName: 'orchestrator',
-        mcpServers: {},  // NO MCPs on the orchestrator agent
+        mcpServers: {}, // NO MCPs on the orchestrator agent
         agentDefinitions, // Sub-agents carry the MCPs
         priority: 'high',
         sessionId,
