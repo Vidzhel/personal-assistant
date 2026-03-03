@@ -39,6 +39,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
   let resultText = '';
   let success = false;
   const errors: string[] = [];
+  const stderrChunks: string[] = [];
 
   try {
     // Build MCP config for the SDK - transform our config to SDK format
@@ -69,6 +70,11 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       allowedTools,
       permissionMode: 'bypassPermissions',
       model: config.CLAUDE_MODEL,
+      maxTurns: config.RAVEN_AGENT_MAX_TURNS,
+      stderr: (data: string) => {
+        stderrChunks.push(data);
+        log.debug(`Agent stderr: ${data.trim()}`);
+      },
     };
 
     if (Object.keys(sdkMcpServers).length > 0) {
@@ -125,8 +131,15 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
+    const stderrOutput = stderrChunks.join('');
     log.error(`Agent task ${task.id} failed: ${errMsg}`);
+    if (stderrOutput) {
+      log.error(`Agent stderr output: ${stderrOutput.slice(-2000)}`);
+    }
     errors.push(errMsg);
+    if (stderrOutput) {
+      errors.push(`stderr: ${stderrOutput.slice(-500)}`);
+    }
     success = false;
   }
 

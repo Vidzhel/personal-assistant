@@ -22,6 +22,10 @@ async function main() {
   const config = loadConfig();
   log.info(`Config loaded (model: ${config.CLAUDE_MODEL}, port: ${config.RAVEN_PORT})`);
 
+  if (!config.ANTHROPIC_API_KEY) {
+    log.warn('ANTHROPIC_API_KEY is not set. Agent tasks will fail unless claude CLI auth is available.');
+  }
+
   // 2. Ensure data directories
   const dbDir = dirname(resolve(config.DATABASE_PATH));
   if (!existsSync(dbDir)) mkdirSync(dbDir, { recursive: true });
