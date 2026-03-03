@@ -44,7 +44,7 @@ export function registerWebSocketHandler(app: FastifyInstance, eventBus: EventBu
       }
     });
 
-    const forwardEvent = (event: RavenEvent) => {
+    const forwardEvent = (event: RavenEvent): void => {
       const channel = event.projectId ? `project:${event.projectId}` : 'global';
 
       if (subscribedChannels.has(channel) || subscribedChannels.has('global')) {

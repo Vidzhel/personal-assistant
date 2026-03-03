@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { generateId } from '@raven/shared';
+import { generateId, type Project } from '@raven/shared';
 import { getDb } from '../../db/database.ts';
 
 export function registerProjectRoutes(app: FastifyInstance): void {
@@ -79,7 +79,7 @@ export function registerProjectRoutes(app: FastifyInstance): void {
   });
 }
 
-function parseProjectRow(row: unknown) {
+function parseProjectRow(row: unknown): Project {
   const r = row as {
     id: string;
     name: string;
@@ -92,9 +92,9 @@ function parseProjectRow(row: unknown) {
   return {
     id: r.id,
     name: r.name,
-    description: r.description,
+    description: r.description ?? undefined,
     skills: JSON.parse(r.skills),
-    systemPrompt: r.system_prompt,
+    systemPrompt: r.system_prompt ?? undefined,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };

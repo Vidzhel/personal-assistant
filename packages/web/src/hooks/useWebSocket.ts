@@ -5,7 +5,10 @@ import { WsClient, type WsMessage } from '@/lib/ws-client';
 
 const WS_URL = process.env.NEXT_PUBLIC_CORE_WS_URL || 'ws://localhost:3001/ws';
 
-export function useWebSocket(channels: string[]) {
+export function useWebSocket(channels: string[]): {
+  messages: WsMessage[];
+  send: (msg: unknown) => void;
+} {
   const [messages, setMessages] = useState<WsMessage[]>([]);
   const clientRef = useRef<WsClient | null>(null);
 

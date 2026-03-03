@@ -81,6 +81,52 @@ export default tseslint.config(
 
       // Use Pino logger, not console
       'no-console': 'warn',
+
+      // AI guardrail: keep functions short and simple
+      'max-lines-per-function': ['warn', { max: 50, skipBlankLines: true, skipComments: true }],
+      complexity: ['warn', 10],
+
+      // AI guardrail: limit params — use option objects instead
+      'max-params': ['error', 3],
+
+      // AI guardrail: extract named constants
+      '@typescript-eslint/no-magic-numbers': [
+        'warn',
+        {
+          ignore: [0, 1, -1, 2],
+          ignoreEnums: true,
+          ignoreNumericLiteralTypes: true,
+          ignoreReadonlyClassProperties: true,
+          ignoreDefaultValues: true,
+          ignoreClassFieldInitialValues: true,
+          ignoreTypeIndexes: true,
+        },
+      ],
+
+      // AI guardrail: explicit return types on exported functions
+      '@typescript-eslint/explicit-function-return-type': [
+        'error',
+        {
+          allowExpressions: true,
+          allowTypedFunctionExpressions: true,
+          allowHigherOrderFunctions: true,
+          allowIIFEs: true,
+        },
+      ],
+
+      // AI guardrail: consistent import type usage
+      '@typescript-eslint/consistent-type-imports': [
+        'error',
+        { prefer: 'type-imports', fixStyle: 'inline-type-imports' },
+      ],
+    },
+  },
+
+  // Relaxed rules for React components (.tsx) — return types are self-evident
+  {
+    files: ['**/*.tsx'],
+    rules: {
+      '@typescript-eslint/explicit-function-return-type': 'off',
     },
   },
 
@@ -91,6 +137,11 @@ export default tseslint.config(
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-non-null-assertion': 'off',
       'no-console': 'off',
+      'max-lines-per-function': 'off',
+      'complexity': 'off',
+      'max-params': 'off',
+      '@typescript-eslint/no-magic-numbers': 'off',
+      '@typescript-eslint/explicit-function-return-type': 'off',
     },
   },
 );

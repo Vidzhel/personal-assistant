@@ -28,7 +28,12 @@ class TelegramSkill implements RavenSkill {
     const chatId = process.env.TELEGRAM_CHAT_ID;
 
     if (token && chatId) {
-      this.bot = new TelegramBot(token, chatId, context.eventBus, context.logger);
+      this.bot = new TelegramBot({
+        token,
+        chatId,
+        eventBus: context.eventBus,
+        logger: context.logger,
+      });
 
       // Subscribe to notification events
       context.eventBus.on('notification', (event: unknown) => {

@@ -2,18 +2,24 @@ import { Bot } from 'grammy';
 import type { LoggerInterface, EventBusInterface } from '@raven/shared';
 import { generateId } from '@raven/shared';
 
+interface TelegramBotOptions {
+  token: string;
+  chatId: string;
+  eventBus: EventBusInterface;
+  logger: LoggerInterface;
+}
+
 export class TelegramBot {
   private bot: Bot;
   private chatId: string;
+  private eventBus: EventBusInterface;
+  private logger: LoggerInterface;
 
-  constructor(
-    token: string,
-    chatId: string,
-    private eventBus: EventBusInterface,
-    private logger: LoggerInterface,
-  ) {
-    this.chatId = chatId;
-    this.bot = new Bot(token);
+  constructor(opts: TelegramBotOptions) {
+    this.chatId = opts.chatId;
+    this.eventBus = opts.eventBus;
+    this.logger = opts.logger;
+    this.bot = new Bot(opts.token);
 
     // Handle incoming messages
     this.bot.on('message:text', async (ctx) => {

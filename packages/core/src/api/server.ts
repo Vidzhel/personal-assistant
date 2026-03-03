@@ -26,7 +26,10 @@ export interface ApiDeps {
   agentManager: AgentManager;
 }
 
-export async function createApiServer(deps: ApiDeps, port: number) {
+export async function createApiServer(
+  deps: ApiDeps,
+  port: number,
+): Promise<ReturnType<typeof Fastify>> {
   const app = Fastify({ logger: false });
 
   await app.register(cors, { origin: true });

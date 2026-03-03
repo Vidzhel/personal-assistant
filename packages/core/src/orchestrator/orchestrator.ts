@@ -2,6 +2,8 @@ import {
   createLogger,
   generateId,
   type NewEmailEvent,
+  type RavenEvent,
+  type RavenEventType,
   type ScheduleTriggeredEvent,
   type UserChatMessageEvent,
 } from '@raven/shared';
@@ -84,11 +86,11 @@ export class Orchestrator {
     // or void if it handled it internally
     const payload = await skill.handleScheduledTask(taskType, {
       eventBus: {
-        emit: (event: unknown) => this.eventBus.emit(event as import('@raven/shared').RavenEvent),
+        emit: (event: unknown) => this.eventBus.emit(event as RavenEvent),
         on: (type: string, handler: (event: unknown) => void) =>
-          this.eventBus.on(type as import('@raven/shared').RavenEventType, handler),
+          this.eventBus.on(type as RavenEventType, handler),
         off: (type: string, handler: (event: unknown) => void) =>
-          this.eventBus.off(type as import('@raven/shared').RavenEventType, handler),
+          this.eventBus.off(type as RavenEventType, handler),
       },
       db: (() => {
         const db = getDb();
