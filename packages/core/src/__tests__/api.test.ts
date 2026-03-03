@@ -1,17 +1,17 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
-import { EventBus } from '../event-bus/event-bus.js';
-import { SkillRegistry } from '../skill-registry/skill-registry.js';
-import { SessionManager } from '../session-manager/session-manager.js';
-import { Scheduler } from '../scheduler/scheduler.js';
-import { initDatabase, getDb } from '../db/database.js';
-import { registerHealthRoute } from '../api/routes/health.js';
-import { registerProjectRoutes } from '../api/routes/projects.js';
-import { registerChatRoute } from '../api/routes/chat.js';
-import { registerSkillRoutes } from '../api/routes/skills.js';
-import { registerScheduleRoutes } from '../api/routes/schedules.js';
-import { registerEventRoutes } from '../api/routes/events.js';
+import { EventBus } from '../event-bus/event-bus.ts';
+import { SkillRegistry } from '../skill-registry/skill-registry.ts';
+import { SessionManager } from '../session-manager/session-manager.ts';
+import { Scheduler } from '../scheduler/scheduler.ts';
+import { initDatabase, getDb } from '../db/database.ts';
+import { registerHealthRoute } from '../api/routes/health.ts';
+import { registerProjectRoutes } from '../api/routes/projects.ts';
+import { registerChatRoute } from '../api/routes/chat.ts';
+import { registerSkillRoutes } from '../api/routes/skills.ts';
+import { registerScheduleRoutes } from '../api/routes/schedules.ts';
+import { registerEventRoutes } from '../api/routes/events.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -66,7 +66,11 @@ describe('API routes', () => {
   afterAll(async () => {
     scheduler.shutdown();
     await app.close();
-    try { getDb().close(); } catch { /* */ }
+    try {
+      getDb().close();
+    } catch {
+      /* */
+    }
     rmSync(tmpDir, { recursive: true, force: true });
   });
 

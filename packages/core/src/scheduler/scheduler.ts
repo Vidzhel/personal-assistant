@@ -1,9 +1,9 @@
 import { Cron } from 'croner';
 import { createLogger, generateId } from '@raven/shared';
-import type { EventBus } from '../event-bus/event-bus.js';
-import type { ScheduleConfig } from '../config.js';
+import type { EventBus } from '../event-bus/event-bus.ts';
+import type { ScheduleConfig } from '../config.ts';
 import type { ScheduleRecord } from '@raven/shared';
-import { getDb } from '../db/database.js';
+import { getDb } from '../db/database.ts';
 
 const log = createLogger('scheduler');
 
@@ -25,7 +25,17 @@ export class Scheduler {
         const now = Date.now();
         db.prepare(
           'INSERT INTO schedules (id, name, cron, timezone, task_type, skill_name, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        ).run(sched.id, sched.name, sched.cron, this.timezone, sched.taskType, sched.skillName, sched.enabled ? 1 : 0, now, now);
+        ).run(
+          sched.id,
+          sched.name,
+          sched.cron,
+          this.timezone,
+          sched.taskType,
+          sched.skillName,
+          sched.enabled ? 1 : 0,
+          now,
+          now,
+        );
       }
     }
 
@@ -42,22 +52,26 @@ export class Scheduler {
   }
 
   private registerJob(schedule: ScheduleDbRow): void {
-    const job = new Cron(schedule.cron, {
-      timezone: schedule.timezone || this.timezone,
-    }, () => {
-      log.info(`Firing schedule: ${schedule.name} (${schedule.task_type})`);
-      this.eventBus.emit({
-        id: generateId(),
-        timestamp: Date.now(),
-        source: 'scheduler',
-        type: 'schedule:triggered',
-        payload: {
-          scheduleId: schedule.id,
-          scheduleName: schedule.name,
-          taskType: schedule.task_type,
-        },
-      });
-    });
+    const job = new Cron(
+      schedule.cron,
+      {
+        timezone: schedule.timezone || this.timezone,
+      },
+      () => {
+        log.info(`Firing schedule: ${schedule.name} (${schedule.task_type})`);
+        this.eventBus.emit({
+          id: generateId(),
+          timestamp: Date.now(),
+          source: 'scheduler',
+          type: 'schedule:triggered',
+          payload: {
+            scheduleId: schedule.id,
+            scheduleName: schedule.name,
+            taskType: schedule.task_type,
+          },
+        });
+      },
+    );
 
     this.jobs.set(schedule.id, job);
     const next = job.nextRun();
@@ -69,7 +83,17 @@ export class Scheduler {
     const now = Date.now();
     db.prepare(
       'INSERT INTO schedules (id, name, cron, timezone, task_type, skill_name, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    ).run(record.id, record.name, record.cron, record.timezone, record.taskType, record.skillName, record.enabled ? 1 : 0, now, now);
+    ).run(
+      record.id,
+      record.name,
+      record.cron,
+      record.timezone,
+      record.taskType,
+      record.skillName,
+      record.enabled ? 1 : 0,
+      now,
+      now,
+    );
 
     if (record.enabled) {
       this.registerJob({

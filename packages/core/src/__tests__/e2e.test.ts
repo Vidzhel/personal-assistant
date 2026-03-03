@@ -13,7 +13,7 @@ vi.mock('@anthropic-ai/claude-code', () => ({
 }));
 
 // Mock config
-vi.mock('../config.js', () => {
+vi.mock('../config.ts', () => {
   let config: Record<string, unknown> | null = null;
   return {
     loadConfig: () => {
@@ -44,16 +44,16 @@ vi.mock('../config.js', () => {
 import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { EventBus } from '../event-bus/event-bus.js';
-import { initDatabase, getDb, createDbInterface } from '../db/database.js';
-import { SkillRegistry } from '../skill-registry/skill-registry.js';
-import { McpManager } from '../mcp-manager/mcp-manager.js';
-import { AgentManager } from '../agent-manager/agent-manager.js';
-import { SessionManager } from '../session-manager/session-manager.js';
-import { Orchestrator } from '../orchestrator/orchestrator.js';
-import { Scheduler } from '../scheduler/scheduler.js';
-import { createApiServer } from '../api/server.js';
-import { loadConfig, getConfig } from '../config.js';
+import { EventBus } from '../event-bus/event-bus.ts';
+import { initDatabase, getDb } from '../db/database.ts';
+import { SkillRegistry } from '../skill-registry/skill-registry.ts';
+import { McpManager } from '../mcp-manager/mcp-manager.ts';
+import { AgentManager } from '../agent-manager/agent-manager.ts';
+import { SessionManager } from '../session-manager/session-manager.ts';
+import { Orchestrator } from '../orchestrator/orchestrator.ts';
+import { Scheduler } from '../scheduler/scheduler.ts';
+import { createApiServer } from '../api/server.ts';
+import { loadConfig } from '../config.ts';
 import type { RavenEvent } from '@raven/shared';
 
 describe('E2E: Full boot → chat → events flow', () => {
@@ -84,7 +84,7 @@ describe('E2E: Full boot → chat → events flow', () => {
     const mcpManager = new McpManager(skillRegistry);
     const sessionManager = new SessionManager();
     agentManager = new AgentManager(eventBus, mcpManager, skillRegistry);
-    const orchestrator = new Orchestrator(eventBus, skillRegistry, mcpManager);
+    const _orchestrator = new Orchestrator(eventBus, skillRegistry, mcpManager);
     scheduler = new Scheduler(eventBus, 'UTC');
     await scheduler.initialize([]);
 
@@ -101,14 +101,18 @@ describe('E2E: Full boot → chat → events flow', () => {
   afterAll(async () => {
     scheduler.shutdown();
     await server.close();
-    try { getDb().close(); } catch { /* */ }
+    try {
+      getDb().close();
+    } catch {
+      /* */
+    }
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
   it('health check works', async () => {
     const res = await fetch(`http://localhost:${port}/api/health`);
     expect(res.ok).toBe(true);
-    const body = await res.json() as Record<string, unknown>;
+    const body = (await res.json()) as Record<string, unknown>;
     expect(body.status).toBe('ok');
   });
 
@@ -120,7 +124,7 @@ describe('E2E: Full boot → chat → events flow', () => {
       body: JSON.stringify({ name: 'E2E Test Project' }),
     });
     expect(createRes.ok).toBe(true);
-    const project = await createRes.json() as Record<string, unknown>;
+    const project = (await createRes.json()) as Record<string, unknown>;
     expect(project.id).toBeDefined();
 
     // 2. Listen for events
@@ -140,11 +144,14 @@ describe('E2E: Full boot → chat → events flow', () => {
     });
 
     // 3. Send a chat message via HTTP
-    const chatRes = await fetch(`http://localhost:${port}/api/projects/${project.id as string}/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: 'Hello Raven, what can you do?' }),
-    });
+    const chatRes = await fetch(
+      `http://localhost:${port}/api/projects/${project.id as string}/chat`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: 'Hello Raven, what can you do?' }),
+      },
+    );
     expect(chatRes.ok).toBe(true);
     expect(await chatRes.json()).toEqual({ status: 'queued' });
 
@@ -163,14 +170,14 @@ describe('E2E: Full boot → chat → events flow', () => {
     // 6. Verify the project exists in database
     const projectRes = await fetch(`http://localhost:${port}/api/projects/${project.id as string}`);
     expect(projectRes.ok).toBe(true);
-    const fetchedProject = await projectRes.json() as Record<string, unknown>;
+    const fetchedProject = (await projectRes.json()) as Record<string, unknown>;
     expect(fetchedProject.name).toBe('E2E Test Project');
   });
 
   it('project listing works after creation', async () => {
     const res = await fetch(`http://localhost:${port}/api/projects`);
     expect(res.ok).toBe(true);
-    const projects = await res.json() as unknown[];
+    const projects = (await res.json()) as unknown[];
     expect(projects.length).toBeGreaterThanOrEqual(1);
   });
 

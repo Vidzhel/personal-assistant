@@ -26,20 +26,37 @@ export default function DashboardPage() {
     <div className="p-8 space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Dashboard</h1>
-        <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>Raven Personal Assistant</p>
+        <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
+          Raven Personal Assistant
+        </p>
       </div>
 
-      <StatusCards health={health} projectCount={projects.length} scheduleCount={schedules.length} />
+      <StatusCards
+        health={health}
+        projectCount={projects.length}
+        scheduleCount={schedules.length}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <ActivityFeed />
-        <div className="rounded-lg" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+        <div
+          className="rounded-lg"
+          style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
+        >
           <div className="p-4 border-b" style={{ borderColor: 'var(--border)' }}>
             <h2 className="text-sm font-semibold">Quick Actions</h2>
           </div>
           <div className="p-4 space-y-2">
-            <QuickAction href="/projects" label="Open Projects" desc="Chat with Raven about your tasks" />
-            <QuickAction href="/schedules" label="View Schedules" desc="Morning digest and recurring tasks" />
+            <QuickAction
+              href="/projects"
+              label="Open Projects"
+              desc="Chat with Raven about your tasks"
+            />
+            <QuickAction
+              href="/schedules"
+              label="View Schedules"
+              desc="Morning digest and recurring tasks"
+            />
             <QuickAction href="/skills" label="Manage Skills" desc="Configure integrations" />
           </div>
         </div>
@@ -56,7 +73,9 @@ function QuickAction({ href, label, desc }: { href: string; label: string; desc:
       style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}
     >
       <p className="text-sm font-medium">{label}</p>
-      <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{desc}</p>
+      <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+        {desc}
+      </p>
     </a>
   );
 }

@@ -25,7 +25,9 @@ export function ChatPanel({ projectId }: { projectId: string }) {
         {messages.length === 0 && (
           <div className="text-center py-12" style={{ color: 'var(--text-muted)' }}>
             <p className="text-lg">Start a conversation</p>
-            <p className="text-sm mt-1">Ask Raven to manage tasks, check email, or plan your day.</p>
+            <p className="text-sm mt-1">
+              Ask Raven to manage tasks, check email, or plan your day.
+            </p>
           </div>
         )}
         {messages.map((msg) => (
@@ -42,7 +44,11 @@ export function ChatPanel({ projectId }: { projectId: string }) {
             onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
             placeholder="Ask Raven..."
             className="flex-1 px-4 py-2 rounded-lg text-sm outline-none"
-            style={{ background: 'var(--bg-hover)', color: 'var(--text)', border: '1px solid var(--border)' }}
+            style={{
+              background: 'var(--bg-hover)',
+              color: 'var(--text)',
+              border: '1px solid var(--border)',
+            }}
           />
           <button
             onClick={handleSend}

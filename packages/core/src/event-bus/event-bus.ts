@@ -33,10 +33,7 @@ export class EventBus {
     this.emitter.off(type, handler as EventHandler);
   }
 
-  once<T extends RavenEvent = RavenEvent>(
-    type: RavenEventType,
-    handler: EventHandler<T>,
-  ): void {
+  once<T extends RavenEvent = RavenEvent>(type: RavenEventType, handler: EventHandler<T>): void {
     this.emitter.once(type, handler as EventHandler);
   }
 

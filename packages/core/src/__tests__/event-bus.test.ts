@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { EventBus } from '../event-bus/event-bus.js';
+import { EventBus } from '../event-bus/event-bus.ts';
 import type { RavenEvent } from '@raven/shared';
 
 function makeEvent(type: string, overrides: Partial<RavenEvent> = {}): RavenEvent {

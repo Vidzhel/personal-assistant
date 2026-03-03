@@ -1,12 +1,21 @@
 import { describe, it, expect, vi } from 'vitest';
-import { SkillRegistry } from '../skill-registry/skill-registry.js';
+import { SkillRegistry } from '../skill-registry/skill-registry.ts';
 import type { RavenSkill, SkillContext, McpServerConfig, SubAgentDefinition } from '@raven/shared';
 
-function makeSkill(name: string, opts: {
-  mcpServers?: Record<string, McpServerConfig>;
-  agentDefs?: Record<string, SubAgentDefinition>;
-  schedules?: Array<{ id: string; name: string; cron: string; taskType: string; enabled: boolean }>;
-} = {}): RavenSkill {
+function makeSkill(
+  name: string,
+  opts: {
+    mcpServers?: Record<string, McpServerConfig>;
+    agentDefs?: Record<string, SubAgentDefinition>;
+    schedules?: Array<{
+      id: string;
+      name: string;
+      cron: string;
+      taskType: string;
+      enabled: boolean;
+    }>;
+  } = {},
+): RavenSkill {
   return {
     manifest: {
       name,
@@ -126,7 +135,13 @@ describe('SkillRegistry', () => {
     await registry.registerSkill(
       makeSkill('digest', {
         schedules: [
-          { id: 's1', name: 'Daily Digest', cron: '0 8 * * *', taskType: 'daily-digest', enabled: true },
+          {
+            id: 's1',
+            name: 'Daily Digest',
+            cron: '0 8 * * *',
+            taskType: 'daily-digest',
+            enabled: true,
+          },
         ],
       }),
       {},

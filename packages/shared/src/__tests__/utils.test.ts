@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createLogger } from '../utils/logger.js';
-import { generateId } from '../utils/id.js';
+import { describe, it, expect, vi } from 'vitest';
+import { createLogger } from '../utils/logger.ts';
+import { generateId } from '../utils/id.ts';
 
 describe('createLogger', () => {
   it('returns a logger with all required methods', () => {
@@ -56,9 +56,7 @@ describe('createLogger', () => {
 describe('generateId', () => {
   it('returns a valid UUID v4', () => {
     const id = generateId();
-    expect(id).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-    );
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 
   it('generates unique IDs', () => {

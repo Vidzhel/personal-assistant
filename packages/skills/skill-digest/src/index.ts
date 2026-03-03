@@ -1,4 +1,12 @@
-import { generateId, type RavenSkill, type SkillManifest, type SkillContext, type McpServerConfig, type SubAgentDefinition, type DigestSection, type AgentTaskPayload } from '@raven/shared';
+import {
+  generateId,
+  type RavenSkill,
+  type SkillManifest,
+  type SkillContext,
+  type McpServerConfig,
+  type SubAgentDefinition,
+  type AgentTaskPayload,
+} from '@raven/shared';
 
 class DigestSkill implements RavenSkill {
   manifest: SkillManifest = {
@@ -38,7 +46,7 @@ class DigestSkill implements RavenSkill {
   async handleScheduledTask(
     taskType: string,
     _context: SkillContext,
-  ): Promise<AgentTaskPayload | void> {
+  ): Promise<AgentTaskPayload | undefined> {
     if (taskType !== 'morning-digest') return;
 
     // The digest creates an orchestrator-level agent task that uses
@@ -49,18 +57,18 @@ class DigestSkill implements RavenSkill {
         'Generate a morning digest briefing for the user.',
         '',
         'You have access to sub-agents for different data sources:',
-        '- Use the ticktick-agent to get today\'s tasks and overdue items',
+        "- Use the ticktick-agent to get today's tasks and overdue items",
         '- Use the gmail-agent to summarize unread/important emails',
         '',
         'Compile the data into a well-formatted morning briefing with:',
-        '1. Task overview (today\'s tasks, overdue items)',
+        "1. Task overview (today's tasks, overdue items)",
         '2. Email highlights (important unread emails)',
         '3. Day structure suggestions',
         '',
         'Format the output as clean markdown.',
       ].join('\n'),
       skillName: 'digest',
-      mcpServers: {},  // No MCPs on the digest agent - it delegates to sub-agents
+      mcpServers: {}, // No MCPs on the digest agent - it delegates to sub-agents
       priority: 'normal',
     };
   }

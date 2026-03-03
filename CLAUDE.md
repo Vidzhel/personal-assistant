@@ -23,7 +23,8 @@ docker-compose up --build    # full stack
 
 ## Coding Conventions
 
-- TypeScript strict mode, ESM only (`import`/`export`, `.js` extensions in imports)
+- TypeScript strict mode, ESM only (`import`/`export`, `.ts` extensions in imports)
+- `rewriteRelativeImportExtensions` in tsconfig rewrites `.ts` → `.js` in compiled output
 - Use `node:` prefix for Node.js builtins (`import { readFile } from 'node:fs/promises'`)
 - Zod for all config/input validation
 - Pino for logging (structured JSON)
@@ -76,6 +77,16 @@ Run core without skills to verify infrastructure:
 RAVEN_PORT=3001 node packages/core/dist/index.js
 curl http://localhost:3001/api/health
 ```
+
+## Linting & Formatting
+
+- ESLint 9 (flat config) with `typescript-eslint` strict rules + Prettier
+- `npm run check` must pass after every task (runs `format:check` + `lint`)
+- `npm run lint` — ESLint + TypeScript type-check
+- `npm run format` — Prettier write mode
+- `no-restricted-syntax` rule bans `.js` import extensions (use `.ts` only)
+- `no-console` enforced — use `createLogger()` from `@raven/shared`
+- Test files (`__tests__/**`) have relaxed rules: `any`, `non-null-assertion`, `console` allowed
 
 ## Environment
 

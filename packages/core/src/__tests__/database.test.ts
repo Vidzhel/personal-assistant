@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { initDatabase, getDb, createDbInterface } from '../db/database.js';
+import { initDatabase, getDb, createDbInterface } from '../db/database.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -42,17 +42,13 @@ describe('database', () => {
   it('migrations run idempotently', () => {
     initDatabase(dbPath);
     const db1 = getDb();
-    const count1 = (
-      db1.prepare('SELECT COUNT(*) as c FROM _migrations').get() as { c: number }
-    ).c;
+    const count1 = (db1.prepare('SELECT COUNT(*) as c FROM _migrations').get() as { c: number }).c;
     db1.close();
 
     // Re-initialize — migrations should not duplicate
     initDatabase(dbPath);
     const db2 = getDb();
-    const count2 = (
-      db2.prepare('SELECT COUNT(*) as c FROM _migrations').get() as { c: number }
-    ).c;
+    const count2 = (db2.prepare('SELECT COUNT(*) as c FROM _migrations').get() as { c: number }).c;
     expect(count2).toBe(count1);
   });
 
@@ -70,7 +66,12 @@ describe('database', () => {
     // Create
     dbi.run(
       'INSERT INTO projects (id, name, description, skills, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-      'p1', 'Test Project', 'A test', '[]', now, now,
+      'p1',
+      'Test Project',
+      'A test',
+      '[]',
+      now,
+      now,
     );
 
     // Read
@@ -89,7 +90,11 @@ describe('database', () => {
     // List
     dbi.run(
       'INSERT INTO projects (id, name, skills, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-      'p2', 'Second', '[]', now, now,
+      'p2',
+      'Second',
+      '[]',
+      now,
+      now,
     );
     const all = dbi.all<{ id: string }>('SELECT * FROM projects');
     expect(all).toHaveLength(2);
@@ -107,7 +112,12 @@ describe('database', () => {
 
     dbi.run(
       'INSERT INTO agent_tasks (id, skill_name, prompt, status, priority, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-      't1', 'orchestrator', 'hello', 'queued', 'normal', now,
+      't1',
+      'orchestrator',
+      'hello',
+      'queued',
+      'normal',
+      now,
     );
 
     const task = dbi.get<{ id: string; status: string }>(
@@ -125,12 +135,21 @@ describe('database', () => {
     // Need a project for FK
     dbi.run(
       'INSERT INTO projects (id, name, skills, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-      'p1', 'Test', '[]', now, now,
+      'p1',
+      'Test',
+      '[]',
+      now,
+      now,
     );
 
     dbi.run(
       'INSERT INTO sessions (id, project_id, status, created_at, last_active_at, turn_count) VALUES (?, ?, ?, ?, ?, ?)',
-      's1', 'p1', 'idle', now, now, 0,
+      's1',
+      'p1',
+      'idle',
+      now,
+      now,
+      0,
     );
 
     const session = dbi.get<{ id: string; status: string }>(

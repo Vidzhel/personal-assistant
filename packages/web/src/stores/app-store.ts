@@ -5,7 +5,13 @@ interface AppState {
   projects: Project[];
   skills: Skill[];
   schedules: Schedule[];
-  health: { status: string; uptime: number; skills: string[]; agentQueue: number; agentsRunning: number } | null;
+  health: {
+    status: string;
+    uptime: number;
+    skills: string[];
+    agentQueue: number;
+    agentsRunning: number;
+  } | null;
   loading: boolean;
   fetchProjects: () => Promise<void>;
   fetchSkills: () => Promise<void>;

@@ -31,7 +31,9 @@ export class WsClient {
       try {
         const msg: WsMessage = JSON.parse(e.data);
         this.handlers.forEach((h) => h(msg));
-      } catch {}
+      } catch {
+        // ignore malformed messages
+      }
     };
 
     this.ws.onclose = () => {

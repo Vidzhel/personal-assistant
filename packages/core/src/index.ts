@@ -2,16 +2,16 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdirSync, existsSync } from 'node:fs';
 import { createLogger } from '@raven/shared';
-import { loadConfig, loadSkillsConfig, loadSchedulesConfig } from './config.js';
-import { initDatabase, createDbInterface } from './db/database.js';
-import { EventBus } from './event-bus/event-bus.js';
-import { SkillRegistry } from './skill-registry/skill-registry.js';
-import { McpManager } from './mcp-manager/mcp-manager.js';
-import { AgentManager } from './agent-manager/agent-manager.js';
-import { SessionManager } from './session-manager/session-manager.js';
-import { Orchestrator } from './orchestrator/orchestrator.js';
-import { Scheduler } from './scheduler/scheduler.js';
-import { createApiServer } from './api/server.js';
+import { loadConfig, loadSkillsConfig, loadSchedulesConfig } from './config.ts';
+import { initDatabase, createDbInterface } from './db/database.ts';
+import { EventBus } from './event-bus/event-bus.ts';
+import { SkillRegistry } from './skill-registry/skill-registry.ts';
+import { McpManager } from './mcp-manager/mcp-manager.ts';
+import { AgentManager } from './agent-manager/agent-manager.ts';
+import { SessionManager } from './session-manager/session-manager.ts';
+import { Orchestrator } from './orchestrator/orchestrator.ts';
+import { Scheduler } from './scheduler/scheduler.ts';
+import { createApiServer } from './api/server.ts';
 
 const log = createLogger('raven');
 
@@ -23,7 +23,9 @@ async function main() {
   log.info(`Config loaded (model: ${config.CLAUDE_MODEL}, port: ${config.RAVEN_PORT})`);
 
   if (!config.ANTHROPIC_API_KEY) {
-    log.warn('ANTHROPIC_API_KEY is not set. Agent tasks will fail unless claude CLI auth is available.');
+    log.warn(
+      'ANTHROPIC_API_KEY is not set. Agent tasks will fail unless claude CLI auth is available.',
+    );
   }
 
   // 2. Ensure data directories
@@ -50,8 +52,10 @@ async function main() {
   const baseContext = {
     eventBus: {
       emit: (event: unknown) => eventBus.emit(event as import('@raven/shared').RavenEvent),
-      on: (type: string, handler: (event: unknown) => void) => eventBus.on(type as import('@raven/shared').RavenEventType, handler),
-      off: (type: string, handler: (event: unknown) => void) => eventBus.off(type as import('@raven/shared').RavenEventType, handler),
+      on: (type: string, handler: (event: unknown) => void) =>
+        eventBus.on(type as import('@raven/shared').RavenEventType, handler),
+      off: (type: string, handler: (event: unknown) => void) =>
+        eventBus.off(type as import('@raven/shared').RavenEventType, handler),
     },
     db: dbInterface,
     logger: log,
@@ -97,7 +101,7 @@ async function main() {
   const agentManager = new AgentManager(eventBus, mcpManager, skillRegistry);
 
   // 10. Init orchestrator
-  const orchestrator = new Orchestrator(eventBus, skillRegistry, mcpManager);
+  const _orchestrator = new Orchestrator(eventBus, skillRegistry, mcpManager);
 
   // 11. Init scheduler
   const schedulesConfig = loadSchedulesConfig(configDir);
@@ -127,6 +131,7 @@ async function main() {
 }
 
 main().catch((err) => {
+  // eslint-disable-next-line no-console -- fatal handler, logger may not be initialized
   console.error('Fatal error:', err);
   process.exit(1);
 });

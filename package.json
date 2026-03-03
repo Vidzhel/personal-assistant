@@ -15,7 +15,11 @@
     "dev:core": "npm run dev -w packages/core",
     "dev:web": "npm run dev -w packages/web",
     "start:core": "npm run start -w packages/core",
-    "lint": "tsc --noEmit",
+    "lint": "eslint packages/*/src packages/skills/*/src && tsc --noEmit -p packages/shared && tsc --noEmit -p packages/core",
+    "lint:fix": "eslint --fix packages/*/src packages/skills/*/src",
+    "format": "prettier --write 'packages/*/src/**/*.{ts,tsx}' 'packages/skills/*/src/**/*.ts'",
+    "format:check": "prettier --check 'packages/*/src/**/*.{ts,tsx}' 'packages/skills/*/src/**/*.ts'",
+    "check": "npm run format:check && npm run lint",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
@@ -24,6 +28,12 @@
     "node": ">=22.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.3",
+    "eslint": "^9.39.3",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.4.0",
+    "prettier": "^3.8.1",
+    "typescript-eslint": "^8.56.1",
     "vitest": "^4.0.18"
   }
 }

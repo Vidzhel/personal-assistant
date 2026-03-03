@@ -11,11 +11,18 @@ export default function ProjectPage() {
   const [project, setProject] = useState<Project | null>(null);
 
   useEffect(() => {
-    api.getProject(id).then(setProject).catch(() => {});
+    api
+      .getProject(id)
+      .then(setProject)
+      .catch(() => {});
   }, [id]);
 
   if (!project) {
-    return <div className="p-8" style={{ color: 'var(--text-muted)' }}>Loading project...</div>;
+    return (
+      <div className="p-8" style={{ color: 'var(--text-muted)' }}>
+        Loading project...
+      </div>
+    );
   }
 
   return (
@@ -24,7 +31,11 @@ export default function ProjectPage() {
         <h1 className="text-lg font-bold">{project.name}</h1>
         <div className="flex gap-1 mt-1">
           {project.skills.map((s) => (
-            <span key={s} className="text-xs px-2 py-0.5 rounded" style={{ background: 'var(--bg-hover)', color: 'var(--accent)' }}>
+            <span
+              key={s}
+              className="text-xs px-2 py-0.5 rounded"
+              style={{ background: 'var(--bg-hover)', color: 'var(--accent)' }}
+            >
               {s}
             </span>
           ))}

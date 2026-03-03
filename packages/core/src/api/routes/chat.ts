@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { generateId } from '@raven/shared';
-import type { ApiDeps } from '../server.js';
+import type { ApiDeps } from '../server.ts';
 
 export function registerChatRoute(app: FastifyInstance, deps: ApiDeps): void {
   app.post<{

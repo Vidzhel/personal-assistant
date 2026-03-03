@@ -1,9 +1,9 @@
 import { query } from '@anthropic-ai/claude-code';
 import { createLogger, generateId } from '@raven/shared';
 import type { AgentTask, McpServerConfig, SubAgentDefinition } from '@raven/shared';
-import type { EventBus } from '../event-bus/event-bus.js';
-import { buildSystemPrompt } from './prompt-builder.js';
-import { getConfig } from '../config.js';
+import type { EventBus } from '../event-bus/event-bus.ts';
+import { buildSystemPrompt } from './prompt-builder.ts';
+import { getConfig } from '../config.ts';
 
 const log = createLogger('agent-session');
 
@@ -43,7 +43,10 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
 
   try {
     // Build MCP config for the SDK - transform our config to SDK format
-    const sdkMcpServers: Record<string, { command: string; args: string[]; env?: Record<string, string> }> = {};
+    const sdkMcpServers: Record<
+      string,
+      { command: string; args: string[]; env?: Record<string, string> }
+    > = {};
     for (const [name, cfg] of Object.entries(mcpServers)) {
       sdkMcpServers[name] = {
         command: cfg.command,
@@ -98,7 +101,9 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
 
       // Stream assistant messages to event bus
       if (msg.type === 'assistant') {
-        const content = msg.message as { content?: Array<{ type: string; text?: string; name?: string }> };
+        const content = msg.message as {
+          content?: Array<{ type: string; text?: string; name?: string }>;
+        };
         if (content?.content) {
           for (const block of content.content) {
             if (block.type === 'text' && block.text) {

@@ -1,11 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { Scheduler } from '../scheduler/scheduler.js';
-import { EventBus } from '../event-bus/event-bus.js';
-import { initDatabase, getDb } from '../db/database.js';
+import { Scheduler } from '../scheduler/scheduler.ts';
+import { EventBus } from '../event-bus/event-bus.ts';
+import { initDatabase, getDb } from '../db/database.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { RavenEvent } from '@raven/shared';
 
 describe('Scheduler', () => {
   let tmpDir: string;
@@ -21,7 +20,11 @@ describe('Scheduler', () => {
 
   afterEach(() => {
     scheduler.shutdown();
-    try { getDb().close(); } catch { /* */ }
+    try {
+      getDb().close();
+    } catch {
+      /* */
+    }
     rmSync(tmpDir, { recursive: true, force: true });
   });
 

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { getDb } from '../../db/database.js';
+import { getDb } from '../../db/database.ts';
 
 export function registerEventRoutes(app: FastifyInstance): void {
   app.get<{
@@ -34,7 +34,16 @@ export function registerEventRoutes(app: FastifyInstance): void {
       .prepare(`SELECT * FROM events ${where} ORDER BY timestamp DESC LIMIT ?`)
       .all(...params, limit);
 
-    return (rows as Array<{ id: string; type: string; source: string; project_id: string | null; payload: string; timestamp: number }>).map((r) => ({
+    return (
+      rows as Array<{
+        id: string;
+        type: string;
+        source: string;
+        project_id: string | null;
+        payload: string;
+        timestamp: number;
+      }>
+    ).map((r) => ({
       id: r.id,
       type: r.type,
       source: r.source,

@@ -1,5 +1,6 @@
-import type { LoggerInterface } from '../types/skills.js';
+import type { LoggerInterface } from '../types/skills.ts';
 
+/* eslint-disable no-console -- logger wraps console on purpose */
 export function createLogger(name: string): LoggerInterface {
   const prefix = `[${name}]`;
   return {
@@ -13,3 +14,4 @@ export function createLogger(name: string): LoggerInterface {
     },
   };
 }
+/* eslint-enable no-console */
