@@ -1,8 +1,7 @@
 import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { mkdirSync, existsSync } from 'node:fs';
 import { createLogger, type RavenEvent, type RavenEventType } from '@raven/shared';
-import { loadConfig, loadSkillsConfig, loadSchedulesConfig } from './config.ts';
+import { loadConfig, loadSkillsConfig, loadSchedulesConfig, projectRoot } from './config.ts';
 import { initDatabase, createDbInterface } from './db/database.ts';
 import { EventBus } from './event-bus/event-bus.ts';
 import { SkillRegistry } from './skill-registry/skill-registry.ts';
@@ -28,13 +27,15 @@ async function main(): Promise<void> {
     );
   }
 
-  // 2. Ensure data directories
-  const dbDir = dirname(resolve(config.DATABASE_PATH));
+  // 2. Ensure data directories (resolve relative paths against project root, not CWD)
+  const dbPath = resolve(projectRoot, config.DATABASE_PATH);
+  const sessionPath = resolve(projectRoot, config.SESSION_PATH);
+  const dbDir = dirname(dbPath);
   if (!existsSync(dbDir)) mkdirSync(dbDir, { recursive: true });
-  if (!existsSync(config.SESSION_PATH)) mkdirSync(config.SESSION_PATH, { recursive: true });
+  if (!existsSync(sessionPath)) mkdirSync(sessionPath, { recursive: true });
 
   // 3. Init database
-  initDatabase(resolve(config.DATABASE_PATH));
+  initDatabase(dbPath);
   const dbInterface = createDbInterface();
 
   // 4. Init event bus
@@ -44,8 +45,6 @@ async function main(): Promise<void> {
   const skillRegistry = new SkillRegistry();
 
   // 6. Load and register skills
-  const __dirname = dirname(fileURLToPath(import.meta.url));
-  const projectRoot = resolve(__dirname, '../../..');
   const configDir = resolve(projectRoot, 'config');
   const skillsConfig = loadSkillsConfig(configDir);
 

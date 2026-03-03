@@ -10,8 +10,8 @@
     "packages/skills/*"
   ],
   "scripts": {
-    "build": "npm run build -w packages/shared && npm run build -w packages/core",
-    "build:all": "npm run build -w packages/shared && npm run build -w packages/core && npm run build -ws --if-present",
+    "build": "npm run build -w packages/shared && npm run build -w packages/core && npm run build -ws --if-present",
+    "dev": "concurrently -n core,web -c blue,green \"npm run dev:core\" \"npm run dev:web\"",
     "dev:core": "npm run dev -w packages/core",
     "dev:web": "npm run dev -w packages/web",
     "start:core": "npm run start -w packages/core",
@@ -29,6 +29,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.3",
+    "concurrently": "^9.2.1",
     "eslint": "^9.39.3",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.4.0",

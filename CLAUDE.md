@@ -91,6 +91,10 @@ curl http://localhost:3001/api/health
 - Test files (`__tests__/**`) have relaxed rules: `any`, `non-null-assertion`, `console`, guardrails off
 - React `.tsx` files exempt from `explicit-function-return-type`
 
+## Documentation
+
+See `docs/` for additional context (setup guides, API references, etc.).
+
 ## Environment
 
 - Runtime: Node.js 22+ on WSL2 (Linux), Windows host accessible
