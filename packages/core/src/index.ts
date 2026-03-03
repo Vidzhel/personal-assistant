@@ -1,7 +1,7 @@
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdirSync, existsSync } from 'node:fs';
-import { createLogger } from '@raven/shared';
+import { createLogger, type RavenEvent, type RavenEventType } from '@raven/shared';
 import { loadConfig, loadSkillsConfig, loadSchedulesConfig } from './config.ts';
 import { initDatabase, createDbInterface } from './db/database.ts';
 import { EventBus } from './event-bus/event-bus.ts';
@@ -15,7 +15,7 @@ import { createApiServer } from './api/server.ts';
 
 const log = createLogger('raven');
 
-async function main() {
+async function main(): Promise<void> {
   log.info('Starting Raven...');
 
   // 1. Load config
@@ -51,11 +51,11 @@ async function main() {
 
   const baseContext = {
     eventBus: {
-      emit: (event: unknown) => eventBus.emit(event as import('@raven/shared').RavenEvent),
+      emit: (event: unknown) => eventBus.emit(event as RavenEvent),
       on: (type: string, handler: (event: unknown) => void) =>
-        eventBus.on(type as import('@raven/shared').RavenEventType, handler),
+        eventBus.on(type as RavenEventType, handler),
       off: (type: string, handler: (event: unknown) => void) =>
-        eventBus.off(type as import('@raven/shared').RavenEventType, handler),
+        eventBus.off(type as RavenEventType, handler),
     },
     db: dbInterface,
     logger: log,
@@ -117,7 +117,7 @@ async function main() {
   log.info(`Raven is ready! API: http://localhost:${config.RAVEN_PORT}`);
 
   // Graceful shutdown
-  const shutdown = async () => {
+  const shutdown = async (): Promise<void> => {
     log.info('Shutting down...');
     scheduler.shutdown();
     await skillRegistry.shutdown();

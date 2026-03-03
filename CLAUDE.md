@@ -86,7 +86,10 @@ curl http://localhost:3001/api/health
 - `npm run format` — Prettier write mode
 - `no-restricted-syntax` rule bans `.js` import extensions (use `.ts` only)
 - `no-console` enforced — use `createLogger()` from `@raven/shared`
-- Test files (`__tests__/**`) have relaxed rules: `any`, `non-null-assertion`, `console` allowed
+- AI guardrail rules (warn): `max-lines-per-function` (50), `complexity` (10), `no-magic-numbers`
+- AI guardrail rules (error): `max-params` (3), `explicit-function-return-type`, `consistent-type-imports`
+- Test files (`__tests__/**`) have relaxed rules: `any`, `non-null-assertion`, `console`, guardrails off
+- React `.tsx` files exempt from `explicit-function-return-type`
 
 ## Environment
 

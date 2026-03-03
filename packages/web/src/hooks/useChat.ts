@@ -10,7 +10,10 @@ export interface ChatMessage {
   timestamp: number;
 }
 
-export function useChat(projectId: string) {
+export function useChat(projectId: string): {
+  messages: ChatMessage[];
+  sendMessage: (message: string) => void;
+} {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const channels = useMemo(() => [`project:${projectId}`], [projectId]);
   const { messages: wsMessages, send } = useWebSocket(channels);
