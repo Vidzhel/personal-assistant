@@ -1,7 +1,15 @@
 import { z } from 'zod';
+import dotenv from 'dotenv';
 import { readFileSync, existsSync } from 'node:fs';
-import { resolve } from 'node:path';
-import 'dotenv/config';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Resolve project root from file location (works from both src/ and dist/)
+const __dirname = dirname(fileURLToPath(import.meta.url));
+export const projectRoot = resolve(__dirname, '..', '..', '..');
+
+// Load .env from project root — not CWD (which differs in workspace scripts)
+dotenv.config({ path: resolve(projectRoot, '.env') });
 
 const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().default(''), // Empty = use `claude` CLI auth (MAX plan)

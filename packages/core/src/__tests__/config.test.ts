@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
-// Mock dotenv so it doesn't re-read .env file on each import
-vi.mock('dotenv/config', () => ({}));
+// Mock dotenv so it doesn't load the real .env file during tests
+vi.mock('dotenv', () => ({ default: { config: () => {} } }));
 
 describe('config', () => {
   const originalEnv = { ...process.env };
