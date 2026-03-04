@@ -1,0 +1,125 @@
+# generated: 2026-03-04
+# project: personal-assistant
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: _bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog → in-progress: Automatically when first story is created (via create-story)
+#   - in-progress → done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - SM typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+
+generated: 2026-03-04
+project: personal-assistant
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+
+development_status:
+  # Epic 1: Trust Foundation & Permission Gates (MVP)
+  epic-1: backlog
+  1-1-permission-types-and-skill-action-declarations: backlog
+  1-2-schema-migration-system-and-permission-tables: backlog
+  1-3-permission-config-loader-and-tier-resolver: backlog
+  1-4-audit-log-writer-and-query-api: backlog
+  1-5-permission-gate-enforcement-in-agent-session: backlog
+  1-6-red-tier-approval-queue-and-batching: backlog
+  1-7-agent-execution-logging-and-system-health-monitoring: backlog
+  epic-1-retrospective: optional
+
+  # Epic 2: Pipeline Automation Engine (MVP)
+  epic-2: backlog
+  2-1-pipeline-yaml-loader-and-validation: backlog
+  2-2-pipeline-execution-engine-and-dag-runner: backlog
+  2-3-pipeline-scheduling-and-event-triggers: backlog
+  2-4-pipeline-retry-and-error-handling: backlog
+  2-5-pipeline-crud-api-and-git-auto-commit: backlog
+  epic-2-retrospective: optional
+
+  # Epic 3: Enhanced Telegram & Mobile Command (MVP)
+  epic-3: backlog
+  3-1-telegram-group-with-topic-threads: backlog
+  3-2-inline-keyboard-actions-and-approvals: backlog
+  3-3-gemini-voice-transcription-skill: backlog
+  3-4-media-and-file-routing: backlog
+  3-5-morning-briefing-delivery: backlog
+  3-6-email-reply-composition-from-telegram: backlog
+  epic-3-retrospective: optional
+
+  # Epic 4: Intelligent Email & Task Automation (MVP)
+  epic-4: backlog
+  4-1-email-auto-triage-rules: backlog
+  4-2-email-action-item-extraction-and-task-creation: backlog
+  4-3-autonomous-task-management: backlog
+  4-4-stale-task-detection-and-nudging: backlog
+  epic-4-retrospective: optional
+
+  # Epic 5: Rich Dashboard & Real-Time Monitoring (Growth)
+  epic-5: backlog
+  5-1-polling-and-sse-infrastructure-hooks: backlog
+  5-2-activity-timeline: backlog
+  5-3-pipeline-monitor: backlog
+  5-4-kanban-agent-task-board: backlog
+  5-5-pipeline-chat-configuration-and-execution-metrics: backlog
+  epic-5-retrospective: optional
+
+  # Epic 6: Knowledge System (Growth)
+  epic-6: backlog
+  6-1-knowledge-bubble-storage-and-crud: backlog
+  6-2-knowledge-ingestion-pipeline: backlog
+  6-3-knowledge-auto-clustering-and-tag-management: backlog
+  6-4-knowledge-context-injection-for-sub-agents: backlog
+  epic-6-retrospective: optional
+
+  # Epic 7: Proactive Intelligence & Friend Protocol (Growth)
+  epic-7: backlog
+  7-1-background-pattern-analysis-engine: backlog
+  7-2-urgency-tier-classification-and-delivery-timing: backlog
+  7-3-engagement-based-throttling: backlog
+  7-4-category-snooze-and-notification-preferences: backlog
+  epic-7-retrospective: optional
+
+  # Epic 8: Expanding Integrations (Growth-Vision)
+  epic-8: backlog
+  8-1-google-drive-file-monitoring-and-processing: backlog
+  8-2-financial-transaction-tracking-and-categorization: backlog
+  8-3-financial-anomaly-detection-calendar-defense-and-meeting-prep: backlog
+  epic-8-retrospective: optional
+
+  # Epic 9: Deep Knowledge & Intelligence (Vision)
+  epic-9: backlog
+  9-1-cross-domain-connection-detection: backlog
+  9-2-visual-knowledge-graph-explorer: backlog
+  9-3-knowledge-gap-detection-and-learning-tracks: backlog
+  epic-9-retrospective: optional
+
+  # Epic 10: Self-Extending System (Vision)
+  epic-10: backlog
+  10-1-conversational-pipeline-creation-and-pattern-based-suggestions: backlog
+  10-2-skill-scaffolding-from-conversation: backlog
+  10-3-config-version-management-and-life-dashboard: backlog
+  epic-10-retrospective: optional
