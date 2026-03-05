@@ -89,6 +89,14 @@ export interface SkillDataEvent extends BaseEvent {
   };
 }
 
+export interface ConfigReloadedEvent extends BaseEvent {
+  type: 'config:reloaded';
+  payload: {
+    configType: string;
+    timestamp: string;
+  };
+}
+
 export type RavenEvent =
   | NewEmailEvent
   | ScheduleTriggeredEvent
@@ -97,7 +105,8 @@ export type RavenEvent =
   | AgentMessageEvent
   | UserChatMessageEvent
   | NotificationEvent
-  | SkillDataEvent;
+  | SkillDataEvent
+  | ConfigReloadedEvent;
 
 export type RavenEventType = RavenEvent['type'];
 

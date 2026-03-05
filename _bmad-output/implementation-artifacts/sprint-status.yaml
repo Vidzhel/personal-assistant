@@ -1,4 +1,4 @@
-# generated: 2026-03-04
+# generated: 2026-03-05
 # project: personal-assistant
 # project_key: NOKEY
 # tracking_system: file-system
@@ -33,7 +33,7 @@
 # - SM typically creates next story after previous one is 'done' to incorporate learnings
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
-generated: 2026-03-04
+generated: 2026-03-05
 project: personal-assistant
 project_key: NOKEY
 tracking_system: file-system
@@ -43,8 +43,8 @@ development_status:
   # Epic 1: Trust Foundation & Permission Gates (MVP)
   epic-1: in-progress
   1-1-permission-types-and-skill-action-declarations: done
-  1-2-schema-migration-system-and-permission-tables: backlog
-  1-3-permission-config-loader-and-tier-resolver: backlog
+  1-2-schema-migration-system-and-permission-tables: done
+  1-3-permission-config-loader-and-tier-resolver: done
   1-4-audit-log-writer-and-query-api: backlog
   1-5-permission-gate-enforcement-in-agent-session: backlog
   1-6-red-tier-approval-queue-and-batching: backlog

@@ -21,3 +21,14 @@ export const SkillActionSchema = z.object({
   defaultTier: PermissionTierSchema,
   reversible: z.boolean(),
 });
+
+export interface PermissionConfig {
+  [actionName: string]: PermissionTier;
+}
+
+export const PermissionConfigSchema = z.record(
+  z.string().regex(ACTION_NAME_REGEX, {
+    message: 'Action name must match <skill-name>:<action-name> in kebab-case',
+  }),
+  PermissionTierSchema,
+);
