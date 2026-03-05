@@ -65,6 +65,9 @@ async function main(): Promise<void> {
     getSkillData: async () => null,
   };
 
+  // Count configured (enabled) skills before loading
+  const configuredSkillCount = Object.values(skillsConfig).filter((s) => s?.enabled).length;
+
   // Dynamic skill loading from packages/skills/
   const skillModules: Record<string, string> = {
     ticktick: resolve(projectRoot, 'packages/skills/skill-ticktick/dist/index.js'),
@@ -161,6 +164,7 @@ async function main(): Promise<void> {
       auditLog,
       pendingApprovals,
       executionLogger,
+      configuredSkillCount,
     },
     config.RAVEN_PORT,
   );

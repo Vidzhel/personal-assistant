@@ -22,7 +22,8 @@ export function registerHealthRoute(app: FastifyInstance, deps: ApiDeps): void {
       dbStatus = 'error';
     }
 
-    const skillsDegraded = skillNames.length === 0;
+    const configuredCount = deps.configuredSkillCount;
+    const skillsDegraded = configuredCount > 0 && skillNames.length < configuredCount;
     const overallStatus: 'ok' | 'degraded' | 'error' =
       dbStatus === 'error'
         ? 'error'
@@ -40,6 +41,7 @@ export function registerHealthRoute(app: FastifyInstance, deps: ApiDeps): void {
         skills: {
           status: skillsDegraded ? 'degraded' : 'ok',
           loaded: skillNames.length,
+          configured: configuredCount,
           names: skillNames,
         },
         scheduler: { status: 'ok', activeJobs: deps.scheduler.getActiveJobCount() },

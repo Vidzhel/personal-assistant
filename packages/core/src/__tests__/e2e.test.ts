@@ -66,6 +66,7 @@ describe('E2E: Full boot → chat → events flow', () => {
   let port: number;
   let scheduler: Scheduler;
   let agentManager: AgentManager;
+  let executionLogger: ReturnType<typeof createExecutionLogger>;
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-e2e-'));
@@ -86,7 +87,6 @@ describe('E2E: Full boot → chat → events flow', () => {
     const skillRegistry = new SkillRegistry();
     const mcpManager = new McpManager(skillRegistry);
     const sessionManager = new SessionManager();
-    agentManager = new AgentManager({ eventBus, mcpManager, skillRegistry });
     const _orchestrator = new Orchestrator(eventBus, skillRegistry, mcpManager);
     scheduler = new Scheduler(eventBus, 'UTC');
     await scheduler.initialize([]);
@@ -96,7 +96,8 @@ describe('E2E: Full boot → chat → events flow', () => {
     auditLog.initialize();
     const pendingApprovals = createPendingApprovals(getDb());
     pendingApprovals.initialize();
-    const executionLogger = createExecutionLogger({ db: getDb() });
+    executionLogger = createExecutionLogger({ db: getDb() });
+    agentManager = new AgentManager({ eventBus, mcpManager, skillRegistry, executionLogger });
 
     server = await createApiServer(
       {
@@ -108,6 +109,7 @@ describe('E2E: Full boot → chat → events flow', () => {
         auditLog,
         pendingApprovals,
         executionLogger,
+        configuredSkillCount: 0,
       },
       0, // Let OS assign port
     );
@@ -131,8 +133,8 @@ describe('E2E: Full boot → chat → events flow', () => {
     const res = await fetch(`http://localhost:${port}/api/health`);
     expect(res.ok).toBe(true);
     const body = (await res.json()) as Record<string, unknown>;
-    // Status is 'degraded' when no skills are loaded (expected in test env)
-    expect(['ok', 'degraded']).toContain(body.status);
+    // Status is 'ok' when configuredSkillCount=0 and no skills loaded (no failures to detect)
+    expect(body.status).toBe('ok');
     expect(body).toHaveProperty('subsystems');
     expect(body).toHaveProperty('taskStats');
     expect(body).toHaveProperty('memory');
@@ -194,6 +196,16 @@ describe('E2E: Full boot → chat → events flow', () => {
     expect(projectRes.ok).toBe(true);
     const fetchedProject = (await projectRes.json()) as Record<string, unknown>;
     expect(fetchedProject.name).toBe('E2E Test Project');
+  });
+
+  it('execution logger persists task records to DB', async () => {
+    const tasks = executionLogger.queryTasks({});
+    expect(tasks.length).toBeGreaterThanOrEqual(1);
+    const task = tasks[0];
+    expect(task.status).toBe('completed');
+    expect(task.skillName).toBeDefined();
+    expect(task.durationMs).toBeDefined();
+    expect(task.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
   it('project listing works after creation', async () => {

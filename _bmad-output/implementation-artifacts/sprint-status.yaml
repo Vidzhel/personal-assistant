@@ -48,7 +48,7 @@ development_status:
   1-4-audit-log-writer-and-query-api: done
   1-5-permission-gate-enforcement-in-agent-session: done
   1-6-red-tier-approval-queue-and-batching: done
-  1-7-agent-execution-logging-and-system-health-monitoring: review
+  1-7-agent-execution-logging-and-system-health-monitoring: done
   epic-1-retrospective: optional
 
   # Epic 2: Pipeline Automation Engine (MVP)
