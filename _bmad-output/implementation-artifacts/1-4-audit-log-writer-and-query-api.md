@@ -1,6 +1,6 @@
 # Story 1.4: Audit Log Writer & Query API
 
-Status: review
+Status: done
 
 ## Story
 
@@ -304,11 +304,14 @@ Claude Opus 4.6
 
 ### Change Log
 - 2026-03-05: Story 1.4 implemented — audit log writer, query module, and API route
+- 2026-03-05: Code review fixes — DI for createAuditLog(db), auditLog required in ApiDeps, insert/query return consistency, cleaner Zod error format, integration test coverage in api.test.ts
 
 ### File List
 - packages/shared/src/types/permissions.ts (modified — added AuditOutcome, AuditEntry, AuditLogFilter, AuditLogFilterSchema)
-- packages/core/src/permission-engine/audit-log.ts (new — createAuditLog factory, AuditLog interface)
-- packages/core/src/api/routes/audit-logs.ts (new — GET /api/audit-logs route)
-- packages/core/src/api/server.ts (modified — added auditLog to ApiDeps, registered audit log routes)
-- packages/core/src/index.ts (modified — added audit log initialization and boot integration)
+- packages/core/src/permission-engine/audit-log.ts (new — createAuditLog factory with DB DI, AuditLog interface)
+- packages/core/src/api/routes/audit-logs.ts (new — GET /api/audit-logs route with structured Zod errors)
+- packages/core/src/api/server.ts (modified — auditLog required in ApiDeps, registered audit log routes)
+- packages/core/src/index.ts (modified — audit log initialization with getDb() DI)
 - packages/core/src/__tests__/audit-log.test.ts (new — 16 tests for audit log module and API)
+- packages/core/src/__tests__/api.test.ts (modified — added auditLog to deps, integration test for audit route)
+- packages/core/src/__tests__/e2e.test.ts (modified — added auditLog to createApiServer deps)

@@ -26,7 +26,7 @@ export interface ApiDeps {
   sessionManager: SessionManager;
   scheduler: Scheduler;
   agentManager: AgentManager;
-  auditLog?: AuditLog;
+  auditLog: AuditLog;
 }
 
 export async function createApiServer(
@@ -46,9 +46,7 @@ export async function createApiServer(
   registerSkillRoutes(app, deps);
   registerScheduleRoutes(app, deps);
   registerEventRoutes(app);
-  if (deps.auditLog) {
-    registerAuditLogRoutes(app, deps.auditLog);
-  }
+  registerAuditLogRoutes(app, deps.auditLog);
 
   // WebSocket
   registerWebSocketHandler(app, deps.eventBus);

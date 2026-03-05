@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { createAuditLog } from '../permission-engine/audit-log.ts';
 
 // Mock the claude-code SDK to avoid real subprocess calls
 vi.mock('@anthropic-ai/claude-code', () => ({
@@ -90,7 +91,14 @@ describe('E2E: Full boot → chat → events flow', () => {
 
     // Start API server on random port
     server = await createApiServer(
-      { eventBus, skillRegistry, sessionManager, scheduler, agentManager },
+      {
+        eventBus,
+        skillRegistry,
+        sessionManager,
+        scheduler,
+        agentManager,
+        auditLog: createAuditLog(getDb()),
+      },
       0, // Let OS assign port
     );
 

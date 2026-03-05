@@ -1,5 +1,5 @@
+import type Database from 'better-sqlite3';
 import { createLogger, generateId, type AuditEntry, type AuditLogFilter } from '@raven/shared';
-import { getDb } from '../db/database.ts';
 
 const log = createLogger('audit-log');
 
@@ -35,10 +35,9 @@ function rowToEntry(row: AuditLogRow): AuditEntry {
   };
 }
 
-export function createAuditLog(): AuditLog {
+export function createAuditLog(db: Database.Database): AuditLog {
   return {
     initialize(): void {
-      const db = getDb();
       const table = db
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='audit_log'")
         .get() as { name: string } | undefined;
@@ -49,7 +48,6 @@ export function createAuditLog(): AuditLog {
     },
 
     insert(entry: Omit<AuditEntry, 'id' | 'timestamp'>): AuditEntry {
-      const db = getDb();
       const id = generateId();
       const timestamp = new Date().toISOString();
 
@@ -68,15 +66,12 @@ export function createAuditLog(): AuditLog {
         entry.pipelineName ?? null,
       );
 
-      return {
-        id,
-        timestamp,
-        ...entry,
-      };
+      const inserted = db.prepare('SELECT * FROM audit_log WHERE id = ?').get(id) as AuditLogRow;
+
+      return rowToEntry(inserted);
     },
 
     query(filters?: AuditLogFilter): AuditEntry[] {
-      const db = getDb();
       const conditions: string[] = [];
       const params: unknown[] = [];
 

@@ -12,6 +12,8 @@ import { registerChatRoute } from '../api/routes/chat.ts';
 import { registerSkillRoutes } from '../api/routes/skills.ts';
 import { registerScheduleRoutes } from '../api/routes/schedules.ts';
 import { registerEventRoutes } from '../api/routes/events.ts';
+import { registerAuditLogRoutes } from '../api/routes/audit-logs.ts';
+import { createAuditLog } from '../permission-engine/audit-log.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -45,12 +47,16 @@ describe('API routes', () => {
     app = Fastify({ logger: false });
     await app.register(cors, { origin: true });
 
+    const auditLog = createAuditLog(getDb());
+    auditLog.initialize();
+
     const deps = {
       eventBus,
       skillRegistry,
       sessionManager,
       scheduler,
       agentManager: makeMockAgentManager() as any,
+      auditLog,
     };
 
     registerHealthRoute(app, deps);
@@ -59,6 +65,7 @@ describe('API routes', () => {
     registerSkillRoutes(app, deps);
     registerScheduleRoutes(app, deps);
     registerEventRoutes(app);
+    registerAuditLogRoutes(app, auditLog);
 
     await app.ready();
   });
@@ -189,6 +196,27 @@ describe('API routes', () => {
       const body = JSON.parse(res.payload);
       expect(body.id).toBeDefined();
       expect(body.name).toBe('Test Schedule');
+    });
+  });
+
+  describe('GET /api/audit-logs', () => {
+    it('returns audit log entries through integrated route', async () => {
+      // Insert via the auditLog instance used by the server
+      const auditLog = createAuditLog(getDb());
+      auditLog.insert({
+        skillName: 'gmail',
+        actionName: 'gmail:send-email',
+        permissionTier: 'red',
+        outcome: 'denied',
+      });
+
+      const res = await app.inject({ method: 'GET', url: '/api/audit-logs' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(Array.isArray(body)).toBe(true);
+      expect(body.length).toBeGreaterThanOrEqual(1);
+      expect(body[0]).toHaveProperty('skillName');
+      expect(body[0]).not.toHaveProperty('skill_name');
     });
   });
 
