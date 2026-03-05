@@ -45,7 +45,7 @@ describe('AgentManager', () => {
     eventBus = new EventBus();
     skillRegistry = new SkillRegistry();
     mcpManager = new McpManager(skillRegistry);
-    agentManager = new AgentManager(eventBus, mcpManager, skillRegistry);
+    agentManager = new AgentManager({ eventBus, mcpManager, skillRegistry });
     mockQuery.mockReset();
   });
 

@@ -1,3 +1,7 @@
+import { z } from 'zod';
+import type { PermissionTier } from './permissions.ts';
+import { PermissionTierSchema } from './permissions.ts';
+
 export interface BaseEvent {
   id: string;
   timestamp: number;
@@ -31,6 +35,7 @@ export interface AgentTaskRequestEvent extends BaseEvent {
     taskId: string;
     prompt: string;
     skillName: string;
+    actionName?: string;
     mcpServers: Record<string, McpServerConfig>;
     agentDefinitions?: Record<string, SubAgentDefinition>;
     priority: Priority;
@@ -97,6 +102,42 @@ export interface ConfigReloadedEvent extends BaseEvent {
   };
 }
 
+export interface PermissionApprovedEvent extends BaseEvent {
+  type: 'permission:approved';
+  payload: {
+    actionName: string;
+    skillName: string;
+    tier: PermissionTier;
+    sessionId?: string;
+  };
+}
+
+export interface PermissionBlockedEvent extends BaseEvent {
+  type: 'permission:blocked';
+  payload: {
+    actionName: string;
+    skillName: string;
+    tier: PermissionTier;
+    approvalId: string;
+    sessionId?: string;
+  };
+}
+
+export const PermissionApprovedPayloadSchema = z.object({
+  actionName: z.string(),
+  skillName: z.string(),
+  tier: PermissionTierSchema,
+  sessionId: z.string().optional(),
+});
+
+export const PermissionBlockedPayloadSchema = z.object({
+  actionName: z.string(),
+  skillName: z.string(),
+  tier: PermissionTierSchema,
+  approvalId: z.string(),
+  sessionId: z.string().optional(),
+});
+
 export type RavenEvent =
   | NewEmailEvent
   | ScheduleTriggeredEvent
@@ -106,7 +147,9 @@ export type RavenEvent =
   | UserChatMessageEvent
   | NotificationEvent
   | SkillDataEvent
-  | ConfigReloadedEvent;
+  | ConfigReloadedEvent
+  | PermissionApprovedEvent
+  | PermissionBlockedEvent;
 
 export type RavenEventType = RavenEvent['type'];
 

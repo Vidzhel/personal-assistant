@@ -16,6 +16,7 @@ export interface AgentTask {
   sessionId?: string;
   projectId?: string;
   skillName: string;
+  actionName?: string;
   prompt: string;
   status: 'queued' | 'running' | 'completed' | 'failed';
   priority: Priority;

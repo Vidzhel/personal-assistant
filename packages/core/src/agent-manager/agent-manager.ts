@@ -3,6 +3,10 @@ import type { AgentTask, AgentTaskRequestEvent } from '@raven/shared';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { McpManager } from '../mcp-manager/mcp-manager.ts';
 import type { SkillRegistry } from '../skill-registry/skill-registry.ts';
+import type { PermissionEngine } from '../permission-engine/permission-engine.ts';
+import type { AuditLog } from '../permission-engine/audit-log.ts';
+import type { PendingApprovals } from '../permission-engine/pending-approvals.ts';
+import type { PermissionDeps } from './agent-session.ts';
 import { runAgentTask } from './agent-session.ts';
 import { getConfig } from '../config.ts';
 
@@ -15,16 +19,31 @@ const log = createLogger('agent-manager');
  * CRITICAL: The agent manager NEVER gives MCPs to the main orchestrator agent.
  * MCPs are only attached to sub-agents that are skill-specific.
  */
+export interface AgentManagerDeps {
+  eventBus: EventBus;
+  mcpManager: McpManager;
+  skillRegistry: SkillRegistry;
+  permissionEngine?: PermissionEngine;
+  auditLog?: AuditLog;
+  pendingApprovals?: PendingApprovals;
+}
+
 export class AgentManager {
   private queue: AgentTask[] = [];
   private running = new Map<string, Promise<void>>();
   private maxConcurrent: number;
+  private eventBus: EventBus;
+  private permissionDeps?: PermissionDeps;
 
-  constructor(
-    private eventBus: EventBus,
-    private mcpManager: McpManager,
-    private skillRegistry: SkillRegistry,
-  ) {
+  constructor(deps: AgentManagerDeps) {
+    this.eventBus = deps.eventBus;
+    if (deps.permissionEngine && deps.auditLog && deps.pendingApprovals) {
+      this.permissionDeps = {
+        permissionEngine: deps.permissionEngine,
+        auditLog: deps.auditLog,
+        pendingApprovals: deps.pendingApprovals,
+      };
+    }
     this.maxConcurrent = getConfig().RAVEN_MAX_CONCURRENT_AGENTS;
 
     this.eventBus.on<AgentTaskRequestEvent>('agent:task:request', (event) => {
@@ -44,6 +63,7 @@ export class AgentManager {
       mcpServers: payload.mcpServers,
       agentDefinitions: payload.agentDefinitions ?? {},
       createdAt: Date.now(),
+      actionName: payload.actionName,
     };
 
     // Insert by priority
@@ -95,6 +115,8 @@ export class AgentManager {
       eventBus: this.eventBus,
       mcpServers: task.mcpServers,
       agentDefinitions: task.agentDefinitions,
+      actionName: task.actionName,
+      permissionDeps: this.permissionDeps,
     });
 
     task.status = result.success ? 'completed' : 'failed';

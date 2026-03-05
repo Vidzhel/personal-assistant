@@ -1,7 +1,10 @@
 import { query } from '@anthropic-ai/claude-code';
 import { createLogger, generateId } from '@raven/shared';
-import type { AgentTask, McpServerConfig, SubAgentDefinition } from '@raven/shared';
+import type { AgentTask, McpServerConfig, PermissionTier, SubAgentDefinition } from '@raven/shared';
 import type { EventBus } from '../event-bus/event-bus.ts';
+import type { PermissionEngine } from '../permission-engine/permission-engine.ts';
+import type { AuditLog } from '../permission-engine/audit-log.ts';
+import type { PendingApprovals } from '../permission-engine/pending-approvals.ts';
 import { buildSystemPrompt } from './prompt-builder.ts';
 import { getConfig } from '../config.ts';
 
@@ -16,11 +19,96 @@ export interface AgentSessionResult {
   errors?: string[];
 }
 
+export interface PermissionDeps {
+  permissionEngine: PermissionEngine;
+  auditLog: AuditLog;
+  pendingApprovals: PendingApprovals;
+}
+
 export interface RunOptions {
   task: AgentTask;
   eventBus: EventBus;
   mcpServers: Record<string, McpServerConfig>;
   agentDefinitions: Record<string, SubAgentDefinition>;
+  actionName?: string;
+  permissionDeps?: PermissionDeps;
+}
+
+export interface GateResult {
+  allowed: boolean;
+  tier: PermissionTier;
+  reason?: string;
+}
+
+export function enforcePermissionGate(
+  actionName: string,
+  deps: PermissionDeps & { eventBus: EventBus },
+  context: { sessionId?: string; skillName: string; pipelineName?: string },
+): GateResult {
+  const tier = deps.permissionEngine.resolveTier(actionName);
+
+  if (tier === 'green') {
+    deps.auditLog.insert({
+      skillName: context.skillName,
+      actionName,
+      permissionTier: tier,
+      outcome: 'executed',
+      sessionId: context.sessionId,
+    });
+    return { allowed: true, tier };
+  }
+
+  if (tier === 'yellow') {
+    deps.auditLog.insert({
+      skillName: context.skillName,
+      actionName,
+      permissionTier: tier,
+      outcome: 'executed',
+      sessionId: context.sessionId,
+    });
+    deps.eventBus.emit({
+      id: generateId(),
+      timestamp: Date.now(),
+      source: 'permission-gate',
+      type: 'permission:approved',
+      payload: {
+        actionName,
+        skillName: context.skillName,
+        tier,
+        sessionId: context.sessionId,
+      },
+    });
+    return { allowed: true, tier };
+  }
+
+  // Red tier: block and queue
+  deps.auditLog.insert({
+    skillName: context.skillName,
+    actionName,
+    permissionTier: tier,
+    outcome: 'queued',
+    sessionId: context.sessionId,
+  });
+  const approval = deps.pendingApprovals.insert({
+    actionName,
+    skillName: context.skillName,
+    details: `Blocked: ${actionName}`,
+    sessionId: context.sessionId,
+  });
+  deps.eventBus.emit({
+    id: generateId(),
+    timestamp: Date.now(),
+    source: 'permission-gate',
+    type: 'permission:blocked',
+    payload: {
+      actionName,
+      skillName: context.skillName,
+      tier,
+      approvalId: approval.id,
+      sessionId: context.sessionId,
+    },
+  });
+  return { allowed: false, tier, reason: 'queued-for-approval' };
 }
 
 /**
@@ -29,11 +117,34 @@ export interface RunOptions {
  * with only the MCPs needed for this specific task.
  */
 export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult> {
-  const { task, eventBus, mcpServers, agentDefinitions } = opts;
+  const { task, eventBus, mcpServers, agentDefinitions, actionName, permissionDeps } = opts;
   const config = getConfig();
   const startTime = Date.now();
 
   log.info(`Starting agent task ${task.id} for skill ${task.skillName}`);
+
+  // Permission gate: enforce before query() if deps are provided
+  if (permissionDeps) {
+    const gateAction = actionName ?? 'unknown:undeclared';
+    const gateResult = enforcePermissionGate(
+      gateAction,
+      { ...permissionDeps, eventBus },
+      { sessionId: task.sessionId, skillName: task.skillName },
+    );
+
+    if (!gateResult.allowed) {
+      log.info(
+        `Task ${task.id} blocked by permission gate (action: ${gateAction}, tier: ${gateResult.tier})`,
+      );
+      return {
+        taskId: task.id,
+        result: `Action blocked: ${gateAction} requires approval (tier: ${gateResult.tier})`,
+        durationMs: Date.now() - startTime,
+        success: false,
+        errors: [gateResult.reason ?? 'blocked'],
+      };
+    }
+  }
 
   let sdkSessionId: string | undefined;
   let resultText = '';
