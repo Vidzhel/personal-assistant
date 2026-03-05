@@ -6,6 +6,7 @@ import type {
   SubAgentDefinition,
   DigestSection,
   AgentTaskPayload,
+  SkillAction,
 } from '@raven/shared';
 import { ImapWatcher } from './imap-watcher.ts';
 
@@ -44,6 +45,59 @@ class GmailSkill implements RavenSkill {
     }
 
     context.logger.info('Gmail skill initialized');
+  }
+
+  getActions(): SkillAction[] {
+    return [
+      {
+        name: 'gmail:search-emails',
+        description: 'Search and read emails',
+        defaultTier: 'green',
+        reversible: true,
+      },
+      {
+        name: 'gmail:get-email',
+        description: 'Read a specific email',
+        defaultTier: 'green',
+        reversible: true,
+      },
+      {
+        name: 'gmail:label-email',
+        description: 'Apply labels to an email',
+        defaultTier: 'yellow',
+        reversible: true,
+      },
+      {
+        name: 'gmail:archive-email',
+        description: 'Archive an email',
+        defaultTier: 'yellow',
+        reversible: true,
+      },
+      {
+        name: 'gmail:mark-read',
+        description: 'Mark email as read',
+        defaultTier: 'yellow',
+        reversible: true,
+      },
+      {
+        name: 'gmail:send-email',
+        description: 'Send a new email',
+        defaultTier: 'red',
+        reversible: false,
+      },
+      {
+        name: 'gmail:reply-email',
+        description: 'Reply to an email',
+        defaultTier: 'red',
+        reversible: false,
+      },
+      {
+        name: 'gmail:delete-email',
+        description: 'Permanently delete an email',
+        defaultTier: 'red',
+        reversible: false,
+      },
+    ];
   }
 
   async shutdown(): Promise<void> {

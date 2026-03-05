@@ -6,6 +6,7 @@ import type {
   SubAgentDefinition,
   DigestSection,
   AgentTaskPayload,
+  SkillAction,
 } from '@raven/shared';
 
 class TickTickSkill implements RavenSkill {
@@ -25,6 +26,47 @@ class TickTickSkill implements RavenSkill {
   }
 
   async shutdown(): Promise<void> {}
+
+  getActions(): SkillAction[] {
+    return [
+      {
+        name: 'ticktick:get-tasks',
+        description: 'Retrieve tasks and lists',
+        defaultTier: 'green',
+        reversible: true,
+      },
+      {
+        name: 'ticktick:get-task-details',
+        description: 'Get details of a specific task',
+        defaultTier: 'green',
+        reversible: true,
+      },
+      {
+        name: 'ticktick:create-task',
+        description: 'Create a new task',
+        defaultTier: 'yellow',
+        reversible: true,
+      },
+      {
+        name: 'ticktick:update-task',
+        description: 'Update an existing task',
+        defaultTier: 'yellow',
+        reversible: true,
+      },
+      {
+        name: 'ticktick:complete-task',
+        description: 'Mark a task as complete',
+        defaultTier: 'yellow',
+        reversible: true,
+      },
+      {
+        name: 'ticktick:delete-task',
+        description: 'Permanently delete a task',
+        defaultTier: 'red',
+        reversible: false,
+      },
+    ];
+  }
 
   getMcpServers(): Record<string, McpServerConfig> {
     const env: Record<string, string> = {};

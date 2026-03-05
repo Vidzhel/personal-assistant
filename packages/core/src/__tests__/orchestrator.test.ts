@@ -33,6 +33,7 @@ function makeSkill(
     initialize: vi.fn().mockResolvedValue(undefined),
     shutdown: vi.fn().mockResolvedValue(undefined),
     getMcpServers: () => mcpServers,
+    getActions: () => [],
     getAgentDefinitions: () => ({
       [`${name}-agent`]: { description: `${name} agent`, prompt: `Do ${name} things` },
     }),

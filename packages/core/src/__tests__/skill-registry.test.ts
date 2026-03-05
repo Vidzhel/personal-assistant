@@ -29,6 +29,7 @@ function makeSkill(
     shutdown: vi.fn().mockResolvedValue(undefined),
     getMcpServers: () => opts.mcpServers ?? {},
     getAgentDefinitions: () => opts.agentDefs ?? {},
+    getActions: () => [],
     handleScheduledTask: vi.fn().mockResolvedValue(undefined),
   };
 }
