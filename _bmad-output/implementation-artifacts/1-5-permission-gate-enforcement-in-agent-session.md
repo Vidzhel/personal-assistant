@@ -1,6 +1,6 @@
 # Story 1.5: Permission Gate Enforcement in Agent Session
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -385,14 +385,22 @@ None — clean implementation, no debugging issues.
 - Undeclared actions default to `unknown:undeclared` which resolves to Red tier
 - 147 tests pass (14 new tests added), 0 lint errors, build succeeds
 
+### Code Review Fixes Applied
+
+- **H1 — All tasks blocked in production**: Changed gate condition from `if (permissionDeps)` to `if (permissionDeps && actionName)`. Gate only activates when an explicit actionName is provided. Undeclared actions (AC5) still blocked when named explicitly.
+- **H2 — Missing integration tests**: Added 3 integration tests for `runAgentTask`: red-tier blocking (verifies SDK `query()` NOT called), green-tier execution, and permissionDeps-without-actionName (verifies gate skipped).
+- **M1 — Blocked vs failed indistinguishable**: Added `blocked?: boolean` to `AgentSessionResult`, `'blocked'` to `AgentTask.status` union, agent-manager now sets `task.status = 'blocked'` for permission-gated tasks.
+- **M2 — vi.mock inside it() block**: Moved SDK and config mocks to top level (properly hoisted), replaced dynamic import with static import.
+- **M3 — resolve() re-resolution guard**: Added `AND resolution IS NULL` to UPDATE query; throws on already-resolved approvals. Added test.
+
 ### File List
 
 - `packages/shared/src/types/events.ts` — Added PermissionApprovedEvent, PermissionBlockedEvent, Zod schemas, added to RavenEvent union
-- `packages/shared/src/types/agents.ts` — Added optional `actionName` field to AgentTask
-- `packages/core/src/permission-engine/pending-approvals.ts` — NEW: PendingApprovals factory module
-- `packages/core/src/agent-manager/agent-session.ts` — Added PermissionDeps, GateResult, enforcePermissionGate(), gate call in runAgentTask()
-- `packages/core/src/agent-manager/agent-manager.ts` — Added AgentManagerDeps interface, refactored constructor to deps object, threads permission deps + actionName
+- `packages/shared/src/types/agents.ts` — Added optional `actionName` field to AgentTask; added `'blocked'` to status union (code review fix)
+- `packages/core/src/permission-engine/pending-approvals.ts` — NEW: PendingApprovals factory module; re-resolution guard added (code review fix)
+- `packages/core/src/agent-manager/agent-session.ts` — Added PermissionDeps, GateResult, enforcePermissionGate(), gate call in runAgentTask(); added `blocked` field to result, gate requires explicit actionName (code review fixes)
+- `packages/core/src/agent-manager/agent-manager.ts` — Added AgentManagerDeps interface, refactored constructor to deps object, threads permission deps + actionName; blocked status handling (code review fix)
 - `packages/core/src/index.ts` — Init pendingApprovals, pass all permission deps to AgentManager
-- `packages/core/src/__tests__/permission-gate.test.ts` — NEW: 14 tests covering all tiers, undeclared actions, backward compat, pending approvals CRUD
+- `packages/core/src/__tests__/permission-gate.test.ts` — NEW: 18 tests covering all tiers, undeclared actions, backward compat, pending approvals CRUD, runAgentTask integration (code review additions)
 - `packages/core/src/__tests__/agent-manager.test.ts` — Updated AgentManager constructor to deps object
 - `packages/core/src/__tests__/e2e.test.ts` — Updated AgentManager constructor to deps object

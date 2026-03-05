@@ -1,11 +1,27 @@
 import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from 'vitest';
+
+// Mock claude-code SDK and config — hoisted by Vitest, applies to all tests
+vi.mock('@anthropic-ai/claude-code', () => ({
+  query: vi.fn().mockImplementation(async function* () {
+    yield { type: 'result', subtype: 'success', result: 'test result' };
+  }),
+}));
+
+vi.mock('../config.ts', () => ({
+  getConfig: () => ({
+    CLAUDE_MODEL: 'test-model',
+    RAVEN_AGENT_MAX_TURNS: 10,
+  }),
+}));
+
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { query } from '@anthropic-ai/claude-code';
 import { initDatabase, getDb } from '../db/database.ts';
 import { createAuditLog } from '../permission-engine/audit-log.ts';
 import { createPendingApprovals } from '../permission-engine/pending-approvals.ts';
-import { enforcePermissionGate } from '../agent-manager/agent-session.ts';
+import { enforcePermissionGate, runAgentTask } from '../agent-manager/agent-session.ts';
 import type { PermissionDeps } from '../agent-manager/agent-session.ts';
 import type { PermissionEngine } from '../permission-engine/permission-engine.ts';
 import { EventBus } from '../event-bus/event-bus.ts';
@@ -94,6 +110,15 @@ describe('Pending Approvals', () => {
     expect(() => pendingApprovals.resolve('nonexistent-id', 'approved')).toThrow(
       'Pending approval not found',
     );
+  });
+
+  it('resolve throws for already-resolved approval', () => {
+    const approval = pendingApprovals.insert({
+      actionName: 'test:double-resolve',
+      skillName: 'test',
+    });
+    pendingApprovals.resolve(approval.id, 'approved');
+    expect(() => pendingApprovals.resolve(approval.id, 'denied')).toThrow('already resolved');
   });
 
   it('query returns results ordered by requestedAt ASC', () => {
@@ -263,22 +288,7 @@ describe('Permission Gate', () => {
   });
 
   it('backward compat: when permissionDeps not provided, agent executes normally', async () => {
-    // This tests the runAgentTask path. We mock query() to avoid SDK calls.
-    const { runAgentTask } = await import('../agent-manager/agent-session.ts');
-
-    // Mock the SDK query to return a result immediately
-    vi.mock('@anthropic-ai/claude-code', () => ({
-      query: vi.fn().mockImplementation(async function* () {
-        yield { type: 'result', subtype: 'success', result: 'test result' };
-      }),
-    }));
-
-    vi.mock('../config.ts', () => ({
-      getConfig: () => ({
-        CLAUDE_MODEL: 'test-model',
-        RAVEN_AGENT_MAX_TURNS: 10,
-      }),
-    }));
+    vi.mocked(query).mockClear();
 
     const task = {
       id: 'task-compat',
@@ -296,14 +306,98 @@ describe('Permission Gate', () => {
       eventBus,
       mcpServers: {},
       agentDefinitions: {},
-      // no permissionDeps — backward compat
     });
 
-    // Should execute normally without gating
     expect(result.taskId).toBe('task-compat');
     expect(result.success).toBe(true);
+    expect(result.blocked).toBeUndefined();
+  });
 
-    vi.restoreAllMocks();
+  it('runAgentTask with permissionDeps but no actionName: skips gating, executes', async () => {
+    vi.mocked(query).mockClear();
+    const engine = createMockPermissionEngine({});
+
+    const task = {
+      id: 'task-no-action',
+      skillName: 'ticktick',
+      prompt: 'test prompt',
+      status: 'running' as const,
+      priority: 'normal' as const,
+      mcpServers: {},
+      agentDefinitions: {},
+      createdAt: Date.now(),
+    };
+
+    const result = await runAgentTask({
+      task,
+      eventBus,
+      mcpServers: {},
+      agentDefinitions: {},
+      permissionDeps: { permissionEngine: engine, auditLog, pendingApprovals },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.blocked).toBeUndefined();
+    expect(vi.mocked(query)).toHaveBeenCalled();
+  });
+
+  it('runAgentTask with red-tier action: blocks without calling SDK query', async () => {
+    vi.mocked(query).mockClear();
+    const engine = createMockPermissionEngine({ 'gmail:send-email': 'red' });
+
+    const task = {
+      id: 'task-blocked',
+      skillName: 'gmail',
+      prompt: 'send an email',
+      status: 'running' as const,
+      priority: 'normal' as const,
+      mcpServers: {},
+      agentDefinitions: {},
+      createdAt: Date.now(),
+    };
+
+    const result = await runAgentTask({
+      task,
+      eventBus,
+      mcpServers: {},
+      agentDefinitions: {},
+      actionName: 'gmail:send-email',
+      permissionDeps: { permissionEngine: engine, auditLog, pendingApprovals },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.blocked).toBe(true);
+    expect(result.errors).toContain('queued-for-approval');
+    expect(vi.mocked(query)).not.toHaveBeenCalled();
+  });
+
+  it('runAgentTask with green-tier action: executes via SDK query', async () => {
+    vi.mocked(query).mockClear();
+    const engine = createMockPermissionEngine({ 'ticktick:get-tasks': 'green' });
+
+    const task = {
+      id: 'task-green',
+      skillName: 'ticktick',
+      prompt: 'get tasks',
+      status: 'running' as const,
+      priority: 'normal' as const,
+      mcpServers: {},
+      agentDefinitions: {},
+      createdAt: Date.now(),
+    };
+
+    const result = await runAgentTask({
+      task,
+      eventBus,
+      mcpServers: {},
+      agentDefinitions: {},
+      actionName: 'ticktick:get-tasks',
+      permissionDeps: { permissionEngine: engine, auditLog, pendingApprovals },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.blocked).toBeUndefined();
+    expect(vi.mocked(query)).toHaveBeenCalled();
   });
 
   it('permission gate with mock engine returning each tier', () => {

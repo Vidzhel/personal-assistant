@@ -104,11 +104,13 @@ export function createPendingApprovals(db: Database.Database): PendingApprovals 
       const resolvedAt = new Date().toISOString();
 
       const result = db
-        .prepare('UPDATE pending_approvals SET resolution = ?, resolved_at = ? WHERE id = ?')
+        .prepare(
+          'UPDATE pending_approvals SET resolution = ?, resolved_at = ? WHERE id = ? AND resolution IS NULL',
+        )
         .run(resolution, resolvedAt, id);
 
       if (result.changes === 0) {
-        throw new Error(`Pending approval not found: ${id}`);
+        throw new Error(`Pending approval not found or already resolved: ${id}`);
       }
 
       const updated = db
