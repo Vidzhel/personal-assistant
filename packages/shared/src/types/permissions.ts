@@ -4,6 +4,42 @@ export type PermissionTier = 'green' | 'yellow' | 'red';
 
 export const PermissionTierSchema = z.enum(['green', 'yellow', 'red']);
 
+export type AuditOutcome = 'executed' | 'approved' | 'denied' | 'queued';
+
+export const AuditOutcomeSchema = z.enum(['executed', 'approved', 'denied', 'queued']);
+
+export interface AuditEntry {
+  id: string;
+  timestamp: string;
+  skillName: string;
+  actionName: string;
+  permissionTier: PermissionTier;
+  outcome: AuditOutcome;
+  details?: string;
+  sessionId?: string;
+  pipelineName?: string;
+}
+
+export interface AuditLogFilter {
+  skillName?: string;
+  tier?: PermissionTier;
+  outcome?: AuditOutcome;
+  from?: string;
+  to?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export const AuditLogFilterSchema = z.object({
+  skillName: z.string().optional(),
+  tier: PermissionTierSchema.optional(),
+  outcome: AuditOutcomeSchema.optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(1000).optional().default(100),
+  offset: z.coerce.number().int().min(0).optional().default(0),
+});
+
 export const ACTION_NAME_REGEX = /^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$/;
 
 export interface SkillAction {

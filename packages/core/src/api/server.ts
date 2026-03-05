@@ -7,6 +7,7 @@ import type { SkillRegistry } from '../skill-registry/skill-registry.ts';
 import type { SessionManager } from '../session-manager/session-manager.ts';
 import type { Scheduler } from '../scheduler/scheduler.ts';
 import type { AgentManager } from '../agent-manager/agent-manager.ts';
+import type { AuditLog } from '../permission-engine/audit-log.ts';
 import { registerHealthRoute } from './routes/health.ts';
 import { registerProjectRoutes } from './routes/projects.ts';
 import { registerSessionRoutes } from './routes/sessions.ts';
@@ -14,6 +15,7 @@ import { registerChatRoute } from './routes/chat.ts';
 import { registerSkillRoutes } from './routes/skills.ts';
 import { registerScheduleRoutes } from './routes/schedules.ts';
 import { registerEventRoutes } from './routes/events.ts';
+import { registerAuditLogRoutes } from './routes/audit-logs.ts';
 import { registerWebSocketHandler } from './ws/handler.ts';
 
 const log = createLogger('api');
@@ -24,6 +26,7 @@ export interface ApiDeps {
   sessionManager: SessionManager;
   scheduler: Scheduler;
   agentManager: AgentManager;
+  auditLog?: AuditLog;
 }
 
 export async function createApiServer(
@@ -43,6 +46,9 @@ export async function createApiServer(
   registerSkillRoutes(app, deps);
   registerScheduleRoutes(app, deps);
   registerEventRoutes(app);
+  if (deps.auditLog) {
+    registerAuditLogRoutes(app, deps.auditLog);
+  }
 
   // WebSocket
   registerWebSocketHandler(app, deps.eventBus);
