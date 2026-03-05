@@ -28,15 +28,26 @@ export interface AgentManagerDeps {
   pendingApprovals?: PendingApprovals;
 }
 
+export interface ApprovedActionParams {
+  actionName: string;
+  skillName: string;
+  details?: string;
+  sessionId?: string;
+}
+
 export class AgentManager {
   private queue: AgentTask[] = [];
   private running = new Map<string, Promise<void>>();
   private maxConcurrent: number;
   private eventBus: EventBus;
+  private mcpManager: McpManager;
+  private skillRegistry: SkillRegistry;
   private permissionDeps?: PermissionDeps;
 
   constructor(deps: AgentManagerDeps) {
     this.eventBus = deps.eventBus;
+    this.mcpManager = deps.mcpManager;
+    this.skillRegistry = deps.skillRegistry;
     if (deps.permissionEngine && deps.auditLog && deps.pendingApprovals) {
       this.permissionDeps = {
         permissionEngine: deps.permissionEngine,
@@ -152,5 +163,36 @@ export class AgentManager {
 
   getRunningCount(): number {
     return this.running.size;
+  }
+
+  async executeApprovedAction(
+    params: ApprovedActionParams,
+  ): Promise<{ success: boolean; error?: string }> {
+    const mcpServers = this.mcpManager.resolveForSkill(params.skillName);
+    const skill = this.skillRegistry.getSkill(params.skillName);
+    const agentDefinitions = skill?.getAgentDefinitions?.() ?? {};
+
+    const task: AgentTask = {
+      id: generateId(),
+      sessionId: params.sessionId,
+      skillName: params.skillName,
+      prompt: `Execute approved action: ${params.actionName}. Context: ${params.details ?? 'none'}`,
+      status: 'queued',
+      priority: 'high',
+      mcpServers,
+      agentDefinitions,
+      createdAt: Date.now(),
+      actionName: params.actionName,
+    };
+
+    await this.runTask(task);
+
+    return {
+      success: task.status === 'completed',
+      error:
+        task.status !== 'completed'
+          ? (task.errors?.join(', ') ?? 'Task did not complete successfully')
+          : undefined,
+    };
   }
 }

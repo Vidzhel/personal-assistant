@@ -4,9 +4,9 @@ export type PermissionTier = 'green' | 'yellow' | 'red';
 
 export const PermissionTierSchema = z.enum(['green', 'yellow', 'red']);
 
-export type AuditOutcome = 'executed' | 'approved' | 'denied' | 'queued';
+export type AuditOutcome = 'executed' | 'approved' | 'denied' | 'queued' | 'failed';
 
-export const AuditOutcomeSchema = z.enum(['executed', 'approved', 'denied', 'queued']);
+export const AuditOutcomeSchema = z.enum(['executed', 'approved', 'denied', 'queued', 'failed']);
 
 export interface AuditEntry {
   id: string;

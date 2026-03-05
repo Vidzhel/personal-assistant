@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { createAuditLog } from '../permission-engine/audit-log.ts';
+import { createPendingApprovals } from '../permission-engine/pending-approvals.ts';
 
 // Mock the claude-code SDK to avoid real subprocess calls
 vi.mock('@anthropic-ai/claude-code', () => ({
@@ -90,6 +91,11 @@ describe('E2E: Full boot → chat → events flow', () => {
     await scheduler.initialize([]);
 
     // Start API server on random port
+    const auditLog = createAuditLog(getDb());
+    auditLog.initialize();
+    const pendingApprovals = createPendingApprovals(getDb());
+    pendingApprovals.initialize();
+
     server = await createApiServer(
       {
         eventBus,
@@ -97,7 +103,8 @@ describe('E2E: Full boot → chat → events flow', () => {
         sessionManager,
         scheduler,
         agentManager,
-        auditLog: createAuditLog(getDb()),
+        auditLog,
+        pendingApprovals,
       },
       0, // Let OS assign port
     );

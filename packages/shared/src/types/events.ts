@@ -138,6 +138,25 @@ export const PermissionBlockedPayloadSchema = z.object({
   sessionId: z.string().optional(),
 });
 
+export interface PermissionDeniedEvent extends BaseEvent {
+  type: 'permission:denied';
+  payload: {
+    actionName: string;
+    skillName: string;
+    tier: PermissionTier;
+    approvalId: string;
+    sessionId?: string;
+  };
+}
+
+export const PermissionDeniedPayloadSchema = z.object({
+  actionName: z.string(),
+  skillName: z.string(),
+  tier: PermissionTierSchema,
+  approvalId: z.string(),
+  sessionId: z.string().optional(),
+});
+
 export type RavenEvent =
   | NewEmailEvent
   | ScheduleTriggeredEvent
@@ -149,7 +168,8 @@ export type RavenEvent =
   | SkillDataEvent
   | ConfigReloadedEvent
   | PermissionApprovedEvent
-  | PermissionBlockedEvent;
+  | PermissionBlockedEvent
+  | PermissionDeniedEvent;
 
 export type RavenEventType = RavenEvent['type'];
 

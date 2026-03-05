@@ -110,7 +110,17 @@ export function createPendingApprovals(db: Database.Database): PendingApprovals 
         .run(resolution, resolvedAt, id);
 
       if (result.changes === 0) {
-        throw new Error(`Pending approval not found or already resolved: ${id}`);
+        const existing = db.prepare('SELECT id FROM pending_approvals WHERE id = ?').get(id) as
+          | { id: string }
+          | undefined;
+        if (!existing) {
+          const err = new Error(`Pending approval not found: ${id}`);
+          (err as Error & { code: string }).code = 'APPROVAL_NOT_FOUND';
+          throw err;
+        }
+        const err = new Error(`Pending approval already resolved: ${id}`);
+        (err as Error & { code: string }).code = 'APPROVAL_ALREADY_RESOLVED';
+        throw err;
       }
 
       const updated = db

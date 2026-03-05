@@ -134,7 +134,15 @@ async function main(): Promise<void> {
 
   // 13. Start API server
   const server = await createApiServer(
-    { eventBus, skillRegistry, sessionManager, scheduler, agentManager, auditLog },
+    {
+      eventBus,
+      skillRegistry,
+      sessionManager,
+      scheduler,
+      agentManager,
+      auditLog,
+      pendingApprovals,
+    },
     config.RAVEN_PORT,
   );
 
