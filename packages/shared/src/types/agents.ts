@@ -18,7 +18,7 @@ export interface AgentTask {
   skillName: string;
   actionName?: string;
   prompt: string;
-  status: 'queued' | 'running' | 'completed' | 'failed';
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'blocked';
   priority: Priority;
   mcpServers: Record<string, McpServerConfig>;
   agentDefinitions: Record<string, SubAgentDefinition>;

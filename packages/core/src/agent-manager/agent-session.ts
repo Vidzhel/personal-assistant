@@ -16,6 +16,7 @@ export interface AgentSessionResult {
   result: string;
   durationMs: number;
   success: boolean;
+  blocked?: boolean;
   errors?: string[];
 }
 
@@ -123,24 +124,24 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
 
   log.info(`Starting agent task ${task.id} for skill ${task.skillName}`);
 
-  // Permission gate: enforce before query() if deps are provided
-  if (permissionDeps) {
-    const gateAction = actionName ?? 'unknown:undeclared';
+  // Permission gate: enforce before query() only when actionName is explicitly provided
+  if (permissionDeps && actionName) {
     const gateResult = enforcePermissionGate(
-      gateAction,
+      actionName,
       { ...permissionDeps, eventBus },
       { sessionId: task.sessionId, skillName: task.skillName },
     );
 
     if (!gateResult.allowed) {
       log.info(
-        `Task ${task.id} blocked by permission gate (action: ${gateAction}, tier: ${gateResult.tier})`,
+        `Task ${task.id} blocked by permission gate (action: ${actionName}, tier: ${gateResult.tier})`,
       );
       return {
         taskId: task.id,
-        result: `Action blocked: ${gateAction} requires approval (tier: ${gateResult.tier})`,
+        result: `Action blocked: ${actionName} requires approval (tier: ${gateResult.tier})`,
         durationMs: Date.now() - startTime,
         success: false,
+        blocked: true,
         errors: [gateResult.reason ?? 'blocked'],
       };
     }

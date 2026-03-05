@@ -119,7 +119,7 @@ export class AgentManager {
       permissionDeps: this.permissionDeps,
     });
 
-    task.status = result.success ? 'completed' : 'failed';
+    task.status = result.blocked ? 'blocked' : result.success ? 'completed' : 'failed';
     task.result = result.result;
     task.durationMs = result.durationMs;
     task.errors = result.errors;
