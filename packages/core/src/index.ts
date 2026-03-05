@@ -13,6 +13,7 @@ import { Scheduler } from './scheduler/scheduler.ts';
 import { createApiServer } from './api/server.ts';
 import { createPermissionEngine } from './permission-engine/permission-engine.ts';
 import { createAuditLog } from './permission-engine/audit-log.ts';
+import { createPendingApprovals } from './permission-engine/pending-approvals.ts';
 
 const log = createLogger('raven');
 
@@ -102,6 +103,11 @@ async function main(): Promise<void> {
   auditLog.initialize();
   log.info('Audit log initialized');
 
+  // 7c. Init pending approvals
+  const pendingApprovals = createPendingApprovals(getDb());
+  pendingApprovals.initialize();
+  log.info('Pending approvals initialized');
+
   // 8. Init MCP manager
   const mcpManager = new McpManager(skillRegistry);
 
@@ -109,7 +115,14 @@ async function main(): Promise<void> {
   const sessionManager = new SessionManager();
 
   // 10. Init agent manager
-  const agentManager = new AgentManager(eventBus, mcpManager, skillRegistry);
+  const agentManager = new AgentManager({
+    eventBus,
+    mcpManager,
+    skillRegistry,
+    permissionEngine,
+    auditLog,
+    pendingApprovals,
+  });
 
   // 11. Init orchestrator
   const _orchestrator = new Orchestrator(eventBus, skillRegistry, mcpManager);

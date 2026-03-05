@@ -84,7 +84,7 @@ describe('E2E: Full boot → chat → events flow', () => {
     const skillRegistry = new SkillRegistry();
     const mcpManager = new McpManager(skillRegistry);
     const sessionManager = new SessionManager();
-    agentManager = new AgentManager(eventBus, mcpManager, skillRegistry);
+    agentManager = new AgentManager({ eventBus, mcpManager, skillRegistry });
     const _orchestrator = new Orchestrator(eventBus, skillRegistry, mcpManager);
     scheduler = new Scheduler(eventBus, 'UTC');
     await scheduler.initialize([]);
