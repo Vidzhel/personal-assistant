@@ -7,6 +7,10 @@ description: Browser testing and verification for the Raven dashboard using Play
 
 Provides browser-based testing and verification for the Raven personal assistant dashboard using Playwright MCP tools.
 
+## Tests location
+
+Test scripts located under `manual-tests` directory in the root of the project.
+
 ## Prerequisites
 
 ### 1. Check Dev Server Status
