@@ -11,6 +11,7 @@ import { SessionManager } from './session-manager/session-manager.ts';
 import { Orchestrator } from './orchestrator/orchestrator.ts';
 import { Scheduler } from './scheduler/scheduler.ts';
 import { createApiServer } from './api/server.ts';
+import { createPermissionEngine } from './permission-engine/permission-engine.ts';
 
 const log = createLogger('raven');
 
@@ -90,24 +91,29 @@ async function main(): Promise<void> {
     }
   }
 
-  // 7. Init MCP manager
+  // 7. Init permission engine
+  const permissionEngine = createPermissionEngine({ skillRegistry, eventBus });
+  permissionEngine.initialize(configDir);
+  log.info('Permission engine initialized');
+
+  // 8. Init MCP manager
   const mcpManager = new McpManager(skillRegistry);
 
-  // 8. Init session manager
+  // 9. Init session manager
   const sessionManager = new SessionManager();
 
-  // 9. Init agent manager
+  // 10. Init agent manager
   const agentManager = new AgentManager(eventBus, mcpManager, skillRegistry);
 
-  // 10. Init orchestrator
+  // 11. Init orchestrator
   const _orchestrator = new Orchestrator(eventBus, skillRegistry, mcpManager);
 
-  // 11. Init scheduler
+  // 12. Init scheduler
   const schedulesConfig = loadSchedulesConfig(configDir);
   const scheduler = new Scheduler(eventBus, config.RAVEN_TIMEZONE);
   await scheduler.initialize(schedulesConfig);
 
-  // 12. Start API server
+  // 13. Start API server
   const server = await createApiServer(
     { eventBus, skillRegistry, sessionManager, scheduler, agentManager },
     config.RAVEN_PORT,
@@ -118,6 +124,7 @@ async function main(): Promise<void> {
   // Graceful shutdown
   const shutdown = async (): Promise<void> => {
     log.info('Shutting down...');
+    permissionEngine.shutdown();
     scheduler.shutdown();
     await skillRegistry.shutdown();
     await server.close();
