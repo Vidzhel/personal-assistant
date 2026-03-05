@@ -157,6 +157,23 @@ export const PermissionDeniedPayloadSchema = z.object({
   sessionId: z.string().optional(),
 });
 
+export interface SystemHealthAlertEvent extends BaseEvent {
+  type: 'system:health:alert';
+  payload: {
+    severity: 'warning' | 'error' | 'critical';
+    source: string;
+    message: string;
+    taskId?: string;
+  };
+}
+
+export const SystemHealthAlertPayloadSchema = z.object({
+  severity: z.enum(['warning', 'error', 'critical']),
+  source: z.string(),
+  message: z.string(),
+  taskId: z.string().optional(),
+});
+
 export type RavenEvent =
   | NewEmailEvent
   | ScheduleTriggeredEvent
@@ -169,7 +186,8 @@ export type RavenEvent =
   | ConfigReloadedEvent
   | PermissionApprovedEvent
   | PermissionBlockedEvent
-  | PermissionDeniedEvent;
+  | PermissionDeniedEvent
+  | SystemHealthAlertEvent;
 
 export type RavenEventType = RavenEvent['type'];
 

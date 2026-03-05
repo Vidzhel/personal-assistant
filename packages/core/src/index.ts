@@ -1,6 +1,6 @@
 import { resolve, dirname } from 'node:path';
 import { mkdirSync, existsSync } from 'node:fs';
-import { createLogger, type RavenEvent, type RavenEventType } from '@raven/shared';
+import { createLogger, generateId, type RavenEvent, type RavenEventType } from '@raven/shared';
 import { loadConfig, loadSkillsConfig, loadSchedulesConfig, projectRoot } from './config.ts';
 import { initDatabase, createDbInterface, getDb } from './db/database.ts';
 import { EventBus } from './event-bus/event-bus.ts';
@@ -14,6 +14,7 @@ import { createApiServer } from './api/server.ts';
 import { createPermissionEngine } from './permission-engine/permission-engine.ts';
 import { createAuditLog } from './permission-engine/audit-log.ts';
 import { createPendingApprovals } from './permission-engine/pending-approvals.ts';
+import { createExecutionLogger } from './agent-manager/execution-logger.ts';
 
 const log = createLogger('raven');
 
@@ -89,7 +90,19 @@ async function main(): Promise<void> {
         log.warn(`Skill '${name}' does not export a factory function`);
       }
     } catch (err) {
-      log.warn(`Failed to load skill '${name}': ${err instanceof Error ? err.message : err}`);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      log.warn(`Failed to load skill '${name}': ${errMsg}`);
+      eventBus.emit({
+        id: generateId(),
+        timestamp: Date.now(),
+        source: 'skill-registry',
+        type: 'system:health:alert',
+        payload: {
+          severity: 'error' as const,
+          source: 'skill-registry',
+          message: `Failed to load skill '${name}': ${errMsg}`,
+        },
+      });
     }
   }
 
@@ -108,6 +121,10 @@ async function main(): Promise<void> {
   pendingApprovals.initialize();
   log.info('Pending approvals initialized');
 
+  // 7d. Init execution logger
+  const executionLogger = createExecutionLogger({ db: getDb() });
+  log.info('Execution logger initialized');
+
   // 8. Init MCP manager
   const mcpManager = new McpManager(skillRegistry);
 
@@ -122,6 +139,7 @@ async function main(): Promise<void> {
     permissionEngine,
     auditLog,
     pendingApprovals,
+    executionLogger,
   });
 
   // 11. Init orchestrator
@@ -142,6 +160,7 @@ async function main(): Promise<void> {
       agentManager,
       auditLog,
       pendingApprovals,
+      executionLogger,
     },
     config.RAVEN_PORT,
   );

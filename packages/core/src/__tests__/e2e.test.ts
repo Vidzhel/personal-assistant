@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { createAuditLog } from '../permission-engine/audit-log.ts';
 import { createPendingApprovals } from '../permission-engine/pending-approvals.ts';
+import { createExecutionLogger } from '../agent-manager/execution-logger.ts';
 
 // Mock the claude-code SDK to avoid real subprocess calls
 vi.mock('@anthropic-ai/claude-code', () => ({
@@ -95,6 +96,7 @@ describe('E2E: Full boot → chat → events flow', () => {
     auditLog.initialize();
     const pendingApprovals = createPendingApprovals(getDb());
     pendingApprovals.initialize();
+    const executionLogger = createExecutionLogger({ db: getDb() });
 
     server = await createApiServer(
       {
@@ -105,6 +107,7 @@ describe('E2E: Full boot → chat → events flow', () => {
         agentManager,
         auditLog,
         pendingApprovals,
+        executionLogger,
       },
       0, // Let OS assign port
     );
@@ -128,7 +131,11 @@ describe('E2E: Full boot → chat → events flow', () => {
     const res = await fetch(`http://localhost:${port}/api/health`);
     expect(res.ok).toBe(true);
     const body = (await res.json()) as Record<string, unknown>;
-    expect(body.status).toBe('ok');
+    // Status is 'degraded' when no skills are loaded (expected in test env)
+    expect(['ok', 'degraded']).toContain(body.status);
+    expect(body).toHaveProperty('subsystems');
+    expect(body).toHaveProperty('taskStats');
+    expect(body).toHaveProperty('memory');
   });
 
   it('full chat flow: create project → send chat → receive events', async () => {

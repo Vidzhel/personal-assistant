@@ -37,6 +37,12 @@ export class EventBus {
     this.emitter.once(type, handler as EventHandler);
   }
 
+  listenerCount(): number {
+    return this.emitter
+      .eventNames()
+      .reduce((sum, name) => sum + this.emitter.listenerCount(name), 0);
+  }
+
   removeAllListeners(type?: RavenEventType | '*'): void {
     if (type) {
       this.emitter.removeAllListeners(type);
