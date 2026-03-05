@@ -68,6 +68,15 @@ function epochToIso(epoch: number | null): string | undefined {
   return new Date(epoch).toISOString();
 }
 
+function safeParseErrors(json: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(json);
+    return Array.isArray(parsed) ? (parsed as string[]) : [String(parsed)];
+  } catch {
+    return [json];
+  }
+}
+
 function rowToTaskRecord(row: AgentTaskRow): TaskRecord {
   return {
     id: row.id,
@@ -80,7 +89,7 @@ function rowToTaskRecord(row: AgentTaskRow): TaskRecord {
     priority: row.priority,
     ...(row.result !== null && { result: row.result }),
     ...(row.duration_ms !== null && { durationMs: row.duration_ms }),
-    ...(row.errors !== null && { errors: JSON.parse(row.errors) as string[] }),
+    ...(row.errors !== null && { errors: safeParseErrors(row.errors) }),
     blocked: row.blocked === 1,
     createdAt: new Date(row.created_at).toISOString(),
     ...(row.started_at !== null && { startedAt: epochToIso(row.started_at) }),

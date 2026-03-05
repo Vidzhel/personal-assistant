@@ -142,7 +142,7 @@ export class AgentManager {
     task.completedAt = Date.now();
     this.executionLogger?.logTaskComplete(task);
 
-    if (!result.success) {
+    if (!result.success && !result.blocked) {
       this.eventBus.emit({
         id: generateId(),
         timestamp: Date.now(),

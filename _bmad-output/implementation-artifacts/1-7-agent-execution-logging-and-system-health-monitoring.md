@@ -1,6 +1,6 @@
 # Story 1.7: Agent Execution Logging & System Health Monitoring
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -370,3 +370,4 @@ Claude Opus 4.6
 ### Change Log
 
 - 2026-03-05: Story 1-7 implemented — execution logging, enhanced health endpoint, agent-tasks API, health alert events
+- 2026-03-05: Code review fixes — H1: health alerts no longer fire for blocked tasks; H2/H3: added configuredSkillCount to ApiDeps and health response, fixed degraded logic; M1: safe JSON.parse for errors column; M2: added e2e test verifying DB persistence after task execution

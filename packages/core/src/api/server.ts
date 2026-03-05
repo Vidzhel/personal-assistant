@@ -33,6 +33,7 @@ export interface ApiDeps {
   auditLog: AuditLog;
   pendingApprovals: PendingApprovals;
   executionLogger: ExecutionLogger;
+  configuredSkillCount: number;
 }
 
 export async function createApiServer(

@@ -66,6 +66,7 @@ describe('API routes', () => {
       auditLog,
       pendingApprovals,
       executionLogger,
+      configuredSkillCount: 0,
     };
 
     registerHealthRoute(app, deps);
