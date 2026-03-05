@@ -14,6 +14,7 @@ import { registerScheduleRoutes } from '../api/routes/schedules.ts';
 import { registerEventRoutes } from '../api/routes/events.ts';
 import { registerAuditLogRoutes } from '../api/routes/audit-logs.ts';
 import { createAuditLog } from '../permission-engine/audit-log.ts';
+import { createPendingApprovals } from '../permission-engine/pending-approvals.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -50,6 +51,9 @@ describe('API routes', () => {
     const auditLog = createAuditLog(getDb());
     auditLog.initialize();
 
+    const pendingApprovals = createPendingApprovals(getDb());
+    pendingApprovals.initialize();
+
     const deps = {
       eventBus,
       skillRegistry,
@@ -57,6 +61,7 @@ describe('API routes', () => {
       scheduler,
       agentManager: makeMockAgentManager() as any,
       auditLog,
+      pendingApprovals,
     };
 
     registerHealthRoute(app, deps);

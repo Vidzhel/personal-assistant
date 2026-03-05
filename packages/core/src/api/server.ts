@@ -8,6 +8,7 @@ import type { SessionManager } from '../session-manager/session-manager.ts';
 import type { Scheduler } from '../scheduler/scheduler.ts';
 import type { AgentManager } from '../agent-manager/agent-manager.ts';
 import type { AuditLog } from '../permission-engine/audit-log.ts';
+import type { PendingApprovals } from '../permission-engine/pending-approvals.ts';
 import { registerHealthRoute } from './routes/health.ts';
 import { registerProjectRoutes } from './routes/projects.ts';
 import { registerSessionRoutes } from './routes/sessions.ts';
@@ -16,6 +17,7 @@ import { registerSkillRoutes } from './routes/skills.ts';
 import { registerScheduleRoutes } from './routes/schedules.ts';
 import { registerEventRoutes } from './routes/events.ts';
 import { registerAuditLogRoutes } from './routes/audit-logs.ts';
+import { registerApprovalRoutes } from './routes/approvals.ts';
 import { registerWebSocketHandler } from './ws/handler.ts';
 
 const log = createLogger('api');
@@ -27,6 +29,7 @@ export interface ApiDeps {
   scheduler: Scheduler;
   agentManager: AgentManager;
   auditLog: AuditLog;
+  pendingApprovals: PendingApprovals;
 }
 
 export async function createApiServer(
@@ -47,6 +50,12 @@ export async function createApiServer(
   registerScheduleRoutes(app, deps);
   registerEventRoutes(app);
   registerAuditLogRoutes(app, deps.auditLog);
+  registerApprovalRoutes(app, {
+    pendingApprovals: deps.pendingApprovals,
+    auditLog: deps.auditLog,
+    agentManager: deps.agentManager,
+    eventBus: deps.eventBus,
+  });
 
   // WebSocket
   registerWebSocketHandler(app, deps.eventBus);
