@@ -6,6 +6,7 @@ import type {
   SubAgentDefinition,
   DigestSection,
   AgentTaskPayload,
+  SkillAction,
 } from '@raven/shared';
 
 export abstract class BaseSkill implements RavenSkill {
@@ -18,6 +19,10 @@ export abstract class BaseSkill implements RavenSkill {
   }
 
   async shutdown(): Promise<void> {}
+
+  getActions(): SkillAction[] {
+    return [];
+  }
 
   getMcpServers(): Record<string, McpServerConfig> {
     return {};

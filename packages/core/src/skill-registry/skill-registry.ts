@@ -1,9 +1,11 @@
 import {
   createLogger,
+  ACTION_NAME_REGEX,
   type RavenSkill,
   type SkillContext,
   type McpServerConfig,
   type SubAgentDefinition,
+  type SkillAction,
 } from '@raven/shared';
 
 const log = createLogger('skill-registry');
@@ -66,6 +68,30 @@ export class SkillRegistry {
     return defs;
   }
 
+  collectActions(skillNames?: string[]): SkillAction[] {
+    const actions: SkillAction[] = [];
+    const seen = new Set<string>();
+    const names = skillNames ?? this.getEnabledSkillNames();
+    for (const name of names) {
+      const skill = this.skills.get(name);
+      if (!skill) continue;
+      const skillActions = skill.getActions();
+      for (const action of skillActions) {
+        if (!isValidActionName(action.name)) {
+          log.warn(`Invalid action name "${action.name}" from skill "${name}" — skipping`);
+          continue;
+        }
+        if (seen.has(action.name)) {
+          log.warn(`Duplicate action name "${action.name}" from skill "${name}" — skipping`);
+          continue;
+        }
+        seen.add(action.name);
+        actions.push(action);
+      }
+    }
+    return actions;
+  }
+
   findSkillForTaskType(taskType: string): RavenSkill | undefined {
     for (const skill of this.skills.values()) {
       const schedules = skill.manifest.defaultSchedules ?? [];
@@ -84,4 +110,8 @@ export class SkillRegistry {
     }
     this.skills.clear();
   }
+}
+
+export function isValidActionName(name: string): boolean {
+  return ACTION_NAME_REGEX.test(name);
 }

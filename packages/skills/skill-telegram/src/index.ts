@@ -6,6 +6,7 @@ import type {
   SubAgentDefinition,
   AgentTaskPayload,
   NotificationEvent,
+  SkillAction,
 } from '@raven/shared';
 import { TelegramBot } from './bot.ts';
 
@@ -71,6 +72,23 @@ class TelegramSkill implements RavenSkill {
     }
 
     context.logger.info('Telegram skill initialized');
+  }
+
+  getActions(): SkillAction[] {
+    return [
+      {
+        name: 'telegram:send-message',
+        description: 'Send a message to user',
+        defaultTier: 'green',
+        reversible: false,
+      },
+      {
+        name: 'telegram:send-notification',
+        description: 'Send a system notification',
+        defaultTier: 'green',
+        reversible: false,
+      },
+    ];
   }
 
   async shutdown(): Promise<void> {

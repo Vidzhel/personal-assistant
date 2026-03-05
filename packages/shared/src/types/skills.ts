@@ -1,4 +1,5 @@
 import type { McpServerConfig, SubAgentDefinition, AgentTaskRequestEvent } from './events.ts';
+import type { SkillAction } from './permissions.ts';
 
 export interface SkillManifest {
   name: string;
@@ -81,5 +82,6 @@ export interface RavenSkill {
     taskType: string,
     context: SkillContext,
   ): Promise<AgentTaskPayload | undefined>;
+  getActions(): SkillAction[];
   getDataForDigest?(): Promise<DigestSection>;
 }

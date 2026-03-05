@@ -1,0 +1,15 @@
+{
+  "browser": {
+    "browserName": "chromium",
+    "launchOptions": {
+      "channel": "chrome",
+      "chromiumSandbox": false,
+      "args": ["--disable-gpu", "--use-gl=swiftshader"]
+    },
+    "contextOptions": {
+      "viewport": { "width": 1280, "height": 720 }
+    }
+  },
+  "capabilities": ["pdf", "devtools"],
+  "outputDir": ".browser-test-output"
+}

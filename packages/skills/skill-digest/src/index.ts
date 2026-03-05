@@ -6,6 +6,7 @@ import {
   type McpServerConfig,
   type SubAgentDefinition,
   type AgentTaskPayload,
+  type SkillAction,
 } from '@raven/shared';
 
 class DigestSkill implements RavenSkill {
@@ -34,6 +35,17 @@ class DigestSkill implements RavenSkill {
   }
 
   async shutdown(): Promise<void> {}
+
+  getActions(): SkillAction[] {
+    return [
+      {
+        name: 'digest:compile-briefing',
+        description: 'Compile a digest briefing from skill data',
+        defaultTier: 'green',
+        reversible: true,
+      },
+    ];
+  }
 
   getMcpServers(): Record<string, McpServerConfig> {
     return {}; // Digest skill has no MCPs - it delegates to other skill agents
