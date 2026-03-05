@@ -12,6 +12,7 @@ import { Orchestrator } from './orchestrator/orchestrator.ts';
 import { Scheduler } from './scheduler/scheduler.ts';
 import { createApiServer } from './api/server.ts';
 import { createPermissionEngine } from './permission-engine/permission-engine.ts';
+import { createAuditLog } from './permission-engine/audit-log.ts';
 
 const log = createLogger('raven');
 
@@ -96,6 +97,11 @@ async function main(): Promise<void> {
   permissionEngine.initialize(configDir);
   log.info('Permission engine initialized');
 
+  // 7b. Init audit log
+  const auditLog = createAuditLog();
+  auditLog.initialize();
+  log.info('Audit log initialized');
+
   // 8. Init MCP manager
   const mcpManager = new McpManager(skillRegistry);
 
@@ -115,7 +121,7 @@ async function main(): Promise<void> {
 
   // 13. Start API server
   const server = await createApiServer(
-    { eventBus, skillRegistry, sessionManager, scheduler, agentManager },
+    { eventBus, skillRegistry, sessionManager, scheduler, agentManager, auditLog },
     config.RAVEN_PORT,
   );
 
