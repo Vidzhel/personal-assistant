@@ -2,7 +2,7 @@ import { resolve, dirname } from 'node:path';
 import { mkdirSync, existsSync } from 'node:fs';
 import { createLogger, type RavenEvent, type RavenEventType } from '@raven/shared';
 import { loadConfig, loadSkillsConfig, loadSchedulesConfig, projectRoot } from './config.ts';
-import { initDatabase, createDbInterface } from './db/database.ts';
+import { initDatabase, createDbInterface, getDb } from './db/database.ts';
 import { EventBus } from './event-bus/event-bus.ts';
 import { SkillRegistry } from './skill-registry/skill-registry.ts';
 import { McpManager } from './mcp-manager/mcp-manager.ts';
@@ -98,7 +98,7 @@ async function main(): Promise<void> {
   log.info('Permission engine initialized');
 
   // 7b. Init audit log
-  const auditLog = createAuditLog();
+  const auditLog = createAuditLog(getDb());
   auditLog.initialize();
   log.info('Audit log initialized');
 

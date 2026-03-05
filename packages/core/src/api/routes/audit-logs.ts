@@ -16,7 +16,9 @@ export function registerAuditLogRoutes(app: FastifyInstance, auditLog: AuditLog)
   }>('/api/audit-logs', async (req, reply) => {
     const result = AuditLogFilterSchema.safeParse(req.query);
     if (!result.success) {
-      return reply.status(400).send({ error: result.error.message });
+      return reply
+        .status(400)
+        .send({ error: 'Invalid query parameters', details: result.error.flatten().fieldErrors });
     }
 
     return auditLog.query(result.data);

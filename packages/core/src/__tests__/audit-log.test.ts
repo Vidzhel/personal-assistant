@@ -17,7 +17,7 @@ describe('Audit Log', () => {
   beforeAll(() => {
     tmpDir = mkdtempSync(join(tmpdir(), 'audit-log-'));
     initDatabase(join(tmpDir, 'test.db'));
-    auditLog = createAuditLog();
+    auditLog = createAuditLog(getDb());
     auditLog.initialize();
   });
 
@@ -188,7 +188,7 @@ describe('Audit Log API route', () => {
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'audit-api-'));
     initDatabase(join(tmpDir, 'test.db'));
-    auditLog = createAuditLog();
+    auditLog = createAuditLog(getDb());
     auditLog.initialize();
 
     // Insert test data
