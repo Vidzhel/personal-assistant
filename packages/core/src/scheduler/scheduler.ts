@@ -136,6 +136,10 @@ export class Scheduler {
     }));
   }
 
+  getActiveJobCount(): number {
+    return this.jobs.size;
+  }
+
   shutdown(): void {
     for (const job of this.jobs.values()) {
       job.stop();

@@ -6,6 +6,7 @@ import type { SkillRegistry } from '../skill-registry/skill-registry.ts';
 import type { PermissionEngine } from '../permission-engine/permission-engine.ts';
 import type { AuditLog } from '../permission-engine/audit-log.ts';
 import type { PendingApprovals } from '../permission-engine/pending-approvals.ts';
+import type { ExecutionLogger } from './execution-logger.ts';
 import type { PermissionDeps } from './agent-session.ts';
 import { runAgentTask } from './agent-session.ts';
 import { getConfig } from '../config.ts';
@@ -26,6 +27,7 @@ export interface AgentManagerDeps {
   permissionEngine?: PermissionEngine;
   auditLog?: AuditLog;
   pendingApprovals?: PendingApprovals;
+  executionLogger?: ExecutionLogger;
 }
 
 export interface ApprovedActionParams {
@@ -43,11 +45,13 @@ export class AgentManager {
   private mcpManager: McpManager;
   private skillRegistry: SkillRegistry;
   private permissionDeps?: PermissionDeps;
+  private executionLogger?: ExecutionLogger;
 
   constructor(deps: AgentManagerDeps) {
     this.eventBus = deps.eventBus;
     this.mcpManager = deps.mcpManager;
     this.skillRegistry = deps.skillRegistry;
+    this.executionLogger = deps.executionLogger;
     if (deps.permissionEngine && deps.auditLog && deps.pendingApprovals) {
       this.permissionDeps = {
         permissionEngine: deps.permissionEngine,
@@ -107,6 +111,7 @@ export class AgentManager {
   private async runTask(task: AgentTask): Promise<void> {
     task.status = 'running';
     task.startedAt = Date.now();
+    this.executionLogger?.logTaskStart(task);
 
     this.eventBus.emit({
       id: generateId(),
@@ -135,6 +140,22 @@ export class AgentManager {
     task.durationMs = result.durationMs;
     task.errors = result.errors;
     task.completedAt = Date.now();
+    this.executionLogger?.logTaskComplete(task);
+
+    if (!result.success) {
+      this.eventBus.emit({
+        id: generateId(),
+        timestamp: Date.now(),
+        source: 'agent-manager',
+        type: 'system:health:alert',
+        payload: {
+          severity: 'error' as const,
+          source: 'agent-manager',
+          message: `Task ${task.id} failed: ${result.errors?.join(', ') ?? 'unknown error'}`,
+          taskId: task.id,
+        },
+      });
+    }
 
     this.eventBus.emit({
       id: generateId(),

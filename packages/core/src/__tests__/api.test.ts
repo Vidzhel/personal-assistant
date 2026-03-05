@@ -15,6 +15,7 @@ import { registerEventRoutes } from '../api/routes/events.ts';
 import { registerAuditLogRoutes } from '../api/routes/audit-logs.ts';
 import { createAuditLog } from '../permission-engine/audit-log.ts';
 import { createPendingApprovals } from '../permission-engine/pending-approvals.ts';
+import { createExecutionLogger } from '../agent-manager/execution-logger.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -54,6 +55,8 @@ describe('API routes', () => {
     const pendingApprovals = createPendingApprovals(getDb());
     pendingApprovals.initialize();
 
+    const executionLogger = createExecutionLogger({ db: getDb() });
+
     const deps = {
       eventBus,
       skillRegistry,
@@ -62,6 +65,7 @@ describe('API routes', () => {
       agentManager: makeMockAgentManager() as any,
       auditLog,
       pendingApprovals,
+      executionLogger,
     };
 
     registerHealthRoute(app, deps);
@@ -87,15 +91,21 @@ describe('API routes', () => {
   });
 
   describe('GET /api/health', () => {
-    it('returns 200 with status ok', async () => {
+    it('returns 200 with enhanced health response', async () => {
       const res = await app.inject({ method: 'GET', url: '/api/health' });
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.payload);
-      expect(body.status).toBe('ok');
+      expect(body.status).toBeDefined();
       expect(body).toHaveProperty('uptime');
-      expect(body).toHaveProperty('skills');
-      expect(body).toHaveProperty('agentQueue');
-      expect(body).toHaveProperty('agentsRunning');
+      expect(body).toHaveProperty('timestamp');
+      expect(body).toHaveProperty('subsystems');
+      expect(body.subsystems).toHaveProperty('database');
+      expect(body.subsystems).toHaveProperty('eventBus');
+      expect(body.subsystems).toHaveProperty('skills');
+      expect(body.subsystems).toHaveProperty('scheduler');
+      expect(body.subsystems).toHaveProperty('agentManager');
+      expect(body).toHaveProperty('taskStats');
+      expect(body).toHaveProperty('memory');
     });
   });
 
