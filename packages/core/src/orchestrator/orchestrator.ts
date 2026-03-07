@@ -149,7 +149,7 @@ export class Orchestrator {
         taskId,
         prompt: message,
         skillName: 'orchestrator',
-        mcpServers: {}, // NO MCPs on the orchestrator agent
+        mcpServers: this.skillRegistry.collectMcpServers(enabledSkills), // Declared for SDK to spawn; only sub-agents use them
         agentDefinitions, // Sub-agents carry the MCPs
         priority: 'high',
         sessionId,

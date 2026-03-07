@@ -371,3 +371,15 @@ Claude Opus 4.6
 
 - 2026-03-05: Story 1-7 implemented — execution logging, enhanced health endpoint, agent-tasks API, health alert events
 - 2026-03-05: Code review fixes — H1: health alerts no longer fire for blocked tasks; H2/H3: added configuredSkillCount to ApiDeps and health response, fixed degraded logic; M1: safe JSON.parse for errors column; M2: added e2e test verifying DB persistence after task execution
+- 2026-03-07: Runtime bug fixes found via `npm run dev` (--experimental-strip-types mode):
+  - Bug 1: TS parameter properties (`constructor(private x: T)`) not supported by Node strip-types — replaced with explicit field + assignment in 5 files
+  - Bug 2: `health?.skills.length` crash when skills is undefined — added optional chaining `health?.skills?.length` in StatusCards.tsx
+  - Bug 3: Grammarly browser extension causes React hydration mismatch — added `suppressHydrationWarning` to `<html>` and `<body>` in layout.tsx
+  - Bug 4: Agent tasks fail because orchestrator passed `mcpServers: {}` — SDK needs server configs to spawn sub-agents. Fixed to `this.skillRegistry.collectMcpServers(enabledSkills)`. MCP isolation preserved via `allowedTools` exclusion.
+  - Root cause: Tests/CI run against `tsc`-compiled dist/ output, not strip-types dev mode. Dashboard tested with mocked data, not live API. No browser E2E tests.
+  - Prevention: Added ESLint `TSParameterProperty` ban, `scripts/check-strip-types.sh` in `npm run check`, new browser test suite `manual-tests/08-integration-flows.md`
+- 2026-03-07: Dependency updates across all packages:
+  - Major bumps: next 15→16, zod 3→4, pino 9→10, better-sqlite3 11→12, croner 9→10, dotenv 16→17, @fastify/cors 10→11, eslint 9→10, @eslint/js 9→10, @types/node 22→25
+  - Minor bumps: react 19.0→19.2, fastify 5.2→5.8, grammy 1.30→1.41, imapflow 1.0→1.2, mailparser 3.7→3.9, typescript 5.7→5.9, tailwindcss 4.0→4.2, zustand 5.0→5.0.11, pino-pretty 13.0→13.1, @fastify/websocket 11.0→11.2
+  - Kept @anthropic-ai/claude-code at ^1.0.128 (v2 removed SDK query() exports, CLI-only)
+  - All 190 tests pass, build + lint + strip-types checks clean

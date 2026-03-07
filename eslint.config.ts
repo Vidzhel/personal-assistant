@@ -50,6 +50,7 @@ export default tseslint.config(
     files: ['packages/*/src/**/*.ts', 'packages/skills/*/src/**/*.ts', 'packages/web/**/*.{ts,tsx}'],
     rules: {
       // Ban .js extensions in imports — use .ts instead
+      // Ban TS parameter properties — not supported by Node strip-types
       'no-restricted-syntax': [
         'error',
         {
@@ -63,6 +64,10 @@ export default tseslint.config(
         {
           selector: 'ExportAllDeclaration[source.value=/\\.js[\'"]?$/]',
           message: 'Use .ts extension instead of .js in exports.',
+        },
+        {
+          selector: 'TSParameterProperty',
+          message: 'Parameter properties are not supported by Node strip-types. Use explicit field declaration.',
         },
       ],
 
