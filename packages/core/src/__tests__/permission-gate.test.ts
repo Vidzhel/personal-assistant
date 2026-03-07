@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from 'vitest';
 
 // Mock claude-code SDK and config — hoisted by Vitest, applies to all tests
-vi.mock('@anthropic-ai/claude-code', () => ({
+vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   query: vi.fn().mockImplementation(async function* () {
     yield { type: 'result', subtype: 'success', result: 'test result' };
   }),
@@ -9,6 +9,7 @@ vi.mock('@anthropic-ai/claude-code', () => ({
 
 vi.mock('../config.ts', () => ({
   getConfig: () => ({
+    ANTHROPIC_API_KEY: 'test-key',
     CLAUDE_MODEL: 'test-model',
     RAVEN_AGENT_MAX_TURNS: 10,
   }),
@@ -17,7 +18,7 @@ vi.mock('../config.ts', () => ({
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { query } from '@anthropic-ai/claude-code';
+import { query } from '@anthropic-ai/claude-agent-sdk';
 import { initDatabase, getDb } from '../db/database.ts';
 import { createAuditLog } from '../permission-engine/audit-log.ts';
 import { createPendingApprovals } from '../permission-engine/pending-approvals.ts';

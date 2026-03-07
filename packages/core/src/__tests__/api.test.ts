@@ -16,6 +16,7 @@ import { registerAuditLogRoutes } from '../api/routes/audit-logs.ts';
 import { createAuditLog } from '../permission-engine/audit-log.ts';
 import { createPendingApprovals } from '../permission-engine/pending-approvals.ts';
 import { createExecutionLogger } from '../agent-manager/execution-logger.ts';
+import { createMessageStore } from '../session-manager/message-store.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -66,6 +67,7 @@ describe('API routes', () => {
       auditLog,
       pendingApprovals,
       executionLogger,
+      messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
       configuredSkillCount: 0,
     };
 

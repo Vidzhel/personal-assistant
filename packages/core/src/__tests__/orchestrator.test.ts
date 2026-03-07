@@ -3,6 +3,8 @@ import { Orchestrator } from '../orchestrator/orchestrator.ts';
 import { EventBus } from '../event-bus/event-bus.ts';
 import { SkillRegistry } from '../skill-registry/skill-registry.ts';
 import { McpManager } from '../mcp-manager/mcp-manager.ts';
+import { SessionManager } from '../session-manager/session-manager.ts';
+import { createMessageStore } from '../session-manager/message-store.ts';
 import { initDatabase, getDb } from '../db/database.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -73,7 +75,13 @@ describe('Orchestrator', () => {
   });
 
   it('user:chat:message emits agent:task:request with empty mcpServers', async () => {
-    _orchestrator = new Orchestrator(eventBus, skillRegistry, mcpManager);
+    _orchestrator = new Orchestrator({
+      eventBus,
+      skillRegistry,
+      mcpManager,
+      sessionManager: new SessionManager(),
+      messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
+    });
 
     // Create a project in DB
     const db = getDb();
@@ -117,7 +125,13 @@ describe('Orchestrator', () => {
       },
     );
 
-    _orchestrator = new Orchestrator(eventBus, skillRegistry, mcpManager);
+    _orchestrator = new Orchestrator({
+      eventBus,
+      skillRegistry,
+      mcpManager,
+      sessionManager: new SessionManager(),
+      messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
+    });
 
     const taskRequestPromise = new Promise<RavenEvent>((resolve) => {
       eventBus.on('agent:task:request', (e) => resolve(e));
@@ -156,7 +170,13 @@ describe('Orchestrator', () => {
       },
     );
 
-    _orchestrator = new Orchestrator(eventBus, skillRegistry, mcpManager);
+    _orchestrator = new Orchestrator({
+      eventBus,
+      skillRegistry,
+      mcpManager,
+      sessionManager: new SessionManager(),
+      messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
+    });
 
     const taskRequestPromise = new Promise<RavenEvent>((resolve) => {
       eventBus.on('agent:task:request', (e) => resolve(e));
@@ -189,7 +209,13 @@ describe('Orchestrator', () => {
   });
 
   it('schedule:triggered with unknown taskType logs warning and does not emit', async () => {
-    _orchestrator = new Orchestrator(eventBus, skillRegistry, mcpManager);
+    _orchestrator = new Orchestrator({
+      eventBus,
+      skillRegistry,
+      mcpManager,
+      sessionManager: new SessionManager(),
+      messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
+    });
 
     const handler = vi.fn();
     eventBus.on('agent:task:request', handler);

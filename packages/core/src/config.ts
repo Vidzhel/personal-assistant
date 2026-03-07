@@ -13,7 +13,7 @@ dotenv.config({ path: resolve(projectRoot, '.env') });
 
 const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().default(''), // Empty = use `claude` CLI auth (MAX plan)
-  CLAUDE_MODEL: z.string().default('claude-sonnet-4-5-20250514'),
+  CLAUDE_MODEL: z.string().default('claude-sonnet-4-6'),
   RAVEN_PORT: z.coerce.number().default(3001),
   RAVEN_TIMEZONE: z.string().default('UTC'),
   RAVEN_DIGEST_TIME: z.string().default('08:00'),

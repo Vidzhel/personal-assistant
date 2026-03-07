@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock the claude-code SDK before importing AgentManager
-vi.mock('@anthropic-ai/claude-code', () => ({
+vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   query: vi.fn(),
 }));
 
@@ -26,7 +26,7 @@ vi.mock('../config.ts', () => {
   };
 });
 
-import { query } from '@anthropic-ai/claude-code';
+import { query } from '@anthropic-ai/claude-agent-sdk';
 import { AgentManager } from '../agent-manager/agent-manager.ts';
 import { EventBus } from '../event-bus/event-bus.ts';
 import { SkillRegistry } from '../skill-registry/skill-registry.ts';

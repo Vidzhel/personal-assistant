@@ -7,6 +7,8 @@ import type { PermissionEngine } from '../permission-engine/permission-engine.ts
 import type { AuditLog } from '../permission-engine/audit-log.ts';
 import type { PendingApprovals } from '../permission-engine/pending-approvals.ts';
 import type { ExecutionLogger } from './execution-logger.ts';
+import type { MessageStore } from '../session-manager/message-store.ts';
+import type { SessionManager } from '../session-manager/session-manager.ts';
 import type { PermissionDeps } from './agent-session.ts';
 import { runAgentTask } from './agent-session.ts';
 import { getConfig } from '../config.ts';
@@ -28,6 +30,8 @@ export interface AgentManagerDeps {
   auditLog?: AuditLog;
   pendingApprovals?: PendingApprovals;
   executionLogger?: ExecutionLogger;
+  messageStore?: MessageStore;
+  sessionManager?: SessionManager;
 }
 
 export interface ApprovedActionParams {
@@ -46,12 +50,16 @@ export class AgentManager {
   private skillRegistry: SkillRegistry;
   private permissionDeps?: PermissionDeps;
   private executionLogger?: ExecutionLogger;
+  private messageStore?: MessageStore;
+  private sessionManager?: SessionManager;
 
   constructor(deps: AgentManagerDeps) {
     this.eventBus = deps.eventBus;
     this.mcpManager = deps.mcpManager;
     this.skillRegistry = deps.skillRegistry;
     this.executionLogger = deps.executionLogger;
+    this.messageStore = deps.messageStore;
+    this.sessionManager = deps.sessionManager;
     if (deps.permissionEngine && deps.auditLog && deps.pendingApprovals) {
       this.permissionDeps = {
         permissionEngine: deps.permissionEngine,
@@ -113,6 +121,8 @@ export class AgentManager {
     task.startedAt = Date.now();
     this.executionLogger?.logTaskStart(task);
 
+    const thinkingContent = `Starting ${task.skillName} agent...`;
+
     this.eventBus.emit({
       id: generateId(),
       timestamp: Date.now(),
@@ -122,9 +132,17 @@ export class AgentManager {
       payload: {
         taskId: task.id,
         messageType: 'thinking',
-        content: `Starting ${task.skillName} agent...`,
+        content: thinkingContent,
       },
     });
+
+    if (task.sessionId && this.messageStore) {
+      this.messageStore.appendMessage(task.sessionId, {
+        role: 'thinking',
+        content: thinkingContent,
+        taskId: task.id,
+      });
+    }
 
     const result = await runAgentTask({
       task,
@@ -133,6 +151,7 @@ export class AgentManager {
       agentDefinitions: task.agentDefinitions,
       actionName: task.actionName,
       permissionDeps: this.permissionDeps,
+      messageStore: this.messageStore,
     });
 
     task.status = result.blocked ? 'blocked' : result.success ? 'completed' : 'failed';
@@ -141,6 +160,20 @@ export class AgentManager {
     task.errors = result.errors;
     task.completedAt = Date.now();
     this.executionLogger?.logTaskComplete(task);
+
+    // Store assistant result message
+    if (task.sessionId && this.messageStore && result.result) {
+      this.messageStore.appendMessage(task.sessionId, {
+        role: 'assistant',
+        content: result.result,
+        taskId: task.id,
+      });
+    }
+
+    // Update session status back to idle
+    if (task.sessionId && this.sessionManager) {
+      this.sessionManager.updateStatus(task.sessionId, 'idle');
+    }
 
     if (!result.success && !result.blocked) {
       this.eventBus.emit({

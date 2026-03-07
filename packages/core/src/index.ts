@@ -9,12 +9,14 @@ import { McpManager } from './mcp-manager/mcp-manager.ts';
 import { AgentManager } from './agent-manager/agent-manager.ts';
 import { SessionManager } from './session-manager/session-manager.ts';
 import { Orchestrator } from './orchestrator/orchestrator.ts';
+import { createMessageStore } from './session-manager/message-store.ts';
 import { Scheduler } from './scheduler/scheduler.ts';
 import { createApiServer } from './api/server.ts';
 import { createPermissionEngine } from './permission-engine/permission-engine.ts';
 import { createAuditLog } from './permission-engine/audit-log.ts';
 import { createPendingApprovals } from './permission-engine/pending-approvals.ts';
 import { createExecutionLogger } from './agent-manager/execution-logger.ts';
+import { initializeBackend } from './agent-manager/agent-session.ts';
 
 const log = createLogger('raven');
 
@@ -25,11 +27,8 @@ async function main(): Promise<void> {
   const config = loadConfig();
   log.info(`Config loaded (model: ${config.CLAUDE_MODEL}, port: ${config.RAVEN_PORT})`);
 
-  if (!config.ANTHROPIC_API_KEY) {
-    log.warn(
-      'ANTHROPIC_API_KEY is not set. Agent tasks will fail unless claude CLI auth is available.',
-    );
-  }
+  // Initialize agent backend: SDK mode (API key) or CLI mode (claude binary)
+  initializeBackend(config.ANTHROPIC_API_KEY);
 
   // 2. Ensure data directories (resolve relative paths against project root, not CWD)
   const dbPath = resolve(projectRoot, config.DATABASE_PATH);
@@ -131,8 +130,9 @@ async function main(): Promise<void> {
   // 8. Init MCP manager
   const mcpManager = new McpManager(skillRegistry);
 
-  // 9. Init session manager
+  // 9. Init session manager + message store
   const sessionManager = new SessionManager();
+  const messageStore = createMessageStore({ basePath: sessionPath });
 
   // 10. Init agent manager
   const agentManager = new AgentManager({
@@ -143,10 +143,18 @@ async function main(): Promise<void> {
     auditLog,
     pendingApprovals,
     executionLogger,
+    messageStore,
+    sessionManager,
   });
 
   // 11. Init orchestrator
-  const _orchestrator = new Orchestrator(eventBus, skillRegistry, mcpManager);
+  const _orchestrator = new Orchestrator({
+    eventBus,
+    skillRegistry,
+    mcpManager,
+    sessionManager,
+    messageStore,
+  });
 
   // 12. Init scheduler
   const schedulesConfig = loadSchedulesConfig(configDir);
@@ -164,6 +172,7 @@ async function main(): Promise<void> {
       auditLog,
       pendingApprovals,
       executionLogger,
+      messageStore,
       configuredSkillCount,
     },
     config.RAVEN_PORT,
