@@ -8,7 +8,11 @@ import type { SkillRegistry } from '../skill-registry/skill-registry.ts';
  * This ensures MCPs are only active during sub-agent execution.
  */
 export class McpManager {
-  constructor(private skillRegistry: SkillRegistry) {}
+  private skillRegistry: SkillRegistry;
+
+  constructor(skillRegistry: SkillRegistry) {
+    this.skillRegistry = skillRegistry;
+  }
 
   /**
    * Resolve MCP server configs for a specific skill.

@@ -11,7 +11,11 @@ export class WsClient {
   private channels: string[] = [];
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(private url: string) {}
+  private url: string;
+
+  constructor(url: string) {
+    this.url = url;
+  }
 
   connect(channels: string[]): void {
     this.channels = channels;

@@ -9,11 +9,13 @@ const log = createLogger('scheduler');
 
 export class Scheduler {
   private jobs = new Map<string, Cron>();
+  private eventBus: EventBus;
+  private timezone: string;
 
-  constructor(
-    private eventBus: EventBus,
-    private timezone: string,
-  ) {}
+  constructor(eventBus: EventBus, timezone: string) {
+    this.eventBus = eventBus;
+    this.timezone = timezone;
+  }
 
   async initialize(defaultSchedules: ScheduleConfig[]): Promise<void> {
     const db = getDb();
