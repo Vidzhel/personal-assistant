@@ -10,9 +10,9 @@
   },
   "dependencies": {
     "@raven/shared": "*",
-    "grammy": "^1.30.0"
+    "grammy": "^1.41.1"
   },
   "devDependencies": {
-    "typescript": "^5.7.0"
+    "typescript": "^5.9.3"
   }
 }

@@ -71,8 +71,8 @@ Follow this structured approach for every task:
 
 ### 2. Navigate & Verify
 - Go to each target page/route
-- Use `browser_snapshot` to get the accessibility tree (identifies elements, text, structure)
-- Use `browser_take_screenshot` for visual evidence
+- Use `browser_snapshot` as the **primary** verification tool — it returns the accessibility tree (deterministic, machine-readable, fast)
+- Use `browser_take_screenshot` as **supplementary** visual evidence only when layout/styling matters
 - Check for: correct page title, expected content, no error banners, proper layout
 
 ### 3. Interact (if required)

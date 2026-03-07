@@ -19,7 +19,8 @@
     "lint:fix": "eslint --fix packages/*/src packages/skills/*/src",
     "format": "prettier --write 'packages/*/src/**/*.{ts,tsx}' 'packages/skills/*/src/**/*.ts'",
     "format:check": "prettier --check 'packages/*/src/**/*.{ts,tsx}' 'packages/skills/*/src/**/*.ts'",
-    "check": "npm run format:check && npm run lint",
+    "check:strip-types": "bash scripts/check-strip-types.sh",
+    "check": "npm run format:check && npm run lint && npm run check:strip-types",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
@@ -28,9 +29,9 @@
     "node": ">=22.0.0"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.3",
+    "@eslint/js": "^10.0.1",
     "concurrently": "^9.2.1",
-    "eslint": "^9.39.3",
+    "eslint": "^10.0.3",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.4.0",
     "prettier": "^3.8.1",

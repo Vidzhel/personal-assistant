@@ -21,7 +21,7 @@ export function StatusCards({ health, projectCount, scheduleCount }: StatusCards
     },
     {
       label: 'Skills',
-      value: String(health?.skills.length ?? 0),
+      value: String(health?.skills?.length ?? 0),
       color: 'var(--accent)',
     },
     {

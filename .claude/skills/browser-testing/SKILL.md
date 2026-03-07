@@ -21,13 +21,18 @@ Test scripts located under `manual-tests` directory in the root of the project.
 
 Reports status of frontend (port 3000) and API backend (port 3001).
 
-### 2. Start Frontend Dev Server (if needed)
+### 2. Start Dev Servers (if needed)
 
+Run both servers together:
 ```bash
-.claude/skills/browser-testing/scripts/start-devserver.sh
+npm run dev
 ```
 
-Starts `npm run dev:web` in background, waits up to 30s for port 3000.
+Or start individually:
+```bash
+.claude/skills/browser-testing/scripts/start-devserver.sh  # frontend only
+npm run dev:core                                            # backend only
+```
 
 ## No Authentication Required
 

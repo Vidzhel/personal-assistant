@@ -6,6 +6,7 @@ Quick prerequisite validation. Run first before any other tests. Takes under 2 m
 
 - Frontend dev server running at `http://localhost:3000` (`npm run dev:web`)
 - Backend API running at `http://localhost:3001` (`npm run dev:core`)
+- Alternatively, run both together: `npm run dev` (uses concurrently)
 - Run `.claude/skills/browser-testing/scripts/check-devserver.sh` to verify both servers
 
 ## Playwright MCP Tools Used
