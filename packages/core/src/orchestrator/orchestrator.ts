@@ -21,11 +21,14 @@ const log = createLogger('orchestrator');
  * It delegates to skill-specific sub-agents that carry their own MCPs.
  */
 export class Orchestrator {
-  constructor(
-    private eventBus: EventBus,
-    private skillRegistry: SkillRegistry,
-    private mcpManager: McpManager,
-  ) {
+  private eventBus: EventBus;
+  private skillRegistry: SkillRegistry;
+  private mcpManager: McpManager;
+
+  constructor(eventBus: EventBus, skillRegistry: SkillRegistry, mcpManager: McpManager) {
+    this.eventBus = eventBus;
+    this.skillRegistry = skillRegistry;
+    this.mcpManager = mcpManager;
     this.eventBus.on<NewEmailEvent>('email:new', (e) => this.handleNewEmail(e));
     this.eventBus.on<ScheduleTriggeredEvent>('schedule:triggered', (e) => this.handleSchedule(e));
     this.eventBus.on<UserChatMessageEvent>('user:chat:message', (e) => this.handleUserChat(e));

@@ -14,12 +14,15 @@ export class ImapWatcher {
   private client: ImapFlow | null = null;
   private running = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private config: ImapWatcherConfig;
+  private eventBus: EventBusInterface;
+  private logger: LoggerInterface;
 
-  constructor(
-    private config: ImapWatcherConfig,
-    private eventBus: EventBusInterface,
-    private logger: LoggerInterface,
-  ) {}
+  constructor(config: ImapWatcherConfig, eventBus: EventBusInterface, logger: LoggerInterface) {
+    this.config = config;
+    this.eventBus = eventBus;
+    this.logger = logger;
+  }
 
   async start(): Promise<void> {
     this.running = true;
