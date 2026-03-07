@@ -1,14 +1,34 @@
-import { query } from '@anthropic-ai/claude-code';
 import { createLogger, generateId } from '@raven/shared';
 import type { AgentTask, McpServerConfig, PermissionTier, SubAgentDefinition } from '@raven/shared';
+import type { MessageStore } from '../session-manager/message-store.ts';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { PermissionEngine } from '../permission-engine/permission-engine.ts';
 import type { AuditLog } from '../permission-engine/audit-log.ts';
 import type { PendingApprovals } from '../permission-engine/pending-approvals.ts';
 import { buildSystemPrompt } from './prompt-builder.ts';
 import { getConfig } from '../config.ts';
+import type { AgentBackend } from './agent-backend.ts';
+import { createSdkBackend } from './sdk-backend.ts';
+import { createCliBackend } from './cli-backend.ts';
 
 const log = createLogger('agent-session');
+
+let activeBackend: AgentBackend | null = null;
+
+export function initializeBackend(apiKey: string): void {
+  activeBackend = apiKey ? createSdkBackend() : createCliBackend();
+  log.info(`Agent backend: ${apiKey ? 'SDK' : 'CLI'} mode`);
+}
+
+function getActiveBackend(): AgentBackend {
+  if (!activeBackend) {
+    // Fallback: auto-initialize based on config if not explicitly initialized
+    const config = getConfig();
+    initializeBackend(config.ANTHROPIC_API_KEY);
+  }
+  // initializeBackend always sets activeBackend
+  return activeBackend as AgentBackend;
+}
 
 export interface AgentSessionResult {
   taskId: string;
@@ -33,6 +53,7 @@ export interface RunOptions {
   agentDefinitions: Record<string, SubAgentDefinition>;
   actionName?: string;
   permissionDeps?: PermissionDeps;
+  messageStore?: MessageStore;
 }
 
 export interface GateResult {
@@ -118,7 +139,8 @@ export function enforcePermissionGate(
  * with only the MCPs needed for this specific task.
  */
 export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult> {
-  const { task, eventBus, mcpServers, agentDefinitions, actionName, permissionDeps } = opts;
+  const { task, eventBus, mcpServers, agentDefinitions, actionName, permissionDeps, messageStore } =
+    opts;
   const config = getConfig();
   const startTime = Date.now();
 
@@ -154,7 +176,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
   const stderrChunks: string[] = [];
 
   try {
-    // Build MCP config for the SDK - transform our config to SDK format
+    // Build MCP config - transform our config to backend format
     const sdkMcpServers: Record<
       string,
       { command: string; args: string[]; env?: Record<string, string> }
@@ -180,72 +202,64 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       allowedTools.push('Task');
     }
 
-    const queryOptions: Record<string, unknown> = {
+    const backend = getActiveBackend();
+    const backendResult = await backend({
+      prompt: task.prompt,
       systemPrompt,
       allowedTools,
-      permissionMode: 'bypassPermissions',
       model: config.CLAUDE_MODEL,
       maxTurns: config.RAVEN_AGENT_MAX_TURNS,
-      stderr: (data: string) => {
+      mcpServers: sdkMcpServers,
+      agents: agentDefinitions,
+      onAssistantMessage: (text: string) => {
+        eventBus.emit({
+          id: generateId(),
+          timestamp: Date.now(),
+          source: task.skillName,
+          projectId: task.projectId,
+          type: 'agent:message',
+          payload: {
+            taskId: task.id,
+            sessionId: sdkSessionId,
+            messageType: 'assistant',
+            content: text,
+          },
+        });
+      },
+      onToolUse: (toolName: string, toolInput: string) => {
+        eventBus.emit({
+          id: generateId(),
+          timestamp: Date.now(),
+          source: task.skillName,
+          projectId: task.projectId,
+          type: 'agent:message',
+          payload: {
+            taskId: task.id,
+            sessionId: sdkSessionId,
+            messageType: 'tool_use',
+            content: `${toolName}: ${toolInput}`,
+          },
+        });
+        if (task.sessionId && messageStore) {
+          messageStore.appendMessage(task.sessionId, {
+            role: 'action',
+            content: `${toolName}: ${toolInput}`,
+            taskId: task.id,
+            toolName,
+            toolSummary: toolInput,
+          });
+        }
+      },
+      onStderr: (data: string) => {
         stderrChunks.push(data);
         log.debug(`Agent stderr: ${data.trim()}`);
       },
-    };
+    });
 
-    if (Object.keys(sdkMcpServers).length > 0) {
-      queryOptions.mcpServers = sdkMcpServers;
-    }
-
-    if (Object.keys(agentDefinitions).length > 0) {
-      queryOptions.agents = agentDefinitions;
-    }
-
-    for await (const message of query({
-      prompt: task.prompt,
-      options: queryOptions as Parameters<typeof query>[0]['options'],
-    })) {
-      const msg = message as Record<string, unknown>;
-
-      // Capture session ID
-      if (msg.type === 'system' && msg.subtype === 'init') {
-        sdkSessionId = msg.session_id as string;
-      }
-
-      // Stream assistant messages to event bus
-      if (msg.type === 'assistant') {
-        const content = msg.message as {
-          content?: Array<{ type: string; text?: string; name?: string }>;
-        };
-        if (content?.content) {
-          for (const block of content.content) {
-            if (block.type === 'text' && block.text) {
-              eventBus.emit({
-                id: generateId(),
-                timestamp: Date.now(),
-                source: task.skillName,
-                projectId: task.projectId,
-                type: 'agent:message',
-                payload: {
-                  taskId: task.id,
-                  sessionId: sdkSessionId,
-                  messageType: 'assistant',
-                  content: block.text,
-                },
-              });
-            }
-          }
-        }
-      }
-
-      // Capture final result
-      if (msg.type === 'result') {
-        success = msg.subtype === 'success';
-        resultText = (msg.result as string) ?? '';
-        if (!success) {
-          errors.push(`Agent ended with status: ${msg.subtype}`);
-        }
-      }
-    }
+    sdkSessionId = backendResult.sessionId;
+    resultText = backendResult.result;
+    success = backendResult.success;
+    errors.push(...backendResult.errors);
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     const stderrOutput = stderrChunks.join('');
@@ -257,7 +271,6 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
     if (stderrOutput) {
       errors.push(`stderr: ${stderrOutput.slice(-500)}`);
     }
-    success = false;
   }
 
   const durationMs = Date.now() - startTime;

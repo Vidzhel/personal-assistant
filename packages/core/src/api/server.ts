@@ -10,6 +10,7 @@ import type { AgentManager } from '../agent-manager/agent-manager.ts';
 import type { AuditLog } from '../permission-engine/audit-log.ts';
 import type { PendingApprovals } from '../permission-engine/pending-approvals.ts';
 import type { ExecutionLogger } from '../agent-manager/execution-logger.ts';
+import type { MessageStore } from '../session-manager/message-store.ts';
 import { registerHealthRoute } from './routes/health.ts';
 import { registerProjectRoutes } from './routes/projects.ts';
 import { registerSessionRoutes } from './routes/sessions.ts';
@@ -33,6 +34,7 @@ export interface ApiDeps {
   auditLog: AuditLog;
   pendingApprovals: PendingApprovals;
   executionLogger: ExecutionLogger;
+  messageStore: MessageStore;
   configuredSkillCount: number;
 }
 

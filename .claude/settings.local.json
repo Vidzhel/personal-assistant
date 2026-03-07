@@ -42,7 +42,11 @@
       "mcp__playwright__browser_run_code",
       "Bash(git:*)",
       "Bash(curl:*)",
-      "Bash(chmod +x:*)"
+      "Bash(chmod +x:*)",
+      "Bash(timeout 10 claude:*)",
+      "Bash(timeout 15 claude:*)",
+      "Bash(ls:*)",
+      "Bash(npm uninstall:*)"
     ]
   },
   "enabledMcpjsonServers": [

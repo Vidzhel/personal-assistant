@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useChat, type ChatMessage } from '@/hooks/useChat';
 
 export function ChatPanel({ projectId }: { projectId: string }) {
-  const { messages, sendMessage } = useChat(projectId);
+  const { messages, sendMessage, loading } = useChat(projectId);
   const [input, setInput] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -22,7 +22,12 @@ export function ChatPanel({ projectId }: { projectId: string }) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.length === 0 && (
+        {loading && (
+          <div className="text-center py-4" style={{ color: 'var(--text-muted)' }}>
+            <p className="text-sm">Loading history...</p>
+          </div>
+        )}
+        {!loading && messages.length === 0 && (
           <div className="text-center py-12" style={{ color: 'var(--text-muted)' }}>
             <p className="text-lg">Start a conversation</p>
             <p className="text-sm mt-1">
@@ -64,6 +69,23 @@ export function ChatPanel({ projectId }: { projectId: string }) {
 }
 
 function MessageBubble({ message }: { message: ChatMessage }) {
+  if (message.role === 'action') {
+    return <ActionBubble message={message} />;
+  }
+
+  if (message.role === 'thinking') {
+    return (
+      <div className="flex justify-start">
+        <div
+          className="max-w-[80%] px-3 py-1.5 rounded-lg text-xs italic"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          {message.content}
+        </div>
+      </div>
+    );
+  }
+
   const isUser = message.role === 'user';
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -76,6 +98,30 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         }}
       >
         {message.content}
+      </div>
+    </div>
+  );
+}
+
+function ActionBubble({ message }: { message: ChatMessage }) {
+  const toolName = message.toolName ?? 'Tool';
+  return (
+    <div className="flex justify-start">
+      <div
+        className="max-w-[80%] px-3 py-1.5 rounded-md text-xs flex items-center gap-1.5"
+        style={{
+          background: 'var(--bg-hover)',
+          color: 'var(--text-muted)',
+          border: '1px solid var(--border)',
+        }}
+      >
+        <span style={{ fontSize: '0.7rem' }}>&#9881;</span>
+        <span className="font-medium">{toolName}</span>
+        {message.toolSummary && (
+          <span className="truncate" style={{ maxWidth: '300px' }}>
+            {message.toolSummary}
+          </span>
+        )}
       </div>
     </div>
   );

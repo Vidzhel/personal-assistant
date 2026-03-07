@@ -31,7 +31,7 @@ describe('config', () => {
     expect(config.RAVEN_PORT).toBe(3001);
     expect(config.RAVEN_TIMEZONE).toBe('UTC');
     expect(config.RAVEN_AGENT_MAX_TURNS).toBe(25);
-    expect(config.CLAUDE_MODEL).toBe('claude-sonnet-4-5-20250514');
+    expect(config.CLAUDE_MODEL).toBe('claude-sonnet-4-6');
     expect(config.LOG_LEVEL).toBe('info');
     expect(config.RAVEN_MAX_CONCURRENT_AGENTS).toBe(3);
   });

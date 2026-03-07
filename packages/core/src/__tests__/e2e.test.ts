@@ -2,9 +2,10 @@ import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { createAuditLog } from '../permission-engine/audit-log.ts';
 import { createPendingApprovals } from '../permission-engine/pending-approvals.ts';
 import { createExecutionLogger } from '../agent-manager/execution-logger.ts';
+import { createMessageStore } from '../session-manager/message-store.ts';
 
 // Mock the claude-code SDK to avoid real subprocess calls
-vi.mock('@anthropic-ai/claude-code', () => ({
+vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   query: vi.fn(async function* () {
     yield { type: 'system', subtype: 'init', session_id: 'mock-session-1' };
     yield {
@@ -22,7 +23,7 @@ vi.mock('../config.ts', () => {
     loadConfig: () => {
       config = {
         ANTHROPIC_API_KEY: 'test-key',
-        CLAUDE_MODEL: 'claude-sonnet-4-5-20250514',
+        CLAUDE_MODEL: 'claude-sonnet-4-6',
         RAVEN_PORT: 0, // Will be overridden
         RAVEN_TIMEZONE: 'UTC',
         RAVEN_DIGEST_TIME: '08:00',
@@ -87,7 +88,14 @@ describe('E2E: Full boot → chat → events flow', () => {
     const skillRegistry = new SkillRegistry();
     const mcpManager = new McpManager(skillRegistry);
     const sessionManager = new SessionManager();
-    const _orchestrator = new Orchestrator(eventBus, skillRegistry, mcpManager);
+    const messageStore = createMessageStore({ basePath: join(tmpDir, 'sessions') });
+    const _orchestrator = new Orchestrator({
+      eventBus,
+      skillRegistry,
+      mcpManager,
+      sessionManager,
+      messageStore,
+    });
     scheduler = new Scheduler(eventBus, 'UTC');
     await scheduler.initialize([]);
 
@@ -109,6 +117,7 @@ describe('E2E: Full boot → chat → events flow', () => {
         auditLog,
         pendingApprovals,
         executionLogger,
+        messageStore,
         configuredSkillCount: 0,
       },
       0, // Let OS assign port

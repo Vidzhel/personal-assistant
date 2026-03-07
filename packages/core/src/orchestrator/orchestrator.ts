@@ -10,9 +10,19 @@ import {
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { SkillRegistry } from '../skill-registry/skill-registry.ts';
 import type { McpManager } from '../mcp-manager/mcp-manager.ts';
+import type { SessionManager } from '../session-manager/session-manager.ts';
+import type { MessageStore } from '../session-manager/message-store.ts';
 import { getDb } from '../db/database.ts';
 
 const log = createLogger('orchestrator');
+
+export interface OrchestratorDeps {
+  eventBus: EventBus;
+  skillRegistry: SkillRegistry;
+  mcpManager: McpManager;
+  sessionManager: SessionManager;
+  messageStore: MessageStore;
+}
 
 /**
  * The Orchestrator subscribes to events and routes them to appropriate skill sub-agents.
@@ -24,11 +34,15 @@ export class Orchestrator {
   private eventBus: EventBus;
   private skillRegistry: SkillRegistry;
   private mcpManager: McpManager;
+  private sessionManager: SessionManager;
+  private messageStore: MessageStore;
 
-  constructor(eventBus: EventBus, skillRegistry: SkillRegistry, mcpManager: McpManager) {
-    this.eventBus = eventBus;
-    this.skillRegistry = skillRegistry;
-    this.mcpManager = mcpManager;
+  constructor(deps: OrchestratorDeps) {
+    this.eventBus = deps.eventBus;
+    this.skillRegistry = deps.skillRegistry;
+    this.mcpManager = deps.mcpManager;
+    this.sessionManager = deps.sessionManager;
+    this.messageStore = deps.messageStore;
     this.eventBus.on<NewEmailEvent>('email:new', (e) => this.handleNewEmail(e));
     this.eventBus.on<ScheduleTriggeredEvent>('schedule:triggered', (e) => this.handleSchedule(e));
     this.eventBus.on<UserChatMessageEvent>('user:chat:message', (e) => this.handleUserChat(e));
@@ -120,8 +134,18 @@ export class Orchestrator {
   }
 
   private handleUserChat(event: UserChatMessageEvent): void {
-    const { projectId, message, sessionId } = event.payload;
+    const { projectId, message } = event.payload;
     log.info(`User chat in project ${projectId}: ${message.slice(0, 100)}`);
+
+    // Get or create a session for this project
+    const session = this.sessionManager.getOrCreateSession(projectId);
+    this.sessionManager.updateStatus(session.id, 'running');
+
+    // Store the user message
+    this.messageStore.appendMessage(session.id, {
+      role: 'user',
+      content: message,
+    });
 
     // Look up the project to know which skills are enabled
     const db = getDb();
@@ -152,7 +176,7 @@ export class Orchestrator {
         mcpServers: this.skillRegistry.collectMcpServers(enabledSkills), // Declared for SDK to spawn; only sub-agents use them
         agentDefinitions, // Sub-agents carry the MCPs
         priority: 'high',
-        sessionId,
+        sessionId: session.id,
         projectId,
       },
     });

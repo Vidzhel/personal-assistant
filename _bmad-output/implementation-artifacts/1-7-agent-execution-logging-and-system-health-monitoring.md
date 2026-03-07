@@ -383,3 +383,12 @@ Claude Opus 4.6
   - Minor bumps: react 19.0→19.2, fastify 5.2→5.8, grammy 1.30→1.41, imapflow 1.0→1.2, mailparser 3.7→3.9, typescript 5.7→5.9, tailwindcss 4.0→4.2, zustand 5.0→5.0.11, pino-pretty 13.0→13.1, @fastify/websocket 11.0→11.2
   - Kept @anthropic-ai/claude-code at ^1.0.128 (v2 removed SDK query() exports, CLI-only)
   - All 190 tests pass, build + lint + strip-types checks clean
+- 2026-03-07: Dual-mode agent backend — SDK + CLI strategy pattern:
+  - Replaced direct `query()` import in `agent-session.ts` with backend abstraction (strategy pattern using factory functions)
+  - New files: `agent-backend.ts` (shared types: `AgentBackend`, `BackendOptions`, `BackendResult`), `sdk-backend.ts` (wraps `query()` from SDK), `cli-backend.ts` (spawns `claude -p` with `--output-format stream-json`, NDJSON parsing, MCP temp file management)
+  - `agent-session.ts` now dispatches to active backend via `initializeBackend(apiKey)` / `getActiveBackend()` — SDK mode when `ANTHROPIC_API_KEY` is set, CLI mode when empty
+  - Boot sequence (`index.ts`): replaced API key warning with `initializeBackend(config.ANTHROPIC_API_KEY)` call
+  - Swapped SDK dependency: `@anthropic-ai/claude-code` → `@anthropic-ai/claude-agent-sdk` (v0.2.71) — same `query()` API surface
+  - Updated 3 test files to mock `@anthropic-ai/claude-agent-sdk` instead of `@anthropic-ai/claude-code`
+  - New tests: `cli-backend.test.ts` (6 tests: session ID capture, assistant streaming, error handling, MCP temp files, spawn errors, stderr forwarding), `backend-init.test.ts` (2 tests: SDK vs CLI selection)
+  - All 198 tests pass, 0 lint errors, build + check clean
