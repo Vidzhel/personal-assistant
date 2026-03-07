@@ -225,6 +225,13 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
             content: text,
           },
         });
+        if (task.sessionId && messageStore) {
+          messageStore.appendMessage(task.sessionId, {
+            role: 'assistant',
+            content: text,
+            taskId: task.id,
+          });
+        }
       },
       onToolUse: (toolName: string, toolInput: string) => {
         eventBus.emit({

@@ -34,6 +34,9 @@ export const api = {
   },
   sendChat: (projectId: string, message: string) =>
     request(`/projects/${projectId}/chat`, { method: 'POST', body: JSON.stringify({ message }) }),
+  getProjectSessions: (projectId: string) => request<Session[]>(`/projects/${projectId}/sessions`),
+  createSession: (projectId: string) =>
+    request<Session>(`/projects/${projectId}/sessions/new`, { method: 'POST' }),
 };
 
 export interface Project {
@@ -64,6 +67,16 @@ export interface Schedule {
   taskType: string;
   skillName: string;
   enabled: boolean;
+}
+
+export interface Session {
+  id: string;
+  projectId: string;
+  status: string;
+  createdAt: number;
+  lastActiveAt: number;
+  turnCount: number;
+  sdkSessionId?: string;
 }
 
 export interface EventRecord {

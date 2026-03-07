@@ -9,7 +9,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
 vi.mock('../config.ts', () => {
   const config = {
     ANTHROPIC_API_KEY: 'test-key',
-    CLAUDE_MODEL: 'claude-sonnet-4-5-20250514',
+    CLAUDE_MODEL: 'claude-sonnet-4-6',
     RAVEN_PORT: 3001,
     RAVEN_TIMEZONE: 'UTC',
     RAVEN_MAX_CONCURRENT_AGENTS: 3,
@@ -26,11 +26,15 @@ vi.mock('../config.ts', () => {
   };
 });
 
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { AgentManager } from '../agent-manager/agent-manager.ts';
 import { EventBus } from '../event-bus/event-bus.ts';
 import { SkillRegistry } from '../skill-registry/skill-registry.ts';
 import { McpManager } from '../mcp-manager/mcp-manager.ts';
+import { createMessageStore, type MessageStore } from '../session-manager/message-store.ts';
 import type { RavenEvent, AgentTaskRequestEvent } from '@raven/shared';
 
 const mockQuery = vi.mocked(query);
@@ -176,13 +180,78 @@ describe('AgentManager', () => {
       getConfig: () => ({
         RAVEN_MAX_CONCURRENT_AGENTS: 1,
         RAVEN_AGENT_MAX_TURNS: 25,
-        CLAUDE_MODEL: 'claude-sonnet-4-5-20250514',
+        CLAUDE_MODEL: 'claude-sonnet-4-6',
       }),
     }));
 
     // The task request handling is tested through events
     // Just verify the queue length getter works
     expect(agentManager.getQueueLength()).toBe(0);
+  });
+
+  describe('with messageStore', () => {
+    let tmpDir: string;
+    let messageStore: MessageStore;
+    let _amWithStore: AgentManager;
+
+    beforeEach(() => {
+      tmpDir = mkdtempSync(join(tmpdir(), 'raven-am-'));
+      messageStore = createMessageStore({ basePath: tmpDir });
+      _amWithStore = new AgentManager({ eventBus, mcpManager, skillRegistry, messageStore });
+    });
+
+    afterEach(() => {
+      rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('stores streaming assistant messages before tool_use actions', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield {
+          type: 'assistant',
+          message: {
+            content: [
+              { type: 'text', text: 'Let me check that.' },
+              { type: 'tool_use', name: 'Read', input: { path: '/tmp/test' } },
+            ],
+          },
+        };
+        yield {
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'Here is the result.' }] },
+        };
+        yield { type: 'result', subtype: 'success', result: 'Here is the result.' };
+      } as unknown as typeof query);
+
+      const completionPromise = new Promise<void>((resolve) => {
+        eventBus.on('agent:task:complete', () => resolve());
+      });
+
+      eventBus.emit({
+        id: 'evt-store-1',
+        timestamp: Date.now(),
+        source: 'test',
+        type: 'agent:task:request',
+        payload: {
+          taskId: 'task-store-1',
+          sessionId: 'sess-store-1',
+          prompt: 'Hello',
+          skillName: 'orchestrator',
+          mcpServers: {},
+          priority: 'normal',
+        },
+      } as RavenEvent);
+
+      await completionPromise;
+
+      const msgs = messageStore.getMessages('sess-store-1');
+      const roles = msgs.map((m) => m.role);
+
+      // thinking comes first, then assistant text, then action, then final assistant
+      expect(roles[0]).toBe('thinking');
+      expect(roles[1]).toBe('assistant');
+      expect(roles[2]).toBe('action');
+      expect(roles[3]).toBe('assistant');
+    });
   });
 
   it('concurrency limit is respected', async () => {

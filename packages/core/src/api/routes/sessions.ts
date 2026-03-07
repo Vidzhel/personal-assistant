@@ -11,6 +11,11 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
     return deps.sessionManager.getOrCreateSession(req.params.id);
   });
 
+  // Force-create a new session (archives existing active sessions)
+  app.post<{ Params: { id: string } }>('/api/projects/:id/sessions/new', async (req) => {
+    return deps.sessionManager.createSession(req.params.id);
+  });
+
   app.get<{ Params: { id: string } }>('/api/sessions/:id', async (req, reply) => {
     const session = deps.sessionManager.getSession(req.params.id);
     if (!session) return reply.status(404).send({ error: 'Not found' });

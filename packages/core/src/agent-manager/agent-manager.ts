@@ -161,15 +161,6 @@ export class AgentManager {
     task.completedAt = Date.now();
     this.executionLogger?.logTaskComplete(task);
 
-    // Store assistant result message
-    if (task.sessionId && this.messageStore && result.result) {
-      this.messageStore.appendMessage(task.sessionId, {
-        role: 'assistant',
-        content: result.result,
-        taskId: task.id,
-      });
-    }
-
     // Update session status back to idle
     if (task.sessionId && this.sessionManager) {
       this.sessionManager.updateStatus(task.sessionId, 'idle');

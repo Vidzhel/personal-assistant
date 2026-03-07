@@ -15,48 +15,70 @@ export interface ChatMessage {
   toolSummary?: string;
 }
 
-export function useChat(projectId: string): {
+interface UseChatOptions {
+  projectId: string;
+  sessionId?: string | null;
+}
+
+export function useChat(opts: UseChatOptions): {
   messages: ChatMessage[];
   sendMessage: (message: string) => void;
   sessionId: string | null;
   loading: boolean;
 } {
+  const { projectId, sessionId: externalSessionId } = opts;
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(externalSessionId ?? null);
   const [loading, setLoading] = useState(true);
   const initializedRef = useRef(false);
   const channels = useMemo(() => [`project:${projectId}`], [projectId]);
   const { messages: wsMessages, send } = useWebSocket(channels);
 
-  // On mount: get/create active session & load history
+  // Sync external sessionId changes (e.g. session switch)
+  useEffect(() => {
+    if (externalSessionId !== undefined && externalSessionId !== sessionId) {
+      setSessionId(externalSessionId);
+      initializedRef.current = false;
+    }
+  }, [externalSessionId, sessionId]);
+
+  // On mount or session change: load history
   useEffect(() => {
     if (initializedRef.current) return;
     initializedRef.current = true;
 
     async function init(): Promise<void> {
       try {
-        const res = await fetch(`${API_URL}/projects/${projectId}/sessions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        });
-        if (!res.ok) throw new Error('Failed to get session');
-        const session = (await res.json()) as { id: string };
-        setSessionId(session.id);
+        let sid = externalSessionId;
+        if (!sid) {
+          const res = await fetch(`${API_URL}/projects/${projectId}/sessions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+          });
+          if (!res.ok) throw new Error('Failed to get session');
+          const session = (await res.json()) as { id: string };
+          sid = session.id;
+          setSessionId(sid);
+        }
 
-        const msgRes = await fetch(`${API_URL}/sessions/${session.id}/messages`);
+        const msgRes = await fetch(`${API_URL}/sessions/${sid}/messages`);
         if (msgRes.ok) {
           const history = (await msgRes.json()) as ChatMessage[];
           setChatMessages(history);
+        } else {
+          setChatMessages([]);
         }
       } catch {
         // Fallback: work without session persistence
+        setChatMessages([]);
       } finally {
         setLoading(false);
       }
     }
 
+    setLoading(true);
     init();
-  }, [projectId]);
+  }, [projectId, externalSessionId]);
 
   // Handle incoming WebSocket messages
   useEffect(() => {

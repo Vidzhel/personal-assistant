@@ -3,8 +3,14 @@
 import { useState, useRef, useEffect } from 'react';
 import { useChat, type ChatMessage } from '@/hooks/useChat';
 
-export function ChatPanel({ projectId }: { projectId: string }) {
-  const { messages, sendMessage, loading } = useChat(projectId);
+export function ChatPanel({
+  projectId,
+  sessionId,
+}: {
+  projectId: string;
+  sessionId?: string | null;
+}) {
+  const { messages, sendMessage, loading } = useChat({ projectId, sessionId });
   const [input, setInput] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
 
