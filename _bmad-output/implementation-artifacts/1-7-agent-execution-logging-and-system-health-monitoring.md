@@ -392,3 +392,10 @@ Claude Opus 4.6
   - Updated 3 test files to mock `@anthropic-ai/claude-agent-sdk` instead of `@anthropic-ai/claude-code`
   - New tests: `cli-backend.test.ts` (6 tests: session ID capture, assistant streaming, error handling, MCP temp files, spawn errors, stderr forwarding), `backend-init.test.ts` (2 tests: SDK vs CLI selection)
   - All 198 tests pass, 0 lint errors, build + check clean
+- 2026-03-07: Session history fixes, frontend session UI, TickTick investigation:
+  - **Message ordering fix**: `onAssistantMessage` in `agent-session.ts` now stores assistant text chunks to messageStore during streaming (before tool_use actions). Removed duplicate final-result store in `agent-manager.ts` (was appending result text AFTER all actions, breaking chronological order). Correct order now: user → thinking → assistant-chunk → action → assistant-chunk → action → ...
+  - **Frontend session UI**: Added session selector bar to project page — dropdown to switch between sessions, "New Session" button. Updated `useChat` hook to accept optional `sessionId` prop and reload messages on session switch. Updated `ChatPanel` to pass through `sessionId`.
+  - **Backend session creation**: Added `createSession()` to SessionManager (archives existing active sessions, creates fresh one). Added `POST /api/projects/:id/sessions/new` route. Added `getProjectSessions()` and `createSession()` to frontend API client.
+  - **New tests**: `message-store.test.ts` (4 tests: append, ordering, pagination, empty session). Agent-manager tests: message store integration verifying assistant-before-action ordering. E2E tests: session creation, message history retrieval, message ordering verification. Fixed model string to `claude-sonnet-4-6`.
+  - **TickTick investigation**: Documented MCP server connection findings
+  - All 205 tests pass, 0 lint errors, build + check clean

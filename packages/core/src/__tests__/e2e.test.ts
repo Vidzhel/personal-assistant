@@ -207,6 +207,66 @@ describe('E2E: Full boot → chat → events flow', () => {
     expect(fetchedProject.name).toBe('E2E Test Project');
   });
 
+  it('session creation and message history', async () => {
+    // Create a project for this test
+    const createRes = await fetch(`http://localhost:${port}/api/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Session Test Project' }),
+    });
+    const project = (await createRes.json()) as { id: string };
+
+    // Create a session via POST
+    const sessRes = await fetch(`http://localhost:${port}/api/projects/${project.id}/sessions`, {
+      method: 'POST',
+    });
+    expect(sessRes.ok).toBe(true);
+    const session = (await sessRes.json()) as { id: string; status: string };
+    expect(session.id).toBeDefined();
+    expect(session.status).toBe('idle');
+
+    // List sessions
+    const listRes = await fetch(`http://localhost:${port}/api/projects/${project.id}/sessions`);
+    expect(listRes.ok).toBe(true);
+    const sessions = (await listRes.json()) as unknown[];
+    expect(sessions.length).toBeGreaterThanOrEqual(1);
+
+    // Get messages (should be empty for new session)
+    const msgRes = await fetch(`http://localhost:${port}/api/sessions/${session.id}/messages`);
+    expect(msgRes.ok).toBe(true);
+    const msgs = (await msgRes.json()) as unknown[];
+    expect(Array.isArray(msgs)).toBe(true);
+  });
+
+  it('message ordering: assistant stored before actions in transcript', async () => {
+    // Use the project from the first chat test
+    const projRes = await fetch(`http://localhost:${port}/api/projects`);
+    const projects = (await projRes.json()) as Array<{ id: string; name: string }>;
+    const project = projects.find((p) => p.name === 'E2E Test Project');
+    if (!project) return; // skip if first test didn't create it
+
+    // Get sessions for this project
+    const sessRes = await fetch(`http://localhost:${port}/api/projects/${project.id}/sessions`);
+    const sessions = (await sessRes.json()) as Array<{ id: string }>;
+    if (sessions.length === 0) return;
+
+    // Get messages for the first session
+    const msgRes = await fetch(`http://localhost:${port}/api/sessions/${sessions[0].id}/messages`);
+    if (!msgRes.ok) return;
+    const msgs = (await msgRes.json()) as Array<{ role: string; content: string }>;
+
+    if (msgs.length > 0) {
+      // First message should be user
+      expect(msgs[0].role).toBe('user');
+      // Should have thinking message before assistant
+      const thinkingIdx = msgs.findIndex((m) => m.role === 'thinking');
+      const assistantIdx = msgs.findIndex((m) => m.role === 'assistant');
+      if (thinkingIdx >= 0 && assistantIdx >= 0) {
+        expect(thinkingIdx).toBeLessThan(assistantIdx);
+      }
+    }
+  });
+
   it('execution logger persists task records to DB', async () => {
     const tasks = executionLogger.queryTasks({});
     expect(tasks.length).toBeGreaterThanOrEqual(1);

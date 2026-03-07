@@ -57,6 +57,38 @@ export class SessionManager {
     );
   }
 
+  createSession(projectId: string): AgentSession {
+    const db = getDb();
+
+    // Archive any active sessions for this project
+    db.prepare(
+      "UPDATE sessions SET status = 'archived' WHERE project_id = ? AND status IN ('idle', 'running')",
+    ).run(projectId);
+
+    const session: AgentSession = {
+      id: generateId(),
+      projectId,
+      status: 'idle',
+      createdAt: Date.now(),
+      lastActiveAt: Date.now(),
+      turnCount: 0,
+    };
+
+    db.prepare(
+      'INSERT INTO sessions (id, project_id, status, created_at, last_active_at, turn_count) VALUES (?, ?, ?, ?, ?, ?)',
+    ).run(
+      session.id,
+      session.projectId,
+      session.status,
+      session.createdAt,
+      session.lastActiveAt,
+      session.turnCount,
+    );
+
+    log.info(`Created new session ${session.id} for project ${projectId}`);
+    return session;
+  }
+
   getSession(sessionId: string): AgentSession | undefined {
     const db = getDb();
     const row = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId) as
