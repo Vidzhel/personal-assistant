@@ -101,6 +101,15 @@ export function registerTools(server: McpServer, client: Client): void {
       tags: z.array(z.string()).optional().describe('Tags'),
       isAllDay: z.boolean().optional().describe('Whether this is an all-day task'),
       timeZone: z.string().optional().describe('Time zone (e.g. America/New_York)'),
+      reminders: z
+        .array(z.string())
+        .optional()
+        .describe('Reminders (e.g. ["TRIGGER:PT0S", "TRIGGER:P0DT9H0M0S"])'),
+      repeatFlag: z
+        .string()
+        .optional()
+        .describe('Recurrence rule (e.g. "RRULE:FREQ=DAILY;INTERVAL=1")'),
+      sortOrder: z.number().optional().describe('Sort order within project'),
     },
     async (input) => {
       const task = await client.createTask(input);
@@ -122,9 +131,15 @@ export function registerTools(server: McpServer, client: Client): void {
       priority: z.number().optional().describe('New priority (0, 1, 3, 5)'),
       tags: z.array(z.string()).optional().describe('New tags'),
       isAllDay: z.boolean().optional().describe('All-day flag'),
+      reminders: z.array(z.string()).optional().describe('Reminders (e.g. ["TRIGGER:PT0S"])'),
+      repeatFlag: z
+        .string()
+        .optional()
+        .describe('Recurrence rule (e.g. "RRULE:FREQ=DAILY;INTERVAL=1")'),
+      sortOrder: z.number().optional().describe('Sort order within project'),
     },
     async ({ projectId, taskId, ...input }) => {
-      const task = await client.updateTask(projectId, taskId, input);
+      const task = await client.updateTask(taskId, { ...input, id: taskId, projectId });
       return { content: [{ type: 'text', text: JSON.stringify(task, null, 2) }] };
     },
   );
@@ -178,22 +193,62 @@ export function registerTools(server: McpServer, client: Client): void {
     },
   );
 
+  // --- Filter & Search ---
+
+  server.tool(
+    'filter_tasks',
+    'Server-side filtered search for tasks',
+    {
+      projectIds: z.array(z.string()).optional().describe('Filter by project IDs'),
+      startDate: z.string().optional().describe('Start date (ISO 8601)'),
+      endDate: z.string().optional().describe('End date (ISO 8601)'),
+      priority: z.array(z.number()).optional().describe('Filter by priorities (0, 1, 3, 5)'),
+      tags: z.array(z.string()).optional().describe('Filter by tags'),
+      status: z.array(z.number()).optional().describe('Filter by status (0=Open, 2=Completed)'),
+    },
+    async ({ tags, ...rest }) => {
+      const tasks = await client.filterTasks({ ...rest, tag: tags });
+      return { content: [{ type: 'text', text: JSON.stringify(tasks, null, 2) }] };
+    },
+  );
+
+  server.tool(
+    'get_completed_tasks',
+    'List completed tasks by date range',
+    {
+      projectIds: z.array(z.string()).optional().describe('Filter by project IDs'),
+      startDate: z.string().optional().describe('Completed after this date (ISO 8601)'),
+      endDate: z.string().optional().describe('Completed before this date (ISO 8601)'),
+    },
+    async (input) => {
+      const tasks = await client.getCompletedTasks(input);
+      return { content: [{ type: 'text', text: JSON.stringify(tasks, null, 2) }] };
+    },
+  );
+
+  server.tool(
+    'move_task',
+    'Move a task between projects',
+    {
+      taskId: z.string().describe('The task ID to move'),
+      fromProjectId: z.string().describe('Source project ID'),
+      toProjectId: z.string().describe('Destination project ID'),
+    },
+    async (input) => {
+      const result = await client.moveTasks([input]);
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    },
+  );
+
   // --- Aggregate tools ---
 
   server.tool(
     'get_all_tasks',
-    'Get all tasks across all projects. Iterates every project and merges tasks.',
+    'Get all open tasks across all projects using server-side filter',
     {},
     async () => {
-      const projects = await client.getProjects();
-      const allTasks: Array<{ project: string; projectId: string; tasks: unknown[] }> = [];
-      for (const project of projects) {
-        const data = await client.getProjectData(project.id);
-        if (data.tasks && data.tasks.length > 0) {
-          allTasks.push({ project: project.name, projectId: project.id, tasks: data.tasks });
-        }
-      }
-      return { content: [{ type: 'text', text: JSON.stringify(allTasks, null, 2) }] };
+      const tasks = await client.filterTasks({ status: [0] });
+      return { content: [{ type: 'text', text: JSON.stringify(tasks, null, 2) }] };
     },
   );
 
@@ -202,38 +257,16 @@ export function registerTools(server: McpServer, client: Client): void {
     'Get tasks due today or overdue across all projects',
     {},
     async () => {
-      const projects = await client.getProjects();
       const endOfToday = new Date();
       endOfToday.setHours(23, 59, 59, 999);
 
-      const todayTasks: Array<{
-        project: string;
-        projectId: string;
-        title: string;
-        taskId: string;
-        dueDate?: string;
-        priority?: number;
-      }> = [];
+      const tasks = await client.filterTasks({
+        status: [0],
+        endDate: endOfToday.toISOString(),
+      });
 
-      for (const project of projects) {
-        const data = await client.getProjectData(project.id);
-        if (!data.tasks) continue;
-        for (const task of data.tasks) {
-          if (task.dueDate && new Date(task.dueDate) <= endOfToday && task.status === 0) {
-            todayTasks.push({
-              project: project.name,
-              projectId: project.id,
-              title: task.title,
-              taskId: task.id,
-              dueDate: task.dueDate,
-              priority: task.priority,
-            });
-          }
-        }
-      }
-
-      todayTasks.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
-      return { content: [{ type: 'text', text: JSON.stringify(todayTasks, null, 2) }] };
+      const sorted = [...tasks].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+      return { content: [{ type: 'text', text: JSON.stringify(sorted, null, 2) }] };
     },
   );
 }

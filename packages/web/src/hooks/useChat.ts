@@ -31,6 +31,7 @@ export function useChat(opts: UseChatOptions): {
   const [sessionId, setSessionId] = useState<string | null>(externalSessionId ?? null);
   const [loading, setLoading] = useState(true);
   const initializedRef = useRef(false);
+  const processedWsRef = useRef(0);
   const channels = useMemo(() => [`project:${projectId}`], [projectId]);
   const { messages: wsMessages, send } = useWebSocket(channels);
 
@@ -39,6 +40,7 @@ export function useChat(opts: UseChatOptions): {
     if (externalSessionId !== undefined && externalSessionId !== sessionId) {
       setSessionId(externalSessionId);
       initializedRef.current = false;
+      processedWsRef.current = 0;
     }
   }, [externalSessionId, sessionId]);
 
@@ -82,7 +84,9 @@ export function useChat(opts: UseChatOptions): {
 
   // Handle incoming WebSocket messages
   useEffect(() => {
-    for (const msg of wsMessages) {
+    const newMessages = wsMessages.slice(processedWsRef.current);
+    processedWsRef.current = wsMessages.length;
+    for (const msg of newMessages) {
       if (msg.type === 'event') {
         const event = msg.data as {
           type: string;

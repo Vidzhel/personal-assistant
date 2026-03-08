@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { api, type Project, type Session } from '@/lib/api-client';
 import { ChatPanel } from '@/components/chat/ChatPanel';
+import { SessionDebugPanel } from '@/components/session/SessionDebugPanel';
 
 export default function ProjectPage() {
   const params = useParams();
@@ -12,6 +13,8 @@ export default function ProjectPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [showSessions, setShowSessions] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [showDebug, setShowDebug] = useState(false);
 
   useEffect(() => {
     api
@@ -40,6 +43,13 @@ export default function ProjectPage() {
   }, []);
 
   const activeSession = sessions.find((s) => s.id === activeSessionId);
+
+  const handleCopySessionId = useCallback(() => {
+    if (!activeSession) return;
+    navigator.clipboard.writeText(activeSession.id);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }, [activeSession]);
 
   if (!project) {
     return (
@@ -78,12 +88,31 @@ export default function ProjectPage() {
             style={{ background: 'var(--bg-hover)', color: 'var(--text)' }}
           >
             <span className="truncate">
-              {activeSession
-                ? `Session ${new Date(activeSession.createdAt).toLocaleDateString()} · ${activeSession.turnCount} turns`
-                : 'No session'}
+              {activeSession ? (
+                <>
+                  <span className="font-mono opacity-60">{activeSession.id.slice(0, 8)}</span>
+                  {' · '}
+                  {new Date(activeSession.createdAt).toLocaleDateString()}
+                  {' · '}
+                  {activeSession.turnCount} turns
+                </>
+              ) : (
+                'No session'
+              )}
             </span>
             <span style={{ fontSize: '0.6rem' }}>&#9660;</span>
           </button>
+
+          {activeSession && (
+            <button
+              onClick={handleCopySessionId}
+              className="px-1.5 py-1 rounded text-xs hover:opacity-80 transition-opacity"
+              style={{ color: 'var(--text-muted)' }}
+              title="Copy session ID"
+            >
+              {copied ? 'Copied!' : '📋'}
+            </button>
+          )}
 
           {showSessions && (
             <div
@@ -104,7 +133,11 @@ export default function ProjectPage() {
                     borderBottom: '1px solid var(--border)',
                   }}
                 >
-                  <span className="truncate">{new Date(s.createdAt).toLocaleString()}</span>
+                  <span className="truncate">
+                    <span className="font-mono opacity-60">{s.id.slice(0, 8)}</span>
+                    {' · '}
+                    {new Date(s.createdAt).toLocaleString()}
+                  </span>
                   <span className="text-xs ml-2 shrink-0" style={{ color: 'var(--text-muted)' }}>
                     {s.turnCount} turns · {s.status}
                   </span>
@@ -120,6 +153,16 @@ export default function ProjectPage() {
         </div>
 
         <button
+          onClick={() => activeSessionId && setShowDebug(true)}
+          className="px-2 py-1 rounded text-sm hover:opacity-80 transition-opacity shrink-0"
+          style={{ color: 'var(--text-muted)' }}
+          title="Debug session"
+          disabled={!activeSessionId}
+        >
+          🐛
+        </button>
+
+        <button
           onClick={handleNewSession}
           className="px-3 py-1 rounded text-sm font-medium transition-colors shrink-0"
           style={{ background: 'var(--accent)', color: 'white' }}
@@ -131,6 +174,10 @@ export default function ProjectPage() {
       <div className="flex-1 overflow-hidden">
         <ChatPanel projectId={id} sessionId={activeSessionId} />
       </div>
+
+      {showDebug && activeSessionId && (
+        <SessionDebugPanel sessionId={activeSessionId} onClose={() => setShowDebug(false)} />
+      )}
     </div>
   );
 }

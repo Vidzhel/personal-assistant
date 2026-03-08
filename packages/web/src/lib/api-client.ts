@@ -1,10 +1,9 @@
 const API_URL = process.env.NEXT_PUBLIC_CORE_API_URL || 'http://localhost:4001/api';
 
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
-    ...opts,
-    headers: { 'Content-Type': 'application/json', ...opts?.headers },
-  });
+  const headers: Record<string, string> = { ...(opts?.headers as Record<string, string>) };
+  if (opts?.body) headers['Content-Type'] = 'application/json';
+  const res = await fetch(`${API_URL}${path}`, { ...opts, headers });
   if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json() as Promise<T>;
 }
