@@ -90,44 +90,51 @@ export function useChat(opts: UseChatOptions): {
             messageType?: string;
             content?: string;
             taskId?: string;
+            messageId?: string;
           };
         };
         const content = event.payload?.content;
         const taskId = event.payload?.taskId;
         const messageType = event.payload?.messageType;
+        const messageId = event.payload?.messageId;
 
         if (event.type === 'agent:message' && content) {
           if (messageType === 'tool_use') {
-            // Tool use messages: parse toolName from content
             const colonIdx = content.indexOf(':');
             const toolName = colonIdx > 0 ? content.slice(0, colonIdx).trim() : undefined;
             const toolSummary = colonIdx > 0 ? content.slice(colonIdx + 1).trim() : content;
-            setChatMessages((prev) => [
-              ...prev,
-              {
-                id: crypto.randomUUID(),
-                role: 'action' as const,
-                content,
-                timestamp: Date.now(),
-                taskId,
-                toolName,
-                toolSummary,
-              },
-            ]);
-          } else if (messageType === 'thinking') {
-            setChatMessages((prev) => [
-              ...prev,
-              {
-                id: crypto.randomUUID(),
-                role: 'thinking' as const,
-                content,
-                timestamp: Date.now(),
-                taskId,
-              },
-            ]);
-          } else {
-            // Assistant text — append to existing or create new
             setChatMessages((prev) => {
+              if (messageId && prev.some((m) => m.id === messageId)) return prev;
+              return [
+                ...prev,
+                {
+                  id: messageId ?? crypto.randomUUID(),
+                  role: 'action' as const,
+                  content,
+                  timestamp: Date.now(),
+                  taskId,
+                  toolName,
+                  toolSummary,
+                },
+              ];
+            });
+          } else if (messageType === 'thinking') {
+            setChatMessages((prev) => {
+              if (messageId && prev.some((m) => m.id === messageId)) return prev;
+              return [
+                ...prev,
+                {
+                  id: messageId ?? crypto.randomUUID(),
+                  role: 'thinking' as const,
+                  content,
+                  timestamp: Date.now(),
+                  taskId,
+                },
+              ];
+            });
+          } else {
+            setChatMessages((prev) => {
+              if (messageId && prev.some((m) => m.id === messageId)) return prev;
               const existing = prev.find((m) => m.role === 'assistant' && m.taskId === taskId);
               if (existing) {
                 return prev.map((m) =>
@@ -137,7 +144,7 @@ export function useChat(opts: UseChatOptions): {
               return [
                 ...prev,
                 {
-                  id: crypto.randomUUID(),
+                  id: messageId ?? crypto.randomUUID(),
                   role: 'assistant' as const,
                   content,
                   timestamp: Date.now(),

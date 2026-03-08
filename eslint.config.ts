@@ -28,7 +28,7 @@ export default tseslint.config(
 
   // Shared/core/skills: Node globals
   {
-    files: ['packages/shared/src/**/*.ts', 'packages/core/src/**/*.ts', 'packages/skills/*/src/**/*.ts'],
+    files: ['packages/shared/src/**/*.ts', 'packages/core/src/**/*.ts', 'packages/skills/*/src/**/*.ts', 'packages/mcp-ticktick/src/**/*.ts'],
     languageOptions: {
       globals: globals.node,
     },
@@ -54,15 +54,15 @@ export default tseslint.config(
       'no-restricted-syntax': [
         'error',
         {
-          selector: 'ImportDeclaration[source.value=/\\.js[\'"]?$/]',
+          selector: 'ImportDeclaration[source.value=/^\\..*\\.js[\'"]?$/]',
           message: 'Use .ts extension instead of .js in imports.',
         },
         {
-          selector: 'ExportNamedDeclaration[source.value=/\\.js[\'"]?$/]',
+          selector: 'ExportNamedDeclaration[source.value=/^\\..*\\.js[\'"]?$/]',
           message: 'Use .ts extension instead of .js in exports.',
         },
         {
-          selector: 'ExportAllDeclaration[source.value=/\\.js[\'"]?$/]',
+          selector: 'ExportAllDeclaration[source.value=/^\\..*\\.js[\'"]?$/]',
           message: 'Use .ts extension instead of .js in exports.',
         },
         {

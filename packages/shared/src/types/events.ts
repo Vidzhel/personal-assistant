@@ -63,6 +63,7 @@ export interface AgentMessageEvent extends BaseEvent {
     sessionId?: string;
     messageType: 'assistant' | 'tool_use' | 'thinking' | 'result';
     content: string;
+    messageId?: string;
   };
 }
 

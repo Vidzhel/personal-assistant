@@ -1,6 +1,6 @@
 import { createLogger, generateId } from '@raven/shared';
 import type { AgentTask, McpServerConfig, PermissionTier, SubAgentDefinition } from '@raven/shared';
-import type { MessageStore } from '../session-manager/message-store.ts';
+import type { MessageStore, StoredMessage } from '../session-manager/message-store.ts';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { PermissionEngine } from '../permission-engine/permission-engine.ts';
 import type { AuditLog } from '../permission-engine/audit-log.ts';
@@ -133,6 +133,23 @@ export function enforcePermissionGate(
   return { allowed: false, tier, reason: 'queued-for-approval' };
 }
 
+const MAX_HISTORY_MESSAGES = 50;
+
+function formatConversationHistory(messages: StoredMessage[], currentPrompt: string): string {
+  const history = messages
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .slice(-MAX_HISTORY_MESSAGES);
+  // Last user message IS the current prompt (already appended by orchestrator), strip it
+  const prior = history.slice(0, -1);
+  if (prior.length === 0) return currentPrompt;
+
+  const transcript = prior
+    .map((m) => `[${m.role === 'user' ? 'User' : 'Assistant'}]: ${m.content}`)
+    .join('\n\n');
+
+  return `<conversation-history>\n${transcript}\n</conversation-history>\n\n[User]: ${currentPrompt}`;
+}
+
 /**
  * Runs a single agent task using Claude Agent SDK query().
  * This is the core execution unit - each call spawns a fresh agent
@@ -202,9 +219,15 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       allowedTools.push('Task');
     }
 
+    let prompt = task.prompt;
+    if (task.sessionId && messageStore) {
+      const history = messageStore.getMessages(task.sessionId);
+      prompt = formatConversationHistory(history, task.prompt);
+    }
+
     const backend = getActiveBackend();
     const backendResult = await backend({
-      prompt: task.prompt,
+      prompt,
       systemPrompt,
       allowedTools,
       model: config.CLAUDE_MODEL,
@@ -212,6 +235,14 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       mcpServers: sdkMcpServers,
       agents: agentDefinitions,
       onAssistantMessage: (text: string) => {
+        let messageId: string | undefined;
+        if (task.sessionId && messageStore) {
+          messageId = messageStore.appendMessage(task.sessionId, {
+            role: 'assistant',
+            content: text,
+            taskId: task.id,
+          });
+        }
         eventBus.emit({
           id: generateId(),
           timestamp: Date.now(),
@@ -223,17 +254,21 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
             sessionId: sdkSessionId,
             messageType: 'assistant',
             content: text,
+            messageId,
           },
         });
-        if (task.sessionId && messageStore) {
-          messageStore.appendMessage(task.sessionId, {
-            role: 'assistant',
-            content: text,
-            taskId: task.id,
-          });
-        }
       },
       onToolUse: (toolName: string, toolInput: string) => {
+        let messageId: string | undefined;
+        if (task.sessionId && messageStore) {
+          messageId = messageStore.appendMessage(task.sessionId, {
+            role: 'action',
+            content: `${toolName}: ${toolInput}`,
+            taskId: task.id,
+            toolName,
+            toolSummary: toolInput,
+          });
+        }
         eventBus.emit({
           id: generateId(),
           timestamp: Date.now(),
@@ -245,17 +280,9 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
             sessionId: sdkSessionId,
             messageType: 'tool_use',
             content: `${toolName}: ${toolInput}`,
+            messageId,
           },
         });
-        if (task.sessionId && messageStore) {
-          messageStore.appendMessage(task.sessionId, {
-            role: 'action',
-            content: `${toolName}: ${toolInput}`,
-            taskId: task.id,
-            toolName,
-            toolSummary: toolInput,
-          });
-        }
       },
       onStderr: (data: string) => {
         stderrChunks.push(data);

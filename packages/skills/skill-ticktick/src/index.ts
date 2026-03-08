@@ -80,8 +80,8 @@ class TickTickSkill implements RavenSkill {
 
     return {
       ticktick: {
-        command: 'npx',
-        args: ['-y', '@alexarevalo.ai/mcp-server-ticktick'],
+        command: 'node',
+        args: ['--experimental-strip-types', 'packages/mcp-ticktick/src/index.ts'],
         env,
       },
     };
@@ -93,8 +93,11 @@ class TickTickSkill implements RavenSkill {
         description:
           'Manages tasks in TickTick. Use this agent for creating, listing, updating, or organizing tasks.',
         prompt:
-          'You are a TickTick task management agent within Raven. Use the TickTick MCP tools to manage tasks. Be concise and return structured data.',
-        tools: ['mcp__ticktick_ticktick__*', 'Read', 'Grep'],
+          'You are a TickTick task management agent within Raven. Use the TickTick MCP tools to manage tasks.\n\n' +
+          'Available tools: get_projects, get_project, get_project_tasks, create_project, update_project, delete_project, ' +
+          'get_task, create_task, update_task, delete_task, complete_task, batch_create_tasks, get_all_tasks, get_today_tasks.\n\n' +
+          'For listing all tasks use get_all_tasks. For today/overdue tasks use get_today_tasks. Be concise and return structured data.',
+        tools: ['mcp__ticktick__*', 'Read', 'Grep'],
       },
     };
   }
