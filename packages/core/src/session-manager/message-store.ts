@@ -19,7 +19,10 @@ export interface MessageStoreOptions {
 }
 
 export interface MessageStore {
-  appendMessage: (sessionId: string, message: Omit<StoredMessage, 'id' | 'timestamp'>) => void;
+  appendMessage: (
+    sessionId: string,
+    message: Omit<StoredMessage, 'id' | 'timestamp'>,
+  ) => string | undefined;
   getMessages: (sessionId: string, opts?: { limit?: number; offset?: number }) => StoredMessage[];
 }
 
@@ -41,7 +44,7 @@ export function createMessageStore(options: MessageStoreOptions): MessageStore {
   function appendMessage(
     sessionId: string,
     message: Omit<StoredMessage, 'id' | 'timestamp'>,
-  ): void {
+  ): string | undefined {
     const full: StoredMessage = {
       id: generateId(),
       timestamp: Date.now(),
@@ -49,8 +52,10 @@ export function createMessageStore(options: MessageStoreOptions): MessageStore {
     };
     try {
       appendFileSync(getTranscriptPath(sessionId), JSON.stringify(full) + '\n');
+      return full.id;
     } catch (err) {
       log.error(`Failed to append message for session ${sessionId}: ${err}`);
+      return undefined;
     }
   }
 
