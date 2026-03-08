@@ -9,6 +9,7 @@ export interface TickTickProject {
   groupId?: string;
   viewMode?: string;
   kind?: string;
+  permission?: string;
 }
 
 export interface TickTickTask {
@@ -27,6 +28,10 @@ export interface TickTickTask {
   timeZone?: string;
   isAllDay?: boolean;
   sortOrder?: number;
+  reminders?: string[];
+  repeatFlag?: string;
+  kind?: string;
+  etag?: string;
 }
 
 export interface TickTickChecklistItem {
@@ -36,9 +41,17 @@ export interface TickTickChecklistItem {
   sortOrder?: number;
 }
 
+export interface Column {
+  id: string;
+  projectId: string;
+  name: string;
+  sortOrder: number;
+}
+
 export interface ProjectData {
   project: TickTickProject;
   tasks: TickTickTask[];
+  columns?: Column[];
 }
 
 export interface CreateTaskInput {
@@ -53,6 +66,9 @@ export interface CreateTaskInput {
   items?: TickTickChecklistItem[];
   isAllDay?: boolean;
   timeZone?: string;
+  reminders?: string[];
+  repeatFlag?: string;
+  sortOrder?: number;
 }
 
 export interface UpdateTaskInput {
@@ -65,6 +81,9 @@ export interface UpdateTaskInput {
   tags?: string[];
   items?: TickTickChecklistItem[];
   isAllDay?: boolean;
+  reminders?: string[];
+  repeatFlag?: string;
+  sortOrder?: number;
 }
 
 export interface CreateProjectInput {
@@ -78,6 +97,33 @@ export interface UpdateProjectInput {
   name?: string;
   color?: string;
   viewMode?: string;
+}
+
+export interface FilterTasksInput {
+  projectIds?: string[];
+  startDate?: string;
+  endDate?: string;
+  priority?: number[];
+  tag?: string[];
+  status?: number[];
+}
+
+export interface CompletedTasksInput {
+  projectIds?: string[];
+  startDate?: string;
+  endDate?: string;
+}
+
+export interface MoveTaskInput {
+  fromProjectId: string;
+  toProjectId: string;
+  taskId: string;
+}
+
+export interface MoveTaskResult {
+  taskId: string;
+  fromProjectId: string;
+  toProjectId: string;
 }
 
 async function request<T>(
@@ -116,10 +162,16 @@ export function createClient(token: string): {
   deleteProject: (projectId: string) => Promise<void>;
   getTask: (projectId: string, taskId: string) => Promise<TickTickTask>;
   createTask: (input: CreateTaskInput) => Promise<TickTickTask>;
-  updateTask: (projectId: string, taskId: string, input: UpdateTaskInput) => Promise<TickTickTask>;
+  updateTask: (
+    taskId: string,
+    input: UpdateTaskInput & { id: string; projectId: string },
+  ) => Promise<TickTickTask>;
   deleteTask: (projectId: string, taskId: string) => Promise<void>;
   completeTask: (projectId: string, taskId: string) => Promise<void>;
   batchCreateTasks: (tasks: CreateTaskInput[]) => Promise<TickTickTask[]>;
+  filterTasks: (filter: FilterTasksInput) => Promise<TickTickTask[]>;
+  getCompletedTasks: (filter: CompletedTasksInput) => Promise<TickTickTask[]>;
+  moveTasks: (moves: MoveTaskInput[]) => Promise<MoveTaskResult[]>;
 } {
   return {
     getProjects: () => request<TickTickProject[]>('/project', token),
@@ -137,15 +189,16 @@ export function createClient(token: string): {
     deleteProject: (projectId) =>
       request<undefined>(`/project/${projectId}`, token, { method: 'DELETE' }),
 
-    getTask: (projectId, taskId) => request<TickTickTask>(`/task/${projectId}/${taskId}`, token),
+    getTask: (projectId, taskId) =>
+      request<TickTickTask>(`/project/${projectId}/task/${taskId}`, token),
 
     createTask: (input) => request<TickTickTask>('/task', token, { method: 'POST', body: input }),
 
-    updateTask: (projectId, taskId, input) =>
-      request<TickTickTask>(`/task/${projectId}/${taskId}`, token, { method: 'POST', body: input }),
+    updateTask: (taskId, input) =>
+      request<TickTickTask>(`/task/${taskId}`, token, { method: 'POST', body: input }),
 
     deleteTask: (projectId, taskId) =>
-      request<undefined>(`/task/${projectId}/${taskId}`, token, { method: 'DELETE' }),
+      request<undefined>(`/project/${projectId}/task/${taskId}`, token, { method: 'DELETE' }),
 
     completeTask: (projectId, taskId) =>
       request<undefined>(`/project/${projectId}/task/${taskId}/complete`, token, {
@@ -154,5 +207,14 @@ export function createClient(token: string): {
 
     batchCreateTasks: (tasks) =>
       request<TickTickTask[]>('/batch/task', token, { method: 'POST', body: tasks }),
+
+    filterTasks: (filter) =>
+      request<TickTickTask[]>('/task/filter', token, { method: 'POST', body: filter }),
+
+    getCompletedTasks: (filter) =>
+      request<TickTickTask[]>('/task/completed', token, { method: 'POST', body: filter }),
+
+    moveTasks: (moves) =>
+      request<MoveTaskResult[]>('/task/move', token, { method: 'POST', body: moves }),
   };
 }
