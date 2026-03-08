@@ -44,8 +44,8 @@ cp .env.example .env
 docker compose up --build
 ```
 
-- Dashboard: http://localhost:3000
-- API: http://localhost:3001/api/health
+- Dashboard: http://localhost:4000
+- API: http://localhost:4001/api/health
 
 ## Environment Variables
 

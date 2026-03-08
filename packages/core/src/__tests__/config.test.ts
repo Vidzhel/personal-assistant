@@ -28,7 +28,7 @@ describe('config', () => {
     const { loadConfig } = await import('../config.ts');
     const config = loadConfig();
 
-    expect(config.RAVEN_PORT).toBe(3001);
+    expect(config.RAVEN_PORT).toBe(4001);
     expect(config.RAVEN_TIMEZONE).toBe('UTC');
     expect(config.RAVEN_AGENT_MAX_TURNS).toBe(25);
     expect(config.CLAUDE_MODEL).toBe('claude-sonnet-4-6');

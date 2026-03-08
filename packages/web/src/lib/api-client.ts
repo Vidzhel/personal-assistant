@@ -1,4 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_CORE_API_URL || 'http://localhost:3001/api';
+const API_URL = process.env.NEXT_PUBLIC_CORE_API_URL || 'http://localhost:4001/api';
 
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
@@ -37,6 +37,7 @@ export const api = {
   getProjectSessions: (projectId: string) => request<Session[]>(`/projects/${projectId}/sessions`),
   createSession: (projectId: string) =>
     request<Session>(`/projects/${projectId}/sessions/new`, { method: 'POST' }),
+  getSessionDebug: (sessionId: string) => request<SessionDebug>(`/sessions/${sessionId}/debug`),
 };
 
 export interface Project {
@@ -77,6 +78,13 @@ export interface Session {
   lastActiveAt: number;
   turnCount: number;
   sdkSessionId?: string;
+}
+
+export interface SessionDebug {
+  session: Session;
+  messages: unknown[];
+  tasks: unknown[];
+  auditEntries: unknown[];
 }
 
 export interface EventRecord {

@@ -6,7 +6,7 @@
  *   node scripts/google-oauth.mjs <CLIENT_ID> <CLIENT_SECRET>
  *
  * This script:
- * 1. Starts a local HTTP server on port 8080
+ * 1. Starts a local HTTP server on port 4002
  * 2. Opens Google's OAuth consent page
  * 3. Captures the auth code
  * 4. Exchanges it for access + refresh tokens
@@ -21,7 +21,7 @@ import { execFileSync } from 'node:child_process';
 
 const CLIENT_ID = process.argv[2] || process.env.GMAIL_CLIENT_ID;
 const CLIENT_SECRET = process.argv[3] || process.env.GMAIL_CLIENT_SECRET;
-const REDIRECT_URI = 'http://localhost:8080/callback';
+const REDIRECT_URI = 'http://localhost:4002/callback';
 
 // Scopes needed for Gmail MCP
 const SCOPES = [
@@ -47,10 +47,10 @@ const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
   `&prompt=consent`;
 
 console.log('\n=== Google OAuth2 Token Generator (Gmail) ===\n');
-console.log('Starting local server on http://localhost:8080...');
+console.log('Starting local server on http://localhost:4002...');
 
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, 'http://localhost:8080');
+  const url = new URL(req.url, 'http://localhost:4002');
 
   if (url.pathname === '/callback') {
     const code = url.searchParams.get('code');
@@ -133,7 +133,7 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(8080, () => {
+server.listen(4002, () => {
   console.log(`\nOpening browser to authorize Gmail access...\n`);
   console.log(`If the browser doesn't open, visit:\n${authUrl}\n`);
 

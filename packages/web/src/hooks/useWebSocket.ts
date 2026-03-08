@@ -3,7 +3,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { WsClient, type WsMessage } from '@/lib/ws-client';
 
-const WS_URL = process.env.NEXT_PUBLIC_CORE_WS_URL || 'ws://localhost:3001/ws';
+const WS_URL = process.env.NEXT_PUBLIC_CORE_WS_URL || 'ws://localhost:4001/ws';
 
 export function useWebSocket(channels: string[]): {
   messages: WsMessage[];

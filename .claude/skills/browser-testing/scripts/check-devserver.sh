@@ -36,8 +36,8 @@ echo ""
 frontend_ok=0
 backend_ok=0
 
-check_port "Frontend (Next.js)" 3000 "http://localhost:3000" && frontend_ok=1 || true
-check_port "API Backend (Fastify)" 3001 "http://localhost:3001/api/health" && backend_ok=1 || true
+check_port "Frontend (Next.js)" 4000 "http://localhost:4000" && frontend_ok=1 || true
+check_port "API Backend (Fastify)" 4001 "http://localhost:4001/api/health" && backend_ok=1 || true
 
 echo ""
 
