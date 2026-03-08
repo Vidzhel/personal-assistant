@@ -9,7 +9,7 @@
  *   TICKTICK_CLIENT_ID=xxx TICKTICK_CLIENT_SECRET=yyy node scripts/ticktick-auth.mjs
  *
  * This script:
- * 1. Starts a local HTTP server on port 8080
+ * 1. Starts a local HTTP server on port 4002
  * 2. Opens the TickTick authorization page in your browser
  * 3. Captures the auth code from the redirect
  * 4. Exchanges it for an access token
@@ -22,7 +22,7 @@ import { execFileSync } from 'node:child_process';
 
 const CLIENT_ID = process.argv[2] || process.env.TICKTICK_CLIENT_ID;
 const CLIENT_SECRET = process.argv[3] || process.env.TICKTICK_CLIENT_SECRET;
-const REDIRECT_URI = 'http://localhost:8080/callback';
+const REDIRECT_URI = 'http://localhost:4002/callback';
 const SCOPE = 'tasks:read tasks:write';
 
 if (!CLIENT_ID || !CLIENT_SECRET) {
@@ -38,10 +38,11 @@ const authUrl = `https://ticktick.com/oauth/authorize?` +
   `&scope=${encodeURIComponent(SCOPE)}`;
 
 console.log('\n=== TickTick OAuth2 Token Generator ===\n');
-console.log('Starting local server on http://localhost:8080...');
+console.log('Starting local server on http://localhost:4002...');
 
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, 'http://localhost:8080');
+  console.log(`\nReceived request: ${req.method} ${req.url}`);
+  const url = new URL(req.url, 'http://localhost:4002');
 
   if (url.pathname === '/callback') {
     const code = url.searchParams.get('code');
@@ -118,18 +119,18 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(8080, () => {
+server.listen(4002, () => {
   console.log(`\nOpening browser to authorize TickTick...\n`);
   console.log(`If the browser doesn't open, visit:\n${authUrl}\n`);
 
   // Try to open browser via WSL2 -> Windows
-  try {
-    execFileSync('cmd.exe', ['/c', 'start', '', authUrl], { stdio: 'ignore' });
-  } catch {
-    try {
-      execFileSync('xdg-open', [authUrl], { stdio: 'ignore' });
-    } catch {
-      console.log('(Could not auto-open browser. Please open the URL manually.)');
-    }
-  }
+  //try {
+  //  execFileSync('cmd.exe', ['/c', 'start', '', authUrl], { stdio: 'ignore' });
+  //} catch {
+  //  try {
+  //    execFileSync('xdg-open', [authUrl], { stdio: 'ignore' });
+  //  } catch {
+  //    console.log('(Could not auto-open browser. Please open the URL manually.)');
+  //  }
+  //}
 });

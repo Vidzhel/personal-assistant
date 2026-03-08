@@ -74,8 +74,8 @@ docker-compose up --build    # full stack
 
 Run core without skills to verify infrastructure:
 ```bash
-RAVEN_PORT=3001 node packages/core/dist/index.js
-curl http://localhost:3001/api/health
+RAVEN_PORT=4001 node packages/core/dist/index.js
+curl http://localhost:4001/api/health
 ```
 
 ## Linting & Formatting

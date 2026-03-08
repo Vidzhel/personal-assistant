@@ -19,7 +19,7 @@ Test scripts located under `manual-tests` directory in the root of the project.
 .claude/skills/browser-testing/scripts/check-devserver.sh
 ```
 
-Reports status of frontend (port 3000) and API backend (port 3001).
+Reports status of frontend (port 4000) and API backend (port 4001).
 
 ### 2. Start Dev Servers (if needed)
 
@@ -36,7 +36,7 @@ npm run dev:core                                            # backend only
 
 ## No Authentication Required
 
-The Raven dashboard is open — no login flow needed. Simply navigate to `http://localhost:3000` and the dashboard loads directly.
+The Raven dashboard is open — no login flow needed. Simply navigate to `http://localhost:4000` and the dashboard loads directly.
 
 ## Screenshot Output Directory
 
@@ -93,7 +93,7 @@ All routes are open — no authentication required.
 
 ### Smoke Test
 1. Check dev server status
-2. Navigate to `http://localhost:3000`
+2. Navigate to `http://localhost:4000`
 3. Verify dashboard loads (status cards, activity feed visible)
 4. Navigate through sidebar links to verify each page renders
 
@@ -131,7 +131,7 @@ The sub-agent has its own system prompt at `.claude/agents/browser-testing/brows
 ## Troubleshooting
 
 - **"Browser not found"**: Run `mcp__playwright__browser_install` to install Chrome
-- **API errors on pages**: Verify the Fastify backend is running on port 3001 (`curl http://localhost:3001/api/health`)
+- **API errors on pages**: Verify the Fastify backend is running on port 4001 (`curl http://localhost:4001/api/health`)
 - **Blank page**: Check browser console via snapshot; may be a JS error
 - **Slow loading**: Use `mcp__playwright__browser_wait_for` with `time` param before snapshot
 - **WebSocket issues**: Dashboard uses WS for real-time updates; if data seems stale, check backend is running

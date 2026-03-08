@@ -28,5 +28,5 @@ COPY --from=builder /app/packages/skills/ packages/skills/
 
 RUN mkdir -p /app/data/sessions
 
-EXPOSE 3001
+EXPOSE 4001
 CMD ["node", "packages/core/dist/index.js"]

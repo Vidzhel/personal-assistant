@@ -5,7 +5,7 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
 LOG_FILE="/tmp/raven-web-dev.log"
-PORT=3000
+PORT=4000
 TIMEOUT=30
 
 RED='\033[0;31m'

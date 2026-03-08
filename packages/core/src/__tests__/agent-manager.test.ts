@@ -10,7 +10,7 @@ vi.mock('../config.ts', () => {
   const config = {
     ANTHROPIC_API_KEY: 'test-key',
     CLAUDE_MODEL: 'claude-sonnet-4-6',
-    RAVEN_PORT: 3001,
+    RAVEN_PORT: 4001,
     RAVEN_TIMEZONE: 'UTC',
     RAVEN_MAX_CONCURRENT_AGENTS: 3,
     RAVEN_AGENT_MAX_TURNS: 25,

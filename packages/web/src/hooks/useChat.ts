@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useWebSocket } from './useWebSocket';
 
-const API_URL = process.env.NEXT_PUBLIC_CORE_API_URL || 'http://localhost:3001/api';
+const API_URL = process.env.NEXT_PUBLIC_CORE_API_URL || 'http://localhost:4001/api';
 
 export interface ChatMessage {
   id: string;

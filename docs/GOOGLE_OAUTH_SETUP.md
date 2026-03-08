@@ -74,7 +74,7 @@ This is more involved but gives Raven full Gmail API access through the MCP serv
 3. Application type: **Web application**
 4. Name: `Raven`
 5. Under **Authorized redirect URIs**: click **+ Add URI**
-   - Add: `http://localhost:8080/callback`
+   - Add: `http://localhost:4002/callback`
 6. Click **Create**
 7. A dialog shows your **Client ID** and **Client Secret** — copy both
 
@@ -89,7 +89,7 @@ node scripts/google-oauth.mjs YOUR_CLIENT_ID YOUR_CLIENT_SECRET
 This will:
 1. Open your browser to Google's consent page
 2. You sign in and authorize Raven
-3. Google redirects back to `localhost:8080/callback`
+3. Google redirects back to `localhost:4002/callback`
 4. The script exchanges the code for a **refresh token**
 5. The token is printed in your terminal
 
@@ -108,7 +108,7 @@ GMAIL_REFRESH_TOKEN=1//0e...
 - Run the script again — you need `prompt=consent` (the script includes this) to get a refresh token
 
 **"Access blocked: This app's request is invalid" (Error 400)**
-- Make sure `http://localhost:8080/callback` is in your **Authorized redirect URIs** (exact match, no trailing slash)
+- Make sure `http://localhost:4002/callback` is in your **Authorized redirect URIs** (exact match, no trailing slash)
 
 **"This app isn't verified"**
 - Click **Advanced** → **Go to Raven (unsafe)** — this is expected for testing mode apps that only you use

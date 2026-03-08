@@ -46,7 +46,7 @@ export default function SettingsPage() {
           <div>
             <p style={{ color: 'var(--text-muted)' }}>API URL</p>
             <p className="font-mono text-xs">
-              {process.env.NEXT_PUBLIC_CORE_API_URL || 'http://localhost:3001/api'}
+              {process.env.NEXT_PUBLIC_CORE_API_URL || 'http://localhost:4001/api'}
             </p>
           </div>
         </div>
