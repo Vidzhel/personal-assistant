@@ -12,6 +12,7 @@ export interface StoredMessage {
   taskId?: string;
   toolName?: string;
   toolSummary?: string;
+  agentName?: string; // e.g. 'ticktick-agent'. absent = orchestrator
 }
 
 export interface MessageStoreOptions {

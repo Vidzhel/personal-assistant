@@ -6,10 +6,21 @@ export function buildSystemPrompt(task: AgentTask, project?: Project): string {
     '',
     'Guidelines:',
     '- Be concise and actionable in your responses',
-    '- When using tools from MCP servers, prefer structured data over free-form text',
     '- If you cannot complete a task, explain why clearly',
     '- Format responses in markdown when appropriate',
   ];
+
+  if (task.skillName === 'orchestrator') {
+    parts.push(
+      '',
+      '## Delegation',
+      'You have specialized sub-agents available via the Agent tool.',
+      'Always delegate domain-specific work (tasks, email, etc.) to the appropriate sub-agent.',
+      'Do NOT try to use ToolSearch or load MCP tools directly — your sub-agents already have the right tools.',
+    );
+  } else {
+    parts.push('- When using tools from MCP servers, prefer structured data over free-form text');
+  }
 
   if (project?.systemPrompt) {
     parts.push('', '## Project Context', project.systemPrompt);

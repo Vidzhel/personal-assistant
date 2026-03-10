@@ -63,7 +63,7 @@ function spawnClaude(args: string[], opts: BackendOptions): Promise<BackendResul
 
     const child = spawn('claude', args, {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env },
+      env: { ...process.env, CLAUDECODE: undefined },
     });
 
     child.stderr.on('data', (chunk: Buffer) => {
@@ -88,17 +88,27 @@ function spawnClaude(args: string[], opts: BackendOptions): Promise<BackendResul
           }
 
           if (msg.type === 'assistant') {
+            const parentToolUseId = (msg.parent_tool_use_id as string | null) ?? null;
             const content = msg.message as {
-              content?: Array<{ type: string; text?: string; name?: string; input?: unknown }>;
+              content?: Array<{
+                type: string;
+                text?: string;
+                name?: string;
+                input?: unknown;
+                id?: string;
+              }>;
             };
             if (content?.content) {
               for (const block of content.content) {
                 if (block.type === 'text' && block.text) {
-                  opts.onAssistantMessage(block.text);
+                  opts.onAssistantMessage(block.text, { parentToolUseId });
                 }
                 if (block.type === 'tool_use' && block.name && opts.onToolUse) {
                   const inputSummary = block.input ? JSON.stringify(block.input).slice(0, 200) : '';
-                  opts.onToolUse(block.name, inputSummary);
+                  opts.onToolUse(block.name, inputSummary, {
+                    parentToolUseId,
+                    toolUseId: block.id,
+                  });
                 }
               }
             }
