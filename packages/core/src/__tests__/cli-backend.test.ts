@@ -86,7 +86,7 @@ describe('CLI Backend', () => {
     child.emit('close', 0);
 
     await promise;
-    expect(onAssistantMessage).toHaveBeenCalledWith('Hello!');
+    expect(onAssistantMessage).toHaveBeenCalledWith('Hello!', { parentToolUseId: null });
   });
 
   it('handles error result', async () => {

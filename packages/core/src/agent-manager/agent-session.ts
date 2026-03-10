@@ -7,7 +7,7 @@ import type { AuditLog } from '../permission-engine/audit-log.ts';
 import type { PendingApprovals } from '../permission-engine/pending-approvals.ts';
 import { buildSystemPrompt } from './prompt-builder.ts';
 import { getConfig } from '../config.ts';
-import type { AgentBackend } from './agent-backend.ts';
+import type { AgentBackend, ToolUseMeta } from './agent-backend.ts';
 import { createSdkBackend } from './sdk-backend.ts';
 import { createCliBackend } from './cli-backend.ts';
 
@@ -208,21 +208,31 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
 
     const systemPrompt = buildSystemPrompt(task);
 
-    // Compute allowed tools: base tools + all MCP tool wildcards
+    // Compute allowed tools: base tools + MCP wildcards OR Agent delegation
     const allowedTools = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'];
-    for (const name of Object.keys(sdkMcpServers)) {
-      allowedTools.push(`mcp__${name}__*`);
-    }
-
-    // If there are sub-agent definitions, allow Task tool
-    if (Object.keys(agentDefinitions).length > 0) {
-      allowedTools.push('Task');
+    const hasSubAgents = Object.keys(agentDefinitions).length > 0;
+    if (hasSubAgents) {
+      // Orchestrator delegates to sub-agents — no direct MCP access
+      allowedTools.push('Agent');
+    } else {
+      // Leaf agent — direct MCP tool access
+      for (const name of Object.keys(sdkMcpServers)) {
+        allowedTools.push(`mcp__${name}__*`);
+      }
     }
 
     let prompt = task.prompt;
     if (task.sessionId && messageStore) {
       const history = messageStore.getMessages(task.sessionId);
       prompt = formatConversationHistory(history, task.prompt);
+    }
+
+    // Track Agent tool_use IDs → sub-agent type for attribution
+    const agentToolMap = new Map<string, string>();
+
+    function resolveAgentName(meta?: ToolUseMeta): string | undefined {
+      if (!meta?.parentToolUseId) return undefined;
+      return agentToolMap.get(meta.parentToolUseId);
     }
 
     const backend = getActiveBackend();
@@ -234,13 +244,15 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       maxTurns: config.RAVEN_AGENT_MAX_TURNS,
       mcpServers: sdkMcpServers,
       agents: agentDefinitions,
-      onAssistantMessage: (text: string) => {
+      onAssistantMessage: (text: string, meta?: ToolUseMeta) => {
+        const agentName = resolveAgentName(meta);
         let messageId: string | undefined;
         if (task.sessionId && messageStore) {
           messageId = messageStore.appendMessage(task.sessionId, {
             role: 'assistant',
             content: text,
             taskId: task.id,
+            agentName,
           });
         }
         eventBus.emit({
@@ -255,10 +267,25 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
             messageType: 'assistant',
             content: text,
             messageId,
+            agentName,
           },
         });
       },
-      onToolUse: (toolName: string, toolInput: string) => {
+      onToolUse: (toolName: string, toolInput: string, meta?: ToolUseMeta) => {
+        // Track Agent tool invocations for sub-agent attribution
+        if (toolName === 'Agent' && !meta?.parentToolUseId && meta?.toolUseId) {
+          try {
+            const input = JSON.parse(toolInput) as Record<string, unknown>;
+            const subagentType = (input.subagent_type as string) ?? (input.description as string);
+            if (subagentType) {
+              agentToolMap.set(meta.toolUseId, subagentType);
+            }
+          } catch {
+            // toolInput may be truncated — ignore parse errors
+          }
+        }
+
+        const agentName = resolveAgentName(meta);
         let messageId: string | undefined;
         if (task.sessionId && messageStore) {
           messageId = messageStore.appendMessage(task.sessionId, {
@@ -267,6 +294,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
             taskId: task.id,
             toolName,
             toolSummary: toolInput,
+            agentName,
           });
         }
         eventBus.emit({
@@ -281,6 +309,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
             messageType: 'tool_use',
             content: `${toolName}: ${toolInput}`,
             messageId,
+            agentName,
           },
         });
       },

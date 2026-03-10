@@ -64,6 +64,7 @@ export interface AgentMessageEvent extends BaseEvent {
     messageType: 'assistant' | 'tool_use' | 'thinking' | 'result';
     content: string;
     messageId?: string;
+    agentName?: string;
   };
 }
 

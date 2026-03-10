@@ -5,6 +5,7 @@ export default defineConfig({
     projects: [
       'packages/shared/vitest.config.ts',
       'packages/core/vitest.config.ts',
+      'packages/mcp-ticktick/vitest.config.ts',
     ],
   },
 });

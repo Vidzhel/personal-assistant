@@ -2,6 +2,11 @@ import type { SubAgentDefinition } from '@raven/shared';
 
 export type AgentBackend = (opts: BackendOptions) => Promise<BackendResult>;
 
+export interface ToolUseMeta {
+  parentToolUseId?: string | null; // null = main agent, string = sub-agent
+  toolUseId?: string; // ID of this tool_use block
+}
+
 export interface BackendOptions {
   prompt: string;
   systemPrompt: string;
@@ -10,8 +15,8 @@ export interface BackendOptions {
   maxTurns: number;
   mcpServers: Record<string, { command: string; args: string[]; env?: Record<string, string> }>;
   agents: Record<string, SubAgentDefinition>;
-  onAssistantMessage: (text: string) => void;
-  onToolUse?: (toolName: string, toolInput: string) => void;
+  onAssistantMessage: (text: string, meta?: ToolUseMeta) => void;
+  onToolUse?: (toolName: string, toolInput: string, meta?: ToolUseMeta) => void;
   onStderr: (data: string) => void;
 }
 
