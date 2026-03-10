@@ -26,13 +26,16 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:mcp": "vitest run --project mcp-ticktick",
-    "test:mcp:watch": "vitest --project mcp-ticktick"
+    "test:mcp:watch": "vitest --project mcp-ticktick",
+    "test:skill": "node --experimental-strip-types scripts/test-skill.ts",
+    "test:ticktick": "node --experimental-strip-types scripts/test-ticktick-manual.ts"
   },
   "engines": {
     "node": ">=22.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@modelcontextprotocol/sdk": "^1.12.1",
     "concurrently": "^9.2.1",
     "eslint": "^10.0.3",
     "eslint-config-prettier": "^10.1.8",
