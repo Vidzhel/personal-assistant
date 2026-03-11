@@ -221,17 +221,16 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
 
     const systemPrompt = buildSystemPrompt(task);
 
-    // Compute allowed tools: base tools + MCP wildcards OR Agent delegation
+    // Compute allowed tools: base tools + MCP wildcards + Agent delegation
     const allowedTools = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'];
+    // Always include MCP wildcards — sub-agents inherit tools from the parent,
+    // so the parent must have MCP tools in its allowed list for sub-agents to use them.
+    for (const name of Object.keys(sdkMcpServers)) {
+      allowedTools.push(`mcp__${name}__*`);
+    }
     const hasSubAgents = Object.keys(agentDefinitions).length > 0;
     if (hasSubAgents) {
-      // Orchestrator delegates to sub-agents — no direct MCP access
       allowedTools.push('Agent');
-    } else {
-      // Leaf agent — direct MCP tool access
-      for (const name of Object.keys(sdkMcpServers)) {
-        allowedTools.push(`mcp__${name}__*`);
-      }
     }
 
     let prompt = task.prompt;
