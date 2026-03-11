@@ -7,6 +7,7 @@ export function buildSystemPrompt(task: AgentTask, project?: Project): string {
     'Guidelines:',
     '- Be concise and actionable in your responses',
     '- If you cannot complete a task, explain why clearly',
+    '- If the conversation history shows that a tool or approach has already been tried and failed, do NOT retry the same strategy. Instead, explain the limitation clearly and suggest an alternative approach to the user.',
     '- Format responses in markdown when appropriate',
   ];
 

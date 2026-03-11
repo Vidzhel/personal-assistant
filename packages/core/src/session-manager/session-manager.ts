@@ -48,6 +48,13 @@ export class SessionManager {
     db.prepare('UPDATE sessions SET sdk_session_id = ? WHERE id = ?').run(sdkSessionId, sessionId);
   }
 
+  incrementTurnCount(sessionId: string): void {
+    const db = getDb();
+    db.prepare(
+      'UPDATE sessions SET turn_count = turn_count + 1, last_active_at = ? WHERE id = ?',
+    ).run(Date.now(), sessionId);
+  }
+
   updateStatus(sessionId: string, status: AgentSession['status']): void {
     const db = getDb();
     db.prepare('UPDATE sessions SET status = ?, last_active_at = ? WHERE id = ?').run(

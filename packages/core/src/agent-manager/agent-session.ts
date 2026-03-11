@@ -137,14 +137,27 @@ const MAX_HISTORY_MESSAGES = 50;
 
 function formatConversationHistory(messages: StoredMessage[], currentPrompt: string): string {
   const history = messages
-    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .filter(
+      (m) =>
+        m.role === 'user' ||
+        m.role === 'assistant' ||
+        m.role === 'action' ||
+        m.role === 'tool-result',
+    )
     .slice(-MAX_HISTORY_MESSAGES);
   // Last user message IS the current prompt (already appended by orchestrator), strip it
   const prior = history.slice(0, -1);
   if (prior.length === 0) return currentPrompt;
 
   const transcript = prior
-    .map((m) => `[${m.role === 'user' ? 'User' : 'Assistant'}]: ${m.content}`)
+    .map((m) => {
+      if (m.role === 'action') return `[Tool Call]: ${m.content}`;
+      if (m.role === 'tool-result') {
+        const status = m.toolSummary === 'error' ? 'ERROR' : 'OK';
+        return `[Tool Result ${status}]: ${m.content}`;
+      }
+      return `[${m.role === 'user' ? 'User' : 'Assistant'}]: ${m.content}`;
+    })
     .join('\n\n');
 
   return `<conversation-history>\n${transcript}\n</conversation-history>\n\n[User]: ${currentPrompt}`;
@@ -312,6 +325,19 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
             agentName,
           },
         });
+      },
+      onToolResult: (result) => {
+        const agentName = resolveAgentName(result.meta);
+        if (task.sessionId && messageStore) {
+          messageStore.appendMessage(task.sessionId, {
+            role: 'tool-result',
+            content: result.output,
+            taskId: task.id,
+            toolName: result.toolUseId,
+            toolSummary: result.isError ? 'error' : 'success',
+            agentName,
+          });
+        }
       },
       onStderr: (data: string) => {
         stderrChunks.push(data);

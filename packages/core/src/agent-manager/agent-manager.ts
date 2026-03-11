@@ -161,8 +161,9 @@ export class AgentManager {
     task.completedAt = Date.now();
     this.executionLogger?.logTaskComplete(task);
 
-    // Update session status back to idle
+    // Update session: increment turn count and set status back to idle
     if (task.sessionId && this.sessionManager) {
+      this.sessionManager.incrementTurnCount(task.sessionId);
       this.sessionManager.updateStatus(task.sessionId, 'idle');
     }
 

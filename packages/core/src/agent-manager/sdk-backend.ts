@@ -62,6 +62,34 @@ export function createSdkBackend(): AgentBackend {
         }
       }
 
+      if (msg.type === 'user') {
+        const parentToolUseId = (msg.parent_tool_use_id as string | null) ?? null;
+        const content = msg.message as {
+          content?: Array<{
+            type: string;
+            tool_use_id?: string;
+            content?: unknown;
+            is_error?: boolean;
+          }>;
+        };
+        if (content?.content && opts.onToolResult) {
+          for (const block of content.content) {
+            if (block.type === 'tool_result' && block.tool_use_id) {
+              const output =
+                typeof block.content === 'string'
+                  ? block.content
+                  : JSON.stringify(block.content ?? '').slice(0, 500);
+              opts.onToolResult({
+                toolUseId: block.tool_use_id,
+                output,
+                isError: block.is_error ?? false,
+                meta: { parentToolUseId },
+              });
+            }
+          }
+        }
+      }
+
       if (msg.type === 'result') {
         success = msg.subtype === 'success';
         resultText = (msg.result as string) ?? '';
