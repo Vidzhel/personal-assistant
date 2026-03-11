@@ -61,12 +61,9 @@ export class SkillRegistry {
       const skill = this.skills.get(name);
       if (!skill) continue;
       const agents = skill.getAgentDefinitions();
-      const mcpConfigs = skill.getMcpServers();
-      const mcpSpecs = Object.entries(mcpConfigs).map(([k, config]) => ({
-        [`${name}_${k}`]: config,
-      }));
+      const mcpKeys = Object.keys(skill.getMcpServers()).map((k) => `${name}_${k}`);
       for (const [key, def] of Object.entries(agents)) {
-        defs[key] = { ...def, mcpServers: mcpSpecs.length > 0 ? mcpSpecs : undefined };
+        defs[key] = { ...def, mcpServers: mcpKeys.length > 0 ? mcpKeys : undefined };
       }
     }
     return defs;

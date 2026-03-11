@@ -198,7 +198,7 @@ describe('SkillRegistry', () => {
     expect(() => registry.validateAgentTools()).toThrow(/no MCP server named "wrong" exists/);
   });
 
-  it('collectAgentDefinitions embeds full MCP server configs', async () => {
+  it('collectAgentDefinitions attaches MCP server name refs', async () => {
     const registry = new SkillRegistry();
     await registry.registerSkill(
       makeSkill('ticktick', {
@@ -217,9 +217,7 @@ describe('SkillRegistry', () => {
 
     const defs = registry.collectAgentDefinitions();
     const agent = defs['ticktick-agent'];
-    expect(agent.mcpServers).toEqual([
-      { ticktick_ticktick: { command: 'node', args: ['mcp.js'], env: { TOKEN: 'xxx' } } },
-    ]);
+    expect(agent.mcpServers).toEqual(['ticktick_ticktick']);
   });
 
   it('collectAgentDefinitions omits mcpServers when skill has no MCPs', async () => {
