@@ -17,6 +17,12 @@ export interface BackendOptions {
   agents: Record<string, SubAgentDefinition>;
   onAssistantMessage: (text: string, meta?: ToolUseMeta) => void;
   onToolUse?: (toolName: string, toolInput: string, meta?: ToolUseMeta) => void;
+  onToolResult?: (result: {
+    toolUseId: string;
+    output: string;
+    isError: boolean;
+    meta?: ToolUseMeta;
+  }) => void;
   onStderr: (data: string) => void;
 }
 
