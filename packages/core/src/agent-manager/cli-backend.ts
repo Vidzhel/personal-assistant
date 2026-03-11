@@ -42,6 +42,9 @@ export function createCliBackend(): AgentBackend {
         args.push('--agents', JSON.stringify(opts.agents));
       }
 
+      log.debug(`MCP config: ${JSON.stringify(opts.mcpServers)}`);
+      log.debug(`Agent definitions: ${JSON.stringify(opts.agents)}`);
+
       return await spawnClaude(args, opts);
     } finally {
       if (tmpMcpDir) {

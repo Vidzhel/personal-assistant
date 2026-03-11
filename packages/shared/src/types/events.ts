@@ -206,4 +206,5 @@ export interface SubAgentDefinition {
   prompt: string;
   tools?: string[];
   model?: string;
+  mcpServers?: Array<Record<string, McpServerConfig>>;
 }
