@@ -25,6 +25,7 @@ export interface TaskRecord {
 export interface TaskQueryOpts {
   skillName?: string;
   status?: string;
+  sessionId?: string;
   limit?: number;
   offset?: number;
 }
@@ -156,6 +157,10 @@ export function createExecutionLogger(deps: { db: Database.Database }): Executio
       if (opts.status) {
         conditions.push('status = ?');
         params.push(opts.status);
+      }
+      if (opts.sessionId) {
+        conditions.push('session_id = ?');
+        params.push(opts.sessionId);
       }
 
       const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';

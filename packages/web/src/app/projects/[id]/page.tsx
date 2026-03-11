@@ -82,37 +82,55 @@ export default function ProjectPage() {
         style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}
       >
         <div className="relative flex-1 min-w-0">
-          <button
-            onClick={() => setShowSessions(!showSessions)}
-            className="flex items-center gap-2 px-3 py-1 rounded text-sm hover:opacity-80 transition-opacity"
-            style={{ background: 'var(--bg-hover)', color: 'var(--text)' }}
-          >
-            <span className="truncate">
-              {activeSession ? (
-                <>
-                  <span className="font-mono opacity-60">{activeSession.id.slice(0, 8)}</span>
-                  {' · '}
-                  {new Date(activeSession.createdAt).toLocaleDateString()}
-                  {' · '}
-                  {activeSession.turnCount} turns
-                </>
-              ) : (
-                'No session'
-              )}
-            </span>
-            <span style={{ fontSize: '0.6rem' }}>&#9660;</span>
-          </button>
-
-          {activeSession && (
+          <div className="flex items-center gap-1">
             <button
-              onClick={handleCopySessionId}
-              className="px-1.5 py-1 rounded text-xs hover:opacity-80 transition-opacity"
-              style={{ color: 'var(--text-muted)' }}
-              title="Copy session ID"
+              onClick={() => setShowSessions(!showSessions)}
+              className="flex items-center gap-2 px-3 py-1 rounded text-sm hover:opacity-80 transition-opacity"
+              style={{ background: 'var(--bg-hover)', color: 'var(--text)' }}
             >
-              {copied ? 'Copied!' : '📋'}
+              <span className="truncate">
+                {activeSession ? (
+                  <>
+                    <span className="font-mono opacity-60">{activeSession.id.slice(0, 8)}</span>
+                    {' · '}
+                    {new Date(activeSession.createdAt).toLocaleDateString()}
+                    {' · '}
+                    {activeSession.turnCount} turns
+                  </>
+                ) : (
+                  'No session'
+                )}
+              </span>
+              <span style={{ fontSize: '0.6rem' }}>&#9660;</span>
             </button>
-          )}
+
+            {activeSession && (
+              <button
+                onClick={handleCopySessionId}
+                className="px-1.5 py-1 rounded text-xs hover:opacity-80 transition-opacity shrink-0"
+                style={{ color: 'var(--text-muted)' }}
+                title="Copy session ID"
+              >
+                {copied ? (
+                  'Copied!'
+                ) : (
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                )}
+              </button>
+            )}
+          </div>
 
           {showSessions && (
             <div
@@ -159,7 +177,20 @@ export default function ProjectPage() {
           title="Debug session"
           disabled={!activeSessionId}
         >
-          🐛
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M8 2l1.88 1.88M14.12 3.88L16 2M9 7.13v-1a3.003 3.003 0 1 1 6 0v1" />
+            <path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6" />
+            <path d="M12 20v-9M6.53 9C4.6 8.8 3 7.1 3 5M6 13H2M6 17l-4 1M17.47 9c1.93-.2 3.53-1.9 3.53-4M18 13h4M18 17l4 1" />
+          </svg>
         </button>
 
         <button

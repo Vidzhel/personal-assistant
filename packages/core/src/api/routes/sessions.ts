@@ -22,6 +22,18 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
     return session;
   });
 
+  // Debug: consolidated session data for investigation
+  app.get<{ Params: { id: string } }>('/api/sessions/:id/debug', async (req, reply) => {
+    const session = deps.sessionManager.getSession(req.params.id);
+    if (!session) return reply.status(404).send({ error: 'Session not found' });
+
+    const messages = deps.messageStore.getMessages(req.params.id);
+    const tasks = deps.executionLogger.queryTasks({ sessionId: req.params.id });
+    const auditEntries = deps.auditLog.query({ sessionId: req.params.id });
+
+    return { session, messages, tasks, auditEntries };
+  });
+
   // Get messages for a session
   app.get<{
     Params: { id: string };

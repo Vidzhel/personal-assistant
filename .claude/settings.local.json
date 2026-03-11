@@ -46,7 +46,21 @@
       "Bash(timeout 10 claude:*)",
       "Bash(timeout 15 claude:*)",
       "Bash(ls:*)",
-      "Bash(npm uninstall:*)"
+      "Bash(npm uninstall:*)",
+      "Bash(npx:*)",
+      "Bash(grep \"\"type\"\":\"\"assistant\"\":*)",
+      "Bash(source:*)",
+      "Bash(claude:*)",
+      "Bash(npm list:*)",
+      "WebFetch(domain:developer.ticktick.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:help.ticktick.com)",
+      "Bash(NODE_OPTIONS=\"--max-old-space-size=512\" npm run:*)",
+      "Bash(NODE_OPTIONS=\"--max-old-space-size=2048\" npm run:*)",
+      "WebFetch(domain:lobehub.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:rollout.com)"
     ]
   },
   "enabledMcpjsonServers": [

@@ -24,6 +24,7 @@ export interface AuditLogFilter {
   skillName?: string;
   tier?: PermissionTier;
   outcome?: AuditOutcome;
+  sessionId?: string;
   from?: string;
   to?: string;
   limit?: number;
@@ -34,6 +35,7 @@ export const AuditLogFilterSchema = z.object({
   skillName: z.string().optional(),
   tier: PermissionTierSchema.optional(),
   outcome: AuditOutcomeSchema.optional(),
+  sessionId: z.string().optional(),
   from: z.string().optional(),
   to: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(1000).optional().default(100),

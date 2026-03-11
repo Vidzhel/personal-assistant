@@ -122,7 +122,7 @@ function spawnClaude(args: string[], opts: BackendOptions): Promise<BackendResul
             }
           }
         } catch {
-          // Non-JSON line — ignore
+          log.debug(`Failed to parse line from claude output as JSON: ${trimmed}`);
         }
       }
     });
@@ -143,8 +143,8 @@ function spawnClaude(args: string[], opts: BackendOptions): Promise<BackendResul
               errors.push(`Agent ended with status: ${msg.subtype}`);
             }
           }
-        } catch {
-          // ignore
+        } catch (err) {
+          log.debug(`Failed to parse line from claude output as JSON: ${err.message}`);
         }
       }
 
