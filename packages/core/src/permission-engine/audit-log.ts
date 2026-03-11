@@ -87,6 +87,10 @@ export function createAuditLog(db: Database.Database): AuditLog {
         conditions.push('outcome = ?');
         params.push(filters.outcome);
       }
+      if (filters?.sessionId) {
+        conditions.push('session_id = ?');
+        params.push(filters.sessionId);
+      }
       if (filters?.from) {
         conditions.push('timestamp >= ?');
         params.push(filters.from);

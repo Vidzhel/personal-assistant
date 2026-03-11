@@ -5,6 +5,7 @@ import type { ExecutionLogger } from '../../agent-manager/execution-logger.ts';
 const TaskQuerySchema = z.object({
   skillName: z.string().optional(),
   status: z.enum(['queued', 'running', 'completed', 'failed', 'blocked']).optional(),
+  sessionId: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });

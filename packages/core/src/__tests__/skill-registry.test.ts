@@ -158,6 +158,46 @@ describe('SkillRegistry', () => {
     expect(notFound).toBeUndefined();
   });
 
+  it('validateAgentTools passes when tool patterns match MCP servers', async () => {
+    const registry = new SkillRegistry();
+    await registry.registerSkill(
+      makeSkill('myskill', {
+        mcpServers: { api: { command: 'node', args: ['api.js'] } },
+        agentDefs: {
+          'myskill-agent': {
+            description: 'Test agent',
+            prompt: 'Test',
+            tools: ['mcp__myskill_api__*'],
+          },
+        },
+      }),
+      {},
+      makeContext(),
+    );
+
+    expect(() => registry.validateAgentTools()).not.toThrow();
+  });
+
+  it('validateAgentTools throws when tool patterns reference nonexistent MCP server', async () => {
+    const registry = new SkillRegistry();
+    await registry.registerSkill(
+      makeSkill('myskill', {
+        mcpServers: { api: { command: 'node', args: ['api.js'] } },
+        agentDefs: {
+          'myskill-agent': {
+            description: 'Test agent',
+            prompt: 'Test',
+            tools: ['mcp__wrong__*'],
+          },
+        },
+      }),
+      {},
+      makeContext(),
+    );
+
+    expect(() => registry.validateAgentTools()).toThrow(/no MCP server named "wrong" exists/);
+  });
+
   it('shutdown calls shutdown on all skills in reverse order', async () => {
     const registry = new SkillRegistry();
     const skillA = makeSkill('a');

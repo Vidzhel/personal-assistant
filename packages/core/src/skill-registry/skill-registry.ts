@@ -102,6 +102,28 @@ export class SkillRegistry {
     return undefined;
   }
 
+  validateAgentTools(): void {
+    const mcpServers = this.collectMcpServers();
+    const serverNames = new Set(Object.keys(mcpServers));
+
+    for (const [skillName, skill] of this.skills) {
+      const agents = skill.getAgentDefinitions();
+      for (const [agentKey, def] of Object.entries(agents)) {
+        for (const tool of def.tools ?? []) {
+          const match = tool.match(/^mcp__(.+)__\*$/);
+          if (!match) continue;
+          if (!serverNames.has(match[1])) {
+            throw new Error(
+              `Skill "${skillName}" agent "${agentKey}" declares tool pattern "${tool}" ` +
+                `but no MCP server named "${match[1]}" exists. ` +
+                `Available: ${[...serverNames].join(', ')}`,
+            );
+          }
+        }
+      }
+    }
+  }
+
   async shutdown(): Promise<void> {
     const skills = Array.from(this.skills.values()).reverse();
     for (const skill of skills) {

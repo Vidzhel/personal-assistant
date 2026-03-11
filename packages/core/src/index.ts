@@ -108,6 +108,9 @@ async function main(): Promise<void> {
     }
   }
 
+  // 6b. Validate agent tool patterns match registered MCP servers
+  skillRegistry.validateAgentTools();
+
   // 7. Init permission engine
   const permissionEngine = createPermissionEngine({ skillRegistry, eventBus });
   permissionEngine.initialize(configDir);
