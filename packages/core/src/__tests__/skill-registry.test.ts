@@ -198,6 +198,46 @@ describe('SkillRegistry', () => {
     expect(() => registry.validateAgentTools()).toThrow(/no MCP server named "wrong" exists/);
   });
 
+  it('collectAgentDefinitions embeds full MCP server configs', async () => {
+    const registry = new SkillRegistry();
+    await registry.registerSkill(
+      makeSkill('ticktick', {
+        mcpServers: { ticktick: { command: 'node', args: ['mcp.js'], env: { TOKEN: 'xxx' } } },
+        agentDefs: {
+          'ticktick-agent': {
+            description: 'Manages tasks',
+            prompt: 'Manage tasks',
+            tools: ['mcp__ticktick_ticktick__*'],
+          },
+        },
+      }),
+      {},
+      makeContext(),
+    );
+
+    const defs = registry.collectAgentDefinitions();
+    const agent = defs['ticktick-agent'];
+    expect(agent.mcpServers).toEqual([
+      { ticktick_ticktick: { command: 'node', args: ['mcp.js'], env: { TOKEN: 'xxx' } } },
+    ]);
+  });
+
+  it('collectAgentDefinitions omits mcpServers when skill has no MCPs', async () => {
+    const registry = new SkillRegistry();
+    await registry.registerSkill(
+      makeSkill('basic', {
+        agentDefs: {
+          'basic-agent': { description: 'Basic', prompt: 'Basic' },
+        },
+      }),
+      {},
+      makeContext(),
+    );
+
+    const defs = registry.collectAgentDefinitions();
+    expect(defs['basic-agent'].mcpServers).toBeUndefined();
+  });
+
   it('shutdown calls shutdown on all skills in reverse order', async () => {
     const registry = new SkillRegistry();
     const skillA = makeSkill('a');
