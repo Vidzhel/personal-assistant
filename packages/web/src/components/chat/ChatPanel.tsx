@@ -10,7 +10,10 @@ export function ChatPanel({
   projectId: string;
   sessionId?: string | null;
 }) {
-  const { messages, sendMessage, loading } = useChat({ projectId, sessionId });
+  const { messages, sendMessage, loading, activeTaskId, stopTask } = useChat({
+    projectId,
+    sessionId,
+  });
   const [input, setInput] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -61,13 +64,23 @@ export function ChatPanel({
               border: '1px solid var(--border)',
             }}
           />
-          <button
-            onClick={handleSend}
-            className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-            style={{ background: 'var(--accent)', color: 'white' }}
-          >
-            Send
-          </button>
+          {activeTaskId ? (
+            <button
+              onClick={stopTask}
+              className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              style={{ background: '#ef4444', color: 'white' }}
+            >
+              Stop
+            </button>
+          ) : (
+            <button
+              onClick={handleSend}
+              className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+              style={{ background: 'var(--accent)', color: 'white' }}
+            >
+              Send
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -62,7 +62,10 @@ export async function createApiServer(
     agentManager: deps.agentManager,
     eventBus: deps.eventBus,
   });
-  registerAgentTaskRoutes(app, { executionLogger: deps.executionLogger });
+  registerAgentTaskRoutes(app, {
+    executionLogger: deps.executionLogger,
+    agentManager: deps.agentManager,
+  });
 
   // WebSocket
   registerWebSocketHandler(app, deps.eventBus);

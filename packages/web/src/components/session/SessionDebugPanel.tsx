@@ -161,6 +161,17 @@ export function SessionDebugPanel({ sessionId, onClose }: SessionDebugPanelProps
                 count={debugData.auditEntries.length}
                 data={debugData.auditEntries}
               />
+              <CollapsibleSection
+                title="Raw Output"
+                count={debugData.rawMessages.length}
+                data={debugData.rawMessages.map((s) => {
+                  try {
+                    return JSON.parse(s);
+                  } catch {
+                    return s;
+                  }
+                })}
+              />
             </>
           )}
         </div>

@@ -55,7 +55,14 @@ describe('Agent Tasks API', () => {
 
     app = Fastify({ logger: false });
     await app.register(cors, { origin: true });
-    registerAgentTaskRoutes(app, { executionLogger });
+    const mockAgentManager = {
+      cancelTask: () => false,
+      getActiveTasks: () => ({ running: [], queued: [] }),
+    };
+    registerAgentTaskRoutes(app, {
+      executionLogger,
+      agentManager: mockAgentManager as never,
+    });
     await app.ready();
   });
 

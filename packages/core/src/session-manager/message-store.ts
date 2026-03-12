@@ -25,6 +25,8 @@ export interface MessageStore {
     message: Omit<StoredMessage, 'id' | 'timestamp'>,
   ) => string | undefined;
   getMessages: (sessionId: string, opts?: { limit?: number; offset?: number }) => StoredMessage[];
+  appendRawMessage: (sessionId: string, rawJson: string) => void;
+  getRawMessages: (sessionId: string) => string[];
 }
 
 export function createMessageStore(options: MessageStoreOptions): MessageStore {
@@ -88,5 +90,30 @@ export function createMessageStore(options: MessageStoreOptions): MessageStore {
     }
   }
 
-  return { appendMessage, getMessages };
+  function getRawOutputPath(sessionId: string): string {
+    return join(getSessionDir(sessionId), 'raw-output.jsonl');
+  }
+
+  function appendRawMessage(sessionId: string, rawJson: string): void {
+    try {
+      appendFileSync(getRawOutputPath(sessionId), rawJson + '\n');
+    } catch (err) {
+      log.error(`Failed to append raw message for session ${sessionId}: ${err}`);
+    }
+  }
+
+  function getRawMessages(sessionId: string): string[] {
+    const path = getRawOutputPath(sessionId);
+    if (!existsSync(path)) return [];
+
+    try {
+      const raw = readFileSync(path, 'utf-8');
+      return raw.split('\n').filter((l) => l.trim());
+    } catch (err) {
+      log.error(`Failed to read raw messages for session ${sessionId}: ${err}`);
+      return [];
+    }
+  }
+
+  return { appendMessage, getMessages, appendRawMessage, getRawMessages };
 }

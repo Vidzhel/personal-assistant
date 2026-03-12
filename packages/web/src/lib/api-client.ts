@@ -37,6 +37,8 @@ export const api = {
   createSession: (projectId: string) =>
     request<Session>(`/projects/${projectId}/sessions/new`, { method: 'POST' }),
   getSessionDebug: (sessionId: string) => request<SessionDebug>(`/sessions/${sessionId}/debug`),
+  getActiveTasks: () => request<ActiveTasks>('/agent-tasks/active'),
+  cancelTask: (taskId: string) => request(`/agent-tasks/${taskId}/cancel`, { method: 'POST' }),
 };
 
 export interface Project {
@@ -84,6 +86,24 @@ export interface SessionDebug {
   messages: unknown[];
   tasks: unknown[];
   auditEntries: unknown[];
+  rawMessages: string[];
+}
+
+export interface ActiveTaskInfo {
+  taskId: string;
+  skillName: string;
+  sessionId?: string;
+  projectId?: string;
+  priority: string;
+  status: string;
+  startedAt?: number;
+  createdAt: number;
+  durationMs?: number;
+}
+
+export interface ActiveTasks {
+  running: ActiveTaskInfo[];
+  queued: ActiveTaskInfo[];
 }
 
 export interface EventRecord {

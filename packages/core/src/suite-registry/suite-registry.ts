@@ -2,6 +2,9 @@ import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   createLogger,
+  buildLocalToNamespacedMap,
+  rewriteAgentMcpRefs,
+  MCP_TOOL_WILDCARD_RE,
   type McpServerConfig,
   type SubAgentDefinition,
   type SkillAction,
@@ -97,38 +100,17 @@ export class SuiteRegistry {
 
       // Compute MCP keys for this suite (already namespaced: "suiteName_localKey")
       const mcpKeys = Object.keys(suite.mcpServers);
-
-      // Build local→namespaced mapping for tool pattern rewriting
-      const localToNamespaced = new Map<string, string>();
-      for (const namespacedKey of mcpKeys) {
-        const prefix = `${suite.manifest.name}_`;
-        if (namespacedKey.startsWith(prefix)) {
-          const localKey = namespacedKey.slice(prefix.length);
-          localToNamespaced.set(localKey, namespacedKey);
-        }
-      }
+      const localToNamespaced = buildLocalToNamespacedMap(mcpKeys, suite.manifest.name);
 
       for (const agent of suite.agents) {
-        // Rewrite mcp__<localKey>__<pattern> → mcp__<namespacedKey>__<pattern>
-        const rewrittenTools = agent.tools.map((tool) => {
-          const match = tool.match(/^mcp__([^_]+)__(.+)$/);
-          if (match) {
-            const localKey = match[1];
-            const rest = match[2];
-            const namespacedKey = localToNamespaced.get(localKey);
-            if (namespacedKey) {
-              return `mcp__${namespacedKey}__${rest}`;
-            }
-          }
-          return tool;
-        });
+        const { tools, mcpServers } = rewriteAgentMcpRefs(agent, localToNamespaced);
 
         defs[agent.name] = {
           description: agent.description,
           prompt: agent.prompt,
-          tools: rewrittenTools,
+          tools,
           model: agent.model,
-          mcpServers: mcpKeys.length > 0 ? mcpKeys : undefined,
+          mcpServers: mcpKeys.length > 0 ? (mcpServers ?? mcpKeys) : undefined,
         };
       }
     }
@@ -199,20 +181,12 @@ export class SuiteRegistry {
     const serverNames = new Set(Object.keys(allMcpServers));
 
     for (const [suiteName, suite] of this.suites) {
-      // Build local→namespaced mapping for this suite
       const mcpKeys = Object.keys(suite.mcpServers);
-      const localToNamespaced = new Map<string, string>();
-      for (const namespacedKey of mcpKeys) {
-        const prefix = `${suite.manifest.name}_`;
-        if (namespacedKey.startsWith(prefix)) {
-          const localKey = namespacedKey.slice(prefix.length);
-          localToNamespaced.set(localKey, namespacedKey);
-        }
-      }
+      const localToNamespaced = buildLocalToNamespacedMap(mcpKeys, suite.manifest.name);
 
       for (const agent of suite.agents) {
         for (const tool of agent.tools) {
-          const match = tool.match(/^mcp__(.+)__\*$/);
+          const match = tool.match(MCP_TOOL_WILDCARD_RE);
           if (!match) continue;
 
           // Try rewriting local key to namespaced key
