@@ -1,0 +1,3 @@
+[
+  { "name": "digest:compile-briefing", "description": "Compile a digest briefing from skill data", "defaultTier": "green", "reversible": true }
+]

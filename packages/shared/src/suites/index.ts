@@ -1,0 +1,15 @@
+export {
+  defineAgent,
+  defineSuite,
+  buildPrompt,
+  parseActions,
+  parseMcpConfig,
+  resolveEnvVars,
+  type AgentDefinition,
+  type ResolvedAgentDefinition,
+  type SuiteManifest,
+  type ResolvedSuiteManifest,
+  type PromptParts,
+  type ActionDefinition,
+  type McpConfig,
+} from './define.ts';

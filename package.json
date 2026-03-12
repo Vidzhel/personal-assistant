@@ -28,7 +28,9 @@
     "test:mcp": "vitest run --project mcp-ticktick",
     "test:mcp:watch": "vitest --project mcp-ticktick",
     "test:skill": "node --experimental-strip-types scripts/test-skill.ts",
-    "test:ticktick": "node --experimental-strip-types scripts/test-ticktick-manual.ts"
+    "test:ticktick": "node --experimental-strip-types scripts/test-ticktick-manual.ts",
+    "test:suite": "node --experimental-strip-types scripts/test-suite.ts",
+    "test:suite:list": "node --experimental-strip-types scripts/test-suite.ts --list"
   },
   "engines": {
     "node": ">=22.0.0"
