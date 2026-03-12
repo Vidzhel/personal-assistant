@@ -45,6 +45,16 @@ export async function loadSuite(suiteDir: string): Promise<LoadedSuite> {
   const manifest = manifestModule.default as ResolvedSuiteManifest;
   log.info(`Loading suite: ${manifest.name} (${manifest.displayName})`);
 
+  // Validate required env vars before loading anything else
+  if (manifest.requiresEnv.length > 0) {
+    const missing = manifest.requiresEnv.filter((v) => !process.env[v]);
+    if (missing.length > 0) {
+      throw new Error(
+        `Suite "${manifest.name}" cannot load: missing required env vars: ${missing.join(', ')}`,
+      );
+    }
+  }
+
   // Load agents
   const agents = await loadAgents(absDir);
 

@@ -1,7 +1,7 @@
-import { defineSuite } from '@raven/shared';
+import { defineSuite, SUITE_NOTIFICATIONS } from '@raven/shared';
 
 export default defineSuite({
-  name: 'notifications',
+  name: SUITE_NOTIFICATIONS,
   displayName: 'Notifications',
   version: '0.1.0',
   description: 'Push notifications and quick commands via Telegram',

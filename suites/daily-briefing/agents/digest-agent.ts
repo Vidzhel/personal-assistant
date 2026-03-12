@@ -1,11 +1,11 @@
-import { defineAgent } from '@raven/shared';
+import { defineAgent, AGENT_DIGEST, AGENT_TICKTICK, AGENT_GMAIL, AGENT_TELEGRAM } from '@raven/shared';
 
 export default defineAgent({
-  name: 'digest-agent',
+  name: AGENT_DIGEST,
   description:
     'Compiles daily morning briefings by gathering data from task and email agents.',
   model: 'sonnet',
-  tools: ['Agent(ticktick-agent, gmail-agent, telegram-notifier)', 'Read', 'Grep'],
+  tools: [`Agent(${AGENT_TICKTICK}, ${AGENT_GMAIL}, ${AGENT_TELEGRAM})`, 'Read', 'Grep'],
   maxTurns: 15,
   prompt: `You are a morning digest agent within Raven.
 

@@ -1,6 +1,9 @@
 import {
   createLogger,
   generateId,
+  SUITE_EMAIL,
+  SOURCE_ORCHESTRATOR,
+  SKILL_ORCHESTRATOR,
   type NewEmailEvent,
   type ScheduleTriggeredEvent,
   type UserChatMessageEvent,
@@ -47,7 +50,7 @@ export class Orchestrator {
     const { from, subject, snippet } = event.payload;
     log.info(`New email from ${from}: ${subject}`);
 
-    const emailSuite = this.suiteRegistry.getSuite('email');
+    const emailSuite = this.suiteRegistry.getSuite(SUITE_EMAIL);
     if (!emailSuite) {
       log.warn('Email suite not available, ignoring email event');
       return;
@@ -59,7 +62,7 @@ export class Orchestrator {
     this.eventBus.emit({
       id: generateId(),
       timestamp: Date.now(),
-      source: 'orchestrator',
+      source: SOURCE_ORCHESTRATOR,
       type: 'agent:task:request',
       payload: {
         taskId,
@@ -73,7 +76,7 @@ export class Orchestrator {
           `Use the Gmail tools to read the full email if needed.`,
           `Provide a brief summary and indicate if this requires user action.`,
         ].join('\n'),
-        skillName: 'email',
+        skillName: SUITE_EMAIL,
         mcpServers,
         priority: 'normal',
         projectId: event.projectId,
@@ -101,7 +104,7 @@ export class Orchestrator {
     this.eventBus.emit({
       id: generateId(),
       timestamp: Date.now(),
-      source: 'orchestrator',
+      source: SOURCE_ORCHESTRATOR,
       type: 'agent:task:request',
       payload: {
         taskId,
@@ -139,13 +142,13 @@ export class Orchestrator {
     this.eventBus.emit({
       id: generateId(),
       timestamp: Date.now(),
-      source: 'orchestrator',
+      source: SOURCE_ORCHESTRATOR,
       projectId,
       type: 'agent:task:request',
       payload: {
         taskId,
         prompt: message,
-        skillName: 'orchestrator',
+        skillName: SKILL_ORCHESTRATOR,
         mcpServers: this.suiteRegistry.collectMcpServers(), // Declared for SDK to spawn; only sub-agents use them
         agentDefinitions, // Sub-agents carry the MCPs
         priority: 'high',
