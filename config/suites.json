@@ -1,0 +1,6 @@
+{
+  "task-management": { "enabled": true },
+  "email": { "enabled": true, "config": { "watchFolders": ["INBOX"] } },
+  "notifications": { "enabled": true },
+  "daily-briefing": { "enabled": true }
+}

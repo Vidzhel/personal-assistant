@@ -1,0 +1,11 @@
+import { defineSuite } from '@raven/shared';
+
+export default defineSuite({
+  name: 'email',
+  displayName: 'Email',
+  version: '0.1.0',
+  description: 'Email monitoring and management via Gmail',
+  capabilities: ['mcp-server', 'agent-definition', 'event-source', 'data-provider'],
+  requiresEnv: ['GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN'],
+  services: ['imap-watcher'],
+});
