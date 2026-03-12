@@ -23,6 +23,7 @@ vi.mock('../config.ts', () => {
   return {
     getConfig: () => config,
     loadConfig: () => config,
+    projectRoot: '/test/root',
   };
 });
 

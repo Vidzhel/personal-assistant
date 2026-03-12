@@ -1,4 +1,4 @@
-import { createLogger, generateId } from '@raven/shared';
+import { createLogger, generateId, buildMcpToolPattern } from '@raven/shared';
 import type { AgentTask, McpServerConfig, PermissionTier, SubAgentDefinition } from '@raven/shared';
 import type { MessageStore, StoredMessage } from '../session-manager/message-store.ts';
 import type { EventBus } from '../event-bus/event-bus.ts';
@@ -6,7 +6,7 @@ import type { PermissionEngine } from '../permission-engine/permission-engine.ts
 import type { AuditLog } from '../permission-engine/audit-log.ts';
 import type { PendingApprovals } from '../permission-engine/pending-approvals.ts';
 import { buildSystemPrompt } from './prompt-builder.ts';
-import { getConfig } from '../config.ts';
+import { getConfig, projectRoot } from '../config.ts';
 import type { AgentBackend, ToolUseMeta } from './agent-backend.ts';
 import { createSdkBackend } from './sdk-backend.ts';
 import { createCliBackend } from './cli-backend.ts';
@@ -54,6 +54,7 @@ export interface RunOptions {
   actionName?: string;
   permissionDeps?: PermissionDeps;
   messageStore?: MessageStore;
+  signal?: AbortSignal;
 }
 
 export interface GateResult {
@@ -169,10 +170,28 @@ function formatConversationHistory(messages: StoredMessage[], currentPrompt: str
  * with only the MCPs needed for this specific task.
  */
 export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult> {
-  const { task, eventBus, mcpServers, agentDefinitions, actionName, permissionDeps, messageStore } =
-    opts;
+  const {
+    task,
+    eventBus,
+    mcpServers,
+    agentDefinitions,
+    actionName,
+    permissionDeps,
+    messageStore,
+    signal,
+  } = opts;
   const config = getConfig();
   const startTime = Date.now();
+
+  if (signal?.aborted) {
+    return {
+      taskId: task.id,
+      result: 'Task cancelled',
+      durationMs: 0,
+      success: false,
+      errors: ['cancelled'],
+    };
+  }
 
   log.info(`Starting agent task ${task.id} for skill ${task.skillName}`);
 
@@ -226,7 +245,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
     // Always include MCP wildcards — sub-agents inherit tools from the parent,
     // so the parent must have MCP tools in its allowed list for sub-agents to use them.
     for (const name of Object.keys(sdkMcpServers)) {
-      allowedTools.push(`mcp__${name}__*`);
+      allowedTools.push(buildMcpToolPattern(name));
     }
     const hasSubAgents = Object.keys(agentDefinitions).length > 0;
     if (hasSubAgents) {
@@ -338,10 +357,17 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
           });
         }
       },
+      onRawMessage: (rawJson: string) => {
+        if (task.sessionId && messageStore) {
+          messageStore.appendRawMessage(task.sessionId, rawJson);
+        }
+      },
+      signal,
       onStderr: (data: string) => {
         stderrChunks.push(data);
         log.debug(`Agent stderr: ${data.trim()}`);
       },
+      cwd: projectRoot,
     });
 
     sdkSessionId = backendResult.sessionId;

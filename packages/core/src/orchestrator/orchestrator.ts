@@ -115,11 +115,13 @@ export class Orchestrator {
   }
 
   private handleUserChat(event: UserChatMessageEvent): void {
-    const { projectId, message } = event.payload;
+    const { projectId, sessionId, message } = event.payload;
     log.info(`User chat in project ${projectId}: ${message.slice(0, 100)}`);
 
-    // Get or create a session for this project
-    const session = this.sessionManager.getOrCreateSession(projectId);
+    // Use the specific session if provided, otherwise fall back to getOrCreateSession
+    const session =
+      (sessionId && this.sessionManager.getSession(sessionId)) ||
+      this.sessionManager.getOrCreateSession(projectId);
     this.sessionManager.updateStatus(session.id, 'running');
 
     // Store the user message

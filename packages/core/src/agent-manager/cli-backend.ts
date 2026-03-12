@@ -67,7 +67,19 @@ function spawnClaude(args: string[], opts: BackendOptions): Promise<BackendResul
     const child = spawn('claude', args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, CLAUDECODE: undefined },
+      cwd: opts.cwd,
     });
+
+    if (opts.signal) {
+      if (opts.signal.aborted) {
+        child.kill('SIGTERM');
+        resolve({ result: 'Task cancelled', success: false, errors: ['cancelled'] });
+        return;
+      }
+      opts.signal.addEventListener('abort', () => {
+        child.kill('SIGTERM');
+      });
+    }
 
     child.stderr.on('data', (chunk: Buffer) => {
       opts.onStderr(chunk.toString());
@@ -84,6 +96,7 @@ function spawnClaude(args: string[], opts: BackendOptions): Promise<BackendResul
         if (!trimmed) continue;
 
         try {
+          opts.onRawMessage?.(trimmed);
           const msg = JSON.parse(trimmed) as Record<string, unknown>;
 
           if (msg.type === 'system' && msg.subtype === 'init') {
@@ -166,6 +179,7 @@ function spawnClaude(args: string[], opts: BackendOptions): Promise<BackendResul
       // Process any remaining buffer
       if (buffer.trim()) {
         try {
+          opts.onRawMessage?.(buffer.trim());
           const msg = JSON.parse(buffer.trim()) as Record<string, unknown>;
           if (msg.type === 'result') {
             success = msg.subtype === 'success';
@@ -179,6 +193,16 @@ function spawnClaude(args: string[], opts: BackendOptions): Promise<BackendResul
             `Failed to parse line from claude output as JSON: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
+      }
+
+      if (opts.signal?.aborted) {
+        resolve({
+          sessionId,
+          result: resultText || 'Task cancelled',
+          success: false,
+          errors: ['cancelled'],
+        });
+        return;
       }
 
       if (code !== 0 && !success) {

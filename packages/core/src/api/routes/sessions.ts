@@ -30,8 +30,9 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
     const messages = deps.messageStore.getMessages(req.params.id);
     const tasks = deps.executionLogger.queryTasks({ sessionId: req.params.id });
     const auditEntries = deps.auditLog.query({ sessionId: req.params.id });
+    const rawMessages = deps.messageStore.getRawMessages(req.params.id);
 
-    return { session, messages, tasks, auditEntries };
+    return { session, messages, tasks, auditEntries, rawMessages };
   });
 
   // Get messages for a session

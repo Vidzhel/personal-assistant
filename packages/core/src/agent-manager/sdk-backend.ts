@@ -15,6 +15,7 @@ export function createSdkBackend(): AgentBackend {
       model: opts.model,
       maxTurns: opts.maxTurns,
       stderr: opts.onStderr,
+      cwd: opts.cwd,
     };
 
     if (Object.keys(opts.mcpServers).length > 0) {
@@ -29,7 +30,12 @@ export function createSdkBackend(): AgentBackend {
       prompt: opts.prompt,
       options: queryOptions as Parameters<typeof query>[0]['options'],
     })) {
+      if (opts.signal?.aborted) {
+        errors.push('cancelled');
+        break;
+      }
       const msg = message as Record<string, unknown>;
+      opts.onRawMessage?.(JSON.stringify(msg));
 
       if (msg.type === 'system' && msg.subtype === 'init') {
         sessionId = msg.session_id as string;

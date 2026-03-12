@@ -41,9 +41,23 @@ export interface ApprovedActionParams {
   sessionId?: string;
 }
 
+export interface ActiveTaskInfo {
+  taskId: string;
+  skillName: string;
+  sessionId?: string;
+  projectId?: string;
+  priority: string;
+  status: string;
+  startedAt?: number;
+  createdAt: number;
+  durationMs?: number;
+}
+
 export class AgentManager {
   private queue: AgentTask[] = [];
   private running = new Map<string, Promise<void>>();
+  private abortControllers = new Map<string, AbortController>();
+  private taskMeta = new Map<string, AgentTask>();
   private maxConcurrent: number;
   private eventBus: EventBus;
   private mcpManager: McpManager;
@@ -119,6 +133,9 @@ export class AgentManager {
   private async runTask(task: AgentTask): Promise<void> {
     task.status = 'running';
     task.startedAt = Date.now();
+    this.taskMeta.set(task.id, task);
+    const abortController = new AbortController();
+    this.abortControllers.set(task.id, abortController);
     this.executionLogger?.logTaskStart(task);
 
     const thinkingContent = `Starting ${task.skillName} agent...`;
@@ -152,9 +169,20 @@ export class AgentManager {
       actionName: task.actionName,
       permissionDeps: this.permissionDeps,
       messageStore: this.messageStore,
+      signal: abortController.signal,
     });
 
-    task.status = result.blocked ? 'blocked' : result.success ? 'completed' : 'failed';
+    this.abortControllers.delete(task.id);
+    this.taskMeta.delete(task.id);
+
+    const isCancelled = result.errors?.includes('cancelled');
+    task.status = isCancelled
+      ? 'cancelled'
+      : result.blocked
+        ? 'blocked'
+        : result.success
+          ? 'completed'
+          : 'failed';
     task.result = result.result;
     task.durationMs = result.durationMs;
     task.errors = result.errors;
@@ -201,6 +229,59 @@ export class AgentManager {
     log.info(
       `Task completed: ${task.id} (${result.success ? 'success' : 'failed'}, ${result.durationMs}ms)`,
     );
+  }
+
+  cancelTask(taskId: string): boolean {
+    // Check queued tasks first
+    const queueIdx = this.queue.findIndex((t) => t.id === taskId);
+    if (queueIdx !== -1) {
+      const task = this.queue.splice(queueIdx, 1)[0];
+      task.status = 'cancelled';
+      task.completedAt = Date.now();
+      this.executionLogger?.logTaskComplete(task);
+      log.info(`Cancelled queued task: ${taskId}`);
+      return true;
+    }
+
+    // Check running tasks
+    const controller = this.abortControllers.get(taskId);
+    if (controller) {
+      controller.abort();
+      log.info(`Cancelling running task: ${taskId}`);
+      return true;
+    }
+
+    return false;
+  }
+
+  getActiveTasks(): { running: ActiveTaskInfo[]; queued: ActiveTaskInfo[] } {
+    const now = Date.now();
+    const running: ActiveTaskInfo[] = [];
+    for (const task of this.taskMeta.values()) {
+      if (task.status === 'running') {
+        running.push({
+          taskId: task.id,
+          skillName: task.skillName,
+          sessionId: task.sessionId,
+          projectId: task.projectId,
+          priority: task.priority,
+          status: task.status,
+          startedAt: task.startedAt,
+          createdAt: task.createdAt,
+          durationMs: task.startedAt ? now - task.startedAt : undefined,
+        });
+      }
+    }
+    const queued: ActiveTaskInfo[] = this.queue.map((task) => ({
+      taskId: task.id,
+      skillName: task.skillName,
+      sessionId: task.sessionId,
+      projectId: task.projectId,
+      priority: task.priority,
+      status: task.status,
+      createdAt: task.createdAt,
+    }));
+    return { running, queued };
   }
 
   getQueueLength(): number {

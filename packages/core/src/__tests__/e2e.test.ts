@@ -42,6 +42,7 @@ vi.mock('../config.ts', () => {
     },
     loadSuitesConfig: () => ({}),
     loadSchedulesConfig: () => [],
+    projectRoot: '/test/root',
   };
 });
 

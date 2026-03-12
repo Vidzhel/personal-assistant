@@ -23,7 +23,10 @@ export interface BackendOptions {
     isError: boolean;
     meta?: ToolUseMeta;
   }) => void;
+  onRawMessage?: (rawJson: string) => void;
+  signal?: AbortSignal;
   onStderr: (data: string) => void;
+  cwd?: string;
 }
 
 export interface BackendResult {

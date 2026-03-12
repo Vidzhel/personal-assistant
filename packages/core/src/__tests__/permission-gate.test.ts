@@ -13,6 +13,7 @@ vi.mock('../config.ts', () => ({
     CLAUDE_MODEL: 'test-model',
     RAVEN_AGENT_MAX_TURNS: 10,
   }),
+  projectRoot: '/test/root',
 }));
 
 import { mkdtempSync, rmSync } from 'node:fs';

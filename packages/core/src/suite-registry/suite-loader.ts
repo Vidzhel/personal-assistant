@@ -5,6 +5,8 @@ import {
   parseMcpConfig,
   parseActions,
   resolveEnvVars,
+  namespaceMcpKey,
+  validateAgentMcpRefs,
   type ResolvedSuiteManifest,
   type ResolvedAgentDefinition,
   type ActionDefinition,
@@ -49,6 +51,12 @@ export async function loadSuite(suiteDir: string): Promise<LoadedSuite> {
   // Load MCP config
   const mcpServers = await loadMcpConfig(absDir, manifest.name);
 
+  // Validate agent MCP references before namespacing
+  const localMcpKeys = await getLocalMcpKeys(absDir);
+  for (const agent of agents) {
+    validateAgentMcpRefs(agent, localMcpKeys, manifest.name);
+  }
+
   // Load actions
   const actions = await loadActions(absDir);
 
@@ -89,7 +97,7 @@ async function loadMcpConfig(
   // Namespace MCP servers with suite name and resolve env vars
   const servers: Record<string, McpServerConfig> = {};
   for (const [key, entry] of Object.entries(config.mcpServers)) {
-    servers[`${suiteName}_${key}`] = {
+    servers[namespaceMcpKey(suiteName, key)] = {
       command: entry.command,
       args: entry.args ?? [],
       env: entry.env ? resolveEnvVars(entry.env) : undefined,
@@ -97,6 +105,15 @@ async function loadMcpConfig(
   }
 
   return servers;
+}
+
+async function getLocalMcpKeys(suiteDir: string): Promise<Set<string>> {
+  const mcpPath = join(suiteDir, 'mcp.json');
+  if (!(await exists(mcpPath))) return new Set();
+
+  const raw = JSON.parse(await readFile(mcpPath, 'utf-8')) as unknown;
+  const config = parseMcpConfig(raw);
+  return new Set(Object.keys(config.mcpServers));
 }
 
 async function loadActions(suiteDir: string): Promise<ActionDefinition[]> {

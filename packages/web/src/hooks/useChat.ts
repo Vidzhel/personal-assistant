@@ -25,11 +25,14 @@ export function useChat(opts: UseChatOptions): {
   sendMessage: (message: string) => void;
   sessionId: string | null;
   loading: boolean;
+  activeTaskId: string | null;
+  stopTask: () => void;
 } {
   const { projectId, sessionId: externalSessionId } = opts;
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(externalSessionId ?? null);
   const [loading, setLoading] = useState(true);
+  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const initializedRef = useRef(false);
   const processedWsRef = useRef(0);
   const channels = useMemo(() => [`project:${projectId}`], [projectId]);
@@ -102,7 +105,12 @@ export function useChat(opts: UseChatOptions): {
         const messageType = event.payload?.messageType;
         const messageId = event.payload?.messageId;
 
+        if (event.type === 'agent:task:complete') {
+          setActiveTaskId(null);
+        }
+
         if (event.type === 'agent:message' && content) {
+          if (taskId) setActiveTaskId(taskId);
           if (messageType === 'tool_use') {
             const colonIdx = content.indexOf(':');
             const toolName = colonIdx > 0 ? content.slice(0, colonIdx).trim() : undefined;
@@ -173,5 +181,11 @@ export function useChat(opts: UseChatOptions): {
     [projectId, sessionId, send],
   );
 
-  return { messages: chatMessages, sendMessage, sessionId, loading };
+  const stopTask = useCallback(() => {
+    if (!activeTaskId) return;
+    fetch(`${API_URL}/agent-tasks/${activeTaskId}/cancel`, { method: 'POST' }).catch(() => {});
+    setActiveTaskId(null);
+  }, [activeTaskId]);
+
+  return { messages: chatMessages, sendMessage, sessionId, loading, activeTaskId, stopTask };
 }

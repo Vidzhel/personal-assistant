@@ -13,3 +13,14 @@ export {
   type ActionDefinition,
   type McpConfig,
 } from './define.ts';
+
+export {
+  MCP_NAMESPACE_SEP,
+  MCP_TOOL_PATTERN_RE,
+  MCP_TOOL_WILDCARD_RE,
+  namespaceMcpKey,
+  buildMcpToolPattern,
+  buildLocalToNamespacedMap,
+  rewriteAgentMcpRefs,
+  validateAgentMcpRefs,
+} from './mcp-naming.ts';
