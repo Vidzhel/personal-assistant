@@ -82,6 +82,10 @@ export class SuiteRegistry {
   /**
    * Collects agent definitions from all (or specified) suites.
    * Returns a flat namespace of all agents across all suites.
+   *
+   * Rewrites local MCP tool patterns (e.g. `mcp__ticktick__*`) to namespaced
+   * patterns (e.g. `mcp__task-management_ticktick__*`) so they match the keys
+   * produced by `collectMcpServers()`.
    */
   collectAgentDefinitions(suiteNames?: string[]): Record<string, SubAgentDefinition> {
     const defs: Record<string, SubAgentDefinition> = {};
@@ -91,14 +95,38 @@ export class SuiteRegistry {
       const suite = this.suites.get(name);
       if (!suite) continue;
 
-      // Compute MCP keys for this suite
+      // Compute MCP keys for this suite (already namespaced: "suiteName_localKey")
       const mcpKeys = Object.keys(suite.mcpServers);
 
+      // Build local→namespaced mapping for tool pattern rewriting
+      const localToNamespaced = new Map<string, string>();
+      for (const namespacedKey of mcpKeys) {
+        const prefix = `${suite.manifest.name}_`;
+        if (namespacedKey.startsWith(prefix)) {
+          const localKey = namespacedKey.slice(prefix.length);
+          localToNamespaced.set(localKey, namespacedKey);
+        }
+      }
+
       for (const agent of suite.agents) {
+        // Rewrite mcp__<localKey>__<pattern> → mcp__<namespacedKey>__<pattern>
+        const rewrittenTools = agent.tools.map((tool) => {
+          const match = tool.match(/^mcp__([^_]+)__(.+)$/);
+          if (match) {
+            const localKey = match[1];
+            const rest = match[2];
+            const namespacedKey = localToNamespaced.get(localKey);
+            if (namespacedKey) {
+              return `mcp__${namespacedKey}__${rest}`;
+            }
+          }
+          return tool;
+        });
+
         defs[agent.name] = {
           description: agent.description,
           prompt: agent.prompt,
-          tools: agent.tools,
+          tools: rewrittenTools,
           model: agent.model,
           mcpServers: mcpKeys.length > 0 ? mcpKeys : undefined,
         };
@@ -163,20 +191,38 @@ export class SuiteRegistry {
 
   /**
    * Validates that agent tool patterns reference existing MCP servers.
+   * Applies local-to-namespaced rewriting before checking, matching
+   * the same logic used in `collectAgentDefinitions()`.
    */
   validateAgentTools(): void {
     const allMcpServers = this.collectMcpServers();
     const serverNames = new Set(Object.keys(allMcpServers));
 
     for (const [suiteName, suite] of this.suites) {
+      // Build local→namespaced mapping for this suite
+      const mcpKeys = Object.keys(suite.mcpServers);
+      const localToNamespaced = new Map<string, string>();
+      for (const namespacedKey of mcpKeys) {
+        const prefix = `${suite.manifest.name}_`;
+        if (namespacedKey.startsWith(prefix)) {
+          const localKey = namespacedKey.slice(prefix.length);
+          localToNamespaced.set(localKey, namespacedKey);
+        }
+      }
+
       for (const agent of suite.agents) {
         for (const tool of agent.tools) {
           const match = tool.match(/^mcp__(.+)__\*$/);
           if (!match) continue;
-          if (!serverNames.has(match[1])) {
+
+          // Try rewriting local key to namespaced key
+          const rawKey = match[1];
+          const resolvedKey = localToNamespaced.get(rawKey) ?? rawKey;
+
+          if (!serverNames.has(resolvedKey)) {
             throw new Error(
               `Suite "${suiteName}" agent "${agent.name}" declares tool pattern "${tool}" ` +
-                `but no MCP server named "${match[1]}" exists. ` +
+                `but no MCP server named "${rawKey}" exists. ` +
                 `Available: ${[...serverNames].join(', ')}`,
             );
           }

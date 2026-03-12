@@ -2,14 +2,14 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { EventBus } from '../event-bus/event-bus.ts';
-import { SkillRegistry } from '../skill-registry/skill-registry.ts';
+import { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 import { SessionManager } from '../session-manager/session-manager.ts';
 import { Scheduler } from '../scheduler/scheduler.ts';
 import { initDatabase, getDb } from '../db/database.ts';
 import { registerHealthRoute } from '../api/routes/health.ts';
 import { registerProjectRoutes } from '../api/routes/projects.ts';
 import { registerChatRoute } from '../api/routes/chat.ts';
-import { registerSkillRoutes } from '../api/routes/skills.ts';
+import { registerSuiteRoutes } from '../api/routes/suites.ts';
 import { registerScheduleRoutes } from '../api/routes/schedules.ts';
 import { registerEventRoutes } from '../api/routes/events.ts';
 import { registerAuditLogRoutes } from '../api/routes/audit-logs.ts';
@@ -34,7 +34,7 @@ describe('API routes', () => {
   let tmpDir: string;
   let app: ReturnType<typeof Fastify>;
   let eventBus: EventBus;
-  let skillRegistry: SkillRegistry;
+  let suiteRegistry: SuiteRegistry;
   let scheduler: Scheduler;
 
   beforeAll(async () => {
@@ -42,7 +42,7 @@ describe('API routes', () => {
     initDatabase(join(tmpDir, 'test.db'));
 
     eventBus = new EventBus();
-    skillRegistry = new SkillRegistry();
+    suiteRegistry = new SuiteRegistry();
     const sessionManager = new SessionManager();
     scheduler = new Scheduler(eventBus, 'UTC');
     await scheduler.initialize([]);
@@ -60,7 +60,7 @@ describe('API routes', () => {
 
     const deps = {
       eventBus,
-      skillRegistry,
+      suiteRegistry,
       sessionManager,
       scheduler,
       agentManager: makeMockAgentManager() as any,
@@ -68,13 +68,13 @@ describe('API routes', () => {
       pendingApprovals,
       executionLogger,
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
-      configuredSkillCount: 0,
+      configuredSuiteCount: 0,
     };
 
     registerHealthRoute(app, deps);
     registerProjectRoutes(app);
     registerChatRoute(app, deps);
-    registerSkillRoutes(app, deps);
+    registerSuiteRoutes(app, deps);
     registerScheduleRoutes(app, deps);
     registerEventRoutes(app);
     registerAuditLogRoutes(app, auditLog);
@@ -183,8 +183,16 @@ describe('API routes', () => {
   });
 
   describe('GET /api/skills', () => {
-    it('returns empty array when no skills registered', async () => {
+    it('returns empty array when no suites registered', async () => {
       const res = await app.inject({ method: 'GET', url: '/api/skills' });
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.payload)).toEqual([]);
+    });
+  });
+
+  describe('GET /api/suites', () => {
+    it('returns empty array when no suites registered', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/suites' });
       expect(res.statusCode).toBe(200);
       expect(JSON.parse(res.payload)).toEqual([]);
     });

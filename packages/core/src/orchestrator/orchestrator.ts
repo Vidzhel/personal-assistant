@@ -2,45 +2,38 @@ import {
   createLogger,
   generateId,
   type NewEmailEvent,
-  type RavenEvent,
-  type RavenEventType,
   type ScheduleTriggeredEvent,
   type UserChatMessageEvent,
 } from '@raven/shared';
 import type { EventBus } from '../event-bus/event-bus.ts';
-import type { SkillRegistry } from '../skill-registry/skill-registry.ts';
-import type { McpManager } from '../mcp-manager/mcp-manager.ts';
+import type { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 import type { SessionManager } from '../session-manager/session-manager.ts';
 import type { MessageStore } from '../session-manager/message-store.ts';
-import { getDb } from '../db/database.ts';
 
 const log = createLogger('orchestrator');
 
 export interface OrchestratorDeps {
   eventBus: EventBus;
-  skillRegistry: SkillRegistry;
-  mcpManager: McpManager;
+  suiteRegistry: SuiteRegistry;
   sessionManager: SessionManager;
   messageStore: MessageStore;
 }
 
 /**
- * The Orchestrator subscribes to events and routes them to appropriate skill sub-agents.
+ * The Orchestrator subscribes to events and routes them to appropriate suite agents.
  *
  * CRITICAL: The orchestrator itself has NO MCP servers.
- * It delegates to skill-specific sub-agents that carry their own MCPs.
+ * It delegates to suite-specific sub-agents that carry their own MCPs.
  */
 export class Orchestrator {
   private eventBus: EventBus;
-  private skillRegistry: SkillRegistry;
-  private mcpManager: McpManager;
+  private suiteRegistry: SuiteRegistry;
   private sessionManager: SessionManager;
   private messageStore: MessageStore;
 
   constructor(deps: OrchestratorDeps) {
     this.eventBus = deps.eventBus;
-    this.skillRegistry = deps.skillRegistry;
-    this.mcpManager = deps.mcpManager;
+    this.suiteRegistry = deps.suiteRegistry;
     this.sessionManager = deps.sessionManager;
     this.messageStore = deps.messageStore;
     this.eventBus.on<NewEmailEvent>('email:new', (e) => this.handleNewEmail(e));
@@ -54,14 +47,13 @@ export class Orchestrator {
     const { from, subject, snippet } = event.payload;
     log.info(`New email from ${from}: ${subject}`);
 
-    // Spawn a gmail sub-agent to analyze the email
-    const gmailSkill = this.skillRegistry.getSkill('gmail');
-    if (!gmailSkill) {
-      log.warn('Gmail skill not available, ignoring email event');
+    const emailSuite = this.suiteRegistry.getSuite('email');
+    if (!emailSuite) {
+      log.warn('Email suite not available, ignoring email event');
       return;
     }
 
-    const mcpServers = gmailSkill.getMcpServers();
+    const mcpServers = emailSuite.mcpServers;
     const taskId = generateId();
 
     this.eventBus.emit({
@@ -81,7 +73,7 @@ export class Orchestrator {
           `Use the Gmail tools to read the full email if needed.`,
           `Provide a brief summary and indicate if this requires user action.`,
         ].join('\n'),
-        skillName: 'gmail',
+        skillName: 'email',
         mcpServers,
         priority: 'normal',
         projectId: event.projectId,
@@ -89,48 +81,37 @@ export class Orchestrator {
     });
   }
 
-  private async handleSchedule(event: ScheduleTriggeredEvent): Promise<void> {
+  private handleSchedule(event: ScheduleTriggeredEvent): void {
     const { taskType, scheduleName } = event.payload;
     log.info(`Schedule triggered: ${scheduleName} (${taskType})`);
 
-    const skill = this.skillRegistry.findSkillForTaskType(taskType);
-    if (!skill) {
-      log.warn(`No skill found for task type: ${taskType}`);
+    const suite = this.suiteRegistry.findSuiteForTaskType(taskType);
+    if (!suite) {
+      log.warn(`No suite found for task type: ${taskType}`);
       return;
     }
 
-    // Let the skill handle the scheduled task - it returns an agent task payload
-    // or void if it handled it internally
-    const payload = await skill.handleScheduledTask(taskType, {
-      eventBus: {
-        emit: (event: unknown) => this.eventBus.emit(event as RavenEvent),
-        on: (type: string, handler: (event: unknown) => void) =>
-          this.eventBus.on(type as RavenEventType, handler),
-        off: (type: string, handler: (event: unknown) => void) =>
-          this.eventBus.off(type as RavenEventType, handler),
-      },
-      db: (() => {
-        const db = getDb();
-        return {
-          run: (sql: string, ...p: unknown[]) => db.prepare(sql).run(...p),
-          get: <T>(sql: string, ...p: unknown[]) => db.prepare(sql).get(...p) as T | undefined,
-          all: <T>(sql: string, ...p: unknown[]) => db.prepare(sql).all(...p) as T[],
-        };
-      })(),
-      config: {},
-      logger: log,
-      getSkillData: async () => null,
-    });
+    // Collect agent definitions and MCPs from all enabled suites
+    // so the scheduled agent can delegate to other suites' agents
+    const agentDefinitions = this.suiteRegistry.collectAgentDefinitions();
+    const mcpServers = this.suiteRegistry.collectMcpServers();
 
-    if (payload) {
-      this.eventBus.emit({
-        id: generateId(),
-        timestamp: Date.now(),
-        source: 'orchestrator',
-        type: 'agent:task:request',
-        payload,
-      });
-    }
+    const taskId = generateId();
+
+    this.eventBus.emit({
+      id: generateId(),
+      timestamp: Date.now(),
+      source: 'orchestrator',
+      type: 'agent:task:request',
+      payload: {
+        taskId,
+        prompt: `Execute the scheduled task: ${scheduleName} (type: ${taskType}).`,
+        skillName: suite.manifest.name,
+        mcpServers,
+        agentDefinitions,
+        priority: 'normal',
+      },
+    });
   }
 
   private handleUserChat(event: UserChatMessageEvent): void {
@@ -147,19 +128,9 @@ export class Orchestrator {
       content: message,
     });
 
-    // Look up the project to know which skills are enabled
-    const db = getDb();
-    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId) as
-      | { skills: string }
-      | undefined;
-
-    const enabledSkills = project
-      ? (JSON.parse(project.skills) as string[])
-      : this.skillRegistry.getEnabledSkillNames();
-
-    // Collect sub-agent definitions from all enabled skills.
-    // The orchestrator agent itself has NO MCPs - it delegates via Task tool to sub-agents.
-    const agentDefinitions = this.skillRegistry.collectAgentDefinitions(enabledSkills);
+    // Collect sub-agent definitions from all enabled suites.
+    // The orchestrator agent itself has NO MCPs - it delegates via Agent tool to sub-agents.
+    const agentDefinitions = this.suiteRegistry.collectAgentDefinitions();
 
     const taskId = generateId();
 
@@ -173,7 +144,7 @@ export class Orchestrator {
         taskId,
         prompt: message,
         skillName: 'orchestrator',
-        mcpServers: this.skillRegistry.collectMcpServers(enabledSkills), // Declared for SDK to spawn; only sub-agents use them
+        mcpServers: this.suiteRegistry.collectMcpServers(), // Declared for SDK to spawn; only sub-agents use them
         agentDefinitions, // Sub-agents carry the MCPs
         priority: 'high',
         sessionId: session.id,

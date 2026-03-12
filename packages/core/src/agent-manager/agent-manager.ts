@@ -2,7 +2,7 @@ import { createLogger, generateId } from '@raven/shared';
 import type { AgentTask, AgentTaskRequestEvent } from '@raven/shared';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { McpManager } from '../mcp-manager/mcp-manager.ts';
-import type { SkillRegistry } from '../skill-registry/skill-registry.ts';
+import type { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 import type { PermissionEngine } from '../permission-engine/permission-engine.ts';
 import type { AuditLog } from '../permission-engine/audit-log.ts';
 import type { PendingApprovals } from '../permission-engine/pending-approvals.ts';
@@ -25,7 +25,7 @@ const log = createLogger('agent-manager');
 export interface AgentManagerDeps {
   eventBus: EventBus;
   mcpManager: McpManager;
-  skillRegistry: SkillRegistry;
+  suiteRegistry: SuiteRegistry;
   permissionEngine?: PermissionEngine;
   auditLog?: AuditLog;
   pendingApprovals?: PendingApprovals;
@@ -47,7 +47,7 @@ export class AgentManager {
   private maxConcurrent: number;
   private eventBus: EventBus;
   private mcpManager: McpManager;
-  private skillRegistry: SkillRegistry;
+  private suiteRegistry: SuiteRegistry;
   private permissionDeps?: PermissionDeps;
   private executionLogger?: ExecutionLogger;
   private messageStore?: MessageStore;
@@ -56,7 +56,7 @@ export class AgentManager {
   constructor(deps: AgentManagerDeps) {
     this.eventBus = deps.eventBus;
     this.mcpManager = deps.mcpManager;
-    this.skillRegistry = deps.skillRegistry;
+    this.suiteRegistry = deps.suiteRegistry;
     this.executionLogger = deps.executionLogger;
     this.messageStore = deps.messageStore;
     this.sessionManager = deps.sessionManager;
@@ -214,9 +214,8 @@ export class AgentManager {
   async executeApprovedAction(
     params: ApprovedActionParams,
   ): Promise<{ success: boolean; error?: string }> {
-    const mcpServers = this.mcpManager.resolveForSkill(params.skillName);
-    const skill = this.skillRegistry.getSkill(params.skillName);
-    const agentDefinitions = skill?.getAgentDefinitions?.() ?? {};
+    const mcpServers = this.mcpManager.resolveForSuite(params.skillName);
+    const agentDefinitions = this.suiteRegistry.collectAgentDefinitions([params.skillName]);
 
     const task: AgentTask = {
       id: generateId(),

@@ -6,7 +6,7 @@ const FAILURE_RATE_THRESHOLD = 0.2;
 
 export function registerHealthRoute(app: FastifyInstance, deps: ApiDeps): void {
   app.get('/api/health', async () => {
-    const skillNames = deps.skillRegistry.getEnabledSkillNames();
+    const suiteNames = deps.suiteRegistry.getEnabledSuiteNames();
     const taskStats = deps.executionLogger.getTaskStats(ONE_HOUR_MS);
     const mem = process.memoryUsage();
 
@@ -22,12 +22,12 @@ export function registerHealthRoute(app: FastifyInstance, deps: ApiDeps): void {
       dbStatus = 'error';
     }
 
-    const configuredCount = deps.configuredSkillCount;
-    const skillsDegraded = configuredCount > 0 && skillNames.length < configuredCount;
+    const configuredCount = deps.configuredSuiteCount;
+    const suitesDegraded = configuredCount > 0 && suiteNames.length < configuredCount;
     const overallStatus: 'ok' | 'degraded' | 'error' =
       dbStatus === 'error'
         ? 'error'
-        : skillsDegraded || failureRate >= FAILURE_RATE_THRESHOLD
+        : suitesDegraded || failureRate >= FAILURE_RATE_THRESHOLD
           ? 'degraded'
           : 'ok';
 
@@ -39,10 +39,10 @@ export function registerHealthRoute(app: FastifyInstance, deps: ApiDeps): void {
         database: { status: dbStatus, latencyMs: dbLatencyMs },
         eventBus: { status: 'ok', listenerCount: deps.eventBus.listenerCount() },
         skills: {
-          status: skillsDegraded ? 'degraded' : 'ok',
-          loaded: skillNames.length,
+          status: suitesDegraded ? 'degraded' : 'ok',
+          loaded: suiteNames.length,
           configured: configuredCount,
-          names: skillNames,
+          names: suiteNames,
         },
         scheduler: { status: 'ok', activeJobs: deps.scheduler.getActiveJobCount() },
         agentManager: {

@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import { createLogger } from '@raven/shared';
 import type { EventBus } from '../event-bus/event-bus.ts';
-import type { SkillRegistry } from '../skill-registry/skill-registry.ts';
+import type { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 import type { SessionManager } from '../session-manager/session-manager.ts';
 import type { Scheduler } from '../scheduler/scheduler.ts';
 import type { AgentManager } from '../agent-manager/agent-manager.ts';
@@ -15,7 +15,7 @@ import { registerHealthRoute } from './routes/health.ts';
 import { registerProjectRoutes } from './routes/projects.ts';
 import { registerSessionRoutes } from './routes/sessions.ts';
 import { registerChatRoute } from './routes/chat.ts';
-import { registerSkillRoutes } from './routes/skills.ts';
+import { registerSuiteRoutes } from './routes/suites.ts';
 import { registerScheduleRoutes } from './routes/schedules.ts';
 import { registerEventRoutes } from './routes/events.ts';
 import { registerAuditLogRoutes } from './routes/audit-logs.ts';
@@ -27,7 +27,7 @@ const log = createLogger('api');
 
 export interface ApiDeps {
   eventBus: EventBus;
-  skillRegistry: SkillRegistry;
+  suiteRegistry: SuiteRegistry;
   sessionManager: SessionManager;
   scheduler: Scheduler;
   agentManager: AgentManager;
@@ -35,7 +35,7 @@ export interface ApiDeps {
   pendingApprovals: PendingApprovals;
   executionLogger: ExecutionLogger;
   messageStore: MessageStore;
-  configuredSkillCount: number;
+  configuredSuiteCount: number;
 }
 
 export async function createApiServer(
@@ -52,7 +52,7 @@ export async function createApiServer(
   registerProjectRoutes(app);
   registerSessionRoutes(app, deps);
   registerChatRoute(app, deps);
-  registerSkillRoutes(app, deps);
+  registerSuiteRoutes(app, deps);
   registerScheduleRoutes(app, deps);
   registerEventRoutes(app);
   registerAuditLogRoutes(app, deps.auditLog);

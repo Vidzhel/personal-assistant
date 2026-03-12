@@ -1,67 +1,68 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Orchestrator } from '../orchestrator/orchestrator.ts';
 import { EventBus } from '../event-bus/event-bus.ts';
-import { SkillRegistry } from '../skill-registry/skill-registry.ts';
-import { McpManager } from '../mcp-manager/mcp-manager.ts';
+import { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 import { SessionManager } from '../session-manager/session-manager.ts';
 import { createMessageStore } from '../session-manager/message-store.ts';
 import { initDatabase, getDb } from '../db/database.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { RavenEvent, RavenSkill } from '@raven/shared';
+import type { RavenEvent, McpServerConfig } from '@raven/shared';
 
-function makeSkill(
-  name: string,
-  mcpServers: Record<string, { command: string; args: string[] }> = {},
-): RavenSkill {
-  return {
-    manifest: {
-      name,
-      displayName: name,
-      version: '1.0.0',
-      description: `${name} skill`,
-      capabilities: ['mcp-server'],
-      defaultSchedules: [
-        {
-          id: `${name}-sched`,
-          name: `${name} schedule`,
-          cron: '0 8 * * *',
-          taskType: `${name}-task`,
-          enabled: true,
-        },
-      ],
-    },
-    initialize: vi.fn().mockResolvedValue(undefined),
-    shutdown: vi.fn().mockResolvedValue(undefined),
-    getMcpServers: () => mcpServers,
-    getActions: () => [],
-    getAgentDefinitions: () => ({
-      [`${name}-agent`]: { description: `${name} agent`, prompt: `Do ${name} things` },
-    }),
-    handleScheduledTask: vi.fn().mockResolvedValue({
-      taskId: 'scheduled-task-1',
-      prompt: `Execute ${name} scheduled task`,
-      skillName: name,
-      mcpServers,
-      priority: 'normal' as const,
-    }),
-  };
+function makeSuiteRegistry(
+  suites: Array<{
+    name: string;
+    mcpServers?: Record<string, McpServerConfig>;
+    agents?: Array<{ name: string; description: string; prompt: string; tools: string[] }>;
+    schedules?: Array<{
+      id: string;
+      name: string;
+      cron: string;
+      taskType: string;
+      enabled: boolean;
+    }>;
+  }> = [],
+): SuiteRegistry {
+  const registry = new SuiteRegistry();
+  // Manually populate the internal map for testing
+  for (const suite of suites) {
+    (registry as any).suites.set(suite.name, {
+      manifest: {
+        name: suite.name,
+        displayName: suite.name,
+        version: '1.0.0',
+        description: `${suite.name} suite`,
+        capabilities: [],
+        requiresEnv: [],
+        services: [],
+      },
+      agents: (suite.agents ?? []).map((a) => ({
+        name: a.name,
+        description: a.description,
+        model: 'sonnet',
+        tools: a.tools,
+        maxTurns: 10,
+        prompt: a.prompt,
+      })),
+      mcpServers: suite.mcpServers ?? {},
+      actions: [],
+      schedules: suite.schedules ?? [],
+      suiteDir: '/tmp/test',
+    });
+  }
+  return registry;
 }
 
 describe('Orchestrator', () => {
   let tmpDir: string;
   let eventBus: EventBus;
-  let skillRegistry: SkillRegistry;
-  let mcpManager: McpManager;
   let _orchestrator: Orchestrator;
 
   beforeEach(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-orch-'));
     initDatabase(join(tmpDir, 'test.db'));
     eventBus = new EventBus();
-    skillRegistry = new SkillRegistry();
-    mcpManager = new McpManager(skillRegistry);
   });
 
   afterEach(() => {
@@ -75,10 +76,10 @@ describe('Orchestrator', () => {
   });
 
   it('user:chat:message emits agent:task:request with empty mcpServers', async () => {
+    const suiteRegistry = makeSuiteRegistry();
     _orchestrator = new Orchestrator({
       eventBus,
-      skillRegistry,
-      mcpManager,
+      suiteRegistry,
       sessionManager: new SessionManager(),
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
     });
@@ -110,25 +111,19 @@ describe('Orchestrator', () => {
     expect(payload.priority).toBe('high');
   });
 
-  it('email:new emits agent:task:request with gmail MCPs', async () => {
-    const gmailSkill = makeSkill('gmail', {
-      gmail_api: { command: 'node', args: ['gmail-mcp.js'] },
-    });
-    await skillRegistry.registerSkill(
-      gmailSkill,
-      {},
+  it('email:new emits agent:task:request with email MCPs', async () => {
+    const suiteRegistry = makeSuiteRegistry([
       {
-        eventBus: { emit: vi.fn(), on: vi.fn(), off: vi.fn() },
-        db: { run: vi.fn(), get: vi.fn(), all: vi.fn() },
-        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-        getSkillData: vi.fn().mockResolvedValue(null),
+        name: 'email',
+        mcpServers: {
+          email_gmail: { command: 'node', args: ['gmail-mcp.js'] },
+        },
       },
-    );
+    ]);
 
     _orchestrator = new Orchestrator({
       eventBus,
-      skillRegistry,
-      mcpManager,
+      suiteRegistry,
       sessionManager: new SessionManager(),
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
     });
@@ -153,27 +148,29 @@ describe('Orchestrator', () => {
 
     const event = await taskRequestPromise;
     const payload = (event as unknown as { payload: Record<string, unknown> }).payload;
-    expect(payload.skillName).toBe('gmail');
-    expect(payload.mcpServers).toHaveProperty('gmail_api');
+    expect(payload.skillName).toBe('email');
+    expect(payload.mcpServers).toHaveProperty('email_gmail');
   });
 
-  it('schedule:triggered delegates to skill handleScheduledTask', async () => {
-    const digestSkill = makeSkill('digest');
-    await skillRegistry.registerSkill(
-      digestSkill,
-      {},
+  it('schedule:triggered emits agent:task:request for matching suite', async () => {
+    const suiteRegistry = makeSuiteRegistry([
       {
-        eventBus: { emit: vi.fn(), on: vi.fn(), off: vi.fn() },
-        db: { run: vi.fn(), get: vi.fn(), all: vi.fn() },
-        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-        getSkillData: vi.fn().mockResolvedValue(null),
+        name: 'daily-briefing',
+        schedules: [
+          {
+            id: 'morning-digest',
+            name: 'Morning Digest',
+            cron: '0 8 * * *',
+            taskType: 'morning-digest',
+            enabled: true,
+          },
+        ],
       },
-    );
+    ]);
 
     _orchestrator = new Orchestrator({
       eventBus,
-      skillRegistry,
-      mcpManager,
+      suiteRegistry,
       sessionManager: new SessionManager(),
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
     });
@@ -188,31 +185,23 @@ describe('Orchestrator', () => {
       source: 'scheduler',
       type: 'schedule:triggered',
       payload: {
-        scheduleId: 'digest-sched',
-        scheduleName: 'digest schedule',
-        taskType: 'digest-task',
+        scheduleId: 'morning-digest',
+        scheduleName: 'Morning Digest',
+        taskType: 'morning-digest',
       },
     } as RavenEvent);
 
-    // Wait for async handler
-    await taskRequestPromise;
-    expect(digestSkill.handleScheduledTask).toHaveBeenCalledWith(
-      'digest-task',
-      expect.objectContaining({
-        db: expect.objectContaining({
-          run: expect.any(Function),
-          get: expect.any(Function),
-          all: expect.any(Function),
-        }),
-      }),
-    );
+    const event = await taskRequestPromise;
+    const payload = (event as unknown as { payload: Record<string, unknown> }).payload;
+    expect(payload.skillName).toBe('daily-briefing');
   });
 
   it('schedule:triggered with unknown taskType logs warning and does not emit', async () => {
+    const suiteRegistry = makeSuiteRegistry();
+
     _orchestrator = new Orchestrator({
       eventBus,
-      skillRegistry,
-      mcpManager,
+      suiteRegistry,
       sessionManager: new SessionManager(),
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
     });
