@@ -1,7 +1,7 @@
-import { defineSuite } from '@raven/shared';
+import { defineSuite, SUITE_TASK_MANAGEMENT } from '@raven/shared';
 
 export default defineSuite({
-  name: 'task-management',
+  name: SUITE_TASK_MANAGEMENT,
   displayName: 'Task Management',
   version: '0.1.0',
   description: 'Task management via TickTick',

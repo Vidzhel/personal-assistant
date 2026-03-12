@@ -34,7 +34,7 @@ export function createCliBackend(): AgentBackend {
         tmpMcpDir = await mkdtemp(join(tmpdir(), 'raven-mcp-'));
         const mcpConfigPath = join(tmpMcpDir, 'mcp.json');
         await writeFile(mcpConfigPath, JSON.stringify({ mcpServers: opts.mcpServers }));
-        args.push('--mcp-config', mcpConfigPath);
+        args.push('--mcp-config', mcpConfigPath, '--strict-mcp-config');
       }
 
       // Sub-agent definitions

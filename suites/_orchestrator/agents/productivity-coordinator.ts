@@ -1,10 +1,10 @@
-import { defineAgent } from '@raven/shared';
+import { defineAgent, AGENT_PRODUCTIVITY_COORD, AGENT_TICKTICK, AGENT_GMAIL, AGENT_DIGEST, AGENT_TELEGRAM } from '@raven/shared';
 
 export default defineAgent({
-  name: 'productivity-coordinator',
+  name: AGENT_PRODUCTIVITY_COORD,
   description: 'Coordinates task management, email, and daily planning.',
   model: 'sonnet',
-  tools: ['Agent(ticktick-agent, gmail-agent, digest-agent, telegram-notifier)', 'Read', 'Grep'],
+  tools: [`Agent(${AGENT_TICKTICK}, ${AGENT_GMAIL}, ${AGENT_DIGEST}, ${AGENT_TELEGRAM})`, 'Read', 'Grep'],
   maxTurns: 15,
   prompt: `You coordinate productivity workflows within Raven. Delegate to specialized agents:
 - Task operations (create, list, update, complete) → ticktick-agent

@@ -1,5 +1,5 @@
 import { ImapFlow } from 'imapflow';
-import { generateId, type EventBusInterface, type LoggerInterface } from '@raven/shared';
+import { generateId, SOURCE_GMAIL, type EventBusInterface, type LoggerInterface } from '@raven/shared';
 import type { ServiceContext, SuiteService } from '@raven/core/suite-registry/service-runner.ts';
 
 let client: ImapFlow | null = null;
@@ -88,7 +88,7 @@ async function fetchNewMessages(folder: string, from: number, to: number): Promi
       eventBus.emit({
         id: generateId(),
         timestamp: Date.now(),
-        source: 'gmail',
+        source: SOURCE_GMAIL,
         type: 'email:new',
         payload: {
           from: fromAddr,

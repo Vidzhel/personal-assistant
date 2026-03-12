@@ -1,7 +1,7 @@
-import { defineSuite } from '@raven/shared';
+import { defineSuite, SUITE_EMAIL } from '@raven/shared';
 
 export default defineSuite({
-  name: 'email',
+  name: SUITE_EMAIL,
   displayName: 'Email',
   version: '0.1.0',
   description: 'Email monitoring and management via Gmail',

@@ -1,10 +1,10 @@
-import { defineAgent } from '@raven/shared';
+import { defineAgent, AGENT_COMMUNICATION_COORD, AGENT_TELEGRAM } from '@raven/shared';
 
 export default defineAgent({
-  name: 'communication-coordinator',
+  name: AGENT_COMMUNICATION_COORD,
   description: 'Coordinates messaging and notification delivery.',
   model: 'sonnet',
-  tools: ['Agent(telegram-notifier)', 'Read', 'Grep'],
+  tools: [`Agent(${AGENT_TELEGRAM})`, 'Read', 'Grep'],
   maxTurns: 10,
   prompt: `You coordinate communication and notification workflows within Raven.
 - Send messages and notifications → telegram-notifier

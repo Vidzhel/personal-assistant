@@ -20,6 +20,7 @@ export function createSdkBackend(): AgentBackend {
 
     if (Object.keys(opts.mcpServers).length > 0) {
       queryOptions.mcpServers = opts.mcpServers;
+      queryOptions.strictMcpConfig = true;
     }
 
     if (Object.keys(opts.agents).length > 0) {

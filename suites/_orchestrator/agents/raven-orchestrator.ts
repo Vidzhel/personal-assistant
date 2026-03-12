@@ -1,10 +1,10 @@
-import { defineAgent } from '@raven/shared';
+import { defineAgent, AGENT_ORCHESTRATOR, AGENT_PRODUCTIVITY_COORD, AGENT_COMMUNICATION_COORD } from '@raven/shared';
 
 export default defineAgent({
-  name: 'raven-orchestrator',
+  name: AGENT_ORCHESTRATOR,
   description: 'Top-level Raven router that delegates to domain coordinators.',
   model: 'sonnet',
-  tools: ['Agent(productivity-coordinator, communication-coordinator)', 'Read', 'Glob', 'Grep'],
+  tools: [`Agent(${AGENT_PRODUCTIVITY_COORD}, ${AGENT_COMMUNICATION_COORD})`, 'Read', 'Glob', 'Grep'],
   maxTurns: 20,
   prompt: `You are Raven, a personal life operating system.
 

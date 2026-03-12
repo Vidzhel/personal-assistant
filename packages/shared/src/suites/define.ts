@@ -110,13 +110,26 @@ export function parseMcpConfig(data: unknown): McpConfig {
 
 /**
  * Resolves ${ENV_VAR} placeholders in MCP env values from process.env.
+ * Throws if any referenced env vars are missing.
  */
 export function resolveEnvVars(env: Record<string, string>): Record<string, string> {
   const resolved: Record<string, string> = {};
+  const missing: string[] = [];
+
   for (const [key, value] of Object.entries(env)) {
     resolved[key] = value.replace(/\$\{([^}]+)\}/g, (_match, varName: string) => {
-      return process.env[varName] ?? '';
+      const val = process.env[varName];
+      if (val === undefined) {
+        missing.push(varName);
+        return '';
+      }
+      return val;
     });
   }
+
+  if (missing.length > 0) {
+    throw new Error(`Missing required env vars: ${[...new Set(missing)].join(', ')}`);
+  }
+
   return resolved;
 }

@@ -5,6 +5,7 @@ import {
   buildLocalToNamespacedMap,
   rewriteAgentMcpRefs,
   MCP_TOOL_WILDCARD_RE,
+  SUITE_ORCHESTRATOR,
   type McpServerConfig,
   type SubAgentDefinition,
   type SkillAction,
@@ -30,7 +31,7 @@ export class SuiteRegistry {
       if (!s.isDirectory()) continue;
 
       // _orchestrator is always loaded
-      const isOrchestrator = entry === '_orchestrator';
+      const isOrchestrator = entry === SUITE_ORCHESTRATOR;
       const suiteConfig = config[entry];
 
       if (!isOrchestrator && !suiteConfig?.enabled) {
@@ -48,7 +49,8 @@ export class SuiteRegistry {
         );
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        log.warn(`Failed to load suite '${entry}': ${msg}`);
+        const level = msg.includes('missing required env vars') ? 'error' : 'warn';
+        log[level](`Failed to load suite '${entry}': ${msg}`);
       }
     }
   }

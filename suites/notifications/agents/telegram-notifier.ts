@@ -1,7 +1,7 @@
-import { defineAgent } from '@raven/shared';
+import { defineAgent, AGENT_TELEGRAM } from '@raven/shared';
 
 export default defineAgent({
-  name: 'telegram-notifier',
+  name: AGENT_TELEGRAM,
   description:
     'Sends messages and notifications to the user via Telegram. Use when you need to deliver results or alerts.',
   model: 'haiku',

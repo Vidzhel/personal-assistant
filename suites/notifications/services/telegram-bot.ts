@@ -1,5 +1,5 @@
 import { Bot } from 'grammy';
-import { generateId, type EventBusInterface, type LoggerInterface } from '@raven/shared';
+import { generateId, SOURCE_TELEGRAM, PROJECT_TELEGRAM_DEFAULT, type EventBusInterface, type LoggerInterface } from '@raven/shared';
 import type { ServiceContext, SuiteService } from '@raven/core/suite-registry/service-runner.ts';
 
 let bot: Bot | null = null;
@@ -46,10 +46,10 @@ const service: SuiteService = {
       eventBus.emit({
         id: generateId(),
         timestamp: Date.now(),
-        source: 'telegram',
+        source: SOURCE_TELEGRAM,
         type: 'user:chat:message',
         payload: {
-          projectId: 'telegram-default',
+          projectId: PROJECT_TELEGRAM_DEFAULT,
           message: text,
         },
       } as unknown);
@@ -65,10 +65,10 @@ const service: SuiteService = {
       eventBus.emit({
         id: generateId(),
         timestamp: Date.now(),
-        source: 'telegram',
+        source: SOURCE_TELEGRAM,
         type: 'user:chat:message',
         payload: {
-          projectId: 'telegram-default',
+          projectId: PROJECT_TELEGRAM_DEFAULT,
           message: data,
         },
       } as unknown);

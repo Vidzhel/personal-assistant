@@ -1,4 +1,4 @@
-import type { AgentTask, Project } from '@raven/shared';
+import { SKILL_ORCHESTRATOR, type AgentTask, type Project } from '@raven/shared';
 
 export function buildSystemPrompt(task: AgentTask, project?: Project): string {
   const parts: string[] = [
@@ -11,7 +11,7 @@ export function buildSystemPrompt(task: AgentTask, project?: Project): string {
     '- Format responses in markdown when appropriate',
   ];
 
-  if (task.skillName === 'orchestrator') {
+  if (task.skillName === SKILL_ORCHESTRATOR) {
     parts.push(
       '',
       '## Delegation',
