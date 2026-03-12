@@ -399,3 +399,56 @@ Claude Opus 4.6
   - **New tests**: `message-store.test.ts` (4 tests: append, ordering, pagination, empty session). Agent-manager tests: message store integration verifying assistant-before-action ordering. E2E tests: session creation, message history retrieval, message ordering verification. Fixed model string to `claude-sonnet-4-6`.
   - **TickTick investigation**: Documented MCP server connection findings
   - All 205 tests pass, 0 lint errors, build + check clean
+- 2026-03-08: Port migration to 400x range (`826e9c0`):
+  - Moved all service ports: frontend 3000→4000, backend 3001→4001, OAuth callbacks 8080→4002
+  - Updated config defaults, Docker, scripts, tests, and documentation across 21 files
+- 2026-03-08: Session history & custom TickTick MCP (`f74c0e5`):
+  - Conversation history now passed to sub-agents via `formatConversationHistory()`
+  - Added `messageId` to `AgentMessageEvent` with deduplication in `useChat` hook
+  - Replaced broken upstream TickTick MCP (`@alexarevalo.ai/mcp-server-ticktick`) with custom `@raven/mcp-ticktick` package (14 tools, pure TypeScript, runs via `--experimental-strip-types`)
+  - New package: `packages/mcp-ticktick/` with `client.ts`, `tools.ts`, `index.ts`
+  - Fixed ESLint `.js` import rule to only flag relative imports
+- 2026-03-08: Session bug fixes & TickTick MCP overhaul (`87f8e61`):
+  - Fixed 400 error on New Session (only set Content-Type when body exists)
+  - Fixed WS message duplication via processed message index ref
+  - Added copy session ID button and `SessionDebugPanel` component with collapsible sections and copy buttons
+  - Fixed TickTick API paths (`getTask`, `updateTask`, `deleteTask`) per official docs
+  - Added `filterTasks`, `getCompletedTasks`, `moveTasks` endpoints to TickTick client
+  - Added `filter_tasks`, `get_completed_tasks`, `move_task` MCP tools
+  - Added missing task fields (reminders, repeatFlag, kind, etag, sortOrder)
+  - Refactored `get_all_tasks` and `get_today_tasks` to use filter API
+  - Added manual test scenarios (`manual-tests/09-sessions.md`)
+- 2026-03-10: MCP isolation enforcement & message attribution (`e7a747b`):
+  - Orchestrator no longer gets MCP wildcards in `allowedTools` — delegates to sub-agents via Agent tool instead of trying ToolSearch for MCP tools
+  - System prompt now gives explicit delegation instructions for orchestrator mode
+  - Backend callbacks (`onAssistantMessage`, `onToolUse`) now pass `ToolUseMeta` with `parent_tool_use_id` and `toolUseId`, enabling `agentName` tracking on `StoredMessage`
+  - Added TickTick MCP integration test suite (`packages/mcp-ticktick/src/__tests__/`) — real API tests skip without `TICKTICK_ACCESS_TOKEN`, startup validation always runs
+  - New files: `mcp-test-client.ts`, `ticktick-mcp.test.ts`, `vitest.config.ts`
+- 2026-03-10: Skill test framework (`5a1184c`):
+  - Added `scripts/test-ticktick-manual.ts` for full TickTick MCP lifecycle testing (list projects, list tasks, create/update/reschedule/delete)
+  - Created `scripts/skill-tests/` framework with MCP tester helpers, mock context, runner, and type definitions
+  - Test suites for all 4 skills: ticktick (208 lines), gmail (121 lines), digest (103 lines), telegram (93 lines)
+- 2026-03-11: Tool result capture & retry awareness (`6afc5d3`):
+  - Fixed orchestrator retry loops by capturing `tool_result` blocks from SDK stream (user-type messages)
+  - Stored tool results in session transcript with success/error status
+  - Included action + tool-result messages in conversation history sent to sub-agents
+  - Incremented session `turnCount` after each agent task completion
+  - Added retry awareness guidance to system prompt
+  - Root cause: orchestrator couldn't see what tools were tried or what failed, so it kept retrying the same actions
+- 2026-03-11: Debug view & skill registry enhancements (`24bd3e2`):
+  - Added `skill-registry.test.ts` unit tests
+  - Enhanced execution logger, agent-tasks route, sessions route, and audit log with additional query capabilities
+  - Added skill registry `collectAgentDefinitions()` enhancements
+  - Updated project page with expanded debug UI (89 lines changed)
+  - Added `.idea/` IDE config files (WebStorm)
+- 2026-03-11: MCP server config wiring (`4c0c5cc`):
+  - String refs in `mcpServers` weren't resolving correctly in CLI SDK — switched to embedding full config Records (command/args/env) directly in agent definitions
+  - Changed `SubAgentDefinition.mcpServers` from `string[]` to `Array<Record<string, McpServerConfig>>`
+  - `collectAgentDefinitions()` now builds full config specs from skill MCPs
+  - Removed hardcoded tool names from TickTick agent prompt — model discovers available MCP tools from context automatically
+  - Added debug logging in CLI backend for MCP config diagnostics
+  - Added 2 unit tests verifying MCP config embedding
+- 2026-03-11: MCP wildcard inheritance fix (`a44c1f1`):
+  - Sub-agents inherit tools from parent conversation, but parent's `allowedTools` excluded MCP wildcards — MCP tools unavailable even with `--mcp-config`, causing model to hallucinate tool names
+  - Fix: always include MCP wildcards in parent's `allowedTools` (orchestrator system prompt already prevents direct MCP use)
+  - Reverted `SubAgentDefinition.mcpServers` back to `string[]` (refs to parent's servers) — inline configs from `4c0c5cc` risked spawning duplicate server instances
