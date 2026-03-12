@@ -7,7 +7,6 @@
     "packages/shared",
     "packages/core",
     "packages/web",
-    "packages/skills/*",
     "packages/mcp-ticktick"
   ],
   "scripts": {
@@ -16,10 +15,10 @@
     "dev:core": "npm run dev -w packages/core",
     "dev:web": "npm run dev -w packages/web",
     "start:core": "npm run start -w packages/core",
-    "lint": "eslint packages/*/src packages/skills/*/src && tsc --noEmit -p packages/shared && tsc --noEmit -p packages/core",
-    "lint:fix": "eslint --fix packages/*/src packages/skills/*/src",
-    "format": "prettier --write 'packages/*/src/**/*.{ts,tsx}' 'packages/skills/*/src/**/*.ts'",
-    "format:check": "prettier --check 'packages/*/src/**/*.{ts,tsx}' 'packages/skills/*/src/**/*.ts'",
+    "lint": "eslint packages/*/src && tsc --noEmit -p packages/shared && tsc --noEmit -p packages/core",
+    "lint:fix": "eslint --fix packages/*/src",
+    "format": "prettier --write 'packages/*/src/**/*.{ts,tsx}'",
+    "format:check": "prettier --check 'packages/*/src/**/*.{ts,tsx}'",
     "check:strip-types": "bash scripts/check-strip-types.sh",
     "check": "npm run format:check && npm run lint && npm run check:strip-types",
     "test": "vitest run",

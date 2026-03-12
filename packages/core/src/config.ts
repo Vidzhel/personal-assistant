@@ -71,6 +71,20 @@ export function loadSkillsConfig(configDir: string): SkillsConfig {
   return JSON.parse(raw) as SkillsConfig;
 }
 
+export interface SuitesConfig {
+  [suiteName: string]: {
+    enabled: boolean;
+    config?: Record<string, unknown>;
+  };
+}
+
+export function loadSuitesConfig(configDir: string): SuitesConfig {
+  const path = resolve(configDir, 'suites.json');
+  if (!existsSync(path)) return {};
+  const raw = readFileSync(path, 'utf-8');
+  return JSON.parse(raw) as SuitesConfig;
+}
+
 export interface ScheduleConfig {
   id: string;
   name: string;

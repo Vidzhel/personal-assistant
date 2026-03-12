@@ -32,7 +32,7 @@ import { tmpdir } from 'node:os';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { AgentManager } from '../agent-manager/agent-manager.ts';
 import { EventBus } from '../event-bus/event-bus.ts';
-import { SkillRegistry } from '../skill-registry/skill-registry.ts';
+import { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 import { McpManager } from '../mcp-manager/mcp-manager.ts';
 import { createMessageStore, type MessageStore } from '../session-manager/message-store.ts';
 import type { RavenEvent, AgentTaskRequestEvent } from '@raven/shared';
@@ -41,15 +41,15 @@ const mockQuery = vi.mocked(query);
 
 describe('AgentManager', () => {
   let eventBus: EventBus;
-  let skillRegistry: SkillRegistry;
+  let suiteRegistry: SuiteRegistry;
   let mcpManager: McpManager;
   let agentManager: AgentManager;
 
   beforeEach(() => {
     eventBus = new EventBus();
-    skillRegistry = new SkillRegistry();
-    mcpManager = new McpManager(skillRegistry);
-    agentManager = new AgentManager({ eventBus, mcpManager, skillRegistry });
+    suiteRegistry = new SuiteRegistry();
+    mcpManager = new McpManager(suiteRegistry);
+    agentManager = new AgentManager({ eventBus, mcpManager, suiteRegistry });
     mockQuery.mockReset();
   });
 
@@ -197,7 +197,7 @@ describe('AgentManager', () => {
     beforeEach(() => {
       tmpDir = mkdtempSync(join(tmpdir(), 'raven-am-'));
       messageStore = createMessageStore({ basePath: tmpDir });
-      _amWithStore = new AgentManager({ eventBus, mcpManager, skillRegistry, messageStore });
+      _amWithStore = new AgentManager({ eventBus, mcpManager, suiteRegistry, messageStore });
     });
 
     afterEach(() => {

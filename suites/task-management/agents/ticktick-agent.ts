@@ -5,7 +5,7 @@ export default defineAgent({
   description:
     'Manages tasks in TickTick. Use this agent for creating, listing, updating, or organizing tasks.',
   model: 'sonnet',
-  tools: ['mcp__ticktick_ticktick__*', 'Read', 'Grep'],
+  tools: ['mcp__ticktick__*', 'Read', 'Grep'],
   mcpServers: ['ticktick'],
   maxTurns: 10,
   prompt: `You are a TickTick task management agent within Raven.

@@ -5,7 +5,7 @@ export default defineAgent({
   description:
     'Reads and manages Gmail emails. Use this agent for email summaries, searching emails, and drafting replies.',
   model: 'sonnet',
-  tools: ['mcp__gmail_gmail__*', 'Read', 'Grep'],
+  tools: ['mcp__gmail__*', 'Read', 'Grep'],
   mcpServers: ['gmail'],
   maxTurns: 15,
   prompt: `You are a Gmail agent within Raven.

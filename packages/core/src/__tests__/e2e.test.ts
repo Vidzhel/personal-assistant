@@ -40,7 +40,7 @@ vi.mock('../config.ts', () => {
       if (!config) throw new Error('Config not loaded');
       return config;
     },
-    loadSkillsConfig: () => ({}),
+    loadSuitesConfig: () => ({}),
     loadSchedulesConfig: () => [],
   };
 });
@@ -50,7 +50,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { EventBus } from '../event-bus/event-bus.ts';
 import { initDatabase, getDb } from '../db/database.ts';
-import { SkillRegistry } from '../skill-registry/skill-registry.ts';
+import { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 import { McpManager } from '../mcp-manager/mcp-manager.ts';
 import { AgentManager } from '../agent-manager/agent-manager.ts';
 import { SessionManager } from '../session-manager/session-manager.ts';
@@ -85,14 +85,13 @@ describe('E2E: Full boot → chat → events flow', () => {
 
     // Init all components
     eventBus = new EventBus();
-    const skillRegistry = new SkillRegistry();
-    const mcpManager = new McpManager(skillRegistry);
+    const suiteRegistry = new SuiteRegistry();
+    const mcpManager = new McpManager(suiteRegistry);
     const sessionManager = new SessionManager();
     const messageStore = createMessageStore({ basePath: join(tmpDir, 'sessions') });
     const _orchestrator = new Orchestrator({
       eventBus,
-      skillRegistry,
-      mcpManager,
+      suiteRegistry,
       sessionManager,
       messageStore,
     });
@@ -105,12 +104,12 @@ describe('E2E: Full boot → chat → events flow', () => {
     const pendingApprovals = createPendingApprovals(getDb());
     pendingApprovals.initialize();
     executionLogger = createExecutionLogger({ db: getDb() });
-    agentManager = new AgentManager({ eventBus, mcpManager, skillRegistry, executionLogger });
+    agentManager = new AgentManager({ eventBus, mcpManager, suiteRegistry, executionLogger });
 
     server = await createApiServer(
       {
         eventBus,
-        skillRegistry,
+        suiteRegistry,
         sessionManager,
         scheduler,
         agentManager,
@@ -118,7 +117,7 @@ describe('E2E: Full boot → chat → events flow', () => {
         pendingApprovals,
         executionLogger,
         messageStore,
-        configuredSkillCount: 0,
+        configuredSuiteCount: 0,
       },
       0, // Let OS assign port
     );
@@ -142,7 +141,7 @@ describe('E2E: Full boot → chat → events flow', () => {
     const res = await fetch(`http://localhost:${port}/api/health`);
     expect(res.ok).toBe(true);
     const body = (await res.json()) as Record<string, unknown>;
-    // Status is 'ok' when configuredSkillCount=0 and no skills loaded (no failures to detect)
+    // Status is 'ok' when configuredSuiteCount=0 and no suites loaded (no failures to detect)
     expect(body.status).toBe('ok');
     expect(body).toHaveProperty('subsystems');
     expect(body).toHaveProperty('taskStats');

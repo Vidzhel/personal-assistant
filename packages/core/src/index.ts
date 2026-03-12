@@ -1,10 +1,11 @@
 import { resolve, dirname } from 'node:path';
 import { mkdirSync, existsSync } from 'node:fs';
-import { createLogger, generateId, type RavenEvent, type RavenEventType } from '@raven/shared';
-import { loadConfig, loadSkillsConfig, loadSchedulesConfig, projectRoot } from './config.ts';
+import { createLogger, type RavenEvent, type RavenEventType } from '@raven/shared';
+import { loadConfig, loadSuitesConfig, loadSchedulesConfig, projectRoot } from './config.ts';
 import { initDatabase, createDbInterface, getDb } from './db/database.ts';
 import { EventBus } from './event-bus/event-bus.ts';
-import { SkillRegistry } from './skill-registry/skill-registry.ts';
+import { SuiteRegistry } from './suite-registry/suite-registry.ts';
+import { ServiceRunner } from './suite-registry/service-runner.ts';
 import { McpManager } from './mcp-manager/mcp-manager.ts';
 import { AgentManager } from './agent-manager/agent-manager.ts';
 import { SessionManager } from './session-manager/session-manager.ts';
@@ -44,13 +45,20 @@ async function main(): Promise<void> {
   // 4. Init event bus
   const eventBus = new EventBus();
 
-  // 5. Init skill registry
-  const skillRegistry = new SkillRegistry();
-
-  // 6. Load and register skills
+  // 5. Init suite registry and load suites
+  const suiteRegistry = new SuiteRegistry();
   const configDir = resolve(projectRoot, 'config');
-  const skillsConfig = loadSkillsConfig(configDir);
+  const suitesConfig = loadSuitesConfig(configDir);
+  const suitesDir = resolve(projectRoot, 'suites');
 
+  await suiteRegistry.loadSuites(suitesDir, suitesConfig);
+  suiteRegistry.validateAgentTools();
+
+  // Count configured (enabled) suites
+  const configuredSuiteCount = Object.values(suitesConfig).filter((s) => s?.enabled).length;
+
+  // 6. Start suite services (IMAP watcher, Telegram bot, etc.)
+  const serviceRunner = new ServiceRunner();
   const baseContext = {
     eventBus: {
       emit: (event: unknown) => eventBus.emit(event as RavenEvent),
@@ -61,58 +69,13 @@ async function main(): Promise<void> {
     },
     db: dbInterface,
     logger: log,
-    getSkillData: async () => null,
+    config: {},
   };
 
-  // Count configured (enabled) skills before loading
-  const configuredSkillCount = Object.values(skillsConfig).filter((s) => s?.enabled).length;
-
-  // Dynamic skill loading from packages/skills/
-  const skillModules: Record<string, string> = {
-    ticktick: resolve(projectRoot, 'packages/skills/skill-ticktick/dist/index.js'),
-    gmail: resolve(projectRoot, 'packages/skills/skill-gmail/dist/index.js'),
-    digest: resolve(projectRoot, 'packages/skills/skill-digest/dist/index.js'),
-    telegram: resolve(projectRoot, 'packages/skills/skill-telegram/dist/index.js'),
-  };
-
-  for (const [name, modulePath] of Object.entries(skillModules)) {
-    const skillConfig = skillsConfig[name];
-    if (!skillConfig?.enabled) {
-      log.info(`Skill '${name}' is disabled, skipping`);
-      continue;
-    }
-
-    try {
-      const mod = await import(modulePath);
-      const createSkill = mod.default ?? mod.createSkill;
-      if (typeof createSkill === 'function') {
-        const skill = createSkill();
-        await skillRegistry.registerSkill(skill, skillConfig.config ?? {}, baseContext);
-      } else {
-        log.warn(`Skill '${name}' does not export a factory function`);
-      }
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      log.warn(`Failed to load skill '${name}': ${errMsg}`);
-      eventBus.emit({
-        id: generateId(),
-        timestamp: Date.now(),
-        source: 'skill-registry',
-        type: 'system:health:alert',
-        payload: {
-          severity: 'error' as const,
-          source: 'skill-registry',
-          message: `Failed to load skill '${name}': ${errMsg}`,
-        },
-      });
-    }
-  }
-
-  // 6b. Validate agent tool patterns match registered MCP servers
-  skillRegistry.validateAgentTools();
+  await serviceRunner.startServices(suiteRegistry.getAllSuites(), baseContext);
 
   // 7. Init permission engine
-  const permissionEngine = createPermissionEngine({ skillRegistry, eventBus });
+  const permissionEngine = createPermissionEngine({ suiteRegistry, eventBus });
   permissionEngine.initialize(configDir);
   log.info('Permission engine initialized');
 
@@ -131,7 +94,7 @@ async function main(): Promise<void> {
   log.info('Execution logger initialized');
 
   // 8. Init MCP manager
-  const mcpManager = new McpManager(skillRegistry);
+  const mcpManager = new McpManager(suiteRegistry);
 
   // 9. Init session manager + message store
   const sessionManager = new SessionManager();
@@ -141,7 +104,7 @@ async function main(): Promise<void> {
   const agentManager = new AgentManager({
     eventBus,
     mcpManager,
-    skillRegistry,
+    suiteRegistry,
     permissionEngine,
     auditLog,
     pendingApprovals,
@@ -153,8 +116,7 @@ async function main(): Promise<void> {
   // 11. Init orchestrator
   const _orchestrator = new Orchestrator({
     eventBus,
-    skillRegistry,
-    mcpManager,
+    suiteRegistry,
     sessionManager,
     messageStore,
   });
@@ -168,7 +130,7 @@ async function main(): Promise<void> {
   const server = await createApiServer(
     {
       eventBus,
-      skillRegistry,
+      suiteRegistry,
       sessionManager,
       scheduler,
       agentManager,
@@ -176,7 +138,7 @@ async function main(): Promise<void> {
       pendingApprovals,
       executionLogger,
       messageStore,
-      configuredSkillCount,
+      configuredSuiteCount,
     },
     config.RAVEN_PORT,
   );
@@ -188,7 +150,7 @@ async function main(): Promise<void> {
     log.info('Shutting down...');
     permissionEngine.shutdown();
     scheduler.shutdown();
-    await skillRegistry.shutdown();
+    await serviceRunner.stopAll();
     await server.close();
     log.info('Goodbye!');
     process.exit(0);

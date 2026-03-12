@@ -10,7 +10,7 @@ import {
   type SkillAction,
 } from '@raven/shared';
 import type { EventBus } from '../event-bus/event-bus.ts';
-import type { SkillRegistry } from '../skill-registry/skill-registry.ts';
+import type { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 
 const log = createLogger('permission-engine');
 const CONFIG_FILENAME = 'permissions.json';
@@ -23,12 +23,12 @@ export interface PermissionEngine {
 }
 
 interface PermissionEngineDeps {
-  skillRegistry: SkillRegistry;
+  suiteRegistry: SuiteRegistry;
   eventBus: EventBus;
 }
 
 export function createPermissionEngine(deps: PermissionEngineDeps): PermissionEngine {
-  const { skillRegistry, eventBus } = deps;
+  const { suiteRegistry, eventBus } = deps;
   let currentConfig: PermissionConfig = {};
   let actionMap: Map<string, SkillAction> = new Map();
   let watcher: FSWatcher | null = null;
@@ -75,7 +75,7 @@ export function createPermissionEngine(deps: PermissionEngineDeps): PermissionEn
   }
 
   function refreshActionMap(): void {
-    const allActions = skillRegistry.collectActions();
+    const allActions = suiteRegistry.collectActions();
     actionMap = new Map(allActions.map((a) => [a.name, a]));
   }
 
