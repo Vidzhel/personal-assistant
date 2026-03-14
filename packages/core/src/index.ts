@@ -20,6 +20,8 @@ import { createExecutionLogger } from './agent-manager/execution-logger.ts';
 import { initializeBackend } from './agent-manager/agent-session.ts';
 import { createPipelineEngine } from './pipeline-engine/pipeline-engine.ts';
 import { createPipelineStore } from './pipeline-engine/pipeline-store.ts';
+import { createPipelineScheduler } from './pipeline-engine/pipeline-scheduler.ts';
+import { createPipelineEventTrigger } from './pipeline-engine/pipeline-event-trigger.ts';
 
 const log = createLogger('raven');
 
@@ -140,6 +142,27 @@ async function main(): Promise<void> {
   pipelineEngine.initialize(pipelinesDir);
   log.info('Pipeline engine initialized');
 
+  // 12c. Init pipeline scheduler (cron triggers) and event triggers
+  const pipelineScheduler = createPipelineScheduler({
+    pipelineEngine,
+    eventBus,
+    timezone: config.RAVEN_TIMEZONE,
+  });
+  const pipelineEventTrigger = createPipelineEventTrigger({
+    pipelineEngine,
+    eventBus,
+  });
+  pipelineScheduler.registerPipelines();
+  pipelineEventTrigger.registerPipelines();
+
+  const cronCount = pipelineEngine
+    .getAllPipelines()
+    .filter((p) => p.config.enabled && p.config.trigger.type === 'cron').length;
+  const eventCount = pipelineEngine
+    .getAllPipelines()
+    .filter((p) => p.config.enabled && p.config.trigger.type === 'event').length;
+  log.info(`Pipeline scheduler: ${cronCount} cron jobs, ${eventCount} event triggers`);
+
   // 13. Start API server
   const server = await createApiServer(
     {
@@ -164,6 +187,8 @@ async function main(): Promise<void> {
   // Graceful shutdown
   const shutdown = async (): Promise<void> => {
     log.info('Shutting down...');
+    pipelineScheduler.shutdown();
+    pipelineEventTrigger.shutdown();
     pipelineEngine.shutdown();
     permissionEngine.shutdown();
     scheduler.shutdown();
