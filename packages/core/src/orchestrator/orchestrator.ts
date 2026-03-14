@@ -118,7 +118,7 @@ export class Orchestrator {
   }
 
   private handleUserChat(event: UserChatMessageEvent): void {
-    const { projectId, sessionId, message } = event.payload;
+    const { projectId, sessionId, message, topicId, topicName } = event.payload;
     log.info(`User chat in project ${projectId}: ${message.slice(0, 100)}`);
 
     // Use the specific session if provided, otherwise fall back to getOrCreateSession
@@ -137,6 +137,12 @@ export class Orchestrator {
     // The orchestrator agent itself has NO MCPs - it delegates via Agent tool to sub-agents.
     const agentDefinitions = this.suiteRegistry.collectAgentDefinitions();
 
+    // Build prompt with topic context if available
+    let prompt = message;
+    if (topicName) {
+      prompt = `[Context: This message is from the '${topicName}' topic thread (topicId: ${topicId})]\n\n${message}`;
+    }
+
     const taskId = generateId();
 
     this.eventBus.emit({
@@ -147,7 +153,7 @@ export class Orchestrator {
       type: 'agent:task:request',
       payload: {
         taskId,
-        prompt: message,
+        prompt,
         skillName: SKILL_ORCHESTRATOR,
         mcpServers: this.suiteRegistry.collectMcpServers(), // Declared for SDK to spawn; only sub-agents use them
         agentDefinitions, // Sub-agents carry the MCPs
