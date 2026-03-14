@@ -188,6 +188,8 @@ export interface PipelineStepCompleteEvent extends BaseEvent {
     output: unknown;
     durationMs: number;
     timestamp: string;
+    attempt?: number;
+    maxAttempts?: number;
   };
 }
 
@@ -199,6 +201,21 @@ export interface PipelineStepFailedEvent extends BaseEvent {
     nodeId: string;
     error: string;
     durationMs: number;
+    timestamp: string;
+    attempt?: number;
+    maxAttempts?: number;
+  };
+}
+
+export interface PipelineStepRetryEvent extends BaseEvent {
+  type: 'pipeline:step:retry';
+  payload: {
+    runId: string;
+    pipelineName: string;
+    nodeId: string;
+    attempt: number;
+    maxAttempts: number;
+    backoffMs: number;
     timestamp: string;
   };
 }
@@ -261,6 +278,7 @@ export type RavenEvent =
   | PipelineStartedEvent
   | PipelineStepCompleteEvent
   | PipelineStepFailedEvent
+  | PipelineStepRetryEvent
   | PipelineCompleteEvent
   | PipelineFailedEvent;
 

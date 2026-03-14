@@ -349,7 +349,11 @@ describe('PipelineScheduler', () => {
       timestamp: Date.now(),
       source: 'pipeline-loader',
       type: 'config:pipelines:reloaded',
-      payload: { pipelineName: 'daily-briefing', action: 'loaded', timestamp: new Date().toISOString() },
+      payload: {
+        pipelineName: 'daily-briefing',
+        action: 'loaded',
+        timestamp: new Date().toISOString(),
+      },
     });
 
     // Fire again — should trigger since runningPipelines was cleared
