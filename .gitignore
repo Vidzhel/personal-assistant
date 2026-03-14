@@ -8,3 +8,4 @@ data/sessions/
 .browser-test-output/
 .playwright-mcp/
 .suite-debug/
+.playwright-cli

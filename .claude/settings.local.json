@@ -1,4 +1,7 @@
 {
+  "env": {
+    "LIBGL_ALWAYS_SOFTWARE": "1"
+  },
   "permissions": {
     "allow": [
       "Bash(npm install:*)",
@@ -48,7 +51,9 @@
       "mcp__playwright__browser_navigate",
       "mcp__playwright__browser_click",
       "mcp__playwright__browser_take_screenshot",
-      "mcp__playwright__browser_console_messages"
+      "mcp__playwright__browser_console_messages",
+      "Bash(find:*)",
+      "Bash(bash /home/user/projects/personal-assistant/.claude/skills/browser-testing/scripts/check-devserver.sh)"
     ]
   }
 }

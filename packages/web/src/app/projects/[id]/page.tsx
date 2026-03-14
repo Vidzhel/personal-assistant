@@ -15,12 +15,13 @@ export default function ProjectPage() {
   const [showSessions, setShowSessions] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     api
       .getProject(id)
       .then(setProject)
-      .catch(() => {});
+      .catch(() => setError(true));
     api
       .getProjectSessions(id)
       .then((s) => {
@@ -50,6 +51,14 @@ export default function ProjectPage() {
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }, [activeSession]);
+
+  if (error) {
+    return (
+      <div className="p-8" style={{ color: 'var(--text-muted)' }}>
+        Project not found.
+      </div>
+    );
+  }
 
   if (!project) {
     return (
