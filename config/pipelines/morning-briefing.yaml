@@ -1,0 +1,55 @@
+name: morning-briefing
+description: Compile and send daily morning briefing
+version: 1
+
+trigger:
+  type: cron
+  schedule: "0 6 * * *"
+
+settings:
+  retry:
+    maxAttempts: 3
+    backoffMs: 5000
+  timeout: 600000
+  onError: stop
+
+nodes:
+  fetch-emails:
+    skill: gmail
+    action: get-unread-summary
+    params: {}
+
+  fetch-tasks:
+    skill: ticktick
+    action: get-overdue-tasks
+    params: {}
+
+  check-urgency:
+    type: condition
+    expression: "{{ fetch-emails.output.urgentCount > 0 }}"
+
+  compile-briefing:
+    skill: digest
+    action: compile-briefing
+    params:
+      include:
+        - email-summary
+        - overdue-tasks
+
+  send-message:
+    skill: telegram
+    action: send-message
+    params:
+      topic: general
+
+connections:
+  - from: fetch-emails
+    to: check-urgency
+  - from: check-urgency
+    to: compile-briefing
+  - from: fetch-tasks
+    to: compile-briefing
+  - from: compile-briefing
+    to: send-message
+
+enabled: true

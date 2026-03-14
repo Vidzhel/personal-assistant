@@ -118,6 +118,12 @@ describe('E2E: Full boot → chat → events flow', () => {
         pendingApprovals,
         executionLogger,
         messageStore,
+        pipelineEngine: {
+          initialize: () => {},
+          getPipeline: () => undefined,
+          getAllPipelines: () => [],
+          shutdown: () => {},
+        } as any,
         configuredSuiteCount: 0,
       },
       0, // Let OS assign port

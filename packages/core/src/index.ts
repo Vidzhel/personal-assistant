@@ -18,6 +18,7 @@ import { createAuditLog } from './permission-engine/audit-log.ts';
 import { createPendingApprovals } from './permission-engine/pending-approvals.ts';
 import { createExecutionLogger } from './agent-manager/execution-logger.ts';
 import { initializeBackend } from './agent-manager/agent-session.ts';
+import { createPipelineEngine } from './pipeline-engine/pipeline-engine.ts';
 
 const log = createLogger('raven');
 
@@ -126,6 +127,12 @@ async function main(): Promise<void> {
   const scheduler = new Scheduler(eventBus, config.RAVEN_TIMEZONE);
   await scheduler.initialize(schedulesConfig);
 
+  // 12b. Init pipeline engine
+  const pipelineEngine = createPipelineEngine({ eventBus });
+  const pipelinesDir = resolve(projectRoot, 'config/pipelines');
+  pipelineEngine.initialize(pipelinesDir);
+  log.info('Pipeline engine initialized');
+
   // 13. Start API server
   const server = await createApiServer(
     {
@@ -138,6 +145,7 @@ async function main(): Promise<void> {
       pendingApprovals,
       executionLogger,
       messageStore,
+      pipelineEngine,
       configuredSuiteCount,
     },
     config.RAVEN_PORT,
@@ -148,6 +156,7 @@ async function main(): Promise<void> {
   // Graceful shutdown
   const shutdown = async (): Promise<void> => {
     log.info('Shutting down...');
+    pipelineEngine.shutdown();
     permissionEngine.shutdown();
     scheduler.shutdown();
     await serviceRunner.stopAll();

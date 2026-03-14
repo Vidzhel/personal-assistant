@@ -159,6 +159,15 @@ export const PermissionDeniedPayloadSchema = z.object({
   sessionId: z.string().optional(),
 });
 
+export interface ConfigPipelinesReloadedEvent extends BaseEvent {
+  type: 'config:pipelines:reloaded';
+  payload: {
+    pipelineName: string;
+    action: 'loaded' | 'reloaded' | 'removed';
+    timestamp: string;
+  };
+}
+
 export interface SystemHealthAlertEvent extends BaseEvent {
   type: 'system:health:alert';
   payload: {
@@ -189,6 +198,7 @@ export type RavenEvent =
   | PermissionApprovedEvent
   | PermissionBlockedEvent
   | PermissionDeniedEvent
+  | ConfigPipelinesReloadedEvent
   | SystemHealthAlertEvent;
 
 export type RavenEventType = RavenEvent['type'];
