@@ -9,14 +9,23 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  getHealth: () =>
-    request<{
+  getHealth: async () => {
+    const raw = await request<{
       status: string;
       uptime: number;
-      skills: string[];
-      agentQueue: number;
-      agentsRunning: number;
-    }>('/health'),
+      subsystems: {
+        skills: { names: string[] };
+        agentManager: { queueLength: number; runningCount: number };
+      };
+    }>('/health');
+    return {
+      status: raw.status,
+      uptime: raw.uptime,
+      skills: raw.subsystems.skills.names,
+      agentQueue: raw.subsystems.agentManager.queueLength,
+      agentsRunning: raw.subsystems.agentManager.runningCount,
+    };
+  },
   getProjects: () => request<Project[]>('/projects'),
   getProject: (id: string) => request<Project>(`/projects/${id}`),
   createProject: (data: { name: string; description?: string; skills?: string[] }) =>

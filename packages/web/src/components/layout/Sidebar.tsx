@@ -8,7 +8,6 @@ const nav = [
   { href: '/projects', label: 'Projects', icon: '#' },
   { href: '/activity', label: 'Activity', icon: '>' },
   { href: '/schedules', label: 'Schedules', icon: '@' },
-  { href: '/processes', label: 'Processes', icon: '!' },
   { href: '/skills', label: 'Skills', icon: '*' },
   { href: '/settings', label: 'Settings', icon: '%' },
 ];

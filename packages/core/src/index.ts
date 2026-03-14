@@ -49,6 +49,21 @@ async function main(): Promise<void> {
   // 4. Init event bus
   const eventBus = new EventBus();
 
+  // 4b. Persist all events to the database
+  const insertEvent = getDb().prepare(
+    'INSERT OR IGNORE INTO events (id, type, source, project_id, payload, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
+  );
+  eventBus.on('*', (event: RavenEvent) => {
+    insertEvent.run(
+      event.id,
+      event.type,
+      event.source,
+      event.projectId ?? null,
+      JSON.stringify('payload' in event ? event.payload : {}),
+      event.timestamp,
+    );
+  });
+
   // 5. Init suite registry and load suites
   const suiteRegistry = new SuiteRegistry();
   const configDir = resolve(projectRoot, 'config');

@@ -65,6 +65,7 @@ function CollapsibleSection({ title, count, data, defaultOpen = false }: Collaps
 export function SessionDebugPanel({ sessionId, onClose }: SessionDebugPanelProps) {
   const [debugData, setDebugData] = useState<SessionDebug | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [copiedAll, setCopiedAll] = useState(false);
 
   useEffect(() => {
     setDebugData(null);
@@ -78,6 +79,8 @@ export function SessionDebugPanel({ sessionId, onClose }: SessionDebugPanelProps
   const handleCopyAll = useCallback(() => {
     if (!debugData) return;
     navigator.clipboard.writeText(JSON.stringify(debugData, null, 2));
+    setCopiedAll(true);
+    setTimeout(() => setCopiedAll(false), 1500);
   }, [debugData]);
 
   return (
@@ -119,7 +122,7 @@ export function SessionDebugPanel({ sessionId, onClose }: SessionDebugPanelProps
               style={{ background: 'var(--bg-hover)', color: 'var(--text-muted)' }}
               disabled={!debugData}
             >
-              Copy All
+              {copiedAll ? 'Copied!' : 'Copy All'}
             </button>
             <button
               onClick={onClose}

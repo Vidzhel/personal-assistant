@@ -13,7 +13,7 @@ check_port() {
   local status="DOWN"
   local http_status=""
 
-  if lsof -i :"$port" -sTCP:LISTEN &>/dev/null; then
+  if ss -tlnH "sport = :$port" 2>/dev/null | grep -q LISTEN; then
     status="LISTENING"
     http_status=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 3 "$url" 2>/dev/null || echo "000")
   fi
