@@ -122,6 +122,10 @@ describe('E2E: Full boot → chat → events flow', () => {
           initialize: () => {},
           getPipeline: () => undefined,
           getAllPipelines: () => [],
+          executePipeline: () => Promise.reject(new Error('Not available in test')),
+          triggerPipeline: () => {
+            throw new Error('Not available in test');
+          },
           shutdown: () => {},
         } as any,
         configuredSuiteCount: 0,
