@@ -68,8 +68,14 @@ describe('API routes', () => {
       pendingApprovals,
       executionLogger,
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
+      pipelineEngine: {
+        initialize: () => {},
+        getPipeline: () => undefined,
+        getAllPipelines: () => [],
+        shutdown: () => {},
+      },
       configuredSuiteCount: 0,
-    };
+    } as any;
 
     registerHealthRoute(app, deps);
     registerProjectRoutes(app);
