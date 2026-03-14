@@ -1,15 +1,16 @@
 ---
 name: browser-testing
-description: Browser testing and verification for the Raven dashboard using Playwright MCP. Use when users need to visually verify pages, test UI interactions, verify acceptance criteria, or perform any browser-based testing against the running frontend.
+description: Browser testing and verification for the Raven dashboard using playwright-cli. Use when users need to verify pages, test UI interactions, verify acceptance criteria, create test specs, or perform any browser-based testing. Also use when the user mentions testing the frontend, checking if a page works, writing browser tests, or validating UI changes — even if they don't say "playwright" or "browser test" explicitly.
+allowed-tools: Bash(playwright-cli:*)
 ---
 
 # Browser Testing Skill
 
-Provides browser-based testing and verification for the Raven personal assistant dashboard using Playwright MCP tools.
+Create and run accessibility-tree-first browser tests for the Raven dashboard using `playwright-cli` commands. Tests are structured for automated execution by the `browser-tester` sub-agent.
 
-## Tests location
+## Test Location
 
-Test scripts located under `manual-tests` directory in the root of the project.
+Test specs live in `manual-tests/` at the project root, one file per feature area.
 
 ## Prerequisites
 
@@ -23,116 +24,297 @@ Reports status of frontend (port 4000) and API backend (port 4001).
 
 ### 2. Start Dev Servers (if needed)
 
-Run both servers together:
 ```bash
-npm run dev
-```
-
-Or start individually:
-```bash
+npm run dev          # both servers
+# Or individually:
 .claude/skills/browser-testing/scripts/start-devserver.sh  # frontend only
 npm run dev:core                                            # backend only
 ```
 
 ## No Authentication Required
 
-The Raven dashboard is open — no login flow needed. Simply navigate to `http://localhost:4000` and the dashboard loads directly.
-
-## Screenshot Output Directory
-
-All screenshots and PDFs are saved to `.browser-test-output/` (configured via `--output-dir` in `.mcp.json`). This directory is gitignored.
+The dashboard is open — navigate directly to `http://localhost:4000`.
 
 ## Available Routes
 
-All routes are open — no authentication required.
+| Route | Page |
+|-------|------|
+| `/` | Dashboard — status cards, activity feed, quick actions |
+| `/projects` | Projects list |
+| `/projects/:id` | Project chat view |
+| `/activity` | Activity log with filters |
+| `/schedules` | Scheduled tasks |
+| `/skills` | Active integrations |
+| `/settings` | System info and configuration |
 
-| Route | Page | Notes |
-|-------|------|-------|
-| `/` | Dashboard | Status cards, activity feed, quick actions |
-| `/projects` | Projects List | All projects |
-| `/projects/:id` | Project Chat | Chat view for a specific project |
-| `/activity` | Activity Log | Event history with filters |
-| `/schedules` | Scheduled Tasks | Cron-based scheduled skills |
-| `/skills` | Skills | Active integrations and their status |
-| `/settings` | Settings | System info and configuration |
+## Screenshot Output
 
-## Playwright MCP Tools Reference
+All screenshots save to `.browser-test-output/` (gitignored).
 
-### Navigation & State
-- `mcp__playwright__browser_navigate` — Go to URL (`url` param)
-- `mcp__playwright__browser_navigate_back` — Go back in history
-- `mcp__playwright__browser_snapshot` — Get accessibility tree (use to find elements)
-- `mcp__playwright__browser_take_screenshot` — Capture screenshot (saves to `.browser-test-output/`)
-- `mcp__playwright__browser_wait_for` — Wait for text, text disappearance, or specified time
+---
 
-### Interaction
-- `mcp__playwright__browser_click` — Click element (`element` + `ref` from snapshot)
-- `mcp__playwright__browser_type` — Type text (`ref` + `text` params, `submit` to press Enter)
-- `mcp__playwright__browser_fill_form` — Fill multiple form fields at once
-- `mcp__playwright__browser_select_option` — Select dropdown option
-- `mcp__playwright__browser_hover` — Hover over element
-- `mcp__playwright__browser_drag` — Drag and drop
-- `mcp__playwright__browser_press_key` — Press keyboard key
-- `mcp__playwright__browser_file_upload` — Upload file to input
+## Writing Tests: Accessibility-Tree-First Format
 
-### Tab Management
-- `mcp__playwright__browser_tabs` — List, create, close, or select tabs (`action` param: list/new/close/select)
+The accessibility tree (from `playwright-cli snapshot`) is the primary assertion mechanism. It provides deterministic, machine-readable element data — roles, names, text content, and `ref` IDs for interaction. This is far more reliable than visual checks for automated testing.
 
-### Debugging & Inspection
-- `mcp__playwright__browser_console_messages` — Get browser console output
-- `mcp__playwright__browser_network_requests` — List network requests
-- `mcp__playwright__browser_evaluate` — Execute JavaScript on page
+### Test Spec Format
+
+Each test case follows this structure. Keep it concise — one step per line, assertions reference what the snapshot tree must contain.
+
+```markdown
+### TEST-ID: Short descriptive name
+
+**Steps:**
+1. navigate: `http://localhost:4000/route`
+2. snapshot → assert:
+   - heading "Expected Heading Text"
+   - button "Button Label"
+   - link "Link Text"
+   - textbox "Placeholder or label"
+   - text "Any visible text content"
+   - list with 3+ items
+3. click: button "Create" → snapshot → assert:
+   - text "Success message"
+   - NOT text "Error"
+
+**Notes:** (optional — context for why this matters)
+```
+
+### Assertion Types
+
+Assertions check the accessibility tree returned by `playwright-cli snapshot`. Each assertion is a predicate on the tree:
+
+| Assertion | What it checks | Example |
+|-----------|---------------|---------|
+| `heading "X"` | Element with heading role contains text X | `heading "Dashboard"` |
+| `button "X"` | Button with accessible name X exists | `button "Send"` |
+| `link "X"` | Link with text X exists | `link "Projects"` |
+| `textbox "X"` | Input with placeholder or label X | `textbox "Ask Raven..."` |
+| `text "X"` | Any element contains text X | `text "Online"` |
+| `N items` or `N+ items` | Count elements of a type | `6 status cards` |
+| `NOT text "X"` | Text X must NOT appear | `NOT text "Error"` |
+| `role "X" named "Y"` | Generic role+name check | `role "navigation" named "Sidebar"` |
+
+### Writing Good Assertions
+
+The goal is assertions that verify **behavior and content**, not appearance. This keeps tests stable across styling changes.
+
+**Do this — semantic assertions on accessibility tree:**
+```markdown
+- heading "Dashboard"
+- text "Online"
+- button "New Project"
+- 6 status cards (Status, Skills, Projects, Agents Running, Queue, Schedules)
+- link "Projects" is current (aria-current)
+```
+
+**Don't do this — visual/styling assertions:**
+```markdown
+- Background color is #141414          ← fragile, not in a11y tree
+- Card is 224px wide                   ← layout detail, not testable via snapshot
+- Text is green (#22c55e)              ← color info not in a11y tree
+- Font is semibold                     ← styling detail
+```
+
+### Interaction Steps
+
+When a test needs to interact with the page, reference elements by their accessible name (from the snapshot). The agent will find the matching `ref` ID automatically.
+
+```markdown
+1. navigate: `http://localhost:4000/projects`
+2. snapshot → find button "New Project"
+3. click: button "New Project"
+4. snapshot → assert:
+   - textbox "Project name"
+   - button "Create"
+5. type: textbox "Project name" ← "Test Project"
+6. click: button "Create"
+7. wait: 1s
+8. snapshot → assert:
+   - text "Test Project"
+   - NOT textbox "Project name" (form closed)
+```
+
+### Waiting and Dynamic Content
+
+- After navigation: take snapshot immediately — no artificial delay needed
+- After interaction (click, type, submit): `wait: 1-2s` then snapshot
+- WebSocket content: `wait: 3-5s` or `wait for text "expected text"`
+- Loading states: if snapshot shows loading indicator, `wait: 2s` and re-snapshot
+
+### Test File Structure
+
+Each test file covers one feature area. Keep the header minimal:
+
+```markdown
+# Feature Area Name
+
+Prerequisites: [what must be running/true]
+
+## Test Cases
+
+### TEST-01: Descriptive name
+...
+
+### TEST-02: Another test
+...
+```
+
+Group related tests (e.g., all project CRUD tests together). Order tests so earlier ones set up state for later ones when practical.
+
+---
+
+## Running Tests
+
+### Single Test or Quick Verification
+
+Use `playwright-cli` commands directly in conversation:
+
+1. `playwright-cli open http://localhost:4000 --headed` → open browser
+2. `playwright-cli goto <url>` → navigate to target
+3. `playwright-cli snapshot` → read accessibility tree
+4. Verify assertions against the tree
+5. `playwright-cli click <ref>` / `playwright-cli fill <ref> "text"` for interactions
+6. `playwright-cli snapshot` again to verify result
+7. `playwright-cli close` when done
+
+### Full Test Suite or Multi-Page Testing
+
+Delegate to the `browser-tester` sub-agent for extensive testing. **Each agent must get its own named session** so multiple agents can run in parallel without colliding.
+
+```
+Use the Agent tool with subagent_type="browser-tester" and a prompt like:
+
+"IMPORTANT: Use named session `-s=dash` for ALL playwright commands.
+Open: `playwright-cli -s=dash open http://localhost:4000 --headed`
+All commands: `playwright-cli -s=dash snapshot`, `playwright-cli -s=dash click <ref>`, etc.
+Close when done: `playwright-cli -s=dash close`
+
+Run the test spec from manual-tests/03-dashboard.md against http://localhost:4000.
+For each test case:
+1. Execute the steps (navigate, snapshot, interact)
+2. Check each assertion against the accessibility tree
+3. Record PASS/FAIL with evidence (the matching tree node or absence)
+4. Take a screenshot only on FAIL for debugging
+
+Return a structured report with results for every test case."
+```
+
+The sub-agent uses `playwright-cli` commands and knows the testing methodology. It will use `--headed` mode.
+
+### Parallel Execution with Named Sessions
+
+**CRITICAL**: When dispatching multiple `browser-tester` agents in parallel, each agent MUST use a unique named session (`-s=<name>`). Without named sessions, all agents share the same default browser and will interfere with each other.
+
+Each agent gets its own isolated headed browser instance via named sessions:
+
+```bash
+# Agent 1 (smoke tests) — uses -s=smoke for ALL commands
+playwright-cli -s=smoke open http://localhost:4000 --headed
+playwright-cli -s=smoke snapshot
+playwright-cli -s=smoke click <ref>
+playwright-cli -s=smoke close
+
+# Agent 2 (dashboard tests) — uses -s=dash for ALL commands
+playwright-cli -s=dash open http://localhost:4000 --headed
+playwright-cli -s=dash snapshot
+playwright-cli -s=dash click <ref>
+playwright-cli -s=dash close
+
+# Agent 3 (project tests) — uses -s=proj for ALL commands
+playwright-cli -s=proj open http://localhost:4000 --headed
+playwright-cli -s=proj snapshot
+playwright-cli -s=proj click <ref>
+playwright-cli -s=proj close
+```
+
+Rules:
+- **Every** `playwright-cli` command in a parallel agent must include `-s=<name>`
+- Session names should be short and match the test area (e.g., `smoke`, `dash`, `proj`, `nav`, `activity`)
+- Each session has its own isolated browser window, accessibility tree, and ref IDs
+- Sessions do not share state — navigation in one session does not affect others
+- Each agent closes its own session when done: `playwright-cli -s=<name> close`
+- If cleanup is needed: `playwright-cli close-all` closes all sessions
+
+### Dispatching Parallel Agents — Template
+
+When running multiple test files, dispatch agents like this:
+
+```
+# Agent 1: smoke tests (run first as prerequisite, foreground)
+Agent(subagent_type="browser-tester", prompt="
+  IMPORTANT: Use named session `-s=smoke` for ALL playwright commands.
+  Run manual-tests/01-smoke-test.md ...
+")
+
+# Agents 2-N: feature tests (run in parallel after smoke passes, background)
+Agent(subagent_type="browser-tester", run_in_background=true, prompt="
+  IMPORTANT: Use named session `-s=dash` for ALL playwright commands.
+  Run manual-tests/03-dashboard.md ...
+")
+Agent(subagent_type="browser-tester", run_in_background=true, prompt="
+  IMPORTANT: Use named session `-s=proj` for ALL playwright commands.
+  Run manual-tests/04-projects-and-chat.md ...
+")
+```
+
+### Batch Execution Tips
+
+When running multiple test files:
+- Run prerequisite tests first (smoke tests before feature tests)
+- Dispatch independent test files as parallel agents with unique session names
+- Take screenshots only on failures (saves time and context)
+- Report a summary table at the end
+
+---
+
+## playwright-cli Command Reference
+
+### Core
+- `playwright-cli open <url> --headed` — Open browser in headed mode
+- `playwright-cli goto <url>` — Navigate to URL
+- `playwright-cli snapshot` — **Primary tool** — returns accessibility tree with `ref` IDs
+- `playwright-cli screenshot` — Visual capture (use sparingly — only on failures or when explicitly needed)
+- `playwright-cli click <ref>` — Click element by `ref` from snapshot
+- `playwright-cli fill <ref> "text"` — Fill input field
+- `playwright-cli type "text"` — Type text into focused element
+- `playwright-cli select <ref> "value"` — Select dropdown option
+- `playwright-cli hover <ref>` — Hover over element
+- `playwright-cli drag <ref1> <ref2>` — Drag and drop
+- `playwright-cli upload <path>` — Upload file
+- `playwright-cli close` — Close browser
+
+### Navigation
+- `playwright-cli go-back` — Go back
+- `playwright-cli go-forward` — Go forward
+- `playwright-cli reload` — Reload page
+
+### Keyboard
+- `playwright-cli press <key>` — Press keyboard key (Enter, Tab, ArrowDown, etc.)
+
+### Debugging (use on failures)
+- `playwright-cli console` — JS console output
+- `playwright-cli network` — Network activity
+- `playwright-cli eval "code"` — Run JS on page
+- `playwright-cli run-code "async page => ..."` — Run Playwright code
+
+### Sessions
+- `playwright-cli -s=<name> <command>` — Run command in named session
+- `playwright-cli list` — List active sessions
+- `playwright-cli close-all` — Close all sessions
 
 ### Utilities
-- `mcp__playwright__browser_pdf_save` — Save page as PDF
-- `mcp__playwright__browser_install` — Install browser (if needed)
-- `mcp__playwright__browser_close` — Close browser page
-- `mcp__playwright__browser_resize` — Resize browser window
+- `playwright-cli tab-list` / `tab-new` / `tab-close` / `tab-select` — Tab management
+- `playwright-cli resize <W> <H>` — Resize viewport
+- `playwright-cli pdf --filename=X` — Save as PDF
 
-## Common Workflows
-
-### Smoke Test
-1. Check dev server status
-2. Navigate to `http://localhost:4000`
-3. Verify dashboard loads (status cards, activity feed visible)
-4. Navigate through sidebar links to verify each page renders
-
-### Page Verification
-1. Navigate to target route
-2. Take snapshot (accessibility tree) to verify content
-3. Take screenshot for visual verification
-4. Check for error states or missing content
-
-### Form Testing
-1. Navigate to form page
-2. Take snapshot to identify form fields
-3. Fill fields using click + type (or `browser_fill_form` for multiple fields)
-4. Submit form
-5. Verify success/error response
-
-### Visual Regression
-1. Navigate to page
-2. Take screenshot
-3. Compare with expected layout (describe to user)
-
-## When to Delegate to Sub-Agent
-
-For extensive testing (multiple pages, complex flows), delegate to the `browser-tester` sub-agent:
-
-```
-Use the Agent tool with subagent_type="browser-tester" and prompt describing:
-- What pages/flows to test
-- Acceptance criteria to verify
-- Whether screenshots are needed
-```
-
-The sub-agent has its own system prompt at `.claude/agents/browser-testing/browser-tester.md` that includes the routes and reporting format.
+---
 
 ## Troubleshooting
 
-- **"Browser not found"**: Run `mcp__playwright__browser_install` to install Chrome
-- **API errors on pages**: Verify the Fastify backend is running on port 4001 (`curl http://localhost:4001/api/health`)
-- **Blank page**: Check browser console via snapshot; may be a JS error
-- **Slow loading**: Use `mcp__playwright__browser_wait_for` with `time` param before snapshot
-- **WebSocket issues**: Dashboard uses WS for real-time updates; if data seems stale, check backend is running
-- **Display issues**: If headed mode fails, may need `--headless` flag in `.mcp.json`
+- **"Command not found"**: Try `npx playwright-cli` instead of `playwright-cli`
+- **API errors**: Verify backend on port 4001 (`curl http://localhost:4001/api/health`)
+- **Blank page**: Check `playwright-cli console` for JS errors
+- **Stale data**: Dashboard uses WebSocket — if data seems stale, check backend is running
+- **Element not found**: Re-take snapshot — refs change after page updates
+- **Session issues**: Run `playwright-cli list` to see active sessions, `playwright-cli kill-all` to force reset

@@ -2,146 +2,109 @@
 
 Verify session lifecycle, selector UI, copy ID, and debug panel functionality.
 
-## Prerequisites
-
-- Smoke tests (01) passing
-- Backend running with at least one project created
-- Projects and Chat tests (04) passing
-
-## Playwright MCP Tools Used
-
-- `browser_click` — click buttons and dropdowns
-- `browser_snapshot` — verify DOM changes after actions
-- `browser_take_screenshot` — visual verification
-- `browser_press_key` — keyboard interactions
+Prerequisites: Smoke tests (01) and Projects/Chat tests (04) passing, at least one project exists
 
 ## Test Cases
 
-### SESS-01: Session Selector Shows Current Session Info
+### SESS-01: Session selector shows current session info
 
 **Steps:**
-1. Navigate to `/projects/{id}` for an existing project
-2. Take a snapshot of the session selector bar
+1. navigate to `/projects/:id` for an existing project
+2. snapshot → assert:
+   - text matching truncated session ID (8-char monospace)
+   - text showing turn count (e.g., "0 turns")
 
-**Expected:**
-- Session selector bar visible below the project header
-- Shows truncated session ID (first 8 chars, monospace, dimmed)
-- Shows session creation date
-- Shows turn count (e.g. "0 turns")
-- Dropdown arrow visible
-
-### SESS-02: Session Dropdown Lists All Sessions
+### SESS-02: Session dropdown lists all sessions
 
 **Steps:**
-1. Navigate to a project with multiple sessions
-2. Click the session selector button
+1. navigate to a project with multiple sessions
+2. click: session selector button (dropdown trigger)
+3. snapshot → assert:
+   - multiple session entries visible
+   - each entry shows: truncated ID, turn count
 
-**Expected:**
-- Dropdown appears below the selector
-- Each session shows truncated ID, creation date, turn count, and status
-- Active session is highlighted with `bg-hover` background
-- Dropdown is scrollable if many sessions (max-height 256px)
-
-### SESS-03: New Session Creates and Switches (No 400)
+### SESS-03: New session creates and switches
 
 **Steps:**
-1. Navigate to a project page
-2. Note the current session ID
-3. Click "New Session" button
+1. navigate to a project page
+2. snapshot → note current session ID
+3. click: button "New Session"
+4. wait: 2s
+5. snapshot → assert:
+   - session ID changed (different from noted ID)
+   - text "0 turns" (new session)
+   - NOT text from previous session's messages (chat area cleared)
 
-**Expected:**
-- No error (no 400 status)
-- Session selector updates to show the new session
-- New session has 0 turns
-- Previous session appears in the dropdown
-- Chat area clears (no messages from previous session)
-
-### SESS-04: Switching Sessions Loads Correct Message History
+### SESS-04: Switching sessions loads correct messages
 
 **Steps:**
-1. Send a message in the current session (e.g. "Hello session A")
-2. Click "New Session" to create a second session
-3. Send a different message (e.g. "Hello session B")
-4. Open the session dropdown and switch back to the first session
+1. type: textbox "Ask Raven..." ← "Hello session A"
+2. press: Enter → wait: 1s
+3. snapshot → assert: text "Hello session A"
+4. click: button "New Session" → wait: 2s
+5. type: textbox "Ask Raven..." ← "Hello session B"
+6. press: Enter → wait: 1s
+7. snapshot → assert: text "Hello session B", NOT text "Hello session A"
+8. click: session selector → click: first/previous session entry → wait: 1s
+9. snapshot → assert: text "Hello session A", NOT text "Hello session B"
 
-**Expected:**
-- Messages from session A are loaded (shows "Hello session A")
-- Messages from session B are not visible
-- Switching back to session B shows "Hello session B"
-
-### SESS-05: Copy Session ID Copies Full ID to Clipboard
-
-**Steps:**
-1. Navigate to a project with an active session
-2. Click the clipboard icon (📋) next to the session ID
-
-**Expected:**
-- Button text briefly changes to "Copied!" for ~1.5 seconds
-- Full session UUID is copied to clipboard (not just the truncated 8-char version)
-- Button reverts to clipboard icon after timeout
-
-### SESS-06: Debug Button Opens Debug Panel
+### SESS-05: Copy session ID
 
 **Steps:**
-1. Navigate to a project with an active session
-2. Click the bug icon (🐛) button next to "New Session"
+1. navigate to a project with an active session
+2. click: copy button (clipboard icon next to session ID)
+3. wait: 1s
+4. snapshot → assert:
+   - text "Copied!" (brief feedback)
 
-**Expected:**
-- Dark overlay appears covering the main content
-- Debug panel slides in from the right (480px wide)
-- Panel header shows "Session Debug" and truncated session ID
-- "Copy All" button visible in header
-- Close button (×) visible in header
+**Notes:** Full UUID should be copied to clipboard, not the truncated 8-char version.
 
-### SESS-07: Debug Panel Shows Session, Messages, Tasks, Audit Sections
+### SESS-06: Debug button opens debug panel
 
 **Steps:**
-1. Open the debug panel for a session that has some messages/tasks
-2. Examine the panel content
+1. navigate to a project with an active session
+2. click: debug button (bug icon)
+3. snapshot → assert:
+   - text "Session Debug"
+   - button with close label (× or Close)
+   - text "Copy All"
 
-**Expected:**
-- 4 collapsible sections: Session, Messages, Tasks, Audit
-- Each section shows a count badge
-- Session section is expanded by default
-- Other sections are collapsed by default
-- Clicking a section header toggles its content
-- Content is pre-formatted JSON
-
-### SESS-08: Debug Panel Copy Buttons Work
+### SESS-07: Debug panel shows all sections
 
 **Steps:**
-1. Open the debug panel
-2. Click the "Copy" button on individual sections
-3. Click the "Copy All" button in the header
+1. open debug panel (SESS-06)
+2. snapshot → assert:
+   - text "Session"
+   - text "Messages"
+   - text "Tasks"
+   - text "Audit"
+   - each section shows count badge
 
-**Expected:**
-- Section copy: copies that section's JSON to clipboard
-- Copy All: copies the entire debug data to clipboard
-- Brief "Copied!" feedback on section copy buttons
+**Notes:** Sections are collapsible. Session section expanded by default, others collapsed.
 
-### SESS-09: New Session Archives Previous Active Sessions
-
-**Steps:**
-1. Navigate to a project with an active session
-2. Note the current session's status in the dropdown
-3. Click "New Session"
-4. Open the dropdown again
-
-**Expected:**
-- New session is now the first item and is active
-- Previous session still appears in the list
-- Session list is ordered by most recent first
-
-### SESS-10: Empty Project Shows "No Session" in Selector
+### SESS-08: Debug panel copy buttons
 
 **Steps:**
-1. Create a new project
-2. Navigate to the project page before any session is created
-3. Observe the session selector
+1. open debug panel
+2. click: "Copy All" button
+3. wait: 1s
+4. snapshot → assert: text "Copied!" feedback
 
-**Expected:**
-- Selector shows "No session" text
-- Dropdown shows "No sessions yet" when opened
-- "New Session" button is visible and functional
-- Debug button is disabled (no session to debug)
-- Copy ID button is not visible (no session)
+### SESS-09: New session archives previous
+
+**Steps:**
+1. navigate to a project with an active session
+2. snapshot → note session ID
+3. click: button "New Session" → wait: 2s
+4. click: session selector dropdown
+5. snapshot → assert:
+   - 2+ session entries in dropdown
+   - new session listed first (most recent)
+
+### SESS-10: Empty project shows no session
+
+**Steps:**
+1. create a new project → navigate to it
+2. snapshot → assert:
+   - text "No session" OR text indicating no active session
+   - button "New Session" visible

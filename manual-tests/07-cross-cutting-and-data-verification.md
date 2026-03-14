@@ -1,154 +1,74 @@
 # 07 - Cross-Cutting Concerns and Data Verification
 
-Verify data consistency between pages, WebSocket behavior, error handling, and theme consistency.
+Verify data consistency between pages and error handling.
 
-## Prerequisites
-
-- Smoke tests (01) passing
-- At least one project with chat messages exists
-- Backend API running with skills and schedules configured
-
-## Playwright MCP Tools Used
-
-- `browser_navigate` — navigate between pages
-- `browser_snapshot` — compare data across pages
-- `browser_network_requests` — verify API calls
-- `browser_console_messages` — check for errors
-- `browser_evaluate` — inspect JavaScript state if needed
+Prerequisites: Smoke tests (01) passing, at least one project exists, backend running with skills and schedules
 
 ## Test Cases — Data Consistency
 
-### DATA-01: Skills Count Consistent Across Pages
+### DATA-01: Skills count consistent across pages
 
 **Steps:**
-1. Navigate to `/skills` — count the skill cards
-2. Navigate to `/` (Dashboard) — read the "Skills" status card value
-3. Navigate to `/settings` — read the "Loaded Skills" list
+1. navigate: `http://localhost:4000/skills` → snapshot → count skill cards
+2. navigate: `http://localhost:4000` → snapshot → read "Skills" status card value
+3. navigate: `http://localhost:4000/settings` → snapshot → read "Loaded Skills" list
+4. assert: all three locations show the same skill count
 
-**Expected:**
-- All three locations show the same number of skills
-- The skill names on Settings match the card titles on Skills page
-- Dashboard count equals the number of cards on Skills page
-
-### DATA-02: Projects Count Consistent
+### DATA-02: Projects count consistent
 
 **Steps:**
-1. Navigate to `/projects` — count the project cards
-2. Navigate to `/` (Dashboard) — read the "Projects" status card value
+1. navigate: `http://localhost:4000/projects` → snapshot → count project cards
+2. navigate: `http://localhost:4000` → snapshot → read "Projects" status card value
+3. assert: counts match
 
-**Expected:**
-- Dashboard "Projects" count matches the number of project cards on the Projects page
-
-### DATA-03: Schedules Count Consistent
+### DATA-03: Schedules count consistent
 
 **Steps:**
-1. Navigate to `/schedules` — count the schedule cards
-2. Navigate to `/` (Dashboard) — read the "Schedules" status card value
+1. navigate: `http://localhost:4000/schedules` → snapshot → count schedule cards
+2. navigate: `http://localhost:4000` → snapshot → read "Schedules" status card value
+3. assert: counts match
 
-**Expected:**
-- Dashboard "Schedules" count matches the number of schedule cards on the Schedules page
-
-### DATA-04: Project Creation Updates All Views
+### DATA-04: Project creation updates all views
 
 **Steps:**
-1. Note the current project count on Dashboard
-2. Navigate to `/projects`, create a new project
-3. Verify the new project appears in the list
-4. Navigate to Dashboard, wait up to 10 seconds
-
-**Expected:**
-- Project immediately appears in the `/projects` grid after creation
-- Dashboard "Projects" count increments after the next health poll (~10s)
+1. navigate: `http://localhost:4000` → snapshot → note Projects count
+2. navigate: `http://localhost:4000/projects`
+3. click: button "New Project"
+4. type: textbox "Project name" ← "Consistency Test"
+5. click: button "Create"
+6. wait: 2s → snapshot → assert: text "Consistency Test"
+7. navigate: `http://localhost:4000` → wait: 10s
+8. snapshot → assert: Projects count incremented
 
 ## Test Cases — Error Handling
 
-### ERR-01: Backend Unavailable — Dashboard Degrades Gracefully
+### ERR-01: Backend unavailable — dashboard degrades gracefully
 
 **Steps:**
-1. Navigate to Dashboard while backend is running — verify "Online" status
-2. Stop the backend server
-3. Wait up to 10 seconds for the next health poll
-4. Take a snapshot
+1. navigate: `http://localhost:4000` (with backend running) → snapshot → assert: text "Online"
+2. stop backend server
+3. wait: 10s
+4. snapshot → assert:
+   - text "Offline"
+   - link "Projects" (sidebar still works)
+   - NOT text "Unhandled" or error overlay
 
-**Expected:**
-- Status changes to "Offline" (red)
-- No crash, no unhandled error overlay
-- Page remains interactive (sidebar navigation still works)
-
-### ERR-02: Backend Unavailable — Other Pages Handle Errors
+### ERR-02: Backend unavailable — other pages handle errors
 
 **Steps:**
-1. Stop the backend server
-2. Navigate to `/projects`, take snapshot
-3. Navigate to `/activity`, take snapshot
-4. Navigate to `/skills`, take snapshot
+1. stop backend server
+2. navigate: `http://localhost:4000/projects` → snapshot → assert: no crash, page renders
+3. navigate: `http://localhost:4000/activity` → snapshot → assert: no crash, page renders
+4. navigate: `http://localhost:4000/skills` → snapshot → assert: no crash, page renders
+5. check: console_messages → NOT "TypeError", NOT "Unhandled"
 
-**Expected:**
-- Pages either show empty state or loading state
-- No unhandled error overlay or crash
-- No console errors that break the app (network failures are expected)
-- Sidebar navigation continues to work
+**Notes:** Pages may show empty state or loading state — that's acceptable. Sidebar navigation must continue working.
 
-### ERR-03: Invalid Project ID
+### ERR-03: Invalid project ID
 
 **Steps:**
-1. Navigate to `/projects/this-id-does-not-exist`
-2. Take a snapshot
-3. Check console messages
-
-**Expected:**
-- Shows "Loading project..." text (stays in loading state since project is null)
-- No crash or error page
-- Console may show a network 404, but no unhandled JavaScript errors
-
-## Test Cases — Theme Consistency
-
-### THEME-01: Dark Theme Across All Pages
-
-**Steps:**
-1. Navigate through all 7 routes, taking a screenshot of each
-2. Verify consistent dark theme
-
-**Expected on every page:**
-- Page background: dark (#0a0a0a)
-- Card/panel backgrounds: slightly lighter dark (#141414)
-- Borders: subtle gray (#262626)
-- Primary text: light gray (#e5e5e5)
-- Muted/secondary text: medium gray (#737373)
-- Accent elements (buttons, active states, badges): purple (#6d28d9)
-- No white backgrounds, no light-theme elements
-
-### THEME-02: Interactive Element Colors
-
-**Steps:**
-1. On `/projects`, inspect the "New Project" button color
-2. Open the creation form, inspect selected skill button color
-3. Navigate to a project chat, inspect the "Send" button color
-4. Inspect user chat message bubble color
-
-**Expected:**
-- All interactive/accent elements use purple (#6d28d9):
-  - "New Project" button background
-  - Selected skill buttons in creation form
-  - "Send" button in chat
-  - User message bubbles in chat
-- Consistent purple accent across the entire app
-
-### THEME-03: Status Colors
-
-**Steps:**
-1. On Dashboard, check Status card color
-2. Navigate to `/schedules`, check Active/Disabled badge colors
-3. Navigate to `/settings`, check Status value color
-
-**Expected:**
-- Green (#22c55e): "Online" status, "Active" schedule badge, "ok" status text
-- Red (#ef4444): "Offline" status, "Disabled" schedule badge
-- Yellow (#eab308): "Agents Running" when count > 0
-- Colors are consistent everywhere they appear
-
-## Results
-
-| Date | Tester | Passed | Total | Notes |
-|------|--------|--------|-------|-------|
-|      |        |        | 10    |       |
+1. navigate: `http://localhost:4000/projects/this-id-does-not-exist`
+2. snapshot → assert:
+   - text "Loading project..." (stays in loading state)
+   - NOT text "Unhandled"
+3. check: console_messages → NOT "TypeError"

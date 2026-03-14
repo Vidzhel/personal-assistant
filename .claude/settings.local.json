@@ -18,28 +18,8 @@
       "Bash(npm test:*)",
       "WebSearch",
       "WebFetch(domain:medium.com)",
-      "mcp__playwright__browser_navigate",
-      "mcp__playwright__browser_navigate_back",
-      "mcp__playwright__browser_snapshot",
-      "mcp__playwright__browser_take_screenshot",
-      "mcp__playwright__browser_click",
-      "mcp__playwright__browser_type",
-      "mcp__playwright__browser_fill_form",
-      "mcp__playwright__browser_select_option",
-      "mcp__playwright__browser_hover",
-      "mcp__playwright__browser_press_key",
-      "mcp__playwright__browser_wait_for",
-      "mcp__playwright__browser_tabs",
-      "mcp__playwright__browser_pdf_save",
-      "mcp__playwright__browser_file_upload",
-      "mcp__playwright__browser_install",
-      "mcp__playwright__browser_drag",
-      "mcp__playwright__browser_console_messages",
-      "mcp__playwright__browser_network_requests",
-      "mcp__playwright__browser_evaluate",
-      "mcp__playwright__browser_close",
-      "mcp__playwright__browser_resize",
-      "mcp__playwright__browser_run_code",
+      "Bash(playwright-cli:*)",
+      "Bash(npx playwright-cli:*)",
       "Bash(git:*)",
       "Bash(curl:*)",
       "Bash(chmod +x:*)",
@@ -60,10 +40,15 @@
       "Bash(NODE_OPTIONS=\"--max-old-space-size=2048\" npm run:*)",
       "WebFetch(domain:lobehub.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:rollout.com)"
+      "WebFetch(domain:rollout.com)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "Bash(find /home/user/projects/personal-assistant -maxdepth 2 -name \".env*\" -o -name \"*.env\" 2>/dev/null | head -20)",
+      "Skill(browser-testing)",
+      "Bash(.claude/skills/browser-testing/scripts/check-devserver.sh)",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_click",
+      "mcp__playwright__browser_take_screenshot",
+      "mcp__playwright__browser_console_messages"
     ]
-  },
-  "enabledMcpjsonServers": [
-    "playwright"
-  ]
+  }
 }
