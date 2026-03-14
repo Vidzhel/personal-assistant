@@ -69,3 +69,14 @@ export type PipelineSettings = z.infer<typeof PipelineSettingsSchema>;
 export type PipelineNode = z.infer<typeof PipelineNodeSchema>;
 export type PipelineConnection = z.infer<typeof PipelineConnectionSchema>;
 export type PipelineConfig = z.infer<typeof PipelineConfigSchema>;
+
+export interface PipelineRunRecord {
+  id: string;
+  pipeline_name: string;
+  trigger_type: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  started_at: string;
+  completed_at?: string;
+  node_results?: string;
+  error?: string;
+}

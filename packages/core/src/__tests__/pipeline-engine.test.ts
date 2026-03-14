@@ -6,6 +6,7 @@ import { PipelineConfigSchema } from '@raven/shared';
 import { validateDag } from '../pipeline-engine/dag-validator.ts';
 import { createPipelineLoader } from '../pipeline-engine/pipeline-loader.ts';
 import { createPipelineEngine } from '../pipeline-engine/pipeline-engine.ts';
+import type { PipelineStore } from '../pipeline-engine/pipeline-store.ts';
 import { EventBus } from '../event-bus/event-bus.ts';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -633,6 +634,168 @@ describe('Pipeline API routes', () => {
     expect(response.statusCode).toBe(404);
 
     engine.shutdown();
+    await app.close();
+  });
+
+  it('POST /api/pipelines/:name/trigger returns 202 for valid pipeline', async () => {
+    writeFileSync(join(tmpDir, 'test.yaml'), makeValidPipelineYaml());
+
+    // Create an engine mock with triggerPipeline
+    const engine = {
+      initialize: () => {},
+      getPipeline: (name: string) => {
+        if (name === 'test-pipeline') {
+          return {
+            config: { name: 'test-pipeline', enabled: true },
+            executionOrder: ['step-a', 'step-b'],
+            entryPoints: ['step-a'],
+            filePath: '/test.yaml',
+            loadedAt: new Date().toISOString(),
+          };
+        }
+        return undefined;
+      },
+      getAllPipelines: () => [],
+      executePipeline: () => Promise.resolve({}),
+      triggerPipeline: () => ({
+        runId: 'test-run-id',
+        execution: Promise.resolve({}),
+      }),
+      shutdown: () => {},
+    } as any;
+
+    const { default: Fastify } = await import('fastify');
+    const { registerPipelineRoutes } = await import('../api/routes/pipelines.ts');
+
+    const app = Fastify({ logger: false });
+    registerPipelineRoutes(app, { pipelineEngine: engine });
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/pipelines/test-pipeline/trigger',
+    });
+    expect(response.statusCode).toBe(202);
+    const body = JSON.parse(response.payload);
+    expect(body.status).toBe('started');
+    expect(body.runId).toBe('test-run-id');
+
+    await app.close();
+  });
+
+  it('POST /api/pipelines/:name/trigger returns 404 for unknown pipeline', async () => {
+    const engine = {
+      initialize: () => {},
+      getPipeline: () => undefined,
+      getAllPipelines: () => [],
+      executePipeline: () => Promise.reject(new Error('not found')),
+      triggerPipeline: () => {
+        throw new Error('not found');
+      },
+      shutdown: () => {},
+    } as any;
+
+    const { default: Fastify } = await import('fastify');
+    const { registerPipelineRoutes } = await import('../api/routes/pipelines.ts');
+
+    const app = Fastify({ logger: false });
+    registerPipelineRoutes(app, { pipelineEngine: engine });
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/pipelines/nonexistent/trigger',
+    });
+    expect(response.statusCode).toBe(404);
+
+    await app.close();
+  });
+
+  it('POST /api/pipelines/:name/trigger returns 400 for disabled pipeline', async () => {
+    const engine = {
+      initialize: () => {},
+      getPipeline: (name: string) => {
+        if (name === 'disabled-pipeline') {
+          return {
+            config: { name: 'disabled-pipeline', enabled: false },
+            executionOrder: [],
+            entryPoints: [],
+            filePath: '/test.yaml',
+            loadedAt: new Date().toISOString(),
+          };
+        }
+        return undefined;
+      },
+      getAllPipelines: () => [],
+      executePipeline: () => Promise.reject(new Error('disabled')),
+      triggerPipeline: () => {
+        throw new Error('disabled');
+      },
+      shutdown: () => {},
+    } as any;
+
+    const { default: Fastify } = await import('fastify');
+    const { registerPipelineRoutes } = await import('../api/routes/pipelines.ts');
+
+    const app = Fastify({ logger: false });
+    registerPipelineRoutes(app, { pipelineEngine: engine });
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/pipelines/disabled-pipeline/trigger',
+    });
+    expect(response.statusCode).toBe(400);
+
+    await app.close();
+  });
+
+  it('GET /api/pipelines/:name/runs returns execution history', async () => {
+    const mockStore: PipelineStore = {
+      insertRun: () => {},
+      updateRun: () => {},
+      getRun: () => undefined,
+      getRecentRuns: (name: string) => {
+        if (name === 'test-pipeline') {
+          return [
+            {
+              id: 'run-1',
+              pipeline_name: 'test-pipeline',
+              trigger_type: 'manual',
+              status: 'completed' as const,
+              started_at: '2026-03-14T00:00:00Z',
+            },
+          ];
+        }
+        return [];
+      },
+    };
+
+    const engine = {
+      initialize: () => {},
+      getPipeline: () => undefined,
+      getAllPipelines: () => [],
+      executePipeline: () => Promise.resolve({}),
+      triggerPipeline: () => ({ runId: 'test', execution: Promise.resolve({}) }),
+      shutdown: () => {},
+    } as any;
+
+    const { default: Fastify } = await import('fastify');
+    const { registerPipelineRoutes } = await import('../api/routes/pipelines.ts');
+
+    const app = Fastify({ logger: false });
+    registerPipelineRoutes(app, { pipelineEngine: engine, pipelineStore: mockStore });
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/pipelines/test-pipeline/runs',
+    });
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.payload);
+    expect(body).toHaveLength(1);
+    expect(body[0].id).toBe('run-1');
+
     await app.close();
   });
 });

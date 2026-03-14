@@ -19,6 +19,7 @@ import { createPendingApprovals } from './permission-engine/pending-approvals.ts
 import { createExecutionLogger } from './agent-manager/execution-logger.ts';
 import { initializeBackend } from './agent-manager/agent-session.ts';
 import { createPipelineEngine } from './pipeline-engine/pipeline-engine.ts';
+import { createPipelineStore } from './pipeline-engine/pipeline-store.ts';
 
 const log = createLogger('raven');
 
@@ -128,7 +129,13 @@ async function main(): Promise<void> {
   await scheduler.initialize(schedulesConfig);
 
   // 12b. Init pipeline engine
-  const pipelineEngine = createPipelineEngine({ eventBus });
+  const pipelineStore = createPipelineStore({ db: dbInterface });
+  const pipelineEngine = createPipelineEngine({
+    eventBus,
+    suiteRegistry,
+    mcpManager,
+    pipelineStore,
+  });
   const pipelinesDir = resolve(projectRoot, 'config/pipelines');
   pipelineEngine.initialize(pipelinesDir);
   log.info('Pipeline engine initialized');
@@ -146,6 +153,7 @@ async function main(): Promise<void> {
       executionLogger,
       messageStore,
       pipelineEngine,
+      pipelineStore,
       configuredSuiteCount,
     },
     config.RAVEN_PORT,

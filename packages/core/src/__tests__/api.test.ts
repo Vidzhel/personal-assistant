@@ -72,6 +72,10 @@ describe('API routes', () => {
         initialize: () => {},
         getPipeline: () => undefined,
         getAllPipelines: () => [],
+        executePipeline: () => Promise.reject(new Error('Not available in test')),
+        triggerPipeline: () => {
+          throw new Error('Not available in test');
+        },
         shutdown: () => {},
       },
       configuredSuiteCount: 0,

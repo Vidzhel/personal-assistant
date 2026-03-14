@@ -36,6 +36,7 @@ export interface AgentTaskRequestEvent extends BaseEvent {
     prompt: string;
     skillName: string;
     actionName?: string;
+    pipelineName?: string;
     mcpServers: Record<string, McpServerConfig>;
     agentDefinitions?: Record<string, SubAgentDefinition>;
     priority: Priority;
@@ -168,6 +169,63 @@ export interface ConfigPipelinesReloadedEvent extends BaseEvent {
   };
 }
 
+export interface PipelineStartedEvent extends BaseEvent {
+  type: 'pipeline:started';
+  payload: {
+    runId: string;
+    pipelineName: string;
+    triggerType: string;
+    timestamp: string;
+  };
+}
+
+export interface PipelineStepCompleteEvent extends BaseEvent {
+  type: 'pipeline:step:complete';
+  payload: {
+    runId: string;
+    pipelineName: string;
+    nodeId: string;
+    output: unknown;
+    durationMs: number;
+    timestamp: string;
+  };
+}
+
+export interface PipelineStepFailedEvent extends BaseEvent {
+  type: 'pipeline:step:failed';
+  payload: {
+    runId: string;
+    pipelineName: string;
+    nodeId: string;
+    error: string;
+    durationMs: number;
+    timestamp: string;
+  };
+}
+
+export interface PipelineCompleteEvent extends BaseEvent {
+  type: 'pipeline:complete';
+  payload: {
+    runId: string;
+    pipelineName: string;
+    status: 'completed';
+    durationMs: number;
+    timestamp: string;
+  };
+}
+
+export interface PipelineFailedEvent extends BaseEvent {
+  type: 'pipeline:failed';
+  payload: {
+    runId: string;
+    pipelineName: string;
+    status: 'failed';
+    error: string;
+    durationMs: number;
+    timestamp: string;
+  };
+}
+
 export interface SystemHealthAlertEvent extends BaseEvent {
   type: 'system:health:alert';
   payload: {
@@ -199,7 +257,12 @@ export type RavenEvent =
   | PermissionBlockedEvent
   | PermissionDeniedEvent
   | ConfigPipelinesReloadedEvent
-  | SystemHealthAlertEvent;
+  | SystemHealthAlertEvent
+  | PipelineStartedEvent
+  | PipelineStepCompleteEvent
+  | PipelineStepFailedEvent
+  | PipelineCompleteEvent
+  | PipelineFailedEvent;
 
 export type RavenEventType = RavenEvent['type'];
 
