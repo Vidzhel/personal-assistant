@@ -20,6 +20,7 @@ export interface PendingApprovals {
     entry: Omit<PendingApproval, 'id' | 'requestedAt' | 'resolvedAt' | 'resolution'>,
   ): PendingApproval;
   query(): PendingApproval[];
+  getById(id: string): PendingApproval | undefined;
   resolve(id: string, resolution: 'approved' | 'denied'): PendingApproval;
   initialize(): void;
 }
@@ -98,6 +99,14 @@ export function createPendingApprovals(db: Database.Database): PendingApprovals 
         .all() as PendingApprovalRow[];
 
       return rows.map(rowToApproval);
+    },
+
+    getById(id: string): PendingApproval | undefined {
+      const row = db.prepare('SELECT * FROM pending_approvals WHERE id = ?').get(id) as
+        | PendingApprovalRow
+        | undefined;
+
+      return row ? rowToApproval(row) : undefined;
     },
 
     resolve(id: string, resolution: 'approved' | 'denied'): PendingApproval {

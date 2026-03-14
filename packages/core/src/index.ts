@@ -112,6 +112,9 @@ async function main(): Promise<void> {
   const executionLogger = createExecutionLogger({ db: getDb() });
   log.info('Execution logger initialized');
 
+  // 7e. Inject permission deps into service context for callback handler (lazy resolution)
+  Object.assign(baseContext.config, { pendingApprovals, auditLog });
+
   // 8. Init MCP manager
   const mcpManager = new McpManager(suiteRegistry);
 
@@ -131,6 +134,9 @@ async function main(): Promise<void> {
     messageStore,
     sessionManager,
   });
+
+  // 10b. Inject agentManager into service context for callback handler
+  Object.assign(baseContext.config, { agentManager });
 
   // 11. Init orchestrator
   const _orchestrator = new Orchestrator({

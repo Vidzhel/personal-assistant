@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockSendMessage = vi.fn().mockResolvedValue({});
 const mockGetChat = vi.fn().mockResolvedValue({});
+const mockEditMessageReplyMarkup = vi.fn().mockResolvedValue({});
 const mockStart = vi.fn();
 const mockStop = vi.fn().mockResolvedValue(undefined);
 const messageHandlers: Array<(ctx: any) => Promise<void>> = [];
@@ -12,12 +13,24 @@ class MockBot {
     if (filter === 'message:text') messageHandlers.push(handler);
     if (filter === 'callback_query:data') callbackHandlers.push(handler);
   }
-  api = { sendMessage: mockSendMessage, getChat: mockGetChat };
+  api = { sendMessage: mockSendMessage, getChat: mockGetChat, editMessageReplyMarkup: mockEditMessageReplyMarkup };
   start = mockStart;
   stop = mockStop;
 }
 
-vi.mock('grammy', () => ({ Bot: MockBot }));
+class MockInlineKeyboard {
+  private rows: Array<Array<{ text: string; callback_data: string }>> = [[]];
+  text(label: string, data: string) {
+    this.rows[this.rows.length - 1].push({ text: label, callback_data: data });
+    return this;
+  }
+  row() {
+    this.rows.push([]);
+    return this;
+  }
+}
+
+vi.mock('grammy', () => ({ Bot: MockBot, InlineKeyboard: MockInlineKeyboard }));
 
 vi.mock('@raven/shared', () => ({
   generateId: vi.fn(() => 'test-id'),
@@ -566,6 +579,243 @@ describe('telegram-bot service', () => {
       await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
 
       expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('invalid structure'));
+    });
+  });
+
+  describe('inline keyboard rendering', () => {
+    beforeEach(async () => {
+      process.env.TELEGRAM_BOT_TOKEN = 'test-token';
+      process.env.TELEGRAM_CHAT_ID = '123';
+      process.env.TELEGRAM_GROUP_ID = '-1001234567890';
+      process.env.TELEGRAM_TOPIC_GENERAL = '1';
+      process.env.TELEGRAM_TOPIC_SYSTEM = '42';
+      process.env.TELEGRAM_TOPIC_MAP = '{"Work":5}';
+    });
+
+    it('sends notification with inline keyboard when actions present', async () => {
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      const handler = eventHandlers['notification']?.[0];
+      handler({
+        type: 'notification',
+        payload: {
+          channel: 'telegram',
+          title: 'Approval Required',
+          body: 'Action needs approval',
+          topicName: 'System',
+          actions: [
+            { label: 'Approve', action: 'a:y:id1' },
+            { label: 'Deny', action: 'a:n:id1' },
+            { label: 'View Details', action: 'a:v:id1' },
+          ],
+        },
+      });
+
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
+
+      const callArgs = mockSendMessage.mock.calls[0];
+      expect(callArgs[2]).toHaveProperty('reply_markup');
+      expect(callArgs[2]).toHaveProperty('message_thread_id', 42); // System topic
+    });
+
+    it('sends notification without keyboard when no actions', async () => {
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      const handler = eventHandlers['notification']?.[0];
+      handler({
+        type: 'notification',
+        payload: { channel: 'telegram', title: 'Plain', body: 'No actions' },
+      });
+
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
+
+      const callArgs = mockSendMessage.mock.calls[0];
+      expect(callArgs[2]).not.toHaveProperty('reply_markup');
+    });
+  });
+
+  describe('callback routing with deps', () => {
+    let mockConfig: any;
+
+    beforeEach(async () => {
+      process.env.TELEGRAM_BOT_TOKEN = 'test-token';
+      process.env.TELEGRAM_CHAT_ID = '123';
+      process.env.TELEGRAM_GROUP_ID = '-1001234567890';
+      process.env.TELEGRAM_TOPIC_GENERAL = '1';
+      process.env.TELEGRAM_TOPIC_SYSTEM = '42';
+
+      mockConfig = {
+        pendingApprovals: {
+          resolve: vi.fn().mockReturnValue({
+            id: 'ap1',
+            actionName: 'gmail:send',
+            skillName: 'email',
+            details: 'Send to bob',
+          }),
+          query: vi.fn().mockReturnValue([]),
+          getById: vi.fn().mockReturnValue(undefined),
+        },
+        agentManager: {
+          executeApprovedAction: vi.fn().mockResolvedValue({ success: true }),
+        },
+        auditLog: {
+          insert: vi.fn(),
+        },
+      };
+    });
+
+    it('routes structured callback to handleCallback and edits message', async () => {
+      await loadService();
+      await service.start({
+        eventBus: mockEventBus,
+        logger: mockLogger,
+        db: {},
+        config: mockConfig,
+      });
+
+      const ctx = {
+        callbackQuery: {
+          data: 'a:y:ap1',
+          from: { id: 456 },
+          message: { chat: { id: -1001234567890 }, message_id: 100 },
+        },
+        answerCallbackQuery: vi.fn().mockResolvedValue({}),
+        api: { editMessageReplyMarkup: vi.fn().mockResolvedValue({}) },
+      };
+      await callbackHandlers[0](ctx);
+
+      expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({
+        text: expect.stringContaining('Approved'),
+      });
+      expect(mockConfig.pendingApprovals.resolve).toHaveBeenCalledWith('ap1', 'approved');
+    });
+
+    it('falls back to user:chat:message for unrecognized callback data', async () => {
+      await loadService();
+      await service.start({
+        eventBus: mockEventBus,
+        logger: mockLogger,
+        db: {},
+        config: mockConfig,
+      });
+
+      const ctx = {
+        callbackQuery: {
+          data: 'some:unknown:format:extra',
+          from: { id: 456 },
+          message: { chat: { id: -1001234567890 } },
+        },
+        answerCallbackQuery: vi.fn().mockResolvedValue({}),
+      };
+      await callbackHandlers[0](ctx);
+
+      expect(mockEventBus.emit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'user:chat:message',
+          payload: expect.objectContaining({ message: 'some:unknown:format:extra' }),
+        }),
+      );
+      expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: 'Processing...' });
+    });
+
+    it('answerCallbackQuery always called even on error', async () => {
+      await loadService();
+
+      mockConfig.pendingApprovals.resolve = vi.fn().mockImplementation(() => {
+        throw new Error('DB crash');
+      });
+
+      await service.start({
+        eventBus: mockEventBus,
+        logger: mockLogger,
+        db: {},
+        config: mockConfig,
+      });
+
+      const ctx = {
+        callbackQuery: {
+          data: 'a:y:ap1',
+          from: { id: 456 },
+          message: { chat: { id: -1001234567890 } },
+        },
+        answerCallbackQuery: vi.fn().mockResolvedValue({}),
+      };
+      await callbackHandlers[0](ctx);
+
+      expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({
+        text: 'Error processing action',
+      });
+    });
+
+    it('shows system not ready when deps not injected', async () => {
+      await loadService();
+      await service.start({
+        eventBus: mockEventBus,
+        logger: mockLogger,
+        db: {},
+        config: {}, // no deps injected
+      });
+
+      const ctx = {
+        callbackQuery: {
+          data: 'a:y:ap1',
+          from: { id: 456 },
+          message: { chat: { id: -1001234567890 } },
+        },
+        answerCallbackQuery: vi.fn().mockResolvedValue({}),
+      };
+      await callbackHandlers[0](ctx);
+
+      expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({
+        text: 'System not ready, try again',
+      });
+    });
+  });
+
+  describe('permission:blocked notification', () => {
+    it('emits notification with approval buttons when permission:blocked fires', async () => {
+      process.env.TELEGRAM_BOT_TOKEN = 'test-token';
+      process.env.TELEGRAM_CHAT_ID = '123';
+      process.env.TELEGRAM_GROUP_ID = '-1001234567890';
+      process.env.TELEGRAM_TOPIC_SYSTEM = '42';
+
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      const handler = eventHandlers['permission:blocked']?.[0];
+      expect(handler).toBeDefined();
+
+      handler({
+        type: 'permission:blocked',
+        payload: {
+          actionName: 'gmail:send',
+          skillName: 'email',
+          tier: 'red',
+          approvalId: 'ap99',
+        },
+      });
+
+      expect(mockEventBus.emit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'notification',
+          payload: expect.objectContaining({
+            channel: 'telegram',
+            title: 'Approval Required',
+            topicName: 'System',
+            actions: expect.arrayContaining([
+              expect.objectContaining({ label: 'Approve', action: 'a:y:ap99' }),
+              expect.objectContaining({ label: 'Deny', action: 'a:n:ap99' }),
+              expect.objectContaining({ label: 'View Details', action: 'a:v:ap99' }),
+            ]),
+          }),
+        }),
+      );
     });
   });
 });
