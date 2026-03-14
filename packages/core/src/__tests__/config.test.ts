@@ -78,4 +78,34 @@ describe('config', () => {
     const config = loadConfig();
     expect(config.ANTHROPIC_API_KEY).toBe('');
   });
+
+  it('Telegram group/topic env vars are optional and parsed correctly', async () => {
+    process.env.TELEGRAM_GROUP_ID = '-1001234567890';
+    process.env.TELEGRAM_TOPIC_GENERAL = '1';
+    process.env.TELEGRAM_TOPIC_SYSTEM = '42';
+    process.env.TELEGRAM_TOPIC_MAP = '{"Work":5,"Personal":7}';
+
+    const { loadConfig } = await import('../config.ts');
+    const config = loadConfig();
+
+    expect(config.TELEGRAM_GROUP_ID).toBe('-1001234567890');
+    expect(config.TELEGRAM_TOPIC_GENERAL).toBe('1');
+    expect(config.TELEGRAM_TOPIC_SYSTEM).toBe('42');
+    expect(config.TELEGRAM_TOPIC_MAP).toBe('{"Work":5,"Personal":7}');
+  });
+
+  it('Telegram group/topic env vars default to undefined when not set', async () => {
+    delete process.env.TELEGRAM_GROUP_ID;
+    delete process.env.TELEGRAM_TOPIC_GENERAL;
+    delete process.env.TELEGRAM_TOPIC_SYSTEM;
+    delete process.env.TELEGRAM_TOPIC_MAP;
+
+    const { loadConfig } = await import('../config.ts');
+    const config = loadConfig();
+
+    expect(config.TELEGRAM_GROUP_ID).toBeUndefined();
+    expect(config.TELEGRAM_TOPIC_GENERAL).toBeUndefined();
+    expect(config.TELEGRAM_TOPIC_SYSTEM).toBeUndefined();
+    expect(config.TELEGRAM_TOPIC_MAP).toBeUndefined();
+  });
 });

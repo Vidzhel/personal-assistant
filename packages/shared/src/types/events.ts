@@ -75,6 +75,8 @@ export interface UserChatMessageEvent extends BaseEvent {
     projectId: string;
     sessionId?: string;
     message: string;
+    topicId?: number;
+    topicName?: string;
   };
 }
 
@@ -84,6 +86,7 @@ export interface NotificationEvent extends BaseEvent {
     channel: 'telegram' | 'web' | 'all';
     title: string;
     body: string;
+    topicName?: string;
     actions?: Array<{ label: string; action: string; data?: unknown }>;
   };
 }

@@ -35,6 +35,10 @@ const envSchema = z.object({
   GMAIL_REFRESH_TOKEN: z.string().optional(),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_CHAT_ID: z.string().optional(),
+  TELEGRAM_GROUP_ID: z.string().optional(),
+  TELEGRAM_TOPIC_GENERAL: z.string().optional(),
+  TELEGRAM_TOPIC_SYSTEM: z.string().optional(),
+  TELEGRAM_TOPIC_MAP: z.string().optional(),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;
