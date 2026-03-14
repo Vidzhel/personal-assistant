@@ -1,0 +1,373 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import {
+  parseCallbackData,
+  handleCallback,
+} from '../services/callback-handler.ts';
+import type {
+  CallbackAction,
+  CallbackDeps,
+  PendingApprovalInfo,
+} from '../services/callback-handler.ts';
+
+describe('parseCallbackData', () => {
+  describe('valid task actions', () => {
+    it('parses task complete', () => {
+      const result = parseCallbackData('t:c:taskId123');
+      expect(result).toEqual<CallbackAction>({
+        domain: 'task',
+        action: 'complete',
+        target: 'taskId123',
+        args: [],
+      });
+    });
+
+    it('parses task snooze with duration arg', () => {
+      const result = parseCallbackData('t:s:taskId123:1d');
+      expect(result).toEqual<CallbackAction>({
+        domain: 'task',
+        action: 'snooze',
+        target: 'taskId123',
+        args: ['1d'],
+      });
+    });
+
+    it('parses task snooze 1 week', () => {
+      const result = parseCallbackData('t:s:abc:1w');
+      expect(result).toEqual<CallbackAction>({
+        domain: 'task',
+        action: 'snooze',
+        target: 'abc',
+        args: ['1w'],
+      });
+    });
+
+    it('parses task drop', () => {
+      const result = parseCallbackData('t:d:taskId123');
+      expect(result).toEqual<CallbackAction>({
+        domain: 'task',
+        action: 'drop',
+        target: 'taskId123',
+        args: [],
+      });
+    });
+  });
+
+  describe('valid approval actions', () => {
+    it('parses approval approve', () => {
+      const result = parseCallbackData('a:y:approvalId456');
+      expect(result).toEqual<CallbackAction>({
+        domain: 'approval',
+        action: 'approve',
+        target: 'approvalId456',
+        args: [],
+      });
+    });
+
+    it('parses approval deny', () => {
+      const result = parseCallbackData('a:n:approvalId456');
+      expect(result).toEqual<CallbackAction>({
+        domain: 'approval',
+        action: 'deny',
+        target: 'approvalId456',
+        args: [],
+      });
+    });
+
+    it('parses approval view details', () => {
+      const result = parseCallbackData('a:v:approvalId456');
+      expect(result).toEqual<CallbackAction>({
+        domain: 'approval',
+        action: 'details',
+        target: 'approvalId456',
+        args: [],
+      });
+    });
+  });
+
+  describe('noop', () => {
+    it('returns null for noop', () => {
+      expect(parseCallbackData('noop')).toBeNull();
+    });
+  });
+
+  describe('invalid inputs', () => {
+    it('returns null for empty string', () => {
+      expect(parseCallbackData('')).toBeNull();
+    });
+
+    it('returns null for missing target', () => {
+      expect(parseCallbackData('t:c')).toBeNull();
+    });
+
+    it('returns null for unknown domain prefix', () => {
+      expect(parseCallbackData('x:y:z')).toBeNull();
+    });
+
+    it('returns null for unknown task action', () => {
+      expect(parseCallbackData('t:x:taskId')).toBeNull();
+    });
+
+    it('returns null for unknown approval action', () => {
+      expect(parseCallbackData('a:x:approvalId')).toBeNull();
+    });
+
+    it('returns null for string exceeding 64 bytes', () => {
+      const longData = 't:c:' + 'a'.repeat(61); // 65 bytes
+      expect(parseCallbackData(longData)).toBeNull();
+    });
+
+    it('returns null for single segment', () => {
+      expect(parseCallbackData('hello')).toBeNull();
+    });
+
+    it('returns null for two segments only', () => {
+      expect(parseCallbackData('t:c')).toBeNull();
+    });
+  });
+
+  describe('64-byte constraint', () => {
+    it('accepts callback data at exactly 64 bytes', () => {
+      // t:c: = 4 chars, target fills the rest up to 64
+      const data = 't:c:' + 'a'.repeat(60); // 4 + 60 = 64 bytes
+      const result = parseCallbackData(data);
+      expect(result).not.toBeNull();
+      expect(result!.target).toBe('a'.repeat(60));
+    });
+  });
+});
+
+describe('handleCallback', () => {
+  let deps: CallbackDeps;
+
+  beforeEach(() => {
+    deps = {
+      eventBus: {
+        emit: vi.fn(),
+        on: vi.fn(),
+        off: vi.fn(),
+      },
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        debug: vi.fn(),
+      },
+      pendingApprovals: {
+        resolve: vi.fn(),
+        query: vi.fn().mockReturnValue([]),
+        getById: vi.fn().mockReturnValue(undefined),
+      },
+      agentManager: {
+        executeApprovedAction: vi.fn().mockResolvedValue({ success: true }),
+      },
+      auditLog: {
+        insert: vi.fn(),
+      },
+    };
+  });
+
+  describe('task actions', () => {
+    it('routes task:complete to agent manager', () => {
+      const action: CallbackAction = { domain: 'task', action: 'complete', target: 'tid1', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(true);
+      expect(result.message).toBe('Done \u2713');
+      expect(result.updatedKeyboard).toEqual([[{ text: 'Done \u2713', callback_data: 'noop' }]]);
+      expect(deps.agentManager.executeApprovedAction).toHaveBeenCalledWith({
+        actionName: 'task:complete',
+        skillName: 'task-management',
+        details: expect.stringContaining('tid1'),
+      });
+    });
+
+    it('routes task:snooze with 1d duration', () => {
+      const action: CallbackAction = { domain: 'task', action: 'snooze', target: 'tid2', args: ['1d'] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(true);
+      expect(result.message).toBe('Snoozed \u2713');
+      expect(deps.agentManager.executeApprovedAction).toHaveBeenCalledWith({
+        actionName: 'task:snooze',
+        skillName: 'task-management',
+        details: expect.stringContaining('1 day'),
+      });
+    });
+
+    it('routes task:snooze with 1w duration', () => {
+      const action: CallbackAction = { domain: 'task', action: 'snooze', target: 'tid3', args: ['1w'] };
+      handleCallback(action, deps);
+
+      expect(deps.agentManager.executeApprovedAction).toHaveBeenCalledWith({
+        actionName: 'task:snooze',
+        skillName: 'task-management',
+        details: expect.stringContaining('1 week'),
+      });
+    });
+
+    it('routes task:drop to agent manager', () => {
+      const action: CallbackAction = { domain: 'task', action: 'drop', target: 'tid4', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(true);
+      expect(result.message).toBe('Dropped');
+      expect(deps.agentManager.executeApprovedAction).toHaveBeenCalledWith({
+        actionName: 'task:drop',
+        skillName: 'task-management',
+        details: expect.stringContaining('tid4'),
+      });
+    });
+
+    it('logs error when agent execution fails', async () => {
+      (deps.agentManager.executeApprovedAction as ReturnType<typeof vi.fn>)
+        .mockResolvedValue({ success: false, error: 'MCP timeout' });
+
+      const action: CallbackAction = { domain: 'task', action: 'complete', target: 'tid5', args: [] };
+      handleCallback(action, deps);
+
+      // Wait for the async fire-and-forget
+      await vi.waitFor(() => {
+        expect(deps.logger.error).toHaveBeenCalledWith(expect.stringContaining('MCP timeout'));
+      });
+    });
+  });
+
+  describe('approval actions', () => {
+    it('resolves approval as approved and emits permission:approved event', () => {
+      const mockApproval: PendingApprovalInfo = {
+        id: 'ap1',
+        actionName: 'gmail:send',
+        skillName: 'email',
+        details: 'Send email to bob',
+        sessionId: 'sess1',
+      };
+      (deps.pendingApprovals.resolve as ReturnType<typeof vi.fn>).mockReturnValue(mockApproval);
+
+      const action: CallbackAction = { domain: 'approval', action: 'approve', target: 'ap1', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(true);
+      expect(result.message).toBe('Approved \u2713');
+      expect(deps.pendingApprovals.resolve).toHaveBeenCalledWith('ap1', 'approved');
+      expect(deps.auditLog.insert).toHaveBeenCalledWith({
+        skillName: 'email',
+        actionName: 'gmail:send',
+        permissionTier: 'red',
+        outcome: 'approved',
+      });
+      expect(deps.agentManager.executeApprovedAction).toHaveBeenCalledWith({
+        actionName: 'gmail:send',
+        skillName: 'email',
+        details: 'Send email to bob',
+        sessionId: 'sess1',
+      });
+      // Verify permission:approved event emitted
+      expect(deps.eventBus.emit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'permission:approved',
+          source: 'telegram-callback',
+          payload: expect.objectContaining({
+            actionName: 'gmail:send',
+            skillName: 'email',
+            tier: 'red',
+            sessionId: 'sess1',
+          }),
+        }),
+      );
+    });
+
+    it('resolves approval as denied and emits permission:denied event', () => {
+      const mockApproval: PendingApprovalInfo = {
+        id: 'ap2',
+        actionName: 'gmail:send',
+        skillName: 'email',
+      };
+      (deps.pendingApprovals.resolve as ReturnType<typeof vi.fn>).mockReturnValue(mockApproval);
+
+      const action: CallbackAction = { domain: 'approval', action: 'deny', target: 'ap2', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(true);
+      expect(result.message).toBe('Denied \u2717');
+      expect(deps.pendingApprovals.resolve).toHaveBeenCalledWith('ap2', 'denied');
+      expect(deps.agentManager.executeApprovedAction).not.toHaveBeenCalled();
+      expect(result.updatedKeyboard).toEqual([[{ text: 'Denied \u2717', callback_data: 'noop' }]]);
+      // Verify permission:denied event emitted
+      expect(deps.eventBus.emit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'permission:denied',
+          source: 'telegram-callback',
+          payload: expect.objectContaining({
+            actionName: 'gmail:send',
+            skillName: 'email',
+            tier: 'red',
+            approvalId: 'ap2',
+          }),
+        }),
+      );
+    });
+
+    it('handles already resolved approval', () => {
+      const err = new Error('Already resolved');
+      (err as Error & { code: string }).code = 'APPROVAL_ALREADY_RESOLVED';
+      (deps.pendingApprovals.resolve as ReturnType<typeof vi.fn>).mockImplementation(() => { throw err; });
+
+      const action: CallbackAction = { domain: 'approval', action: 'approve', target: 'ap3', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toBe('Already resolved');
+    });
+
+    it('handles approval not found', () => {
+      const err = new Error('Not found');
+      (err as Error & { code: string }).code = 'APPROVAL_NOT_FOUND';
+      (deps.pendingApprovals.resolve as ReturnType<typeof vi.fn>).mockImplementation(() => { throw err; });
+
+      const action: CallbackAction = { domain: 'approval', action: 'approve', target: 'ap4', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toBe('Approval not found');
+    });
+
+    it('shows approval details via getById', () => {
+      const mockApproval: PendingApprovalInfo = {
+        id: 'ap5', actionName: 'gmail:send', skillName: 'email', details: 'Send to bob@mail.com',
+      };
+      (deps.pendingApprovals.getById as ReturnType<typeof vi.fn>).mockReturnValue(mockApproval);
+
+      const action: CallbackAction = { domain: 'approval', action: 'details', target: 'ap5', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain('email');
+      expect(result.message).toContain('gmail:send');
+      expect(result.message).toContain('Send to bob@mail.com');
+      expect(deps.pendingApprovals.getById).toHaveBeenCalledWith('ap5');
+    });
+
+    it('shows details for already-resolved approvals', () => {
+      const mockApproval: PendingApprovalInfo = {
+        id: 'ap6', actionName: 'gmail:send', skillName: 'email', resolution: 'approved',
+      };
+      (deps.pendingApprovals.getById as ReturnType<typeof vi.fn>).mockReturnValue(mockApproval);
+
+      const action: CallbackAction = { domain: 'approval', action: 'details', target: 'ap6', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain('Status: approved');
+    });
+
+    it('returns not found for unknown approval details', () => {
+      (deps.pendingApprovals.getById as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+
+      const action: CallbackAction = { domain: 'approval', action: 'details', target: 'unknown', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toBe('Approval not found');
+    });
+  });
+});

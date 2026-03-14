@@ -1,4 +1,4 @@
-import { Bot } from 'grammy';
+import { Bot, InlineKeyboard } from 'grammy';
 import { z } from 'zod';
 import {
   generateId,
@@ -9,8 +9,14 @@ import {
   type NotificationEvent,
   type SystemHealthAlertEvent,
   type AgentTaskCompleteEvent,
+  type PermissionBlockedEvent,
 } from '@raven/shared';
 import type { ServiceContext, SuiteService } from '@raven/core/suite-registry/service-runner.ts';
+import {
+  parseCallbackData,
+  handleCallback,
+} from './callback-handler.ts';
+import type { CallbackDeps } from './callback-handler.ts';
 
 type OperatingMode = 'group' | 'direct';
 
@@ -32,6 +38,25 @@ let logger: LoggerInterface;
 
 // Track topicId per projectId so responses can route back to source topic
 const projectTopicMap = new Map<string, number>();
+
+// Callback handler deps (injected lazily via config after boot)
+let callbackDeps: CallbackDeps | null = null;
+
+export function buildInlineKeyboard(
+  actions: Array<{ label: string; action: string }>,
+): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+  // Detect layout: approval actions get 3 per row, task actions get 2 per row
+  const isApproval = actions.some((a) => a.action.startsWith('a:'));
+  const perRow = isApproval ? 3 : 2;
+
+  for (let i = 0; i < actions.length; i++) {
+    if (i > 0 && i % perRow === 0) keyboard.row();
+    keyboard.text(actions[i].label, actions[i].action);
+  }
+
+  return keyboard;
+}
 
 export function escapeMarkdown(text: string): string {
   return text.replace(/([_*[\]()~`>#+\-=|{}.!])/g, '\\$1');
@@ -92,6 +117,7 @@ async function sendMessage(
   text: string,
   parseMode?: 'MarkdownV2' | 'HTML',
   messageThreadId?: number,
+  replyMarkup?: InlineKeyboard,
 ): Promise<void> {
   if (!bot) return;
 
@@ -101,6 +127,7 @@ async function sendMessage(
   if (messageThreadId !== undefined && operatingMode === 'group') {
     options.message_thread_id = messageThreadId;
   }
+  if (replyMarkup) options.reply_markup = replyMarkup;
 
   await bot.api.sendMessage(targetChatId, text, options);
 }
@@ -109,14 +136,15 @@ async function sendMessageWithFallback(
   text: string,
   parseMode?: 'MarkdownV2' | 'HTML',
   messageThreadId?: number,
+  replyMarkup?: InlineKeyboard,
 ): Promise<void> {
   try {
-    await sendMessage(text, parseMode, messageThreadId);
+    await sendMessage(text, parseMode, messageThreadId, replyMarkup);
   } catch (err) {
     if (messageThreadId !== undefined) {
       logger.warn(`Topic send failed (thread ${messageThreadId}), falling back to non-topic send`);
       try {
-        await sendMessage(text, parseMode);
+        await sendMessage(text, parseMode, undefined, replyMarkup);
       } catch (fallbackErr) {
         logger.error(`Telegram fallback send failed: ${fallbackErr}`);
       }
@@ -233,6 +261,22 @@ const service: SuiteService = {
       }
     });
 
+    // Resolve callback deps lazily from config (injected after boot)
+    const resolveCallbackDeps = (): CallbackDeps | null => {
+      if (callbackDeps) return callbackDeps;
+      const cfg = context.config as Record<string, unknown>;
+      if (cfg.pendingApprovals && cfg.agentManager && cfg.auditLog) {
+        callbackDeps = {
+          eventBus: context.eventBus,
+          logger: context.logger,
+          pendingApprovals: cfg.pendingApprovals as CallbackDeps['pendingApprovals'],
+          agentManager: cfg.agentManager as CallbackDeps['agentManager'],
+          auditLog: cfg.auditLog as CallbackDeps['auditLog'],
+        };
+      }
+      return callbackDeps;
+    };
+
     // Handle callback queries
     bot.on('callback_query:data', async (ctx) => {
       // In group mode, verify the callback came from the configured group
@@ -253,24 +297,66 @@ const service: SuiteService = {
       const data = ctx.callbackQuery.data;
       logger.info(`Telegram callback: ${data}`);
 
-      eventBus.emit({
-        id: generateId(),
-        timestamp: Date.now(),
-        source: SOURCE_TELEGRAM,
-        type: 'user:chat:message',
-        payload: {
-          projectId: PROJECT_TELEGRAM_DEFAULT,
-          message: data,
-        },
-      });
+      try {
+        const parsed = parseCallbackData(data);
+        const deps = resolveCallbackDeps();
 
-      await ctx.answerCallbackQuery({ text: 'Processing...' });
+        if (parsed && deps) {
+          const result = handleCallback(parsed, deps);
+
+          // For details action, use brief acknowledgment (full text sent as reply below)
+          const answerText =
+            parsed.domain === 'approval' && parsed.action === 'details'
+              ? 'Loading details...'
+              : result.message;
+          await ctx.answerCallbackQuery({ text: answerText });
+
+          // Edit message keyboard on success
+          if (result.updatedKeyboard && ctx.callbackQuery.message) {
+            try {
+              const targetChat = operatingMode === 'group' ? groupId : chatId;
+              await ctx.api.editMessageReplyMarkup(
+                targetChat,
+                ctx.callbackQuery.message.message_id,
+                { reply_markup: { inline_keyboard: result.updatedKeyboard } },
+              );
+            } catch (editErr) {
+              logger.warn(`Failed to edit message keyboard: ${editErr}`);
+            }
+          }
+
+          // For approval details, send as a reply message instead of editing
+          if (parsed.domain === 'approval' && parsed.action === 'details' && result.success) {
+            const threadId = ctx.callbackQuery.message?.message_thread_id;
+            await sendMessageWithFallback(result.message, undefined, threadId);
+          }
+        } else if (!parsed) {
+          // Unrecognized format: fall back to legacy behavior (emit as user:chat:message)
+          eventBus.emit({
+            id: generateId(),
+            timestamp: Date.now(),
+            source: SOURCE_TELEGRAM,
+            type: 'user:chat:message',
+            payload: {
+              projectId: PROJECT_TELEGRAM_DEFAULT,
+              message: data,
+            },
+          });
+          await ctx.answerCallbackQuery({ text: 'Processing...' });
+        } else {
+          // Parsed but deps not available
+          await ctx.answerCallbackQuery({ text: 'System not ready, try again' });
+        }
+      } catch (err) {
+        logger.error(`Callback error: ${err}`);
+        await ctx.answerCallbackQuery({ text: 'Error processing action' });
+      }
     });
 
     // Subscribe to notification events
     context.eventBus.on('notification', (event: unknown) => {
       const notifEvent = event as NotificationEvent;
-      const { channel, title, body, topicName } = notifEvent.payload;
+      const { channel, title, body, topicName, actions } = notifEvent.payload;
       if (channel === 'telegram' || channel === 'all') {
         const text = `*${escapeMarkdown(title)}*\n\n${escapeMarkdown(body)}`;
         let threadId: number | undefined;
@@ -284,7 +370,13 @@ const service: SuiteService = {
           }
         }
 
-        sendMessageWithFallback(text, 'MarkdownV2', threadId).catch(() => {
+        // Build inline keyboard from actions array
+        let keyboard: InlineKeyboard | undefined;
+        if (actions && actions.length > 0) {
+          keyboard = buildInlineKeyboard(actions);
+        }
+
+        sendMessageWithFallback(text, 'MarkdownV2', threadId, keyboard).catch(() => {
           // already logged in sendMessageWithFallback
         });
       }
@@ -319,6 +411,30 @@ const service: SuiteService = {
           // already logged
         });
       }
+    });
+
+    // Subscribe to permission:blocked — send Telegram notification with approval buttons
+    context.eventBus.on('permission:blocked', (event: unknown) => {
+      const e = event as PermissionBlockedEvent;
+      const { actionName, skillName, approvalId } = e.payload;
+
+      eventBus.emit({
+        id: generateId(),
+        timestamp: Date.now(),
+        source: SOURCE_TELEGRAM,
+        type: 'notification',
+        payload: {
+          channel: 'telegram' as const,
+          title: 'Approval Required',
+          body: `Action "${actionName}" from skill "${skillName}" requires approval.`,
+          topicName: 'System',
+          actions: [
+            { label: 'Approve', action: `a:y:${approvalId}` },
+            { label: 'Deny', action: `a:n:${approvalId}` },
+            { label: 'View Details', action: `a:v:${approvalId}` },
+          ],
+        },
+      });
     });
 
     // Validate group membership on startup (group mode only)

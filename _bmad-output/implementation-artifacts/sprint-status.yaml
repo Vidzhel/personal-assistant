@@ -63,7 +63,7 @@ development_status:
   # Epic 3: Enhanced Telegram & Mobile Command (MVP)
   epic-3: in-progress
   3-1-telegram-group-with-topic-threads: done
-  3-2-inline-keyboard-actions-and-approvals: backlog
+  3-2-inline-keyboard-actions-and-approvals: done
   3-3-gemini-voice-transcription-skill: backlog
   3-4-media-and-file-routing: backlog
   3-5-morning-briefing-delivery: backlog
