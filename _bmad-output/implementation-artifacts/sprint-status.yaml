@@ -55,7 +55,7 @@ development_status:
   epic-2: in-progress
   2-1-pipeline-yaml-loader-and-validation: done
   2-2-pipeline-execution-engine-and-dag-runner: done
-  2-3-pipeline-scheduling-and-event-triggers: backlog
+  2-3-pipeline-scheduling-and-event-triggers: done
   2-4-pipeline-retry-and-error-handling: backlog
   2-5-pipeline-crud-api-and-git-auto-commit: backlog
   epic-2-retrospective: optional
