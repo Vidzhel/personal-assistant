@@ -1,5 +1,5 @@
 name: test-pipeline
-description: Test pipeline for API validation
+description: Updated description
 version: 1
 trigger:
   type: manual
@@ -8,5 +8,11 @@ nodes:
     skill: digest
     action: compile-briefing
     params: {}
-connections: []
+  step-two:
+    skill: telegram
+    action: send-message
+    params: {}
+connections:
+  - from: step-one
+    to: step-two
 enabled: true
