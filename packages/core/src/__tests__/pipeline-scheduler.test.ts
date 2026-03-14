@@ -53,6 +53,8 @@ function createMockEngine(pipelines: ValidatedPipeline[]): PipelineEngine {
       runId: 'test-run-id',
       execution: Promise.resolve({} as any),
     })),
+    savePipeline: vi.fn(),
+    deletePipeline: vi.fn(),
     shutdown: vi.fn(),
   };
 }

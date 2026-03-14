@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync, unlinkSync } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtempSync, writeFileSync, rmSync, unlinkSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { PipelineConfigSchema } from '@raven/shared';
@@ -797,5 +797,339 @@ describe('Pipeline API routes', () => {
     expect(body[0].id).toBe('run-1');
 
     await app.close();
+  });
+});
+
+// ─── Pipeline CRUD API Routes (Story 2-5) ───────────────────────────────────
+
+describe('Pipeline CRUD API routes', () => {
+  let tmpDir: string;
+  let eventBus: EventBus;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'pipeline-crud-api-'));
+    eventBus = new EventBus();
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('PUT /api/pipelines/:name creates pipeline and returns config', async () => {
+    const engine = createPipelineEngine({ eventBus });
+    engine.initialize(tmpDir);
+
+    const { default: Fastify } = await import('fastify');
+    const { registerPipelineRoutes } = await import('../api/routes/pipelines.ts');
+
+    const app = Fastify({ logger: false });
+    registerPipelineRoutes(app, { pipelineEngine: engine });
+    await app.ready();
+
+    const yaml = makeValidPipelineYaml('new-pipeline');
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/pipelines/new-pipeline',
+      headers: { 'content-type': 'text/yaml' },
+      payload: yaml,
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.payload);
+    expect(body.config.name).toBe('new-pipeline');
+
+    // Verify file exists on disk
+    expect(existsSync(join(tmpDir, 'new-pipeline.yaml'))).toBe(true);
+
+    engine.shutdown();
+    await app.close();
+  });
+
+  it('PUT /api/pipelines/:name returns 400 for invalid YAML', async () => {
+    const engine = createPipelineEngine({ eventBus });
+    engine.initialize(tmpDir);
+
+    const { default: Fastify } = await import('fastify');
+    const { registerPipelineRoutes } = await import('../api/routes/pipelines.ts');
+
+    const app = Fastify({ logger: false });
+    registerPipelineRoutes(app, { pipelineEngine: engine });
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/pipelines/bad',
+      headers: { 'content-type': 'text/yaml' },
+      payload: makeInvalidPipelineYaml(),
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = JSON.parse(response.payload);
+    expect(body.error).toBeDefined();
+
+    engine.shutdown();
+    await app.close();
+  });
+
+  it('PUT /api/pipelines/:name returns 400 for name mismatch', async () => {
+    const engine = createPipelineEngine({ eventBus });
+    engine.initialize(tmpDir);
+
+    const { default: Fastify } = await import('fastify');
+    const { registerPipelineRoutes } = await import('../api/routes/pipelines.ts');
+
+    const app = Fastify({ logger: false });
+    registerPipelineRoutes(app, { pipelineEngine: engine });
+    await app.ready();
+
+    const yaml = makeValidPipelineYaml('different-name');
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/pipelines/url-name',
+      headers: { 'content-type': 'text/yaml' },
+      payload: yaml,
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = JSON.parse(response.payload);
+    expect(body.error).toContain('match');
+
+    engine.shutdown();
+    await app.close();
+  });
+
+  it('PUT /api/pipelines/:name updates existing pipeline', async () => {
+    writeFileSync(join(tmpDir, 'existing.yaml'), makeValidPipelineYaml('existing'));
+
+    const engine = createPipelineEngine({ eventBus });
+    engine.initialize(tmpDir);
+
+    const { default: Fastify } = await import('fastify');
+    const { registerPipelineRoutes } = await import('../api/routes/pipelines.ts');
+
+    const app = Fastify({ logger: false });
+    registerPipelineRoutes(app, { pipelineEngine: engine });
+    await app.ready();
+
+    const updatedYaml = makeValidPipelineYaml('existing');
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/pipelines/existing',
+      headers: { 'content-type': 'text/yaml' },
+      payload: updatedYaml,
+    });
+
+    expect(response.statusCode).toBe(200);
+
+    engine.shutdown();
+    await app.close();
+  });
+
+  it('DELETE /api/pipelines/:name removes pipeline and returns 204', async () => {
+    writeFileSync(join(tmpDir, 'to-delete.yaml'), makeValidPipelineYaml('to-delete'));
+
+    const engine = createPipelineEngine({ eventBus });
+    engine.initialize(tmpDir);
+
+    const { default: Fastify } = await import('fastify');
+    const { registerPipelineRoutes } = await import('../api/routes/pipelines.ts');
+
+    const app = Fastify({ logger: false });
+    registerPipelineRoutes(app, { pipelineEngine: engine });
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/api/pipelines/to-delete',
+    });
+
+    expect(response.statusCode).toBe(204);
+    expect(existsSync(join(tmpDir, 'to-delete.yaml'))).toBe(false);
+
+    engine.shutdown();
+    await app.close();
+  });
+
+  it('DELETE /api/pipelines/:name returns 404 for non-existent', async () => {
+    const engine = createPipelineEngine({ eventBus });
+    engine.initialize(tmpDir);
+
+    const { default: Fastify } = await import('fastify');
+    const { registerPipelineRoutes } = await import('../api/routes/pipelines.ts');
+
+    const app = Fastify({ logger: false });
+    registerPipelineRoutes(app, { pipelineEngine: engine });
+    await app.ready();
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/api/pipelines/nonexistent',
+    });
+
+    expect(response.statusCode).toBe(404);
+
+    engine.shutdown();
+    await app.close();
+  });
+
+  it('existing GET and POST routes still work after CRUD additions', async () => {
+    writeFileSync(join(tmpDir, 'test.yaml'), makeValidPipelineYaml());
+
+    const engine = createPipelineEngine({ eventBus });
+    engine.initialize(tmpDir);
+
+    const { default: Fastify } = await import('fastify');
+    const { registerPipelineRoutes } = await import('../api/routes/pipelines.ts');
+
+    const app = Fastify({ logger: false });
+    registerPipelineRoutes(app, { pipelineEngine: engine });
+    await app.ready();
+
+    // GET /api/pipelines
+    const listRes = await app.inject({ method: 'GET', url: '/api/pipelines' });
+    expect(listRes.statusCode).toBe(200);
+
+    // GET /api/pipelines/:name
+    const getRes = await app.inject({ method: 'GET', url: '/api/pipelines/test-pipeline' });
+    expect(getRes.statusCode).toBe(200);
+
+    engine.shutdown();
+    await app.close();
+  });
+});
+
+// ─── Pipeline CRUD (Story 2-5) ──────────────────────────────────────────────
+// NOTE: vi.mock is hoisted by Vitest to the top of the file, so this mock
+// applies to ALL tests above as well. This is safe because gitAutoCommit is
+// only called by savePipeline/deletePipeline (tested in this block), and the
+// mock simply makes it a no-op — matching the real function's fire-and-forget contract.
+
+vi.mock('@raven/shared', async (importOriginal) => {
+  const original: any = await importOriginal();
+  return {
+    ...original,
+    gitAutoCommit: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
+describe('Pipeline CRUD — savePipeline / deletePipeline', () => {
+  let tmpDir: string;
+  let eventBus: EventBus;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'pipeline-crud-'));
+    eventBus = new EventBus();
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('savePipeline writes valid YAML to disk and returns config', () => {
+    const engine = createPipelineEngine({ eventBus });
+    engine.initialize(tmpDir);
+
+    const yaml = makeValidPipelineYaml('new-pipeline');
+    const result = engine.savePipeline('new-pipeline', yaml);
+
+    expect(result.config.name).toBe('new-pipeline');
+    expect(existsSync(join(tmpDir, 'new-pipeline.yaml'))).toBe(true);
+
+    // Verify it's loaded in-memory
+    expect(engine.getPipeline('new-pipeline')).toBeDefined();
+
+    engine.shutdown();
+  });
+
+  it('savePipeline overwrites an existing pipeline', () => {
+    writeFileSync(join(tmpDir, 'existing.yaml'), makeValidPipelineYaml('existing'));
+
+    const engine = createPipelineEngine({ eventBus });
+    engine.initialize(tmpDir);
+
+    expect(engine.getPipeline('existing')).toBeDefined();
+
+    const updatedYaml = makeValidPipelineYaml('existing');
+    const result = engine.savePipeline('existing', updatedYaml);
+
+    expect(result.config.name).toBe('existing');
+    expect(existsSync(join(tmpDir, 'existing.yaml'))).toBe(true);
+
+    engine.shutdown();
+  });
+
+  it('savePipeline throws on invalid YAML (validation failure)', () => {
+    const engine = createPipelineEngine({ eventBus });
+    engine.initialize(tmpDir);
+
+    expect(() => engine.savePipeline('bad', makeInvalidPipelineYaml())).toThrow();
+
+    // No file should be written
+    expect(existsSync(join(tmpDir, 'bad.yaml'))).toBe(false);
+
+    engine.shutdown();
+  });
+
+  it('savePipeline throws on name mismatch', () => {
+    const engine = createPipelineEngine({ eventBus });
+    engine.initialize(tmpDir);
+
+    const yaml = makeValidPipelineYaml('different-name');
+    expect(() => engine.savePipeline('url-name', yaml)).toThrow(
+      'Pipeline name in body must match URL parameter',
+    );
+
+    engine.shutdown();
+  });
+
+  it('savePipeline throws on DAG cycle', () => {
+    const engine = createPipelineEngine({ eventBus });
+    engine.initialize(tmpDir);
+
+    const yaml = makeCyclicPipelineYaml();
+    expect(() => engine.savePipeline('cyclic-pipeline', yaml)).toThrow();
+
+    engine.shutdown();
+  });
+
+  it('deletePipeline removes file from disk and memory', () => {
+    writeFileSync(join(tmpDir, 'to-delete.yaml'), makeValidPipelineYaml('to-delete'));
+
+    const engine = createPipelineEngine({ eventBus });
+    engine.initialize(tmpDir);
+
+    expect(engine.getPipeline('to-delete')).toBeDefined();
+
+    const result = engine.deletePipeline('to-delete');
+    expect(result).toBe(true);
+
+    expect(existsSync(join(tmpDir, 'to-delete.yaml'))).toBe(false);
+    expect(engine.getPipeline('to-delete')).toBeUndefined();
+
+    engine.shutdown();
+  });
+
+  it('deletePipeline returns false for non-existent pipeline', () => {
+    const engine = createPipelineEngine({ eventBus });
+    engine.initialize(tmpDir);
+
+    const result = engine.deletePipeline('nonexistent');
+    expect(result).toBe(false);
+
+    engine.shutdown();
+  });
+
+  it('savePipeline throws when engine not initialized', () => {
+    const engine = createPipelineEngine({ eventBus });
+
+    expect(() => engine.savePipeline('test', makeValidPipelineYaml())).toThrow(
+      'Pipeline engine not initialized',
+    );
+  });
+
+  it('deletePipeline throws when engine not initialized', () => {
+    const engine = createPipelineEngine({ eventBus });
+
+    expect(() => engine.deletePipeline('test')).toThrow('Pipeline engine not initialized');
   });
 });
