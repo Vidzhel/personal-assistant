@@ -120,6 +120,11 @@ export function createPipelineExecutor(deps: PipelineExecutorDeps): PipelineExec
     return levels;
   }
 
+  interface RetryConfig {
+    maxAttempts: number;
+    backoffMs: number;
+  }
+
   interface NodeContext {
     pipeline: ValidatedPipeline;
     nodeId: string;
@@ -228,6 +233,51 @@ export function createPipelineExecutor(deps: PipelineExecutorDeps): PipelineExec
     return { output: completion.result };
   }
 
+  async function executeNodeWithRetry(
+    ctx: NodeContext,
+    retryConfig: RetryConfig,
+    runId: string,
+  ): Promise<{ output?: unknown; error?: string; attempts: number }> {
+    const node = ctx.pipeline.config.nodes[ctx.nodeId];
+    // Only retry skill-action nodes (no type field = skill-action)
+    const isRetryable = !node?.type;
+    const maxAttempts = isRetryable ? retryConfig.maxAttempts : 1;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const result = await executeNode(ctx);
+
+      if (!result.error || attempt === maxAttempts) {
+        return { ...result, attempts: attempt };
+      }
+
+      // Emit retry event before waiting
+      const backoffMs = retryConfig.backoffMs * Math.pow(2, attempt - 1);
+      emitEvent({
+        id: generateId(),
+        timestamp: Date.now(),
+        source: 'pipeline-executor',
+        type: 'pipeline:step:retry',
+        payload: {
+          runId,
+          pipelineName: ctx.pipeline.config.name,
+          nodeId: ctx.nodeId,
+          attempt,
+          maxAttempts,
+          backoffMs,
+          timestamp: new Date().toISOString(),
+        },
+      });
+
+      log.warn(
+        `Retrying node ${ctx.nodeId} (attempt ${String(attempt + 1)}/${String(maxAttempts)}) after ${String(backoffMs)}ms`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
+
+    // Should not reach here, but TypeScript needs it
+    return { error: 'Retry logic error', attempts: maxAttempts };
+  }
+
   function buildPrompt(
     node: {
       action?: string;
@@ -264,6 +314,11 @@ export function createPipelineExecutor(deps: PipelineExecutorDeps): PipelineExec
       const startTime = Date.now();
       const onError = pipeline.config.settings?.onError ?? 'stop';
       const timeoutMs = pipeline.config.settings?.timeout ?? 600000;
+      const retrySettings = pipeline.config.settings?.retry;
+      const retryConfig: RetryConfig = {
+        maxAttempts: retrySettings?.maxAttempts ?? 1,
+        backoffMs: retrySettings?.backoffMs ?? 5000,
+      };
 
       const nodeOutputs = new Map<string, unknown>();
       const nodeStatus = new Map<string, NodeStatus>();
@@ -377,24 +432,22 @@ export function createPipelineExecutor(deps: PipelineExecutorDeps): PipelineExec
               nodeStatus.set(nodeId, 'running');
               const nodeStartTime = Date.now();
 
-              const result = await executeNode({
-                pipeline,
-                nodeId,
-                nodeOutputs,
-                conditionResults,
-                timeoutMs,
-              });
+              const retryResult = await executeNodeWithRetry(
+                { pipeline, nodeId, nodeOutputs, conditionResults, timeoutMs },
+                retryConfig,
+                runId,
+              );
 
               const nodeDurationMs = Date.now() - nodeStartTime;
 
-              if (result.error) {
+              if (retryResult.error) {
                 nodeStatus.set(nodeId, 'failed');
                 nodeResults[nodeId] = {
                   status: 'failed',
-                  error: result.error,
+                  error: retryResult.error,
                   durationMs: nodeDurationMs,
                 };
-                nodeOutputs.set(nodeId, { error: result.error });
+                nodeOutputs.set(nodeId, { error: retryResult.error });
 
                 emitEvent({
                   id: generateId(),
@@ -405,20 +458,22 @@ export function createPipelineExecutor(deps: PipelineExecutorDeps): PipelineExec
                     runId,
                     pipelineName,
                     nodeId,
-                    error: result.error,
+                    error: retryResult.error,
                     durationMs: nodeDurationMs,
                     timestamp: new Date().toISOString(),
+                    attempt: retryResult.attempts,
+                    maxAttempts: retryConfig.maxAttempts,
                   },
                 });
 
-                return { nodeId, failed: true, error: result.error };
+                return { nodeId, failed: true, error: retryResult.error };
               }
 
               nodeStatus.set(nodeId, 'complete');
-              nodeOutputs.set(nodeId, result.output);
+              nodeOutputs.set(nodeId, retryResult.output);
               nodeResults[nodeId] = {
                 status: 'complete',
-                output: result.output,
+                output: retryResult.output,
                 durationMs: nodeDurationMs,
               };
 
@@ -431,9 +486,11 @@ export function createPipelineExecutor(deps: PipelineExecutorDeps): PipelineExec
                   runId,
                   pipelineName,
                   nodeId,
-                  output: result.output,
+                  output: retryResult.output,
                   durationMs: nodeDurationMs,
                   timestamp: new Date().toISOString(),
+                  attempt: retryResult.attempts,
+                  maxAttempts: retryConfig.maxAttempts,
                 },
               });
 
@@ -454,6 +511,17 @@ export function createPipelineExecutor(deps: PipelineExecutorDeps): PipelineExec
               }
             }
             break;
+          }
+        }
+
+        // With onError: continue, mark as failed if ALL nodes failed
+        if (!pipelineFailed && onError === 'continue') {
+          const anySucceeded = pipeline.executionOrder.some(
+            (nodeId) => nodeStatus.get(nodeId) === 'complete',
+          );
+          if (!anySucceeded) {
+            pipelineFailed = true;
+            pipelineError = 'All nodes failed';
           }
         }
       } catch (err) {

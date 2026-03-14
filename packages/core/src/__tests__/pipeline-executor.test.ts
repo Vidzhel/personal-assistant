@@ -131,6 +131,51 @@ function autoFailAgentTasks(eventBus: EventBus) {
   });
 }
 
+/**
+ * Fail agent tasks for the first N attempts, then succeed.
+ * Tracks attempt count per nodeId (via skillName).
+ */
+function autoFailThenSucceedAgentTasks(eventBus: EventBus, failCount: number) {
+  const attemptsBySkill = new Map<string, number>();
+  eventBus.on('agent:task:request', (event: RavenEvent) => {
+    if (event.type !== 'agent:task:request') return;
+    const { taskId, skillName } = event.payload;
+    const attempts = (attemptsBySkill.get(skillName) ?? 0) + 1;
+    attemptsBySkill.set(skillName, attempts);
+
+    setTimeout(() => {
+      if (attempts <= failCount) {
+        eventBus.emit({
+          id: `complete-${taskId}`,
+          timestamp: Date.now(),
+          source: 'mock-agent',
+          type: 'agent:task:complete',
+          payload: {
+            taskId,
+            result: '',
+            durationMs: 10,
+            success: false,
+            errors: ['Transient failure'],
+          },
+        } as any);
+      } else {
+        eventBus.emit({
+          id: `complete-${taskId}`,
+          timestamp: Date.now(),
+          source: 'mock-agent',
+          type: 'agent:task:complete',
+          payload: {
+            taskId,
+            result: `Result from ${skillName}`,
+            durationMs: 10,
+            success: true,
+          },
+        } as any);
+      }
+    }, 5);
+  });
+}
+
 // ─── Tests ─────────────────────────────────────────────────────────────────
 
 describe('PipelineExecutor', () => {
@@ -463,6 +508,251 @@ describe('PipelineExecutor', () => {
       expect(result.status).toBe('failed');
       expect(result.nodeResults['a'].status).toBe('failed');
       expect(result.nodeResults['a'].error).toContain('Suite not found');
+    });
+  });
+
+  describe('retry behavior', () => {
+    it('retries up to maxAttempts with exponential backoff', async () => {
+      autoFailAgentTasks(eventBus);
+
+      const pipeline = makeValidatedPipeline({
+        nodes: { a: { skill: 'test', action: 'flaky' } },
+        settings: { onError: 'stop', timeout: 600000, retry: { maxAttempts: 3, backoffMs: 10 } },
+      });
+
+      const result = await executor.executePipeline(pipeline, 'manual');
+
+      expect(result.status).toBe('failed');
+      expect(result.nodeResults['a'].status).toBe('failed');
+    });
+
+    it('succeeds on retry after transient failure', async () => {
+      // Fail first attempt, succeed on second
+      autoFailThenSucceedAgentTasks(eventBus, 1);
+
+      const pipeline = makeValidatedPipeline({
+        nodes: { a: { skill: 'test', action: 'flaky' } },
+        settings: { onError: 'stop', timeout: 600000, retry: { maxAttempts: 3, backoffMs: 10 } },
+      });
+
+      const result = await executor.executePipeline(pipeline, 'manual');
+
+      expect(result.status).toBe('completed');
+      expect(result.nodeResults['a'].status).toBe('complete');
+    });
+
+    it('fails after all retries exhausted', async () => {
+      autoFailAgentTasks(eventBus);
+
+      const pipeline = makeValidatedPipeline({
+        nodes: { a: { skill: 'test', action: 'always-fail' } },
+        settings: { onError: 'stop', timeout: 600000, retry: { maxAttempts: 2, backoffMs: 10 } },
+      });
+
+      const result = await executor.executePipeline(pipeline, 'manual');
+
+      expect(result.status).toBe('failed');
+      expect(result.nodeResults['a'].status).toBe('failed');
+      expect(result.nodeResults['a'].error).toContain('Task execution failed');
+    });
+
+    it('does not retry when settings.retry is undefined (single attempt)', async () => {
+      const retryEvents: RavenEvent[] = [];
+      eventBus.on('pipeline:step:retry', (e) => retryEvents.push(e));
+      autoFailAgentTasks(eventBus);
+
+      const pipeline = makeValidatedPipeline({
+        nodes: { a: { skill: 'test', action: 'fail' } },
+        settings: { onError: 'stop', timeout: 600000 },
+      });
+
+      const result = await executor.executePipeline(pipeline, 'manual');
+
+      expect(result.status).toBe('failed');
+      expect(retryEvents).toHaveLength(0);
+    });
+
+    it('does not retry condition/merge/delay nodes even with retry config', async () => {
+      const retryEvents: RavenEvent[] = [];
+      eventBus.on('pipeline:step:retry', (e) => retryEvents.push(e));
+
+      const pipeline = makeValidatedPipeline({
+        nodes: {
+          check: { type: 'condition', expression: '{{ nonexistent.value }}' },
+        },
+        settings: {
+          onError: 'continue',
+          timeout: 600000,
+          retry: { maxAttempts: 3, backoffMs: 10 },
+        },
+      });
+
+      await executor.executePipeline(pipeline, 'manual');
+
+      // Condition nodes should not be retried
+      expect(retryEvents).toHaveLength(0);
+    });
+
+    it('emits pipeline:step:retry event before each retry', async () => {
+      const retryEvents: RavenEvent[] = [];
+      eventBus.on('pipeline:step:retry', (e) => retryEvents.push(e));
+      // Fail first 2 attempts, succeed on third
+      autoFailThenSucceedAgentTasks(eventBus, 2);
+
+      const pipeline = makeValidatedPipeline({
+        nodes: { a: { skill: 'test', action: 'flaky' } },
+        settings: { onError: 'stop', timeout: 600000, retry: { maxAttempts: 3, backoffMs: 10 } },
+      });
+
+      const result = await executor.executePipeline(pipeline, 'manual');
+
+      expect(result.status).toBe('completed');
+      // 2 retries = 2 retry events (after attempt 1 and after attempt 2)
+      expect(retryEvents).toHaveLength(2);
+
+      const first = retryEvents[0] as any;
+      expect(first.type).toBe('pipeline:step:retry');
+      expect(first.payload.nodeId).toBe('a');
+      expect(first.payload.attempt).toBe(1);
+      expect(first.payload.maxAttempts).toBe(3);
+      expect(first.payload.backoffMs).toBe(10); // 10 * 2^0
+
+      const second = retryEvents[1] as any;
+      expect(second.payload.attempt).toBe(2);
+      expect(second.payload.backoffMs).toBe(20); // 10 * 2^1
+    });
+
+    it('includes attempt and maxAttempts in pipeline:step:failed event', async () => {
+      const failedEvents: RavenEvent[] = [];
+      eventBus.on('pipeline:step:failed', (e) => failedEvents.push(e));
+      autoFailAgentTasks(eventBus);
+
+      const pipeline = makeValidatedPipeline({
+        nodes: { a: { skill: 'test', action: 'fail' } },
+        settings: { onError: 'stop', timeout: 600000, retry: { maxAttempts: 3, backoffMs: 10 } },
+      });
+
+      await executor.executePipeline(pipeline, 'manual');
+
+      expect(failedEvents).toHaveLength(1);
+      const payload = (failedEvents[0] as any).payload;
+      expect(payload.attempt).toBe(3);
+      expect(payload.maxAttempts).toBe(3);
+    });
+
+    it('includes attempt number in pipeline:step:complete event', async () => {
+      const completeEvents: RavenEvent[] = [];
+      eventBus.on('pipeline:step:complete', (e) => completeEvents.push(e));
+      // Fail first, succeed on second attempt
+      autoFailThenSucceedAgentTasks(eventBus, 1);
+
+      const pipeline = makeValidatedPipeline({
+        nodes: { a: { skill: 'test', action: 'flaky' } },
+        settings: { onError: 'stop', timeout: 600000, retry: { maxAttempts: 3, backoffMs: 10 } },
+      });
+
+      await executor.executePipeline(pipeline, 'manual');
+
+      expect(completeEvents).toHaveLength(1);
+      const payload = (completeEvents[0] as any).payload;
+      expect(payload.attempt).toBe(2); // succeeded on second attempt
+      expect(payload.maxAttempts).toBe(3);
+    });
+
+    it('onError: stop still works — pipeline halts after node fails all retries', async () => {
+      autoFailAgentTasks(eventBus);
+
+      const pipeline = makeValidatedPipeline({
+        nodes: {
+          a: { skill: 'test', action: 'fail' },
+          b: { skill: 'test', action: 'should-skip' },
+        },
+        connections: [{ from: 'a', to: 'b' }],
+        settings: { onError: 'stop', timeout: 600000, retry: { maxAttempts: 2, backoffMs: 10 } },
+      });
+
+      const result = await executor.executePipeline(pipeline, 'manual');
+
+      expect(result.status).toBe('failed');
+      expect(result.nodeResults['a'].status).toBe('failed');
+      expect(result.nodeResults['b'].status).toBe('skipped');
+    });
+
+    it('onError: continue still works — remaining nodes execute after node fails all retries', async () => {
+      // Set up: a always fails, b always succeeds
+      eventBus.on('agent:task:request', (event: RavenEvent) => {
+        if (event.type !== 'agent:task:request') return;
+        const { taskId, skillName } = event.payload;
+
+        setTimeout(() => {
+          if (skillName === 'fail-skill') {
+            eventBus.emit({
+              id: `complete-${taskId}`,
+              timestamp: Date.now(),
+              source: 'mock-agent',
+              type: 'agent:task:complete',
+              payload: { taskId, result: '', durationMs: 10, success: false, errors: ['Failed'] },
+            } as any);
+          } else {
+            eventBus.emit({
+              id: `complete-${taskId}`,
+              timestamp: Date.now(),
+              source: 'mock-agent',
+              type: 'agent:task:complete',
+              payload: { taskId, result: 'ok', durationMs: 10, success: true },
+            } as any);
+          }
+        }, 5);
+      });
+
+      const pipeline = makeValidatedPipeline({
+        nodes: {
+          a: { skill: 'fail-skill', action: 'fail' },
+          b: { skill: 'ok-skill', action: 'succeed' },
+          c: { skill: 'ok-skill', action: 'after-both' },
+        },
+        connections: [
+          { from: 'a', to: 'c' },
+          { from: 'b', to: 'c' },
+        ],
+        settings: {
+          onError: 'continue',
+          timeout: 600000,
+          retry: { maxAttempts: 2, backoffMs: 10 },
+        },
+      });
+
+      const result = await executor.executePipeline(pipeline, 'manual');
+
+      // a fails after retries, b succeeds, pipeline continues
+      expect(result.status).toBe('completed');
+      expect(result.nodeResults['a'].status).toBe('failed');
+      expect(result.nodeResults['b'].status).toBe('complete');
+      // c depends on both a and b — b completed so c should execute
+      expect(result.nodeResults['c'].status).toBe('complete');
+    });
+
+    it('onError: continue reports failed when ALL nodes fail', async () => {
+      autoFailAgentTasks(eventBus);
+
+      const pipeline = makeValidatedPipeline({
+        nodes: {
+          a: { skill: 'test', action: 'fail-a' },
+          b: { skill: 'test', action: 'fail-b' },
+        },
+        settings: {
+          onError: 'continue',
+          timeout: 600000,
+          retry: { maxAttempts: 1, backoffMs: 10 },
+        },
+      });
+
+      const result = await executor.executePipeline(pipeline, 'manual');
+
+      expect(result.status).toBe('failed');
+      expect(result.error).toBe('All nodes failed');
+      expect(result.nodeResults['a'].status).toBe('failed');
+      expect(result.nodeResults['b'].status).toBe('failed');
     });
   });
 });
