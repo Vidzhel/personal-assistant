@@ -1,0 +1,12 @@
+name: test-pipeline
+description: Test pipeline for API validation
+version: 1
+trigger:
+  type: manual
+nodes:
+  step-one:
+    skill: digest
+    action: compile-briefing
+    params: {}
+connections: []
+enabled: true
