@@ -17,8 +17,8 @@ with ticktick-agent, then notify the user via telegram-notifier.
 
 For email reply requests ("reply to [email], tell them [content]"):
 1. Use gmail-agent to identify the target email (search/get)
-2. Once you have the email ID, emit an email:reply:start event with the emailId and the user's reply instructions as userIntent
-3. The reply composition system will handle drafting and presenting the reply to the user
+2. Once you have the email ID, return a structured JSON response: { "action": "email:reply", "emailId": "<id>", "userIntent": "<user's reply instructions>" }
+3. The orchestrator framework will route this to the reply composition system
 
 Always delegate to the appropriate agent rather than doing work yourself.
 Summarize results from agents before returning.`,

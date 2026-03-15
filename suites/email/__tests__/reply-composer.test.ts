@@ -92,6 +92,7 @@ describe('reply-composer service', () => {
       expect(mockEventBus.on).toHaveBeenCalledWith('email:reply:edit', expect.any(Function));
       expect(mockEventBus.on).toHaveBeenCalledWith('email:reply:cancel', expect.any(Function));
       expect(mockEventBus.on).toHaveBeenCalledWith('permission:denied', expect.any(Function));
+      expect(mockEventBus.on).toHaveBeenCalledWith('user:chat:message', expect.any(Function));
     });
 
     it('unsubscribes from all events on stop', async () => {
@@ -103,6 +104,7 @@ describe('reply-composer service', () => {
       expect(mockEventBus.off).toHaveBeenCalledWith('email:reply:edit', expect.any(Function));
       expect(mockEventBus.off).toHaveBeenCalledWith('email:reply:cancel', expect.any(Function));
       expect(mockEventBus.off).toHaveBeenCalledWith('permission:denied', expect.any(Function));
+      expect(mockEventBus.off).toHaveBeenCalledWith('user:chat:message', expect.any(Function));
     });
 
     it('clears pending drafts on stop', async () => {
@@ -376,6 +378,98 @@ describe('reply-composer service', () => {
       expect(updatedNotifs[0][0].payload.title).toContain('Updated Draft');
       expect(updatedNotifs[0][0].payload.body).toContain('Friday instead');
     });
+
+    it('marks draft as awaiting edit when newInstructions is empty', async () => {
+      await startService();
+
+      await emitEventAsync('email:reply:start', {
+        emailId: 'email-123',
+        topicName: 'General',
+      });
+
+      const notifCalls = mockEventBus.emit.mock.calls.filter(
+        (call: any) => call[0].type === 'notification',
+      );
+      const actions = notifCalls[0][0].payload.actions;
+      const editAction = actions.find((a: any) => a.label === 'Edit');
+      const compositionId = editAction.action.split(':')[2];
+
+      mockAgentManager.executeApprovedAction.mockClear();
+
+      await emitEventAsync('email:reply:edit', {
+        compositionId,
+        newInstructions: '',
+      });
+
+      // Should NOT call agent manager — draft is marked as awaiting edit
+      expect(mockAgentManager.executeApprovedAction).not.toHaveBeenCalled();
+
+      // Draft should be marked as awaiting edit
+      const { pendingDrafts } = await import('../services/reply-composer.ts');
+      const draft = [...pendingDrafts.values()][0];
+      expect(draft.awaitingEdit).toBe(true);
+    });
+
+    it('processes user chat message as edit instructions when draft is awaiting edit', async () => {
+      await startService();
+
+      await emitEventAsync('email:reply:start', {
+        emailId: 'email-123',
+        topicName: 'General',
+      });
+
+      const notifCalls = mockEventBus.emit.mock.calls.filter(
+        (call: any) => call[0].type === 'notification',
+      );
+      const actions = notifCalls[0][0].payload.actions;
+      const editAction = actions.find((a: any) => a.label === 'Edit');
+      const compositionId = editAction.action.split(':')[2];
+
+      // Mark as awaiting edit
+      await emitEventAsync('email:reply:edit', {
+        compositionId,
+        newInstructions: '',
+      });
+
+      mockEventBus.emit.mockClear();
+
+      // Simulate user sending chat message with corrections
+      emitEvent('user:chat:message', {
+        projectId: 'test',
+        message: 'Change Thursday to Friday',
+      });
+
+      // Should emit email:reply:edit event with actual instructions
+      const editEvents = mockEventBus.emit.mock.calls.filter(
+        (call: any) => call[0].type === 'email:reply:edit',
+      );
+      expect(editEvents.length).toBe(1);
+      expect(editEvents[0][0].payload.newInstructions).toBe('Change Thursday to Friday');
+      expect(editEvents[0][0].payload.compositionId).toBe(compositionId);
+    });
+
+    it('ignores user chat message when no draft is awaiting edit', async () => {
+      await startService();
+
+      await emitEventAsync('email:reply:start', {
+        emailId: 'email-123',
+        topicName: 'General',
+      });
+
+      mockEventBus.emit.mockClear();
+
+      // Send chat message without having marked any draft for edit
+      emitEvent('user:chat:message', {
+        projectId: 'test',
+        message: 'Some unrelated message',
+      });
+
+      // Should NOT emit email:reply:edit
+      const editEvents = mockEventBus.emit.mock.calls.filter(
+        (call: any) => call[0].type === 'email:reply:edit',
+      );
+      expect(editEvents.length).toBe(0);
+    });
   });
 
   describe('cancel flow (AC #4)', () => {
@@ -432,6 +526,21 @@ describe('reply-composer service', () => {
         topicName: 'General',
       });
 
+      // Get compositionId from notification actions
+      const notifCalls = mockEventBus.emit.mock.calls.filter(
+        (call: any) => call[0].type === 'notification',
+      );
+      const actions = notifCalls[0][0].payload.actions;
+      const sendAction = actions.find((a: any) => a.label === 'Send');
+      const compositionId = sendAction.action.split(':')[2];
+
+      // Trigger a failed send to populate pendingSendIds
+      mockAgentManager.executeApprovedAction.mockResolvedValue({
+        success: false,
+        error: 'Task did not complete successfully',
+      });
+      await emitEventAsync('email:reply:send', { compositionId });
+
       mockEventBus.emit.mockClear();
 
       // Simulate permission denial
@@ -442,11 +551,11 @@ describe('reply-composer service', () => {
         tier: 'red',
       });
 
-      const notifCalls = mockEventBus.emit.mock.calls.filter(
+      const denialNotifs = mockEventBus.emit.mock.calls.filter(
         (call: any) => call[0].type === 'notification',
       );
-      expect(notifCalls.length).toBe(1);
-      expect(notifCalls[0][0].payload.body).toContain('approval denial');
+      expect(denialNotifs.length).toBe(1);
+      expect(denialNotifs[0][0].payload.body).toContain('approval denial');
 
       // Draft should be cleared
       const { pendingDrafts } = await import('../services/reply-composer.ts');
@@ -468,6 +577,84 @@ describe('reply-composer service', () => {
         (call: any) => call[0].type === 'notification',
       );
       expect(notifCalls.length).toBe(0);
+    });
+  });
+
+  describe('draft TTL expiry (M1 fix)', () => {
+    it('expires drafts older than TTL', async () => {
+      await startService();
+
+      await emitEventAsync('email:reply:start', {
+        emailId: 'email-old',
+        topicName: 'General',
+      });
+
+      const { pendingDrafts } = await import('../services/reply-composer.ts');
+      expect(pendingDrafts.size).toBe(1);
+
+      // Manually age the draft past TTL (30 minutes)
+      const draft = [...pendingDrafts.values()][0];
+      draft.createdAt = Date.now() - 31 * 60 * 1000;
+
+      // Try to send — should not find the expired draft
+      await emitEventAsync('email:reply:send', {
+        compositionId: [...pendingDrafts.keys()][0],
+      });
+
+      // Draft should have been cleaned up by TTL check
+      expect(pendingDrafts.size).toBe(0);
+    });
+  });
+
+  describe('pendingSendIds tracking (H2 fix)', () => {
+    it('tracks compositionId in pendingSendIds on blocked send', async () => {
+      await startService();
+
+      await emitEventAsync('email:reply:start', {
+        emailId: 'email-123',
+        topicName: 'General',
+      });
+
+      const notifCalls = mockEventBus.emit.mock.calls.filter(
+        (call: any) => call[0].type === 'notification',
+      );
+      const actions = notifCalls[0][0].payload.actions;
+      const sendAction = actions.find((a: any) => a.label === 'Send');
+      const compositionId = sendAction.action.split(':')[2];
+
+      mockAgentManager.executeApprovedAction.mockResolvedValue({
+        success: false,
+        error: 'Task did not complete successfully',
+      });
+
+      await emitEventAsync('email:reply:send', { compositionId });
+
+      const { pendingSendIds } = await import('../services/reply-composer.ts');
+      expect(pendingSendIds.has(compositionId)).toBe(true);
+    });
+
+    it('clears pendingSendIds on successful send', async () => {
+      await startService();
+
+      await emitEventAsync('email:reply:start', {
+        emailId: 'email-123',
+        topicName: 'General',
+      });
+
+      const notifCalls = mockEventBus.emit.mock.calls.filter(
+        (call: any) => call[0].type === 'notification',
+      );
+      const actions = notifCalls[0][0].payload.actions;
+      const sendAction = actions.find((a: any) => a.label === 'Send');
+      const compositionId = sendAction.action.split(':')[2];
+
+      mockAgentManager.executeApprovedAction.mockClear();
+      mockAgentManager.executeApprovedAction.mockResolvedValue({ success: true });
+
+      await emitEventAsync('email:reply:send', { compositionId });
+
+      const { pendingSendIds } = await import('../services/reply-composer.ts');
+      expect(pendingSendIds.has(compositionId)).toBe(false);
     });
   });
 

@@ -18,6 +18,7 @@ import type { ServiceContext, SuiteService } from '@raven/core/suite-registry/se
 const log = createLogger('reply-composer');
 
 const SHORT_ID_LENGTH = 8;
+const DRAFT_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 interface PendingDraft {
   emailId: string;
@@ -27,6 +28,8 @@ interface PendingDraft {
   topicName?: string;
   originalSubject?: string;
   originalFrom?: string;
+  awaitingEdit?: boolean;
+  createdAt: number;
 }
 
 interface AgentManagerLike {
@@ -47,6 +50,7 @@ const DraftResultSchema = z.object({
 });
 
 const pendingDrafts = new Map<string, PendingDraft>();
+const pendingSendIds = new Set<string>();
 
 let eventBus: EventBusInterface;
 let serviceConfig: Record<string, unknown>;
@@ -65,7 +69,14 @@ function getAgentManager(): AgentManagerLike | null {
 }
 
 function findDraftByShortId(shortId: string): PendingDraft | undefined {
-  return pendingDrafts.get(shortId);
+  const draft = pendingDrafts.get(shortId);
+  if (!draft) return undefined;
+  if (Date.now() - draft.createdAt > DRAFT_TTL_MS) {
+    pendingDrafts.delete(shortId);
+    log.info(`Draft ${shortId} expired after TTL`);
+    return undefined;
+  }
+  return draft;
 }
 
 function emitNotification(
@@ -139,6 +150,7 @@ async function handleReplyStart(event: unknown): Promise<void> {
     draftText: '',
     topicId,
     topicName,
+    createdAt: Date.now(),
   });
 
   log.info(`Starting reply composition ${shortId} for email ${emailId}`);
@@ -256,10 +268,11 @@ async function handleReplySend(event: unknown): Promise<void> {
         draft.topicName,
       );
       pendingDrafts.delete(compositionId);
+      pendingSendIds.delete(compositionId);
       log.info(`Reply sent for draft ${compositionId}`);
     } else {
-      // If blocked by permission gate, user will see approval buttons
-      // Don't remove draft yet — approval flow may still complete
+      // Track this draft as pending approval for permission:denied correlation
+      pendingSendIds.add(compositionId);
       log.info(`Reply send result: ${result.error ?? 'pending approval'}`);
     }
   } catch (err) {
@@ -284,6 +297,12 @@ async function handleReplyEdit(event: unknown): Promise<void> {
   const draft = findDraftByShortId(compositionId);
   if (!draft) {
     log.warn(`No pending draft found for compositionId: ${compositionId}`);
+    return;
+  }
+
+  if (!newInstructions.trim()) {
+    draft.awaitingEdit = true;
+    log.info(`Draft ${compositionId} marked as awaiting edit instructions`);
     return;
   }
 
@@ -350,6 +369,30 @@ async function handleReplyEdit(event: unknown): Promise<void> {
   }
 }
 
+function handleUserChatForEdit(event: unknown): void {
+  const e = event as { payload: { message?: string } };
+  const message = e.payload?.message;
+  if (!message?.trim()) return;
+
+  for (const [shortId, draft] of pendingDrafts) {
+    if (draft.awaitingEdit) {
+      draft.awaitingEdit = false;
+      log.info(`Received edit instructions for draft ${shortId}`);
+      eventBus.emit({
+        id: generateId(),
+        timestamp: Date.now(),
+        source: SUITE_EMAIL,
+        type: EVENT_EMAIL_REPLY_EDIT,
+        payload: {
+          compositionId: shortId,
+          newInstructions: message,
+        },
+      });
+      return;
+    }
+  }
+}
+
 function handleReplyCancel(event: unknown): void {
   const e = event as { payload: unknown };
   const parsed = EmailReplyCancelPayloadSchema.safeParse(e.payload);
@@ -380,15 +423,17 @@ function handlePermissionDenied(event: unknown): void {
   const e = event as { payload: { actionName: string; approvalId: string } };
   if (e.payload.actionName !== 'gmail:reply-email') return;
 
-  // Find any pending draft that may have been waiting for approval
-  for (const [shortId, draft] of pendingDrafts) {
-    if (draft.draftText) {
+  // Find the specific draft that was pending send approval
+  for (const shortId of pendingSendIds) {
+    const draft = pendingDrafts.get(shortId);
+    if (draft) {
       emitNotification(
         'Reply Cancelled',
         'Reply cancelled by approval denial.',
         draft.topicName,
       );
       pendingDrafts.delete(shortId);
+      pendingSendIds.delete(shortId);
       log.info(`Draft ${shortId} cancelled due to approval denial`);
       return;
     }
@@ -404,6 +449,7 @@ const service: SuiteService = {
     eventBus.on(EVENT_EMAIL_REPLY_EDIT, handleReplyEdit as (event: unknown) => void);
     eventBus.on(EVENT_EMAIL_REPLY_CANCEL, handleReplyCancel);
     eventBus.on('permission:denied', handlePermissionDenied);
+    eventBus.on('user:chat:message', handleUserChatForEdit);
     log.info('Reply composer service started');
   },
 
@@ -413,7 +459,9 @@ const service: SuiteService = {
     eventBus.off(EVENT_EMAIL_REPLY_EDIT, handleReplyEdit as (event: unknown) => void);
     eventBus.off(EVENT_EMAIL_REPLY_CANCEL, handleReplyCancel);
     eventBus.off('permission:denied', handlePermissionDenied);
+    eventBus.off('user:chat:message', handleUserChatForEdit);
     pendingDrafts.clear();
+    pendingSendIds.clear();
     log.info('Reply composer service stopped');
   },
 };
@@ -421,4 +469,4 @@ const service: SuiteService = {
 export default service;
 
 // Export for testing
-export { pendingDrafts, parseDraftResult, getShortId, buildDraftActions };
+export { pendingDrafts, pendingSendIds, parseDraftResult, getShortId, buildDraftActions };
