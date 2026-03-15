@@ -77,6 +77,12 @@ export interface UserChatMessageEvent extends BaseEvent {
     message: string;
     topicId?: number;
     topicName?: string;
+    mediaAttachment?: {
+      type: 'photo' | 'document';
+      filePath: string;
+      mimeType: string;
+      fileName: string;
+    };
   };
 }
 
@@ -269,6 +275,35 @@ export const VoiceReceivedPayloadSchema = z.object({
   replyMessageId: z.number().optional(),
 });
 
+export interface MediaReceivedEvent extends BaseEvent {
+  type: 'media:received';
+  payload: {
+    projectId: string;
+    mediaType: 'photo' | 'document';
+    filePath: string;
+    mimeType: string;
+    fileName: string;
+    fileSize?: number;
+    caption?: string;
+    topicId?: number;
+    topicName?: string;
+    replyMessageId?: number;
+  };
+}
+
+export const MediaReceivedPayloadSchema = z.object({
+  projectId: z.string(),
+  mediaType: z.enum(['photo', 'document']),
+  filePath: z.string(),
+  mimeType: z.string(),
+  fileName: z.string(),
+  fileSize: z.number().optional(),
+  caption: z.string().optional(),
+  topicId: z.number().optional(),
+  topicName: z.string().optional(),
+  replyMessageId: z.number().optional(),
+});
+
 export interface SystemHealthAlertEvent extends BaseEvent {
   type: 'system:health:alert';
   payload: {
@@ -302,6 +337,7 @@ export type RavenEvent =
   | ConfigPipelinesReloadedEvent
   | SystemHealthAlertEvent
   | VoiceReceivedEvent
+  | MediaReceivedEvent
   | PipelineStartedEvent
   | PipelineStepCompleteEvent
   | PipelineStepFailedEvent

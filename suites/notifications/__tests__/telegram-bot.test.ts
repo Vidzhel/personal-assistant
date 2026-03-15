@@ -9,6 +9,8 @@ const messageHandlers: Array<(ctx: any) => Promise<void>> = [];
 const callbackHandlers: Array<(ctx: any) => Promise<void>> = [];
 const voiceHandlers: Array<(ctx: any) => Promise<void>> = [];
 const videoNoteHandlers: Array<(ctx: any) => Promise<void>> = [];
+const photoHandlers: Array<(ctx: any) => Promise<void>> = [];
+const documentHandlers: Array<(ctx: any) => Promise<void>> = [];
 
 class MockBot {
   on(filter: string, handler: any) {
@@ -16,6 +18,8 @@ class MockBot {
     if (filter === 'callback_query:data') callbackHandlers.push(handler);
     if (filter === 'message:voice') voiceHandlers.push(handler);
     if (filter === 'message:video_note') videoNoteHandlers.push(handler);
+    if (filter === 'message:photo') photoHandlers.push(handler);
+    if (filter === 'message:document') documentHandlers.push(handler);
   }
   api = { sendMessage: mockSendMessage, getChat: mockGetChat, editMessageReplyMarkup: mockEditMessageReplyMarkup };
   start = mockStart;
@@ -44,6 +48,13 @@ vi.mock('@raven/shared', () => ({
 
 vi.mock('@raven/core/suite-registry/service-runner.ts', () => ({}));
 
+const mockMkdir = vi.fn().mockResolvedValue(undefined);
+const mockWriteFile = vi.fn().mockResolvedValue(undefined);
+vi.mock('node:fs/promises', () => ({
+  mkdir: (...args: any[]) => mockMkdir(...args),
+  writeFile: (...args: any[]) => mockWriteFile(...args),
+}));
+
 describe('telegram-bot service', () => {
   const originalEnv = { ...process.env };
   let service: any;
@@ -57,6 +68,8 @@ describe('telegram-bot service', () => {
     callbackHandlers.length = 0;
     voiceHandlers.length = 0;
     videoNoteHandlers.length = 0;
+    photoHandlers.length = 0;
+    documentHandlers.length = 0;
     vi.clearAllMocks();
 
     eventHandlers = {};
@@ -839,6 +852,7 @@ describe('telegram-bot service', () => {
       // Mock global fetch for file download
       vi.stubGlobal('fetch', mockFetch);
       mockFetch.mockResolvedValue({
+        ok: true,
         arrayBuffer: () => Promise.resolve(new ArrayBuffer(100)),
       });
     });
@@ -979,6 +993,273 @@ describe('telegram-bot service', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('media message handling', () => {
+    const mockFetch = vi.fn();
+
+    beforeEach(async () => {
+      process.env.TELEGRAM_BOT_TOKEN = 'test-token';
+      process.env.TELEGRAM_CHAT_ID = '123';
+      process.env.TELEGRAM_GROUP_ID = '-1001234567890';
+      process.env.TELEGRAM_TOPIC_GENERAL = '1';
+      process.env.TELEGRAM_TOPIC_SYSTEM = '42';
+      process.env.TELEGRAM_TOPIC_MAP = '{"Work":5,"Personal":7}';
+
+      vi.stubGlobal('fetch', mockFetch);
+      mockFetch.mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(100)),
+      });
+
+      mockMkdir.mockResolvedValue(undefined);
+      mockWriteFile.mockResolvedValue(undefined);
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    function createPhotoContext(overrides: Record<string, any> = {}) {
+      return {
+        from: { id: 456 },
+        chat: { id: -1001234567890 },
+        message: {
+          message_thread_id: 5,
+          photo: [
+            { file_id: 'small-id', file_unique_id: 's1', width: 90, height: 90, file_size: 1000 },
+            { file_id: 'medium-id', file_unique_id: 'm1', width: 320, height: 320, file_size: 5000 },
+            { file_id: 'large-id', file_unique_id: 'l1', width: 800, height: 800, file_size: 50000 },
+          ],
+          caption: undefined,
+          ...overrides.message,
+        },
+        getFile: vi.fn().mockResolvedValue({ file_path: 'photos/file_0.jpg' }),
+        reply: vi.fn().mockResolvedValue({ message_id: 300 }),
+        ...overrides,
+      };
+    }
+
+    function createDocumentContext(overrides: Record<string, any> = {}) {
+      return {
+        from: { id: 456 },
+        chat: { id: -1001234567890 },
+        message: {
+          message_thread_id: 5,
+          document: {
+            file_id: 'doc-file-id',
+            file_unique_id: 'd1',
+            file_name: 'report.pdf',
+            mime_type: 'application/pdf',
+            file_size: 80000,
+          },
+          caption: undefined,
+          ...overrides.message,
+        },
+        getFile: vi.fn().mockResolvedValue({ file_path: 'documents/report.pdf' }),
+        reply: vi.fn().mockResolvedValue({ message_id: 301 }),
+        ...overrides,
+      };
+    }
+
+    it('emits media:received event for photo with correct payload', async () => {
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      expect(photoHandlers.length).toBeGreaterThan(0);
+
+      const ctx = createPhotoContext();
+      await photoHandlers[0](ctx);
+
+      // Should reply with "Processing media..."
+      expect(ctx.reply).toHaveBeenCalledWith('Processing media...', {
+        message_thread_id: 5,
+      });
+
+      // Should download file
+      expect(ctx.getFile).toHaveBeenCalled();
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.telegram.org/file/bottest-token/photos/file_0.jpg',
+      );
+
+      // Should save to disk
+      expect(mockMkdir).toHaveBeenCalled();
+      expect(mockWriteFile).toHaveBeenCalled();
+
+      // Should emit media:received event
+      expect(mockEventBus.emit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'media:received',
+          source: 'telegram',
+          projectId: 'telegram-work',
+          payload: expect.objectContaining({
+            projectId: 'telegram-work',
+            mediaType: 'photo',
+            mimeType: 'image/jpeg',
+            topicId: 5,
+            topicName: 'Work',
+            replyMessageId: 300,
+          }),
+        }),
+      );
+    });
+
+    it('emits media:received for document with original filename', async () => {
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      expect(documentHandlers.length).toBeGreaterThan(0);
+
+      const ctx = createDocumentContext();
+      await documentHandlers[0](ctx);
+
+      expect(mockEventBus.emit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'media:received',
+          payload: expect.objectContaining({
+            mediaType: 'document',
+            mimeType: 'application/pdf',
+          }),
+        }),
+      );
+
+      // fileName should contain original name
+      const emittedPayload = mockEventBus.emit.mock.calls.find(
+        (call: any[]) => call[0].type === 'media:received',
+      )?.[0]?.payload;
+      expect(emittedPayload.fileName).toContain('report.pdf');
+    });
+
+    it('preserves caption in photo event payload', async () => {
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      const ctx = createPhotoContext({
+        message: {
+          message_thread_id: 5,
+          photo: [
+            { file_id: 'large-id', file_unique_id: 'l1', width: 800, height: 800, file_size: 50000 },
+          ],
+          caption: 'Check this screenshot',
+        },
+      });
+      await photoHandlers[0](ctx);
+
+      const emittedPayload = mockEventBus.emit.mock.calls.find(
+        (call: any[]) => call[0].type === 'media:received',
+      )?.[0]?.payload;
+      expect(emittedPayload.caption).toBe('Check this screenshot');
+    });
+
+    it('rejects files larger than 20MB', async () => {
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      const ctx = createDocumentContext({
+        message: {
+          message_thread_id: 5,
+          document: {
+            file_id: 'big-doc',
+            file_unique_id: 'b1',
+            file_name: 'huge.pdf',
+            mime_type: 'application/pdf',
+            file_size: 25 * 1024 * 1024, // 25MB
+          },
+        },
+      });
+      await documentHandlers[0](ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith('File too large to process', {
+        message_thread_id: 5,
+      });
+      expect(mockEventBus.emit).not.toHaveBeenCalled();
+    });
+
+    it('ignores media from unauthorized chat in group mode', async () => {
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      const ctx = createPhotoContext({
+        chat: { id: -999 },
+      });
+      await photoHandlers[0](ctx);
+
+      expect(mockEventBus.emit).not.toHaveBeenCalled();
+      expect(ctx.reply).not.toHaveBeenCalled();
+    });
+
+    it('picks highest resolution photo (last element in array)', async () => {
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      const ctx = createPhotoContext();
+      await photoHandlers[0](ctx);
+
+      // The getFile call should be for the largest photo
+      // The handler uses ctx.getFile() which we mock, but the file_size should be from the last element
+      const emittedPayload = mockEventBus.emit.mock.calls.find(
+        (call: any[]) => call[0].type === 'media:received',
+      )?.[0]?.payload;
+      expect(emittedPayload.fileSize).toBe(50000); // last element's file_size
+    });
+
+    it('logs error and sends fallback on download failure', async () => {
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      const ctx = createPhotoContext();
+      ctx.getFile.mockRejectedValueOnce(new Error('Network error'));
+
+      await photoHandlers[0](ctx);
+
+      expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining('Failed to download'));
+      // Fallback message sent via sendMessageWithFallback → bot.api.sendMessage(chatId, text, options)
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        '-1001234567890',
+        'Failed to process media',
+        expect.objectContaining({ message_thread_id: 5 }),
+      );
+    });
+
+    it('sends error reply when file_path is undefined', async () => {
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      const ctx = createPhotoContext();
+      ctx.getFile.mockResolvedValueOnce({ file_path: undefined });
+
+      await photoHandlers[0](ctx);
+
+      expect(mockLogger.error).toHaveBeenCalledWith('Media file has no file_path');
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        '-1001234567890',
+        'Failed to process media',
+        expect.objectContaining({ message_thread_id: 5 }),
+      );
+      expect(mockEventBus.emit).not.toHaveBeenCalled();
+    });
+
+    it('sends error reply on non-ok fetch response', async () => {
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      const ctx = createPhotoContext();
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+      });
+
+      await photoHandlers[0](ctx);
+
+      expect(mockLogger.error).toHaveBeenCalledWith(expect.stringContaining('file download failed: 404'));
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        '-1001234567890',
+        'Failed to process media',
+        expect.objectContaining({ message_thread_id: 5 }),
+      );
+      expect(mockEventBus.emit).not.toHaveBeenCalled();
     });
   });
 });

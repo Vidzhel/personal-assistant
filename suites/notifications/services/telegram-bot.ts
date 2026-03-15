@@ -1,4 +1,6 @@
 import { Bot, InlineKeyboard } from 'grammy';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { z } from 'zod';
 import {
   generateId,
@@ -11,6 +13,7 @@ import {
   type AgentTaskCompleteEvent,
   type PermissionBlockedEvent,
   type VoiceReceivedEvent,
+  type MediaReceivedEvent,
 } from '@raven/shared';
 import type { ServiceContext, SuiteService } from '@raven/core/suite-registry/service-runner.ts';
 import {
@@ -364,6 +367,142 @@ const service: SuiteService = {
 
     bot.on('message:video_note', async (ctx) => {
       await handleVoiceMessage(ctx as unknown as Parameters<typeof handleVoiceMessage>[0]);
+    });
+
+    // Handle photo and document messages for media routing
+    const handleMediaMessage = async (
+      ctx: {
+        chat: { id: number };
+        message: {
+          message_thread_id?: number;
+          photo?: Array<{ file_id: string; file_unique_id: string; width: number; height: number; file_size?: number }>;
+          document?: { file_id: string; file_unique_id: string; file_name?: string; mime_type?: string; file_size?: number };
+          caption?: string;
+        };
+        getFile: () => Promise<{ file_path?: string }>;
+        reply: (text: string, options?: Record<string, unknown>) => Promise<{ message_id: number }>;
+      },
+    ): Promise<void> => {
+      // Authorization check (same as voice/text messages)
+      if (operatingMode === 'group') {
+        if (String(ctx.chat.id) !== groupId) {
+          logger.warn(`Ignoring media from unauthorized chat: ${ctx.chat.id}`);
+          return;
+        }
+      } else {
+        const senderId = String((ctx as Record<string, unknown>).from ? ((ctx as Record<string, unknown>).from as { id: number }).id : ctx.chat.id);
+        if (senderId !== chatId && String(ctx.chat.id) !== chatId) {
+          logger.warn(`Ignoring media from unauthorized chat: ${ctx.chat.id}`);
+          return;
+        }
+      }
+
+      const isPhoto = !!ctx.message.photo;
+      const mediaType: 'photo' | 'document' = isPhoto ? 'photo' : 'document';
+
+      // For photos: pick the last element (highest resolution)
+      const fileId = isPhoto
+        ? ctx.message.photo![ctx.message.photo!.length - 1].file_id
+        : ctx.message.document?.file_id;
+      const fileSize = isPhoto
+        ? ctx.message.photo![ctx.message.photo!.length - 1].file_size
+        : ctx.message.document?.file_size;
+      const originalName = isPhoto ? 'photo.jpg' : (ctx.message.document?.file_name ?? 'document');
+      const mimeType = isPhoto ? 'image/jpeg' : (ctx.message.document?.mime_type ?? 'application/octet-stream');
+      const caption = ctx.message.caption;
+
+      if (!fileId) return;
+
+      // Enforce 20MB file size limit
+      const maxFileSize = 20 * 1024 * 1024;
+      if (fileSize && fileSize > maxFileSize) {
+        const replyOpts: Record<string, unknown> = {};
+        const messageThreadId = ctx.message.message_thread_id;
+        if (messageThreadId !== undefined && operatingMode === 'group') {
+          replyOpts.message_thread_id = messageThreadId;
+        }
+        await ctx.reply('File too large to process', replyOpts);
+        return;
+      }
+
+      const messageThreadId = ctx.message.message_thread_id;
+      const topicName = resolveTopicName(messageThreadId);
+      const projectId = resolveProjectId(topicName);
+
+      if (messageThreadId !== undefined) {
+        projectTopicMap.set(projectId, messageThreadId);
+      }
+
+      logger.info(`Media ${mediaType} received [${topicName ?? 'unknown'}]: ${originalName}`);
+
+      // Send "Processing media..." reply
+      const replyOpts: Record<string, unknown> = {};
+      if (messageThreadId !== undefined && operatingMode === 'group') {
+        replyOpts.message_thread_id = messageThreadId;
+      }
+      const replyMsg = await ctx.reply('Processing media...', replyOpts);
+
+      // Download the file and save to disk
+      try {
+        const file = await ctx.getFile();
+        if (!file.file_path) {
+          logger.error('Media file has no file_path');
+          await sendMessageWithFallback('Failed to process media', undefined, messageThreadId);
+          return;
+        }
+
+        const fileUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+        const response = await fetch(fileUrl);
+        if (!response.ok) {
+          logger.error(`Telegram file download failed: ${response.status} ${response.statusText}`);
+          await sendMessageWithFallback('Failed to process media', undefined, messageThreadId);
+          return;
+        }
+        const buffer = Buffer.from(await response.arrayBuffer());
+
+        // Save to data/media/ directory
+        const mediaDir = join(process.cwd(), 'data', 'media');
+        await mkdir(mediaDir, { recursive: true });
+        const savedFileName = `${Date.now()}-${originalName}`;
+        const filePath = join(mediaDir, savedFileName);
+        await writeFile(filePath, buffer);
+
+        // Emit media:received event
+        eventBus.emit({
+          id: generateId(),
+          timestamp: Date.now(),
+          source: SOURCE_TELEGRAM,
+          type: 'media:received',
+          projectId,
+          payload: {
+            projectId,
+            mediaType,
+            filePath,
+            mimeType,
+            fileName: savedFileName,
+            fileSize,
+            caption,
+            topicId: messageThreadId,
+            topicName,
+            replyMessageId: replyMsg.message_id,
+          },
+        } as MediaReceivedEvent);
+      } catch (err) {
+        logger.error(`Failed to download media file: ${err}`);
+        await sendMessageWithFallback(
+          'Failed to process media',
+          undefined,
+          messageThreadId,
+        );
+      }
+    };
+
+    bot.on('message:photo', async (ctx) => {
+      await handleMediaMessage(ctx as unknown as Parameters<typeof handleMediaMessage>[0]);
+    });
+
+    bot.on('message:document', async (ctx) => {
+      await handleMediaMessage(ctx as unknown as Parameters<typeof handleMediaMessage>[0]);
     });
 
     // Resolve callback deps lazily from config (injected after boot)
