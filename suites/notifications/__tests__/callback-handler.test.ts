@@ -52,6 +52,46 @@ describe('parseCallbackData', () => {
     });
   });
 
+  describe('valid email actions', () => {
+    it('parses email reply', () => {
+      const result = parseCallbackData('e:r:emailId789');
+      expect(result).toEqual<CallbackAction>({
+        domain: 'email',
+        action: 'reply',
+        target: 'emailId789',
+        args: [],
+      });
+    });
+
+    it('parses email archive', () => {
+      const result = parseCallbackData('e:a:emailId789');
+      expect(result).toEqual<CallbackAction>({
+        domain: 'email',
+        action: 'archive',
+        target: 'emailId789',
+        args: [],
+      });
+    });
+
+    it('parses email flag', () => {
+      const result = parseCallbackData('e:f:emailId789');
+      expect(result).toEqual<CallbackAction>({
+        domain: 'email',
+        action: 'flag',
+        target: 'emailId789',
+        args: [],
+      });
+    });
+
+    it('stays within 64-byte limit', () => {
+      // e:r: = 4 bytes + 60 = 64 bytes total
+      const data = 'e:r:' + 'x'.repeat(60);
+      const result = parseCallbackData(data);
+      expect(result).not.toBeNull();
+      expect(result!.domain).toBe('email');
+    });
+  });
+
   describe('valid approval actions', () => {
     it('parses approval approve', () => {
       const result = parseCallbackData('a:y:approvalId456');
@@ -109,6 +149,10 @@ describe('parseCallbackData', () => {
 
     it('returns null for unknown approval action', () => {
       expect(parseCallbackData('a:x:approvalId')).toBeNull();
+    });
+
+    it('returns null for unknown email action', () => {
+      expect(parseCallbackData('e:x:emailId')).toBeNull();
     });
 
     it('returns null for string exceeding 64 bytes', () => {
@@ -229,6 +273,58 @@ describe('handleCallback', () => {
       await vi.waitFor(() => {
         expect(deps.logger.error).toHaveBeenCalledWith(expect.stringContaining('MCP timeout'));
       });
+    });
+  });
+
+  describe('email actions', () => {
+    it('routes email:reply by emitting user:chat:message event', () => {
+      const action: CallbackAction = { domain: 'email', action: 'reply', target: 'em1', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(true);
+      expect(result.message).toBe('Replying...');
+      expect(deps.eventBus.emit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'user:chat:message',
+          source: 'telegram-callback',
+          payload: expect.objectContaining({
+            message: 'Reply to email em1',
+          }),
+        }),
+      );
+    });
+
+    it('routes email:archive via agent manager', () => {
+      const action: CallbackAction = { domain: 'email', action: 'archive', target: 'em2', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(true);
+      expect(result.message).toBe('Archived \u2713');
+      expect(deps.agentManager.executeApprovedAction).toHaveBeenCalledWith({
+        actionName: 'email:archive',
+        skillName: 'email',
+        details: expect.stringContaining('em2'),
+      });
+    });
+
+    it('routes email:flag via agent manager', () => {
+      const action: CallbackAction = { domain: 'email', action: 'flag', target: 'em3', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(true);
+      expect(result.message).toBe('Flagged \u2713');
+      expect(deps.agentManager.executeApprovedAction).toHaveBeenCalledWith({
+        actionName: 'email:flag',
+        skillName: 'email',
+        details: expect.stringContaining('em3'),
+      });
+    });
+
+    it('updates keyboard after email action', () => {
+      const action: CallbackAction = { domain: 'email', action: 'archive', target: 'em4', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.updatedKeyboard).toEqual([[{ text: 'Archived \u2713', callback_data: 'noop' }]]);
     });
   });
 

@@ -14,7 +14,7 @@ import type { InlineKeyboardButton } from 'grammy/types';
 import { generateId, type EventBusInterface, type LoggerInterface } from '@raven/shared';
 
 export interface CallbackAction {
-  domain: 'task' | 'approval';
+  domain: 'task' | 'approval' | 'email';
   action: string;
   target: string;
   args: string[];
@@ -63,9 +63,10 @@ export interface CallbackDeps {
   };
 }
 
-const DOMAIN_MAP: Record<string, 'task' | 'approval'> = {
+const DOMAIN_MAP: Record<string, 'task' | 'approval' | 'email'> = {
   t: 'task',
   a: 'approval',
+  e: 'email',
 };
 
 const TASK_ACTIONS: Record<string, string> = {
@@ -78,6 +79,12 @@ const APPROVAL_ACTIONS: Record<string, string> = {
   y: 'approve',
   n: 'deny',
   v: 'details',
+};
+
+const EMAIL_ACTIONS: Record<string, string> = {
+  r: 'reply',
+  a: 'archive',
+  f: 'flag',
 };
 
 const MAX_CALLBACK_BYTES = 64;
@@ -97,7 +104,12 @@ export function parseCallbackData(data: string): CallbackAction | null {
   if (!domain) return null;
   if (!target) return null;
 
-  const actionMap = domain === 'task' ? TASK_ACTIONS : APPROVAL_ACTIONS;
+  const actionMaps: Record<string, Record<string, string>> = {
+    task: TASK_ACTIONS,
+    approval: APPROVAL_ACTIONS,
+    email: EMAIL_ACTIONS,
+  };
+  const actionMap = actionMaps[domain];
   const action = actionMap[actionPrefix];
   if (!action) return null;
 
@@ -254,12 +266,79 @@ function handleApprovalDetails(
   return { success: true, message: details };
 }
 
+const EMAIL_ACTION_LABELS: Record<string, string> = {
+  reply: 'Replying...',
+  archive: 'Archived \u2713',
+  flag: 'Flagged \u2713',
+};
+
+function handleEmailAction(
+  action: CallbackAction,
+  deps: CallbackDeps,
+): CallbackResult {
+  if (action.action === 'reply') {
+    // Emit user:chat:message to route through orchestrator to email suite
+    deps.eventBus.emit({
+      id: generateId(),
+      timestamp: Date.now(),
+      source: 'telegram-callback',
+      type: 'user:chat:message',
+      payload: {
+        projectId: 'telegram-default',
+        message: `Reply to email ${action.target}`,
+      },
+    });
+
+    return {
+      success: true,
+      message: EMAIL_ACTION_LABELS.reply,
+      updatedKeyboard: [[{ text: EMAIL_ACTION_LABELS.reply, callback_data: 'noop' }]],
+    };
+  }
+
+  // Archive and flag: fire-and-forget via agent manager
+  const gmailPrompts: Record<string, string> = {
+    archive: `Archive the email with ID ${action.target} in Gmail.`,
+    flag: `Star/flag the email with ID ${action.target} in Gmail for follow-up.`,
+  };
+
+  const prompt = gmailPrompts[action.action];
+  if (!prompt) {
+    return { success: false, message: `Unknown email action: ${action.action}` };
+  }
+
+  deps.agentManager
+    .executeApprovedAction({
+      actionName: `email:${action.action}`,
+      skillName: 'email',
+      details: prompt,
+    })
+    .then((result) => {
+      if (!result.success) {
+        deps.logger.error(`Email callback failed: ${result.error}`);
+      }
+    })
+    .catch((err: unknown) => {
+      deps.logger.error(`Email callback error: ${err}`);
+    });
+
+  const label = EMAIL_ACTION_LABELS[action.action] ?? 'Processing...';
+  return {
+    success: true,
+    message: label,
+    updatedKeyboard: [[{ text: label, callback_data: 'noop' }]],
+  };
+}
+
 export function handleCallback(
   action: CallbackAction,
   deps: CallbackDeps,
 ): CallbackResult {
   if (action.domain === 'task') {
     return handleTaskAction(action, deps);
+  }
+  if (action.domain === 'email') {
+    return handleEmailAction(action, deps);
   }
   return handleApprovalAction(action, deps);
 }
