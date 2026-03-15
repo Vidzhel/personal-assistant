@@ -7,6 +7,12 @@
  *   a:y:{id}       → approval approve
  *   a:n:{id}       → approval deny
  *   a:v:{id}       → approval view details
+ *   e:r:{id}       → email reply (triggers reply composition)
+ *   e:a:{id}       → email archive
+ *   e:f:{id}       → email flag
+ *   er:s:{id}      → email reply send
+ *   er:e:{id}      → email reply edit
+ *   er:c:{id}      → email reply cancel
  *   noop           → disabled button (no action)
  */
 
@@ -14,7 +20,7 @@ import type { InlineKeyboardButton } from 'grammy/types';
 import { generateId, type EventBusInterface, type LoggerInterface } from '@raven/shared';
 
 export interface CallbackAction {
-  domain: 'task' | 'approval' | 'email';
+  domain: 'task' | 'approval' | 'email' | 'email-reply';
   action: string;
   target: string;
   args: string[];
@@ -63,10 +69,11 @@ export interface CallbackDeps {
   };
 }
 
-const DOMAIN_MAP: Record<string, 'task' | 'approval' | 'email'> = {
+const DOMAIN_MAP: Record<string, 'task' | 'approval' | 'email' | 'email-reply'> = {
   t: 'task',
   a: 'approval',
   e: 'email',
+  er: 'email-reply',
 };
 
 const TASK_ACTIONS: Record<string, string> = {
@@ -85,6 +92,12 @@ const EMAIL_ACTIONS: Record<string, string> = {
   r: 'reply',
   a: 'archive',
   f: 'flag',
+};
+
+const EMAIL_REPLY_ACTIONS: Record<string, string> = {
+  s: 'send',
+  e: 'edit',
+  c: 'cancel',
 };
 
 const MAX_CALLBACK_BYTES = 64;
@@ -108,6 +121,7 @@ export function parseCallbackData(data: string): CallbackAction | null {
     task: TASK_ACTIONS,
     approval: APPROVAL_ACTIONS,
     email: EMAIL_ACTIONS,
+    'email-reply': EMAIL_REPLY_ACTIONS,
   };
   const actionMap = actionMaps[domain];
   const action = actionMap[actionPrefix];
@@ -277,15 +291,14 @@ function handleEmailAction(
   deps: CallbackDeps,
 ): CallbackResult {
   if (action.action === 'reply') {
-    // Emit user:chat:message to route through orchestrator to email suite
+    // Emit email:reply:start to trigger reply composition flow
     deps.eventBus.emit({
       id: generateId(),
       timestamp: Date.now(),
       source: 'telegram-callback',
-      type: 'user:chat:message',
+      type: 'email:reply:start',
       payload: {
-        projectId: 'telegram-default',
-        message: `Reply to email ${action.target}`,
+        emailId: action.target,
       },
     });
 
@@ -330,6 +343,63 @@ function handleEmailAction(
   };
 }
 
+const EMAIL_REPLY_ACTION_LABELS: Record<string, string> = {
+  send: 'Sending...',
+  edit: 'Editing...',
+  cancel: 'Cancelled',
+};
+
+function handleEmailReplyAction(
+  action: CallbackAction,
+  deps: CallbackDeps,
+): CallbackResult {
+  const eventTypeMap: Record<string, string> = {
+    send: 'email:reply:send',
+    edit: 'email:reply:edit',
+    cancel: 'email:reply:cancel',
+  };
+
+  const eventType = eventTypeMap[action.action];
+  if (!eventType) {
+    return { success: false, message: `Unknown email reply action: ${action.action}` };
+  }
+
+  if (action.action === 'edit') {
+    // For edit, emit a notification asking user for new instructions
+    // The reply-composer will handle the actual re-composition when it receives instructions
+    deps.eventBus.emit({
+      id: generateId(),
+      timestamp: Date.now(),
+      source: 'telegram-callback',
+      type: 'notification',
+      payload: {
+        channel: 'telegram' as const,
+        title: 'Edit Reply',
+        body: 'Please send your corrections or new instructions for this reply.',
+        topicName: 'General',
+      },
+    });
+  }
+
+  deps.eventBus.emit({
+    id: generateId(),
+    timestamp: Date.now(),
+    source: 'telegram-callback',
+    type: eventType,
+    payload: {
+      compositionId: action.target,
+      ...(action.action === 'edit' ? { newInstructions: '' } : {}),
+    },
+  });
+
+  const label = EMAIL_REPLY_ACTION_LABELS[action.action] ?? 'Processing...';
+  return {
+    success: true,
+    message: label,
+    updatedKeyboard: [[{ text: label, callback_data: 'noop' }]],
+  };
+}
+
 export function handleCallback(
   action: CallbackAction,
   deps: CallbackDeps,
@@ -339,6 +409,9 @@ export function handleCallback(
   }
   if (action.domain === 'email') {
     return handleEmailAction(action, deps);
+  }
+  if (action.domain === 'email-reply') {
+    return handleEmailReplyAction(action, deps);
   }
   return handleApprovalAction(action, deps);
 }

@@ -304,6 +304,58 @@ export const MediaReceivedPayloadSchema = z.object({
   replyMessageId: z.number().optional(),
 });
 
+export interface EmailReplyStartEvent extends BaseEvent {
+  type: 'email:reply:start';
+  payload: {
+    emailId: string;
+    userIntent?: string;
+    topicId?: number;
+    topicName?: string;
+  };
+}
+
+export const EmailReplyStartPayloadSchema = z.object({
+  emailId: z.string(),
+  userIntent: z.string().optional(),
+  topicId: z.number().optional(),
+  topicName: z.string().optional(),
+});
+
+export interface EmailReplySendEvent extends BaseEvent {
+  type: 'email:reply:send';
+  payload: {
+    compositionId: string;
+  };
+}
+
+export const EmailReplySendPayloadSchema = z.object({
+  compositionId: z.string(),
+});
+
+export interface EmailReplyEditEvent extends BaseEvent {
+  type: 'email:reply:edit';
+  payload: {
+    compositionId: string;
+    newInstructions: string;
+  };
+}
+
+export const EmailReplyEditPayloadSchema = z.object({
+  compositionId: z.string(),
+  newInstructions: z.string(),
+});
+
+export interface EmailReplyCancelEvent extends BaseEvent {
+  type: 'email:reply:cancel';
+  payload: {
+    compositionId: string;
+  };
+}
+
+export const EmailReplyCancelPayloadSchema = z.object({
+  compositionId: z.string(),
+});
+
 export interface SystemHealthAlertEvent extends BaseEvent {
   type: 'system:health:alert';
   payload: {
@@ -343,7 +395,11 @@ export type RavenEvent =
   | PipelineStepFailedEvent
   | PipelineStepRetryEvent
   | PipelineCompleteEvent
-  | PipelineFailedEvent;
+  | PipelineFailedEvent
+  | EmailReplyStartEvent
+  | EmailReplySendEvent
+  | EmailReplyEditEvent
+  | EmailReplyCancelEvent;
 
 export type RavenEventType = RavenEvent['type'];
 
