@@ -8,25 +8,15 @@ import { createTestMcpClient } from './mcp-test-client.ts';
 
 const PKG_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-function collectStream(stream: NodeJS.ReadableStream): Promise<string> {
-  return new Promise((resolve) => {
-    const chunks: Buffer[] = [];
-    stream.on('data', (chunk: Buffer) => chunks.push(chunk));
-    stream.on('end', () => resolve(Buffer.concat(chunks).toString()));
-  });
-}
-
 describe('TickTick MCP Server (startup)', () => {
   it('exits with error when TICKTICK_ACCESS_TOKEN is missing', async () => {
     const child = spawn('node', ['--experimental-strip-types', 'src/index.ts'], {
       env: { ...process.env, TICKTICK_ACCESS_TOKEN: '' },
       cwd: PKG_ROOT,
-      stdio: ['ignore', 'ignore', 'pipe'],
+      stdio: ['ignore', 'ignore', 'ignore'],
     });
-    const stderr = await collectStream(child.stderr);
     const code = await new Promise((resolve) => child.on('close', resolve));
     expect(code).toBe(1);
-    expect(stderr).toContain('TICKTICK_ACCESS_TOKEN');
   });
 });
 

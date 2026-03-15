@@ -1,6 +1,6 @@
 import { Bot, InlineKeyboard } from 'grammy';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { z } from 'zod';
 import {
   generateId,
@@ -168,6 +168,14 @@ function resolveProjectId(topicName: string | undefined): string {
     return topicConfig.topicToProject[topicName];
   }
   return PROJECT_TELEGRAM_DEFAULT;
+}
+
+function isSupportedDocumentType(mimeType: string, fileName: string): boolean {
+  return mimeType === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf');
+}
+
+function sanitizeMediaFileName(fileName: string): string {
+  return basename(fileName).replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
 const service: SuiteService = {
@@ -413,6 +421,17 @@ const service: SuiteService = {
 
       if (!fileId) return;
 
+      if (!isPhoto && !isSupportedDocumentType(mimeType, originalName)) {
+        const replyOpts: Record<string, unknown> = {};
+        const messageThreadId = ctx.message.message_thread_id;
+        if (messageThreadId !== undefined && operatingMode === 'group') {
+          replyOpts.message_thread_id = messageThreadId;
+        }
+        logger.warn(`Unsupported media type received: ${mimeType} (${originalName})`);
+        await ctx.reply("I can't process this file type yet", replyOpts);
+        return;
+      }
+
       // Enforce 20MB file size limit
       const maxFileSize = 20 * 1024 * 1024;
       if (fileSize && fileSize > maxFileSize) {
@@ -463,7 +482,7 @@ const service: SuiteService = {
         // Save to data/media/ directory
         const mediaDir = join(process.cwd(), 'data', 'media');
         await mkdir(mediaDir, { recursive: true });
-        const savedFileName = `${Date.now()}-${originalName}`;
+        const savedFileName = `${Date.now()}-${sanitizeMediaFileName(originalName)}`;
         const filePath = join(mediaDir, savedFileName);
         await writeFile(filePath, buffer);
 

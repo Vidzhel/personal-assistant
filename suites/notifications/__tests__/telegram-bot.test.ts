@@ -1176,6 +1176,31 @@ describe('telegram-bot service', () => {
       expect(mockEventBus.emit).not.toHaveBeenCalled();
     });
 
+    it('rejects unsupported document types before download', async () => {
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      const ctx = createDocumentContext({
+        message: {
+          message_thread_id: 5,
+          document: {
+            file_id: 'sheet-doc',
+            file_unique_id: 's1',
+            file_name: 'budget.xlsx',
+            mime_type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            file_size: 1000,
+          },
+        },
+      });
+      await documentHandlers[0](ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith("I can't process this file type yet", {
+        message_thread_id: 5,
+      });
+      expect(ctx.getFile).not.toHaveBeenCalled();
+      expect(mockEventBus.emit).not.toHaveBeenCalled();
+    });
+
     it('ignores media from unauthorized chat in group mode', async () => {
       await loadService();
       await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
@@ -1260,6 +1285,30 @@ describe('telegram-bot service', () => {
         expect.objectContaining({ message_thread_id: 5 }),
       );
       expect(mockEventBus.emit).not.toHaveBeenCalled();
+    });
+
+    it('sanitizes document filenames before saving to disk', async () => {
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      const ctx = createDocumentContext({
+        message: {
+          message_thread_id: 5,
+          document: {
+            file_id: 'doc-file-id',
+            file_unique_id: 'd1',
+            file_name: '../../secret?.pdf',
+            mime_type: 'application/pdf',
+            file_size: 80000,
+          },
+        },
+      });
+      await documentHandlers[0](ctx);
+
+      expect(mockWriteFile).toHaveBeenCalledWith(
+        expect.stringMatching(/data\/media\/\d+-secret_\.pdf$/),
+        expect.any(Buffer),
+      );
     });
   });
 });

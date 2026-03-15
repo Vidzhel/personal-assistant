@@ -46,6 +46,7 @@ export interface ApiDeps {
 export async function createApiServer(
   deps: ApiDeps,
   port: number,
+  host = '0.0.0.0',
 ): Promise<ReturnType<typeof Fastify>> {
   const app = Fastify({ logger: false });
 
@@ -79,7 +80,7 @@ export async function createApiServer(
   // WebSocket
   registerWebSocketHandler(app, deps.eventBus);
 
-  await app.listen({ port, host: '0.0.0.0' });
+  await app.listen({ port, host });
   log.info(`API server listening on port ${port}`);
 
   return app;

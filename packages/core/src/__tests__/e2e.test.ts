@@ -66,6 +66,7 @@ describe('E2E: Full boot → chat → events flow', () => {
   let eventBus: EventBus;
   let server: Awaited<ReturnType<typeof createApiServer>>;
   let port: number;
+  let canListen = true;
   let scheduler: Scheduler;
   let agentManager: AgentManager;
   let executionLogger: ReturnType<typeof createExecutionLogger>;
@@ -107,39 +108,50 @@ describe('E2E: Full boot → chat → events flow', () => {
     executionLogger = createExecutionLogger({ db: getDb() });
     agentManager = new AgentManager({ eventBus, mcpManager, suiteRegistry, executionLogger });
 
-    server = await createApiServer(
-      {
-        eventBus,
-        suiteRegistry,
-        sessionManager,
-        scheduler,
-        agentManager,
-        auditLog,
-        pendingApprovals,
-        executionLogger,
-        messageStore,
-        pipelineEngine: {
-          initialize: () => {},
-          getPipeline: () => undefined,
-          getAllPipelines: () => [],
-          executePipeline: () => Promise.reject(new Error('Not available in test')),
-          triggerPipeline: () => {
-            throw new Error('Not available in test');
-          },
-          shutdown: () => {},
-        } as any,
-        configuredSuiteCount: 0,
-      },
-      0, // Let OS assign port
-    );
+    try {
+      server = await createApiServer(
+        {
+          eventBus,
+          suiteRegistry,
+          sessionManager,
+          scheduler,
+          agentManager,
+          auditLog,
+          pendingApprovals,
+          executionLogger,
+          messageStore,
+          pipelineEngine: {
+            initialize: () => {},
+            getPipeline: () => undefined,
+            getAllPipelines: () => [],
+            executePipeline: () => Promise.reject(new Error('Not available in test')),
+            triggerPipeline: () => {
+              throw new Error('Not available in test');
+            },
+            shutdown: () => {},
+          } as any,
+          configuredSuiteCount: 0,
+        },
+        0, // Let OS assign port
+        '127.0.0.1',
+      );
 
-    const address = server.addresses()[0];
-    port = address.port;
+      const address = server.addresses()[0];
+      port = address.port;
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('listen EPERM')) {
+        canListen = false;
+        return;
+      }
+      throw error;
+    }
   });
 
   afterAll(async () => {
     scheduler.shutdown();
-    await server.close();
+    if (server) {
+      await server.close();
+    }
     try {
       getDb().close();
     } catch {
@@ -149,6 +161,7 @@ describe('E2E: Full boot → chat → events flow', () => {
   });
 
   it('health check works', async () => {
+    if (!canListen) return;
     const res = await fetch(`http://localhost:${port}/api/health`);
     expect(res.ok).toBe(true);
     const body = (await res.json()) as Record<string, unknown>;
@@ -160,6 +173,7 @@ describe('E2E: Full boot → chat → events flow', () => {
   });
 
   it('full chat flow: create project → send chat → receive events', async () => {
+    if (!canListen) return;
     // 1. Create a project
     const createRes = await fetch(`http://localhost:${port}/api/projects`, {
       method: 'POST',
@@ -218,6 +232,7 @@ describe('E2E: Full boot → chat → events flow', () => {
   });
 
   it('session creation and message history', async () => {
+    if (!canListen) return;
     // Create a project for this test
     const createRes = await fetch(`http://localhost:${port}/api/projects`, {
       method: 'POST',
@@ -249,6 +264,7 @@ describe('E2E: Full boot → chat → events flow', () => {
   });
 
   it('message ordering: assistant stored before actions in transcript', async () => {
+    if (!canListen) return;
     // Use the project from the first chat test
     const projRes = await fetch(`http://localhost:${port}/api/projects`);
     const projects = (await projRes.json()) as Array<{ id: string; name: string }>;
@@ -278,6 +294,7 @@ describe('E2E: Full boot → chat → events flow', () => {
   });
 
   it('execution logger persists task records to DB', async () => {
+    if (!canListen) return;
     const tasks = executionLogger.queryTasks({});
     expect(tasks.length).toBeGreaterThanOrEqual(1);
     const task = tasks[0];
@@ -288,6 +305,7 @@ describe('E2E: Full boot → chat → events flow', () => {
   });
 
   it('project listing works after creation', async () => {
+    if (!canListen) return;
     const res = await fetch(`http://localhost:${port}/api/projects`);
     expect(res.ok).toBe(true);
     const projects = (await res.json()) as unknown[];
@@ -295,6 +313,7 @@ describe('E2E: Full boot → chat → events flow', () => {
   });
 
   it('schedules endpoint works', async () => {
+    if (!canListen) return;
     const res = await fetch(`http://localhost:${port}/api/schedules`);
     expect(res.ok).toBe(true);
     const schedules = await res.json();
@@ -302,6 +321,7 @@ describe('E2E: Full boot → chat → events flow', () => {
   });
 
   it('skills endpoint works', async () => {
+    if (!canListen) return;
     const res = await fetch(`http://localhost:${port}/api/skills`);
     expect(res.ok).toBe(true);
     const skills = await res.json();
