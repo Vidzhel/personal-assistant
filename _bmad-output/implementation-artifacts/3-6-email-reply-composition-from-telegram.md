@@ -1,6 +1,6 @@
 # Story 3.6: Email Reply Composition from Telegram
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -266,12 +266,13 @@ Claude Opus 4.6 (1M context)
 ### Change Log
 
 - 2026-03-15: Implemented story 3.6 — email reply composition from Telegram
+- 2026-03-15: Code review fixes — H1: empty edit instructions race condition (awaiting-edit state + user:chat:message listener), H2: permission denial now correlates via pendingSendIds, M1: 30-min draft TTL expiry, M2: productivity-coordinator prompt no longer claims agent can emit events, M3: added 6 new tests, M4: added 'services' capability to email suite
 
 ### File List
 
 **New files:**
 - `suites/email/services/reply-composer.ts` — Reply composition service
-- `suites/email/__tests__/reply-composer.test.ts` — 26 tests for reply composer
+- `suites/email/__tests__/reply-composer.test.ts` — 32 tests for reply composer
 
 **Modified files:**
 - `packages/shared/src/types/events.ts` — Added 4 email reply event types + Zod schemas
