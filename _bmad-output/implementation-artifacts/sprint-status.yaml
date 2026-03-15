@@ -74,8 +74,8 @@ development_status:
   epic-4: in-progress
   4-1-email-auto-triage-rules: done
   4-2-email-action-item-extraction-and-task-creation: done
-  4-3-autonomous-task-management: ready-for-dev
-  4-4-stale-task-detection-and-nudging: backlog
+  4-3-autonomous-task-management: done
+  4-4-stale-task-detection-and-nudging: done
   epic-4-retrospective: optional
 
   # Epic 5: Rich Dashboard & Real-Time Monitoring (Growth)

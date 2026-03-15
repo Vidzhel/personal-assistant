@@ -27,6 +27,7 @@ const SuiteCapability = z.enum([
   'event-source',
   'data-provider',
   'notification-sink',
+  'services',
 ]);
 
 const SuiteManifestSchema = z.object({

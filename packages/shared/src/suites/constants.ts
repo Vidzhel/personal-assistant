@@ -37,6 +37,11 @@ export const EVENT_EMAIL_TRIAGE_ACTION_ITEMS = 'email:triage:action-items' as co
 export const EVENT_EMAIL_ACTION_EXTRACT_COMPLETED = 'email:action-extract:completed' as const;
 export const EVENT_EMAIL_ACTION_EXTRACT_FAILED = 'email:action-extract:failed' as const;
 
+// Task management autonomous event types
+export const EVENT_TASK_MGMT_AUTONOMOUS_COMPLETED = 'task-management:autonomous:completed' as const;
+export const EVENT_TASK_MGMT_AUTONOMOUS_FAILED = 'task-management:autonomous:failed' as const;
+export const EVENT_TASK_MGMT_MANAGE_REQUEST = 'task-management:manage-request' as const;
+
 // Event sources
 export const SOURCE_GMAIL = 'gmail';
 export const SOURCE_TELEGRAM = 'telegram';

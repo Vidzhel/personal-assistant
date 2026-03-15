@@ -6,5 +6,13 @@
     "taskType": "morning-digest",
     "skillName": "digest",
     "enabled": true
+  },
+  {
+    "id": "autonomous-task-management",
+    "name": "Autonomous Task Management",
+    "cron": "0 */6 * * *",
+    "taskType": "autonomous-task-management",
+    "skillName": "task-management",
+    "enabled": true
   }
 ]

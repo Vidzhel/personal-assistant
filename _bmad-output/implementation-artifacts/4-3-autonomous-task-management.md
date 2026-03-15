@@ -1,6 +1,6 @@
 # Story 4.3: Autonomous Task Management
 
-Status: ready-for-dev
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -22,75 +22,75 @@ So that routine task operations happen without my involvement.
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Create autonomous-manager service skeleton (AC: #1, #2, #3, #4)
-  - [ ] 1.1 Create `suites/task-management/services/` directory
-  - [ ] 1.2 Create `suites/task-management/services/autonomous-manager.ts` implementing `SuiteService` pattern (same as email-triage, reply-composer, action-extractor)
-  - [ ] 1.3 On `start()`: store `eventBus`, `config` references; subscribe to `schedule:triggered` event filtered by `taskType === 'autonomous-task-management'`; subscribe to `task-management:manage-request` event (for Telegram/API manual triggers)
-  - [ ] 1.4 On `stop()`: unsubscribe from all events, null out all references, clear any in-flight state
-  - [ ] 1.5 `handleScheduleTrigger()`: validate event payload, call `runAutonomousManagement()`
-  - [ ] 1.6 Guard against concurrent runs: use a boolean `isRunning` flag; if already running when triggered, log warning and skip
+- [x] Task 1: Create autonomous-manager service skeleton (AC: #1, #2, #3, #4)
+  - [x] 1.1 Create `suites/task-management/services/` directory
+  - [x] 1.2 Create `suites/task-management/services/autonomous-manager.ts` implementing `SuiteService` pattern (same as email-triage, reply-composer, action-extractor)
+  - [x] 1.3 On `start()`: store `eventBus`, `config` references; subscribe to `schedule:triggered` event filtered by `taskType === 'autonomous-task-management'`; subscribe to `task-management:manage-request` event (for Telegram/API manual triggers)
+  - [x] 1.4 On `stop()`: unsubscribe from all events, null out all references, clear any in-flight state
+  - [x] 1.5 `handleScheduleTrigger()`: validate event payload, call `runAutonomousManagement()`
+  - [x] 1.6 Guard against concurrent runs: use a boolean `isRunning` flag; if already running when triggered, log warning and skip
 
-- [ ] Task 2: Fetch and analyze all open tasks (AC: #2)
-  - [ ] 2.1 In `runAutonomousManagement()`: call `agentManager.executeApprovedAction({ actionName: 'ticktick:get-tasks', skillName: 'task-management', details: 'Get all open tasks across all projects. Return JSON array with fields: id, projectId, title, content, priority (0=none,1=low,3=medium,5=high), dueDate, startDate, tags, status. Use the get_all_tasks or filter_tasks MCP tool.' })`
-  - [ ] 2.2 Parse agent result to extract task list JSON. If fetch fails: log error, emit `task-management:autonomous:failed` event, return
-  - [ ] 2.3 If no tasks found (empty list): log info, emit completion event with `actionsCount: 0`, return early
-  - [ ] 2.4 Call `agentManager.executeApprovedAction({ actionName: 'ticktick:get-tasks', skillName: 'task-management', details: '<analysis prompt with full task list>' })` — AI agent analyzes all tasks and returns structured JSON of recommended actions
-  - [ ] 2.5 The analysis prompt must instruct the agent to return ONLY a JSON array: `[{ "action": "update-task" | "complete-task" | "delete-task", "taskId": "...", "projectId": "...", "taskTitle": "...", "reason": "...", "confidence": "low" | "medium" | "high", "changes": { "priority"?: number, "dueDate"?: string, "tags"?: string[] } }]`
-  - [ ] 2.6 Parse analysis response — extract JSON from result text using defensive parsing (try/catch, regex fallback for JSON extraction). If parsing fails, log warning and emit failure event
-  - [ ] 2.7 Filter out low-confidence recommendations; only execute `"medium"` and `"high"` confidence actions
+- [x] Task 2: Fetch and analyze all open tasks (AC: #2)
+  - [x] 2.1 In `runAutonomousManagement()`: call `agentManager.executeApprovedAction({ actionName: 'ticktick:get-tasks', skillName: 'task-management', details: 'Get all open tasks across all projects. Return JSON array with fields: id, projectId, title, content, priority (0=none,1=low,3=medium,5=high), dueDate, startDate, tags, status. Use the get_all_tasks or filter_tasks MCP tool.' })`
+  - [x] 2.2 Parse agent result to extract task list JSON. If fetch fails: log error, emit `task-management:autonomous:failed` event, return
+  - [x] 2.3 If no tasks found (empty list): log info, emit completion event with `actionsCount: 0`, return early
+  - [x] 2.4 Call `agentManager.executeApprovedAction({ actionName: 'ticktick:get-tasks', skillName: 'task-management', details: '<analysis prompt with full task list>' })` — AI agent analyzes all tasks and returns structured JSON of recommended actions
+  - [x] 2.5 The analysis prompt must instruct the agent to return ONLY a JSON array: `[{ "action": "update-task" | "complete-task" | "delete-task", "taskId": "...", "projectId": "...", "taskTitle": "...", "reason": "...", "confidence": "low" | "medium" | "high", "changes": { "priority"?: number, "dueDate"?: string, "tags"?: string[] } }]`
+  - [x] 2.6 Parse analysis response — extract JSON from result text using defensive parsing (try/catch, regex fallback for JSON extraction). If parsing fails, log warning and emit failure event
+  - [x] 2.7 Filter out low-confidence recommendations; only execute `"medium"` and `"high"` confidence actions
 
-- [ ] Task 3: Execute recommended actions through permission gates (AC: #1, #3, #4)
-  - [ ] 3.1 For each recommended action, map to the correct `actionName`:
+- [x] Task 3: Execute recommended actions through permission gates (AC: #1, #3, #4)
+  - [x] 3.1 For each recommended action, map to the correct `actionName`:
     - `"update-task"` → `ticktick:update-task` (yellow — executes + notifies)
     - `"complete-task"` → `ticktick:complete-task` (yellow — executes + notifies)
     - `"delete-task"` → `ticktick:delete-task` (red — queued for approval)
-  - [ ] 3.2 For each action: call `agentManager.executeApprovedAction({ actionName, skillName: 'task-management', details: '<action-specific prompt including taskId, projectId, reason, and changes>' })`
-  - [ ] 3.3 Track results: `{ executed: ActionResult[], queued: ActionResult[], failed: ActionResult[] }`
-  - [ ] 3.4 For red-tier actions that return `{ success: false }`: the permission gate already queues them and emits `permission:blocked` — log this as "queued for approval", add to `queued` array, do NOT treat as failure
-  - [ ] 3.5 For yellow-tier actions that succeed: add to `executed` array with action details for summary notification
+  - [x] 3.2 For each action: call `agentManager.executeApprovedAction({ actionName, skillName: 'task-management', details: '<action-specific prompt including taskId, projectId, reason, and changes>' })`
+  - [x] 3.3 Track results: `{ executed: ActionResult[], queued: ActionResult[], failed: ActionResult[] }`
+  - [x] 3.4 For red-tier actions that return `{ success: false }`: the permission gate already queues them and emits `permission:blocked` — log this as "queued for approval", add to `queued` array, do NOT treat as failure
+  - [x] 3.5 For yellow-tier actions that succeed: add to `executed` array with action details for summary notification
 
-- [ ] Task 4: Summary notification via Telegram (AC: #3)
-  - [ ] 4.1 After all actions processed: emit `notification` event with summary:
+- [x] Task 4: Summary notification via Telegram (AC: #3)
+  - [x] 4.1 After all actions processed: emit `notification` event with summary:
     - Title: "Autonomous Task Management"
     - Body: "Completed N task actions: X updates, Y completions. Z actions queued for approval."
     - topicName: "general"
     - channel: "telegram"
-  - [ ] 4.2 Include inline keyboard actions: `[View Tasks]` (callback: `t:l:` to list tasks)
-  - [ ] 4.3 Only emit notification if at least 1 action was executed or queued (skip "0 actions" notifications)
-  - [ ] 4.4 Emit `task-management:autonomous:completed` event with full execution details
+  - [x] 4.2 Include inline keyboard actions: `[View Tasks]` (callback: `t:l:` to list tasks)
+  - [x] 4.3 Only emit notification if at least 1 action was executed or queued (skip "0 actions" notifications)
+  - [x] 4.4 Emit `task-management:autonomous:completed` event with full execution details
 
-- [ ] Task 5: Add new event types (AC: all)
-  - [ ] 5.1 Add to `packages/shared/src/types/events.ts`: `TaskManagementAutonomousCompletedEvent` (type: `task-management:autonomous:completed`, payload: `{ executedCount: number, queuedCount: number, failedCount: number, actions: Array<{ action: string, taskTitle: string, reason: string, outcome: 'executed' | 'queued' | 'failed' }> }`)
-  - [ ] 5.2 Add to `packages/shared/src/types/events.ts`: `TaskManagementAutonomousFailedEvent` (type: `task-management:autonomous:failed`, payload: `{ error: string }`)
-  - [ ] 5.3 Add to `packages/shared/src/types/events.ts`: `TaskManagementManageRequestEvent` (type: `task-management:manage-request`, payload: `{ source: 'telegram' | 'api' | 'pipeline', requestId?: string }`)
-  - [ ] 5.4 Add Zod validation schemas for all new event payloads
-  - [ ] 5.5 Add to `RavenEvent` union type and `RavenEventType`
-  - [ ] 5.6 Add constants to `packages/shared/src/suites/constants.ts`: `EVENT_TASK_MGMT_AUTONOMOUS_COMPLETED`, `EVENT_TASK_MGMT_AUTONOMOUS_FAILED`, `EVENT_TASK_MGMT_MANAGE_REQUEST`
-  - [ ] 5.7 Add barrel exports in `packages/shared/src/suites/index.ts`
+- [x] Task 5: Add new event types (AC: all)
+  - [x] 5.1 Add to `packages/shared/src/types/events.ts`: `TaskManagementAutonomousCompletedEvent` (type: `task-management:autonomous:completed`, payload: `{ executedCount: number, queuedCount: number, failedCount: number, actions: Array<{ action: string, taskTitle: string, reason: string, outcome: 'executed' | 'queued' | 'failed' }> }`)
+  - [x] 5.2 Add to `packages/shared/src/types/events.ts`: `TaskManagementAutonomousFailedEvent` (type: `task-management:autonomous:failed`, payload: `{ error: string }`)
+  - [x] 5.3 Add to `packages/shared/src/types/events.ts`: `TaskManagementManageRequestEvent` (type: `task-management:manage-request`, payload: `{ source: 'telegram' | 'api' | 'pipeline', requestId?: string }`)
+  - [x] 5.4 Add Zod validation schemas for all new event payloads
+  - [x] 5.5 Add to `RavenEvent` union type and `RavenEventType`
+  - [x] 5.6 Add constants to `packages/shared/src/suites/constants.ts`: `EVENT_TASK_MGMT_AUTONOMOUS_COMPLETED`, `EVENT_TASK_MGMT_AUTONOMOUS_FAILED`, `EVENT_TASK_MGMT_MANAGE_REQUEST`
+  - [x] 5.7 Add barrel exports in `packages/shared/src/suites/index.ts`
 
-- [ ] Task 6: Add schedule configuration (AC: #1)
-  - [ ] 6.1 Add to `config/schedules.json`: `{ "id": "autonomous-task-management", "name": "Autonomous Task Management", "cron": "0 */6 * * *", "taskType": "autonomous-task-management", "skillName": "task-management", "enabled": true }`
-  - [ ] 6.2 The schedule runs every 6 hours by default (configurable via schedule API)
+- [x] Task 6: Add schedule configuration (AC: #1)
+  - [x] 6.1 Add to `config/schedules.json`: `{ "id": "autonomous-task-management", "name": "Autonomous Task Management", "cron": "0 */6 * * *", "taskType": "autonomous-task-management", "skillName": "task-management", "enabled": true }`
+  - [x] 6.2 The schedule runs every 6 hours by default (configurable via schedule API)
 
-- [ ] Task 7: Register autonomous-manager in task-management suite (AC: all)
-  - [ ] 7.1 Update `suites/task-management/suite.ts`: add `capabilities: [..., 'services']` and `services: ['autonomous-manager']`
-  - [ ] 7.2 Verify service starts/stops correctly in suite lifecycle
+- [x] Task 7: Register autonomous-manager in task-management suite (AC: all)
+  - [x] 7.1 Update `suites/task-management/suite.ts`: add `capabilities: [..., 'services']` and `services: ['autonomous-manager']`
+  - [x] 7.2 Verify service starts/stops correctly in suite lifecycle
 
-- [ ] Task 8: Tests (AC: all)
-  - [ ] 8.1 Create `suites/task-management/__tests__/autonomous-manager.test.ts`
-  - [ ] 8.2 Unit tests: event subscription/unsubscription on start/stop, schedule event filtering (only responds to `taskType: 'autonomous-task-management'`)
-  - [ ] 8.3 Unit tests: concurrent run guard (second trigger while running → skip with warning log)
-  - [ ] 8.4 Integration test: full flow — schedule trigger → task fetch → AI analysis → action execution → notification → completion event
-  - [ ] 8.5 Test green-tier silent read: `ticktick:get-tasks` executeApprovedAction called with correct params, no notification event emitted for the read itself
-  - [ ] 8.6 Test yellow-tier notification: `ticktick:update-task` succeeds → summary notification emitted with change details
-  - [ ] 8.7 Test red-tier blocking: `ticktick:delete-task` → executeApprovedAction returns `{ success: false }` → action counted as "queued" (not "failed"), no error logged
-  - [ ] 8.8 Test no-op run: empty task list → completion event with all counts = 0, no notification emitted
-  - [ ] 8.9 Test AI analysis failure: agent returns invalid JSON → failure event emitted, no crash
-  - [ ] 8.10 Test task fetch failure: `ticktick:get-tasks` fails → failure event emitted, no crash
-  - [ ] 8.11 Test manual trigger: `task-management:manage-request` event → same flow as schedule trigger
-  - [ ] 8.12 Test partial action failure: 3 actions recommended, 1 fails → executed/failed/queued counts correct in completion event
-  - [ ] 8.13 Test low-confidence filtering: agent returns 3 recommendations (1 low, 1 medium, 1 high) → only 2 executed
-  - [ ] 8.14 Extend event type tests if needed
+- [x] Task 8: Tests (AC: all)
+  - [x] 8.1 Create `suites/task-management/__tests__/autonomous-manager.test.ts`
+  - [x] 8.2 Unit tests: event subscription/unsubscription on start/stop, schedule event filtering (only responds to `taskType: 'autonomous-task-management'`)
+  - [x] 8.3 Unit tests: concurrent run guard (second trigger while running → skip with warning log)
+  - [x] 8.4 Integration test: full flow — schedule trigger → task fetch → AI analysis → action execution → notification → completion event
+  - [x] 8.5 Test green-tier silent read: `ticktick:get-tasks` executeApprovedAction called with correct params, no notification event emitted for the read itself
+  - [x] 8.6 Test yellow-tier notification: `ticktick:update-task` succeeds → summary notification emitted with change details
+  - [x] 8.7 Test red-tier blocking: `ticktick:delete-task` → executeApprovedAction returns `{ success: false }` → action counted as "queued" (not "failed"), no error logged
+  - [x] 8.8 Test no-op run: empty task list → completion event with all counts = 0, no notification emitted
+  - [x] 8.9 Test AI analysis failure: agent returns invalid JSON → failure event emitted, no crash
+  - [x] 8.10 Test task fetch failure: `ticktick:get-tasks` fails → failure event emitted, no crash
+  - [x] 8.11 Test manual trigger: `task-management:manage-request` event → same flow as schedule trigger
+  - [x] 8.12 Test partial action failure: 3 actions recommended, 1 fails → executed/failed/queued counts correct in completion event
+  - [x] 8.13 Test low-confidence filtering: agent returns 3 recommendations (1 low, 1 medium, 1 high) → only 2 executed
+  - [x] 8.14 Extend event type tests if needed
 
 ## Dev Notes
 
@@ -311,10 +311,37 @@ Commit message format: `feat: <description> (story X.Y)` — follow for story 4.
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+Claude Opus 4.6 (1M context)
 
 ### Debug Log References
 
+- Fixed latent bug: added 'services' to SuiteCapability Zod enum in define.ts (was missing, would crash at runtime for email, daily-briefing, notifications, gemini-transcription suites)
+
 ### Completion Notes List
 
+- Task 1: Created autonomous-manager service skeleton following SuiteService pattern (action-extractor reference). Subscribes to `schedule:triggered` (filtered by taskType) and `task-management:manage-request`. Concurrent run guard via `isRunning` boolean.
+- Task 2: Two-step agent flow — fetch all open tasks via `ticktick:get-tasks` (green tier, silent), then AI analysis via second `ticktick:get-tasks` call with structured analysis prompt. Defensive JSON parsing with Zod validation per recommendation. Low-confidence filtering.
+- Task 3: Action execution through permission gates. Maps action types to `ticktick:update-task` (yellow), `ticktick:complete-task` (yellow), `ticktick:delete-task` (red). Red-tier detection via `error?.includes('queued')` pattern. Tracks executed/queued/failed results.
+- Task 4: Summary notification via Telegram with inline keyboard `[View Tasks]` action. Skips notification for 0-action runs. Emits `task-management:autonomous:completed` event with full execution details.
+- Task 5: Added 3 new event types with Zod schemas, union type entries, constants, and barrel exports.
+- Task 6: Added `autonomous-task-management` schedule to `config/schedules.json` (every 6 hours).
+- Task 7: Updated `suites/task-management/suite.ts` with `services` capability and `autonomous-manager` service. Also fixed SuiteCapability enum to include 'services'.
+- Task 8: 29 tests covering all ACs — service lifecycle, schedule filtering, concurrent guard, task fetch/analysis, permission gate tiers, partial failures, confidence filtering, manual triggers, parser unit tests.
+
+### Change Log
+
+- 2026-03-15: Implemented autonomous task management (story 4.3) — service, event types, schedule config, suite registration, 29 tests
+
 ### File List
+
+**New files:**
+- `suites/task-management/services/autonomous-manager.ts` — autonomous task management SuiteService
+- `suites/task-management/__tests__/autonomous-manager.test.ts` — 29 unit + integration tests
+
+**Modified files:**
+- `packages/shared/src/types/events.ts` — added TaskManagementAutonomousCompletedEvent, TaskManagementAutonomousFailedEvent, TaskManagementManageRequestEvent types + Zod schemas + union entries
+- `packages/shared/src/suites/constants.ts` — added EVENT_TASK_MGMT_AUTONOMOUS_COMPLETED, EVENT_TASK_MGMT_AUTONOMOUS_FAILED, EVENT_TASK_MGMT_MANAGE_REQUEST
+- `packages/shared/src/suites/index.ts` — barrel exports for new constants
+- `packages/shared/src/suites/define.ts` — added 'services' to SuiteCapability enum (bug fix)
+- `suites/task-management/suite.ts` — added 'services' capability and services: ['autonomous-manager']
+- `config/schedules.json` — added autonomous-task-management schedule entry

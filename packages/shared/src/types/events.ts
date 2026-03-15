@@ -423,6 +423,59 @@ export const EmailActionExtractFailedPayloadSchema = z.object({
   error: z.string(),
 });
 
+export interface TaskManagementAutonomousCompletedEvent extends BaseEvent {
+  type: 'task-management:autonomous:completed';
+  payload: {
+    executedCount: number;
+    queuedCount: number;
+    failedCount: number;
+    actions: Array<{
+      action: string;
+      taskTitle: string;
+      reason: string;
+      outcome: 'executed' | 'queued' | 'failed';
+    }>;
+  };
+}
+
+export const TaskManagementAutonomousCompletedPayloadSchema = z.object({
+  executedCount: z.number(),
+  queuedCount: z.number(),
+  failedCount: z.number(),
+  actions: z.array(
+    z.object({
+      action: z.string(),
+      taskTitle: z.string(),
+      reason: z.string(),
+      outcome: z.enum(['executed', 'queued', 'failed']),
+    }),
+  ),
+});
+
+export interface TaskManagementAutonomousFailedEvent extends BaseEvent {
+  type: 'task-management:autonomous:failed';
+  payload: {
+    error: string;
+  };
+}
+
+export const TaskManagementAutonomousFailedPayloadSchema = z.object({
+  error: z.string(),
+});
+
+export interface TaskManagementManageRequestEvent extends BaseEvent {
+  type: 'task-management:manage-request';
+  payload: {
+    source: 'telegram' | 'api' | 'pipeline';
+    requestId?: string;
+  };
+}
+
+export const TaskManagementManageRequestPayloadSchema = z.object({
+  source: z.enum(['telegram', 'api', 'pipeline']),
+  requestId: z.string().optional(),
+});
+
 export interface SystemHealthAlertEvent extends BaseEvent {
   type: 'system:health:alert';
   payload: {
@@ -470,7 +523,10 @@ export type RavenEvent =
   | EmailTriageProcessedEvent
   | EmailTriageActionItemsEvent
   | EmailActionExtractCompletedEvent
-  | EmailActionExtractFailedEvent;
+  | EmailActionExtractFailedEvent
+  | TaskManagementAutonomousCompletedEvent
+  | TaskManagementAutonomousFailedEvent
+  | TaskManagementManageRequestEvent;
 
 export type RavenEventType = RavenEvent['type'];
 
