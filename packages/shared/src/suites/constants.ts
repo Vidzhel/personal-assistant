@@ -18,6 +18,11 @@ export const AGENT_ORCHESTRATOR = 'raven-orchestrator';
 export const AGENT_PRODUCTIVITY_COORD = 'productivity-coordinator';
 export const AGENT_COMMUNICATION_COORD = 'communication-coordinator';
 
+// Suite: gemini-transcription
+export const SUITE_GEMINI_TRANSCRIPTION = 'gemini-transcription';
+export const AGENT_GEMINI_TRANSCRIBER = 'gemini-transcriber';
+export const SOURCE_GEMINI = 'gemini';
+
 // Event sources
 export const SOURCE_GMAIL = 'gmail';
 export const SOURCE_TELEGRAM = 'telegram';

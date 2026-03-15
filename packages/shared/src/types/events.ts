@@ -246,6 +246,29 @@ export interface PipelineFailedEvent extends BaseEvent {
   };
 }
 
+export interface VoiceReceivedEvent extends BaseEvent {
+  type: 'voice:received';
+  payload: {
+    projectId: string;
+    audioData: string; // base64-encoded audio
+    mimeType: string; // 'audio/ogg' for Telegram voice
+    duration: number; // seconds
+    topicId?: number;
+    topicName?: string;
+    replyMessageId?: number; // message ID of "Transcribing..." reply for editing
+  };
+}
+
+export const VoiceReceivedPayloadSchema = z.object({
+  projectId: z.string(),
+  audioData: z.string(),
+  mimeType: z.string(),
+  duration: z.number(),
+  topicId: z.number().optional(),
+  topicName: z.string().optional(),
+  replyMessageId: z.number().optional(),
+});
+
 export interface SystemHealthAlertEvent extends BaseEvent {
   type: 'system:health:alert';
   payload: {
@@ -278,6 +301,7 @@ export type RavenEvent =
   | PermissionDeniedEvent
   | ConfigPipelinesReloadedEvent
   | SystemHealthAlertEvent
+  | VoiceReceivedEvent
   | PipelineStartedEvent
   | PipelineStepCompleteEvent
   | PipelineStepFailedEvent

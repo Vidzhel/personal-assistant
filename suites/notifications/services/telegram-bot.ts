@@ -10,6 +10,7 @@ import {
   type SystemHealthAlertEvent,
   type AgentTaskCompleteEvent,
   type PermissionBlockedEvent,
+  type VoiceReceivedEvent,
 } from '@raven/shared';
 import type { ServiceContext, SuiteService } from '@raven/core/suite-registry/service-runner.ts';
 import {
@@ -259,6 +260,110 @@ const service: SuiteService = {
 
         await ctx.reply('Got it, processing...');
       }
+    });
+
+    // Handle voice messages (and video notes) for transcription
+    const handleVoiceMessage = async (
+      ctx: { chat: { id: number }; message: { message_thread_id?: number; voice?: { file_id: string; duration: number; mime_type?: string; file_size?: number }; video_note?: { file_id: string; duration: number; file_size?: number } }; getFile: () => Promise<{ file_path?: string }>; reply: (text: string, options?: Record<string, unknown>) => Promise<{ message_id: number }> },
+    ): Promise<void> => {
+      // Authorization check (same as text messages)
+      if (operatingMode === 'group') {
+        if (String(ctx.chat.id) !== groupId) {
+          logger.warn(`Ignoring voice from unauthorized chat: ${ctx.chat.id}`);
+          return;
+        }
+      } else {
+        const senderId = String((ctx as Record<string, unknown>).from ? ((ctx as Record<string, unknown>).from as { id: number }).id : ctx.chat.id);
+        if (senderId !== chatId && String(ctx.chat.id) !== chatId) {
+          logger.warn(`Ignoring voice from unauthorized chat: ${ctx.chat.id}`);
+          return;
+        }
+      }
+
+      const voice = ctx.message.voice;
+      const videoNote = ctx.message.video_note;
+      const fileId = voice?.file_id ?? videoNote?.file_id;
+      const duration = voice?.duration ?? videoNote?.duration ?? 0;
+      const mimeType = voice?.mime_type ?? 'audio/ogg';
+      const fileSize = voice?.file_size ?? videoNote?.file_size;
+
+      if (!fileId) return;
+
+      // Telegram Bot API limits file downloads to 20MB
+      const maxFileSize = 20 * 1024 * 1024;
+      if (fileSize && fileSize > maxFileSize) {
+        const replyOpts: Record<string, unknown> = {};
+        const messageThreadId = ctx.message.message_thread_id;
+        if (messageThreadId !== undefined && operatingMode === 'group') {
+          replyOpts.message_thread_id = messageThreadId;
+        }
+        await ctx.reply('Voice message too large to transcribe', replyOpts);
+        return;
+      }
+
+      const messageThreadId = ctx.message.message_thread_id;
+      const topicName = resolveTopicName(messageThreadId);
+      const projectId = resolveProjectId(topicName);
+
+      if (messageThreadId !== undefined) {
+        projectTopicMap.set(projectId, messageThreadId);
+      }
+
+      logger.info(`Voice message received [${topicName ?? 'unknown'}]: ${duration}s`);
+
+      // Send "Transcribing..." reply
+      const replyOpts: Record<string, unknown> = {};
+      if (messageThreadId !== undefined && operatingMode === 'group') {
+        replyOpts.message_thread_id = messageThreadId;
+      }
+      const replyMsg = await ctx.reply('Transcribing voice message...', replyOpts);
+
+      // Download the voice file
+      try {
+        const file = await ctx.getFile();
+        if (!file.file_path) {
+          logger.error('Voice file has no file_path');
+          return;
+        }
+
+        const fileUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+        const response = await fetch(fileUrl);
+        const buffer = Buffer.from(await response.arrayBuffer());
+        const base64 = buffer.toString('base64');
+
+        // Emit voice:received event
+        eventBus.emit({
+          id: generateId(),
+          timestamp: Date.now(),
+          source: SOURCE_TELEGRAM,
+          type: 'voice:received',
+          projectId,
+          payload: {
+            projectId,
+            audioData: base64,
+            mimeType,
+            duration,
+            topicId: messageThreadId,
+            topicName,
+            replyMessageId: replyMsg.message_id,
+          },
+        } as VoiceReceivedEvent);
+      } catch (err) {
+        logger.error(`Failed to download voice file: ${err}`);
+        await sendMessageWithFallback(
+          'Failed to process voice message',
+          undefined,
+          messageThreadId,
+        );
+      }
+    };
+
+    bot.on('message:voice', async (ctx) => {
+      await handleVoiceMessage(ctx as unknown as Parameters<typeof handleVoiceMessage>[0]);
+    });
+
+    bot.on('message:video_note', async (ctx) => {
+      await handleVoiceMessage(ctx as unknown as Parameters<typeof handleVoiceMessage>[0]);
     });
 
     // Resolve callback deps lazily from config (injected after boot)

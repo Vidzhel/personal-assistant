@@ -64,7 +64,7 @@ development_status:
   epic-3: in-progress
   3-1-telegram-group-with-topic-threads: done
   3-2-inline-keyboard-actions-and-approvals: done
-  3-3-gemini-voice-transcription-skill: backlog
+  3-3-gemini-voice-transcription-skill: review
   3-4-media-and-file-routing: backlog
   3-5-morning-briefing-delivery: backlog
   3-6-email-reply-composition-from-telegram: backlog
