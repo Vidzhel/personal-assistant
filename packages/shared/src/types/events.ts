@@ -395,6 +395,34 @@ export const EmailTriageActionItemsPayloadSchema = z.object({
   emailId: z.string(),
 });
 
+export interface EmailActionExtractCompletedEvent extends BaseEvent {
+  type: 'email:action-extract:completed';
+  payload: {
+    emailId: string;
+    tasksCreated: number;
+    actionItems: string[];
+  };
+}
+
+export const EmailActionExtractCompletedPayloadSchema = z.object({
+  emailId: z.string(),
+  tasksCreated: z.number(),
+  actionItems: z.array(z.string()),
+});
+
+export interface EmailActionExtractFailedEvent extends BaseEvent {
+  type: 'email:action-extract:failed';
+  payload: {
+    emailId: string;
+    error: string;
+  };
+}
+
+export const EmailActionExtractFailedPayloadSchema = z.object({
+  emailId: z.string(),
+  error: z.string(),
+});
+
 export interface SystemHealthAlertEvent extends BaseEvent {
   type: 'system:health:alert';
   payload: {
@@ -440,7 +468,9 @@ export type RavenEvent =
   | EmailReplyEditEvent
   | EmailReplyCancelEvent
   | EmailTriageProcessedEvent
-  | EmailTriageActionItemsEvent;
+  | EmailTriageActionItemsEvent
+  | EmailActionExtractCompletedEvent
+  | EmailActionExtractFailedEvent;
 
 export type RavenEventType = RavenEvent['type'];
 

@@ -48,10 +48,6 @@
       "Bash(find /home/user/projects/personal-assistant -maxdepth 2 -name \".env*\" -o -name \"*.env\" 2>/dev/null | head -20)",
       "Skill(browser-testing)",
       "Bash(.claude/skills/browser-testing/scripts/check-devserver.sh)",
-      "mcp__playwright__browser_navigate",
-      "mcp__playwright__browser_click",
-      "mcp__playwright__browser_take_screenshot",
-      "mcp__playwright__browser_console_messages",
       "Bash(find:*)",
       "Bash(bash /home/user/projects/personal-assistant/.claude/skills/browser-testing/scripts/check-devserver.sh)"
     ]

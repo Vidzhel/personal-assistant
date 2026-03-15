@@ -33,6 +33,10 @@ export const EVENT_EMAIL_REPLY_CANCEL = 'email:reply:cancel' as const;
 export const EVENT_EMAIL_TRIAGE_PROCESSED = 'email:triage:processed' as const;
 export const EVENT_EMAIL_TRIAGE_ACTION_ITEMS = 'email:triage:action-items' as const;
 
+// Email action extract event types
+export const EVENT_EMAIL_ACTION_EXTRACT_COMPLETED = 'email:action-extract:completed' as const;
+export const EVENT_EMAIL_ACTION_EXTRACT_FAILED = 'email:action-extract:failed' as const;
+
 // Event sources
 export const SOURCE_GMAIL = 'gmail';
 export const SOURCE_TELEGRAM = 'telegram';
