@@ -137,10 +137,14 @@ export class Orchestrator {
     // The orchestrator agent itself has NO MCPs - it delegates via Agent tool to sub-agents.
     const agentDefinitions = this.suiteRegistry.collectAgentDefinitions();
 
-    // Build prompt with topic context if available
+    // Build prompt with topic context and media context if available
     let prompt = message;
     if (topicName) {
       prompt = `[Context: This message is from the '${topicName}' topic thread (topicId: ${topicId})]\n\n${message}`;
+    }
+    const mediaAttachment = event.payload.mediaAttachment;
+    if (mediaAttachment) {
+      prompt += `\n\n[Media file available on disk: ${mediaAttachment.filePath} (${mediaAttachment.fileName}, ${mediaAttachment.mimeType}, ${mediaAttachment.type})]`;
     }
 
     const taskId = generateId();
