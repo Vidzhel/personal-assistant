@@ -20,6 +20,14 @@ export interface NewEmailEvent extends BaseEvent {
   };
 }
 
+export const NewEmailPayloadSchema = z.object({
+  from: z.string(),
+  subject: z.string(),
+  snippet: z.string(),
+  messageId: z.string(),
+  receivedAt: z.number(),
+});
+
 export interface ScheduleTriggeredEvent extends BaseEvent {
   type: 'schedule:triggered';
   payload: {
@@ -113,6 +121,11 @@ export interface ConfigReloadedEvent extends BaseEvent {
     timestamp: string;
   };
 }
+
+export const ConfigReloadedPayloadSchema = z.object({
+  configType: z.string(),
+  timestamp: z.string(),
+});
 
 export interface PermissionApprovedEvent extends BaseEvent {
   type: 'permission:approved';
@@ -356,6 +369,32 @@ export const EmailReplyCancelPayloadSchema = z.object({
   compositionId: z.string(),
 });
 
+export interface EmailTriageProcessedEvent extends BaseEvent {
+  type: 'email:triage:processed';
+  payload: {
+    emailId: string;
+    rulesMatched: string[];
+    actionsTaken: string[];
+  };
+}
+
+export const EmailTriageProcessedPayloadSchema = z.object({
+  emailId: z.string(),
+  rulesMatched: z.array(z.string()),
+  actionsTaken: z.array(z.string()),
+});
+
+export interface EmailTriageActionItemsEvent extends BaseEvent {
+  type: 'email:triage:action-items';
+  payload: {
+    emailId: string;
+  };
+}
+
+export const EmailTriageActionItemsPayloadSchema = z.object({
+  emailId: z.string(),
+});
+
 export interface SystemHealthAlertEvent extends BaseEvent {
   type: 'system:health:alert';
   payload: {
@@ -399,7 +438,9 @@ export type RavenEvent =
   | EmailReplyStartEvent
   | EmailReplySendEvent
   | EmailReplyEditEvent
-  | EmailReplyCancelEvent;
+  | EmailReplyCancelEvent
+  | EmailTriageProcessedEvent
+  | EmailTriageActionItemsEvent;
 
 export type RavenEventType = RavenEvent['type'];
 

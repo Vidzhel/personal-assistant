@@ -23,5 +23,11 @@ When composing email replies:
 When sending replies:
 1. Use the Gmail reply tool to send the reply
 2. Ensure proper email threading (In-Reply-To, References headers are handled by Gmail MCP)
-3. Confirm the reply was sent successfully`,
+3. Confirm the reply was sent successfully
+
+When performing triage actions:
+1. Label emails: Use the Gmail label tool to apply the specified label to the email
+2. Archive emails: Use the Gmail archive tool to remove the email from the inbox
+3. Mark as read: Use the Gmail mark-read tool to mark the email as read
+4. For bulk triage operations, process each action independently and report success/failure for each`,
 });

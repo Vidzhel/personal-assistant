@@ -29,6 +29,10 @@ export const EVENT_EMAIL_REPLY_SEND = 'email:reply:send' as const;
 export const EVENT_EMAIL_REPLY_EDIT = 'email:reply:edit' as const;
 export const EVENT_EMAIL_REPLY_CANCEL = 'email:reply:cancel' as const;
 
+// Email triage event types
+export const EVENT_EMAIL_TRIAGE_PROCESSED = 'email:triage:processed' as const;
+export const EVENT_EMAIL_TRIAGE_ACTION_ITEMS = 'email:triage:action-items' as const;
+
 // Event sources
 export const SOURCE_GMAIL = 'gmail';
 export const SOURCE_TELEGRAM = 'telegram';

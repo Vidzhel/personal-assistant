@@ -5,3 +5,4 @@ export * from './projects.ts';
 export * from './api.ts';
 export * from './permissions.ts';
 export * from './pipelines.ts';
+export * from './email-rules.ts';

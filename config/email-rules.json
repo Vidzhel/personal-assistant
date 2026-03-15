@@ -1,0 +1,47 @@
+{
+  "rules": [
+    {
+      "name": "newsletter-archive",
+      "description": "Auto-archive newsletters",
+      "match": {
+        "has": ["unsubscribe"]
+      },
+      "actions": {
+        "archive": true,
+        "markRead": true,
+        "extractActions": true
+      },
+      "enabled": true,
+      "priority": 10
+    },
+    {
+      "name": "important-senders",
+      "description": "Flag emails from key contacts",
+      "match": {
+        "from": ["boss@company.com", "client@important.com", "@family.com"]
+      },
+      "actions": {
+        "label": "urgent",
+        "flag": "urgent"
+      },
+      "enabled": true,
+      "priority": 1
+    },
+    {
+      "name": "automated-noreply",
+      "description": "Auto-archive automated emails",
+      "match": {
+        "from": ["noreply@", "no-reply@", "notifications@"],
+        "has": ["automated"]
+      },
+      "actions": {
+        "archive": true,
+        "markRead": true
+      },
+      "enabled": true,
+      "priority": 5
+    }
+  ],
+  "matchMode": "all",
+  "enabled": true
+}

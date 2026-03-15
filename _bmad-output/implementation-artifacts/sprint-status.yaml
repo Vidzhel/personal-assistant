@@ -61,7 +61,7 @@ development_status:
   epic-2-retrospective: optional
 
   # Epic 3: Enhanced Telegram & Mobile Command (MVP)
-  epic-3: in-progress
+  epic-3: done
   3-1-telegram-group-with-topic-threads: done
   3-2-inline-keyboard-actions-and-approvals: done
   3-3-gemini-voice-transcription-skill: done
@@ -71,8 +71,8 @@ development_status:
   epic-3-retrospective: optional
 
   # Epic 4: Intelligent Email & Task Automation (MVP)
-  epic-4: backlog
-  4-1-email-auto-triage-rules: backlog
+  epic-4: in-progress
+  4-1-email-auto-triage-rules: done
   4-2-email-action-item-extraction-and-task-creation: backlog
   4-3-autonomous-task-management: backlog
   4-4-stale-task-detection-and-nudging: backlog
