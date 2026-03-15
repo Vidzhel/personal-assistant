@@ -23,6 +23,12 @@ export const SUITE_GEMINI_TRANSCRIPTION = 'gemini-transcription';
 export const AGENT_GEMINI_TRANSCRIBER = 'gemini-transcriber';
 export const SOURCE_GEMINI = 'gemini';
 
+// Email reply event types
+export const EVENT_EMAIL_REPLY_START = 'email:reply:start' as const;
+export const EVENT_EMAIL_REPLY_SEND = 'email:reply:send' as const;
+export const EVENT_EMAIL_REPLY_EDIT = 'email:reply:edit' as const;
+export const EVENT_EMAIL_REPLY_CANCEL = 'email:reply:cancel' as const;
+
 // Event sources
 export const SOURCE_GMAIL = 'gmail';
 export const SOURCE_TELEGRAM = 'telegram';

@@ -67,7 +67,7 @@ development_status:
   3-3-gemini-voice-transcription-skill: review
   3-4-media-and-file-routing: done
   3-5-morning-briefing-delivery: done
-  3-6-email-reply-composition-from-telegram: backlog
+  3-6-email-reply-composition-from-telegram: review
   epic-3-retrospective: optional
 
   # Epic 4: Intelligent Email & Task Automation (MVP)

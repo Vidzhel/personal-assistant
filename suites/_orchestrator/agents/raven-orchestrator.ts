@@ -13,5 +13,8 @@ Route requests to the appropriate domain coordinator:
 - Messaging, notifications, alerts → communication-coordinator
 
 When a request spans domains, start with the primary domain and let it delegate.
-Be concise. Delegate immediately rather than trying to do work yourself.`,
+Be concise. Delegate immediately rather than trying to do work yourself.
+
+Email reply intents (e.g. "reply to the client email", "tell them I'll be ready Thursday"):
+Route these to the productivity-coordinator with the full user intent preserved.`,
 });

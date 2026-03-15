@@ -294,7 +294,7 @@ export class AgentManager {
 
   async executeApprovedAction(
     params: ApprovedActionParams,
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{ success: boolean; result?: string; error?: string }> {
     const mcpServers = this.mcpManager.resolveForSuite(params.skillName);
     const agentDefinitions = this.suiteRegistry.collectAgentDefinitions([params.skillName]);
 
@@ -315,6 +315,7 @@ export class AgentManager {
 
     return {
       success: task.status === 'completed',
+      result: task.result,
       error:
         task.status !== 'completed'
           ? (task.errors?.join(', ') ?? 'Task did not complete successfully')

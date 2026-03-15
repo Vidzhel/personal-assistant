@@ -277,7 +277,7 @@ describe('handleCallback', () => {
   });
 
   describe('email actions', () => {
-    it('routes email:reply by emitting user:chat:message event', () => {
+    it('routes email:reply by emitting email:reply:start event', () => {
       const action: CallbackAction = { domain: 'email', action: 'reply', target: 'em1', args: [] };
       const result = handleCallback(action, deps);
 
@@ -285,10 +285,10 @@ describe('handleCallback', () => {
       expect(result.message).toBe('Replying...');
       expect(deps.eventBus.emit).toHaveBeenCalledWith(
         expect.objectContaining({
-          type: 'user:chat:message',
+          type: 'email:reply:start',
           source: 'telegram-callback',
           payload: expect.objectContaining({
-            message: 'Reply to email em1',
+            emailId: 'em1',
           }),
         }),
       );
@@ -325,6 +325,103 @@ describe('handleCallback', () => {
       const result = handleCallback(action, deps);
 
       expect(result.updatedKeyboard).toEqual([[{ text: 'Archived \u2713', callback_data: 'noop' }]]);
+    });
+  });
+
+  describe('email reply actions (er: prefix)', () => {
+    it('parses email reply send callback', () => {
+      const result = parseCallbackData('er:s:abc12345');
+      expect(result).toEqual<CallbackAction>({
+        domain: 'email-reply',
+        action: 'send',
+        target: 'abc12345',
+        args: [],
+      });
+    });
+
+    it('parses email reply edit callback', () => {
+      const result = parseCallbackData('er:e:abc12345');
+      expect(result).toEqual<CallbackAction>({
+        domain: 'email-reply',
+        action: 'edit',
+        target: 'abc12345',
+        args: [],
+      });
+    });
+
+    it('parses email reply cancel callback', () => {
+      const result = parseCallbackData('er:c:abc12345');
+      expect(result).toEqual<CallbackAction>({
+        domain: 'email-reply',
+        action: 'cancel',
+        target: 'abc12345',
+        args: [],
+      });
+    });
+
+    it('routes email reply send by emitting email:reply:send event', () => {
+      const action: CallbackAction = { domain: 'email-reply', action: 'send', target: 'comp123', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(true);
+      expect(result.message).toBe('Sending...');
+      expect(deps.eventBus.emit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'email:reply:send',
+          payload: expect.objectContaining({
+            compositionId: 'comp123',
+          }),
+        }),
+      );
+    });
+
+    it('routes email reply edit by emitting notification and email:reply:edit event', () => {
+      const action: CallbackAction = { domain: 'email-reply', action: 'edit', target: 'comp456', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(true);
+      expect(result.message).toBe('Editing...');
+      // Should emit a notification asking for new instructions
+      expect(deps.eventBus.emit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'notification',
+          payload: expect.objectContaining({
+            title: 'Edit Reply',
+          }),
+        }),
+      );
+      // Should emit email:reply:edit event
+      expect(deps.eventBus.emit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'email:reply:edit',
+          payload: expect.objectContaining({
+            compositionId: 'comp456',
+          }),
+        }),
+      );
+    });
+
+    it('routes email reply cancel by emitting email:reply:cancel event', () => {
+      const action: CallbackAction = { domain: 'email-reply', action: 'cancel', target: 'comp789', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(true);
+      expect(result.message).toBe('Cancelled');
+      expect(deps.eventBus.emit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'email:reply:cancel',
+          payload: expect.objectContaining({
+            compositionId: 'comp789',
+          }),
+        }),
+      );
+    });
+
+    it('updates keyboard after email reply action', () => {
+      const action: CallbackAction = { domain: 'email-reply', action: 'send', target: 'comp123', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.updatedKeyboard).toEqual([[{ text: 'Sending...', callback_data: 'noop' }]]);
     });
   });
 

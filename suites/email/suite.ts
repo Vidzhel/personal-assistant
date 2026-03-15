@@ -7,5 +7,5 @@ export default defineSuite({
   description: 'Email monitoring and management via Gmail',
   capabilities: ['mcp-server', 'agent-definition', 'event-source', 'data-provider'],
   requiresEnv: ['GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN'],
-  services: ['imap-watcher'],
+  services: ['imap-watcher', 'reply-composer'],
 });
