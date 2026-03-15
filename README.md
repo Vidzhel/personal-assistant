@@ -63,6 +63,11 @@ docker compose up --build
 | `GMAIL_REFRESH_TOKEN` | Google OAuth refresh token |
 | `TELEGRAM_BOT_TOKEN` | Telegram bot token from @BotFather |
 | `TELEGRAM_CHAT_ID` | Your Telegram chat ID for notifications |
+| `TELEGRAM_GROUP_ID` | Telegram group/supergroup ID for topic threads (optional) |
+| `TELEGRAM_TOPIC_GENERAL` | General topic thread ID (optional, group mode) |
+| `TELEGRAM_TOPIC_SYSTEM` | System alerts topic thread ID (optional, group mode) |
+| `TELEGRAM_TOPIC_MAP` | JSON mapping topic names to thread IDs, e.g. `{"Work":5}` (optional) |
+| `GOOGLE_API_KEY` | Google AI API key for Gemini voice transcription (optional) |
 | `RAVEN_TIMEZONE` | Timezone for schedules (e.g., `Europe/London`) |
 | `RAVEN_DIGEST_TIME` | Morning digest time (default: `08:00`) |
 | `RAVEN_MAX_CONCURRENT_AGENTS` | Max parallel AI agents (default: `3`) |

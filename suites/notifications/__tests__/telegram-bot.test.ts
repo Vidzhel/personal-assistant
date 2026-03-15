@@ -7,11 +7,15 @@ const mockStart = vi.fn();
 const mockStop = vi.fn().mockResolvedValue(undefined);
 const messageHandlers: Array<(ctx: any) => Promise<void>> = [];
 const callbackHandlers: Array<(ctx: any) => Promise<void>> = [];
+const voiceHandlers: Array<(ctx: any) => Promise<void>> = [];
+const videoNoteHandlers: Array<(ctx: any) => Promise<void>> = [];
 
 class MockBot {
   on(filter: string, handler: any) {
     if (filter === 'message:text') messageHandlers.push(handler);
     if (filter === 'callback_query:data') callbackHandlers.push(handler);
+    if (filter === 'message:voice') voiceHandlers.push(handler);
+    if (filter === 'message:video_note') videoNoteHandlers.push(handler);
   }
   api = { sendMessage: mockSendMessage, getChat: mockGetChat, editMessageReplyMarkup: mockEditMessageReplyMarkup };
   start = mockStart;
@@ -51,6 +55,8 @@ describe('telegram-bot service', () => {
     process.env = { ...originalEnv };
     messageHandlers.length = 0;
     callbackHandlers.length = 0;
+    voiceHandlers.length = 0;
+    videoNoteHandlers.length = 0;
     vi.clearAllMocks();
 
     eventHandlers = {};
@@ -813,6 +819,163 @@ describe('telegram-bot service', () => {
               expect.objectContaining({ label: 'Deny', action: 'a:n:ap99' }),
               expect.objectContaining({ label: 'View Details', action: 'a:v:ap99' }),
             ]),
+          }),
+        }),
+      );
+    });
+  });
+
+  describe('voice message handling', () => {
+    const mockFetch = vi.fn();
+
+    beforeEach(async () => {
+      process.env.TELEGRAM_BOT_TOKEN = 'test-token';
+      process.env.TELEGRAM_CHAT_ID = '123';
+      process.env.TELEGRAM_GROUP_ID = '-1001234567890';
+      process.env.TELEGRAM_TOPIC_GENERAL = '1';
+      process.env.TELEGRAM_TOPIC_SYSTEM = '42';
+      process.env.TELEGRAM_TOPIC_MAP = '{"Work":5,"Personal":7}';
+
+      // Mock global fetch for file download
+      vi.stubGlobal('fetch', mockFetch);
+      mockFetch.mockResolvedValue({
+        arrayBuffer: () => Promise.resolve(new ArrayBuffer(100)),
+      });
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    function createVoiceContext(overrides: Record<string, any> = {}) {
+      return {
+        from: { id: 456 },
+        chat: { id: -1001234567890 },
+        message: {
+          message_thread_id: 5,
+          voice: {
+            file_id: 'voice-file-id',
+            duration: 5,
+            mime_type: 'audio/ogg',
+            file_size: 1024,
+          },
+          ...overrides.message,
+        },
+        getFile: vi.fn().mockResolvedValue({ file_path: 'voice/file_0.oga' }),
+        reply: vi.fn().mockResolvedValue({ message_id: 200 }),
+        ...overrides,
+      };
+    }
+
+    it('emits voice:received event with correct payload on voice message', async () => {
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      expect(voiceHandlers.length).toBeGreaterThan(0);
+
+      const ctx = createVoiceContext();
+      await voiceHandlers[0](ctx);
+
+      // Should reply with "Transcribing..."
+      expect(ctx.reply).toHaveBeenCalledWith('Transcribing voice message...', {
+        message_thread_id: 5,
+      });
+
+      // Should download file
+      expect(ctx.getFile).toHaveBeenCalled();
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.telegram.org/file/bottest-token/voice/file_0.oga',
+      );
+
+      // Should emit voice:received event
+      expect(mockEventBus.emit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'voice:received',
+          source: 'telegram',
+          projectId: 'telegram-work',
+          payload: expect.objectContaining({
+            projectId: 'telegram-work',
+            mimeType: 'audio/ogg',
+            duration: 5,
+            topicId: 5,
+            topicName: 'Work',
+            replyMessageId: 200,
+          }),
+        }),
+      );
+
+      // audioData should be base64 encoded
+      const emittedPayload = mockEventBus.emit.mock.calls.find(
+        (call: any[]) => call[0].type === 'voice:received',
+      )?.[0]?.payload;
+      expect(emittedPayload.audioData).toBeDefined();
+      expect(typeof emittedPayload.audioData).toBe('string');
+    });
+
+    it('ignores voice from unauthorized chat in group mode', async () => {
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      const ctx = createVoiceContext({
+        chat: { id: -999 },
+      });
+      await voiceHandlers[0](ctx);
+
+      expect(mockEventBus.emit).not.toHaveBeenCalled();
+      expect(ctx.reply).not.toHaveBeenCalled();
+    });
+
+    it('rejects voice messages larger than 20MB', async () => {
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      const ctx = createVoiceContext({
+        message: {
+          message_thread_id: 5,
+          voice: {
+            file_id: 'big-file',
+            duration: 60,
+            mime_type: 'audio/ogg',
+            file_size: 25 * 1024 * 1024, // 25MB
+          },
+        },
+      });
+      await voiceHandlers[0](ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith('Voice message too large to transcribe', {
+        message_thread_id: 5,
+      });
+      expect(mockEventBus.emit).not.toHaveBeenCalled();
+    });
+
+    it('handles video_note messages', async () => {
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      expect(videoNoteHandlers.length).toBeGreaterThan(0);
+
+      const ctx = {
+        from: { id: 456 },
+        chat: { id: -1001234567890 },
+        message: {
+          message_thread_id: 5,
+          video_note: {
+            file_id: 'videonote-file-id',
+            duration: 10,
+            file_size: 2048,
+          },
+        },
+        getFile: vi.fn().mockResolvedValue({ file_path: 'video/note_0.mp4' }),
+        reply: vi.fn().mockResolvedValue({ message_id: 201 }),
+      };
+      await videoNoteHandlers[0](ctx);
+
+      expect(mockEventBus.emit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'voice:received',
+          payload: expect.objectContaining({
+            mimeType: 'audio/ogg',
+            duration: 10,
           }),
         }),
       );
