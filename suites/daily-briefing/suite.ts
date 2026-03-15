@@ -6,4 +6,5 @@ export default defineSuite({
   version: '0.1.0',
   description: 'Daily morning briefing with tasks, emails, and suggestions',
   capabilities: ['agent-definition'],
+  services: ['briefing-formatter'],
 });

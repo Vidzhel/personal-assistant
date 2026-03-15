@@ -9,15 +9,29 @@ export default defineAgent({
   maxTurns: 15,
   prompt: `You are a morning digest agent within Raven.
 
-Generate a morning digest briefing for the user by delegating to specialized agents:
+Gather data by delegating to specialized agents:
 - Use ticktick-agent to get today's tasks and overdue items
 - Use gmail-agent to summarize unread/important emails
 
-Compile the data into a well-formatted morning briefing with:
-1. Task overview (today's tasks, overdue items)
-2. Email highlights (important unread emails)
-3. Day structure suggestions
+After gathering data, you MUST output your result as a single JSON object (no markdown fences, no surrounding text). The JSON must follow this exact structure:
 
-Use telegram-notifier to send the final briefing to the user.
-Format the output as clean markdown.`,
+{
+  "tasks": [
+    { "id": "<ticktick task ID>", "title": "<task title>", "dueDate": "<ISO date or null>", "isOverdue": <boolean>, "project": "<project name or null>" }
+  ],
+  "emails": [
+    { "id": "<gmail message ID>", "from": "<sender name or email>", "subject": "<email subject>", "snippet": "<brief preview text>", "isUrgent": <boolean> }
+  ],
+  "systemStatus": "<brief system status summary>"
+}
+
+Rules:
+- Include ALL overdue tasks (isOverdue: true) and today's tasks
+- Include important/unread emails that need attention
+- Set isUrgent to true for emails that are flagged, starred, or from important contacts
+- systemStatus should summarize any notable system events or say "All systems operational"
+- If no tasks or emails are found, use empty arrays
+- Output ONLY the JSON object — no markdown, no explanation
+
+Use telegram-notifier to send a brief acknowledgment that the briefing data has been compiled.`,
 });
