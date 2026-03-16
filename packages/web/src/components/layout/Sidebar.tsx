@@ -7,6 +7,7 @@ const nav = [
   { href: '/', label: 'Dashboard', icon: '~' },
   { href: '/projects', label: 'Projects', icon: '#' },
   { href: '/activity', label: 'Activity', icon: '>' },
+  { href: '/pipelines', label: 'Pipelines', icon: '|' },
   { href: '/schedules', label: 'Schedules', icon: '@' },
   { href: '/skills', label: 'Skills', icon: '*' },
   { href: '/settings', label: 'Settings', icon: '%' },

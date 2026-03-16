@@ -125,3 +125,14 @@ body {
   max-width: 100%;
   border-radius: 6px;
 }
+
+/* Pipeline running indicator */
+@keyframes pulse-ring {
+  0% { opacity: 1; }
+  50% { opacity: 0.4; }
+  100% { opacity: 1; }
+}
+
+.pipeline-running {
+  animation: pulse-ring 1.5s ease-in-out infinite;
+}

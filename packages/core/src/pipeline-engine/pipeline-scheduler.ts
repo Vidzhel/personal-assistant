@@ -9,6 +9,7 @@ const log = createLogger('pipeline-scheduler');
 export interface PipelineScheduler {
   registerPipelines: () => void;
   shutdown: () => void;
+  getNextRun: (name: string) => string | null;
 }
 
 export interface PipelineSchedulerDeps {
@@ -90,6 +91,11 @@ export function createPipelineScheduler(deps: PipelineSchedulerDeps): PipelineSc
       eventBus.on('pipeline:failed', onPipelineFailed);
       eventBus.on('config:pipelines:reloaded', onPipelinesReloaded);
       registerCronJobs();
+    },
+
+    getNextRun(name: string): string | null {
+      const job = cronJobs.get(name);
+      return job?.nextRun()?.toISOString() ?? null;
     },
 
     shutdown(): void {

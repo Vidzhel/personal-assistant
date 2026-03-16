@@ -199,6 +199,7 @@ async function main(): Promise<void> {
       messageStore,
       pipelineEngine,
       pipelineStore,
+      pipelineScheduler,
       configuredSuiteCount,
     },
     config.RAVEN_PORT,

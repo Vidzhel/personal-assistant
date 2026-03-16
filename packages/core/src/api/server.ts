@@ -13,6 +13,7 @@ import type { ExecutionLogger } from '../agent-manager/execution-logger.ts';
 import type { MessageStore } from '../session-manager/message-store.ts';
 import type { PipelineEngine } from '../pipeline-engine/pipeline-engine.ts';
 import type { PipelineStore } from '../pipeline-engine/pipeline-store.ts';
+import type { PipelineScheduler } from '../pipeline-engine/pipeline-scheduler.ts';
 import { registerHealthRoute } from './routes/health.ts';
 import { registerProjectRoutes } from './routes/projects.ts';
 import { registerSessionRoutes } from './routes/sessions.ts';
@@ -41,6 +42,7 @@ export interface ApiDeps {
   messageStore: MessageStore;
   pipelineEngine: PipelineEngine;
   pipelineStore?: PipelineStore;
+  pipelineScheduler?: PipelineScheduler;
   configuredSuiteCount: number;
 }
 
@@ -76,6 +78,7 @@ export async function createApiServer(
   registerPipelineRoutes(app, {
     pipelineEngine: deps.pipelineEngine,
     pipelineStore: deps.pipelineStore,
+    pipelineScheduler: deps.pipelineScheduler,
   });
 
   // SSE streaming

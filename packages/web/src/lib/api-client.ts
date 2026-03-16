@@ -51,6 +51,14 @@ export const api = {
   getSessionDebug: (sessionId: string) => request<SessionDebug>(`/sessions/${sessionId}/debug`),
   getActiveTasks: () => request<ActiveTasks>('/agent-tasks/active'),
   cancelTask: (taskId: string) => request(`/agent-tasks/${taskId}/cancel`, { method: 'POST' }),
+  getPipelines: () => request<EnrichedPipeline[]>('/pipelines'),
+  getPipeline: (name: string) => request<EnrichedPipeline>(`/pipelines/${name}`),
+  getPipelineRuns: (name: string, limit?: number) => {
+    const qs = limit ? `?limit=${limit}` : '';
+    return request<PipelineRunRecord[]>(`/pipelines/${name}/runs${qs}`);
+  },
+  triggerPipeline: (name: string) =>
+    request<{ runId: string; status: string }>(`/pipelines/${name}/trigger`, { method: 'POST' }),
 };
 
 export interface Project {
@@ -125,4 +133,47 @@ export interface EventRecord {
   projectId: string | null;
   payload: unknown;
   timestamp: number;
+}
+
+export interface PipelineRunRecord {
+  id: string;
+  pipeline_name: string;
+  trigger_type: string;
+  status: string;
+  started_at: string;
+  completed_at?: string;
+  node_results?: string;
+  error?: string;
+}
+
+export interface PipelineTrigger {
+  type: 'cron' | 'event' | 'manual' | 'webhook';
+  schedule?: string;
+  event?: string;
+  filter?: Record<string, string>;
+}
+
+export interface PipelineConfig {
+  name: string;
+  description?: string;
+  version: number;
+  trigger: PipelineTrigger;
+  settings?: {
+    retry?: { maxAttempts: number; backoffMs: number };
+    timeout?: number;
+    onError?: 'stop' | 'continue';
+  };
+  nodes: Record<string, unknown>;
+  connections: unknown[];
+  enabled: boolean;
+}
+
+export interface EnrichedPipeline {
+  config: PipelineConfig;
+  executionOrder: string[];
+  entryPoints: string[];
+  filePath: string;
+  loadedAt: string;
+  lastRun: PipelineRunRecord | null;
+  nextRun: string | null;
 }

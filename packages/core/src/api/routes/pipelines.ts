@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { HTTP_STATUS } from '@raven/shared';
 import type { PipelineEngine } from '../../pipeline-engine/pipeline-engine.ts';
 import type { PipelineStore } from '../../pipeline-engine/pipeline-store.ts';
+import type { PipelineScheduler } from '../../pipeline-engine/pipeline-scheduler.ts';
 
 const DEFAULT_RUNS_LIMIT = 10;
 const MAX_RUNS_LIMIT = 100;
@@ -9,7 +10,11 @@ const MAX_RUNS_LIMIT = 100;
 // eslint-disable-next-line max-lines-per-function -- route registration for all pipeline CRUD endpoints
 export function registerPipelineRoutes(
   app: FastifyInstance,
-  deps: { pipelineEngine: PipelineEngine; pipelineStore?: PipelineStore },
+  deps: {
+    pipelineEngine: PipelineEngine;
+    pipelineStore?: PipelineStore;
+    pipelineScheduler?: PipelineScheduler;
+  },
 ): void {
   // Register YAML content-type parser so PUT can receive raw YAML strings
   app.addContentTypeParser(
@@ -20,7 +25,12 @@ export function registerPipelineRoutes(
     },
   );
   app.get('/api/pipelines', async () => {
-    return deps.pipelineEngine.getAllPipelines();
+    const pipelines = deps.pipelineEngine.getAllPipelines();
+    return pipelines.map((p) => ({
+      ...p,
+      lastRun: deps.pipelineStore?.getRecentRuns(p.config.name, 1)[0] ?? null,
+      nextRun: deps.pipelineScheduler?.getNextRun(p.config.name) ?? null,
+    }));
   });
 
   app.get<{ Params: { name: string } }>('/api/pipelines/:name', async (req, reply) => {
@@ -28,7 +38,11 @@ export function registerPipelineRoutes(
     if (!pipeline) {
       return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Pipeline not found' });
     }
-    return pipeline;
+    return {
+      ...pipeline,
+      lastRun: deps.pipelineStore?.getRecentRuns(pipeline.config.name, 1)[0] ?? null,
+      nextRun: deps.pipelineScheduler?.getNextRun(pipeline.config.name) ?? null,
+    };
   });
 
   app.post<{ Params: { name: string } }>('/api/pipelines/:name/trigger', async (req, reply) => {
