@@ -49,6 +49,20 @@ export const api = {
   createSession: (projectId: string) =>
     request<Session>(`/projects/${projectId}/sessions/new`, { method: 'POST' }),
   getSessionDebug: (sessionId: string) => request<SessionDebug>(`/sessions/${sessionId}/debug`),
+  getAgentTasks: (params?: {
+    status?: string;
+    skillName?: string;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set('status', params.status);
+    if (params?.skillName) qs.set('skillName', params.skillName);
+    if (params?.limit) qs.set('limit', String(params.limit));
+    if (params?.offset) qs.set('offset', String(params.offset));
+    return request<TaskRecord[]>(`/agent-tasks?${qs}`);
+  },
+  getAgentTask: (id: string) => request<TaskRecord>(`/agent-tasks/${id}`),
   getActiveTasks: () => request<ActiveTasks>('/agent-tasks/active'),
   cancelTask: (taskId: string) => request(`/agent-tasks/${taskId}/cancel`, { method: 'POST' }),
   getPipelines: () => request<EnrichedPipeline[]>('/pipelines'),
@@ -107,6 +121,24 @@ export interface SessionDebug {
   tasks: unknown[];
   auditEntries: unknown[];
   rawMessages: string[];
+}
+
+export interface TaskRecord {
+  id: string;
+  sessionId?: string;
+  projectId?: string;
+  skillName: string;
+  actionName?: string;
+  prompt: string;
+  status: string;
+  priority: string;
+  result?: string;
+  durationMs?: number;
+  errors?: string[];
+  blocked: boolean;
+  createdAt: string;
+  startedAt?: string;
+  completedAt?: string;
 }
 
 export interface ActiveTaskInfo {

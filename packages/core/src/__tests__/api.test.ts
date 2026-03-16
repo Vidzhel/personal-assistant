@@ -14,6 +14,7 @@ import { registerScheduleRoutes } from '../api/routes/schedules.ts';
 import { registerEventRoutes } from '../api/routes/events.ts';
 import { registerAuditLogRoutes } from '../api/routes/audit-logs.ts';
 import { registerPipelineRoutes } from '../api/routes/pipelines.ts';
+import { registerAgentTaskRoutes } from '../api/routes/agent-tasks.ts';
 import { createAuditLog } from '../permission-engine/audit-log.ts';
 import { createPendingApprovals } from '../permission-engine/pending-approvals.ts';
 import { createExecutionLogger } from '../agent-manager/execution-logger.ts';
@@ -149,6 +150,17 @@ describe('API routes', () => {
       pipelineEngine: mockPipelineEngine,
       pipelineStore,
       pipelineScheduler: mockScheduler,
+    });
+
+    const mockAgentManager = {
+      ...makeMockAgentManager(),
+      getActiveTasks: () => ({ running: [], queued: [] }),
+      cancelTask: () => false,
+    };
+
+    registerAgentTaskRoutes(app, {
+      executionLogger,
+      agentManager: mockAgentManager as any,
     });
 
     await app.ready();
@@ -450,6 +462,50 @@ describe('API routes', () => {
       expect(body.length).toBeGreaterThanOrEqual(1);
       expect(body[0].pipeline_name).toBe('test-pipeline');
       expect(body[0].status).toBe('completed');
+    });
+  });
+
+  describe('GET /api/agent-tasks', () => {
+    it('returns paginated task list', async () => {
+      const db = getDb();
+      const now = new Date().toISOString();
+      db.prepare(
+        'INSERT INTO agent_tasks (id, skill_name, prompt, status, priority, blocked, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      ).run('task-1', 'gmail', 'Check email', 'completed', 'normal', 0, now);
+      db.prepare(
+        'INSERT INTO agent_tasks (id, skill_name, prompt, status, priority, blocked, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      ).run('task-2', 'ticktick', 'Create task', 'failed', 'high', 0, now);
+
+      const res = await app.inject({ method: 'GET', url: '/api/agent-tasks' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(Array.isArray(body)).toBe(true);
+      expect(body.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('filters by status', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/agent-tasks?status=completed' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(Array.isArray(body)).toBe(true);
+      for (const task of body) {
+        expect(task.status).toBe('completed');
+      }
+    });
+  });
+
+  describe('GET /api/agent-tasks/:id', () => {
+    it('returns single task', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/agent-tasks/task-1' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body.id).toBe('task-1');
+      expect(body.skillName).toBeDefined();
+    });
+
+    it('returns 404 for nonexistent task', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/agent-tasks/no-such-task' });
+      expect(res.statusCode).toBe(404);
     });
   });
 });
