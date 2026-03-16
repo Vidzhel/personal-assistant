@@ -2,10 +2,20 @@
 
 import { useEffect } from 'react';
 import { useAppStore } from '@/stores/app-store';
+import { usePolling } from '@/hooks/usePolling';
 import { StatusCards } from '@/components/dashboard/StatusCards';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 
 const HEALTH_REFRESH_INTERVAL_MS = 10000;
+
+interface HealthResponse {
+  status: string;
+  uptime: number;
+  subsystems: {
+    skills: { names: string[] };
+    agentManager: { queueLength: number; runningCount: number };
+  };
+}
 
 // eslint-disable-next-line max-lines-per-function -- page component with layout and data fetching
 export default function DashboardPage() {
@@ -13,12 +23,23 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetchAll();
-    const interval = setInterval(
-      () => useAppStore.getState().fetchHealth(),
-      HEALTH_REFRESH_INTERVAL_MS,
-    );
-    return () => clearInterval(interval);
   }, [fetchAll]);
+
+  const { data: healthData } = usePolling<HealthResponse>('/health', HEALTH_REFRESH_INTERVAL_MS);
+
+  useEffect(() => {
+    if (healthData) {
+      useAppStore.setState({
+        health: {
+          status: healthData.status,
+          uptime: healthData.uptime,
+          skills: healthData.subsystems.skills.names,
+          agentQueue: healthData.subsystems.agentManager.queueLength,
+          agentsRunning: healthData.subsystems.agentManager.runningCount,
+        },
+      });
+    }
+  }, [healthData]);
 
   if (loading && !health) {
     return (

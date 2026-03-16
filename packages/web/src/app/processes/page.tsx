@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { api, type ActiveTaskInfo } from '@/lib/api-client';
+import { useCallback } from 'react';
+import { api, type ActiveTaskInfo, type ActiveTasks } from '@/lib/api-client';
+import { usePolling } from '@/hooks/usePolling';
 
 const MS_PER_SECOND = 1000;
 const SECONDS_PER_MINUTE = 60;
@@ -103,32 +104,20 @@ function TaskTable({
 }
 
 export default function ProcessesPage() {
-  const [running, setRunning] = useState<ActiveTaskInfo[]>([]);
-  const [queued, setQueued] = useState<ActiveTaskInfo[]>([]);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchTasks = useCallback(() => {
-    api
-      .getActiveTasks()
-      .then((data) => {
-        setRunning(data.running);
-        setQueued(data.queued);
-        setError(null);
-      })
-      .catch((e: Error) => setError(e.message));
-  }, []);
-
-  useEffect(() => {
-    fetchTasks();
-    const interval = setInterval(fetchTasks, REFRESH_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [fetchTasks]);
+  const {
+    data,
+    error: pollError,
+    refresh,
+  } = usePolling<ActiveTasks>('/agent-tasks/active', REFRESH_INTERVAL_MS);
+  const running = data?.running ?? [];
+  const queued = data?.queued ?? [];
+  const error = pollError?.message ?? null;
 
   const handleCancel = useCallback(
     (taskId: string) => {
-      api.cancelTask(taskId).then(fetchTasks).catch(fetchTasks);
+      api.cancelTask(taskId).then(refresh).catch(refresh);
     },
-    [fetchTasks],
+    [refresh],
   );
 
   return (

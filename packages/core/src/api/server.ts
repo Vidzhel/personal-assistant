@@ -24,6 +24,7 @@ import { registerAuditLogRoutes } from './routes/audit-logs.ts';
 import { registerApprovalRoutes } from './routes/approvals.ts';
 import { registerAgentTaskRoutes } from './routes/agent-tasks.ts';
 import { registerPipelineRoutes } from './routes/pipelines.ts';
+import { registerSSERoutes } from './sse/stream.ts';
 import { registerWebSocketHandler } from './ws/handler.ts';
 
 const log = createLogger('api');
@@ -75,6 +76,12 @@ export async function createApiServer(
   registerPipelineRoutes(app, {
     pipelineEngine: deps.pipelineEngine,
     pipelineStore: deps.pipelineStore,
+  });
+
+  // SSE streaming
+  registerSSERoutes(app, {
+    eventBus: deps.eventBus,
+    executionLogger: deps.executionLogger,
   });
 
   // WebSocket
