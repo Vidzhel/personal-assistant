@@ -73,15 +73,19 @@ export const api = {
   },
   triggerPipeline: (name: string) =>
     request<{ runId: string; status: string }>(`/pipelines/${name}/trigger`, { method: 'POST' }),
-  savePipeline: (name: string, yamlString: string) =>
-    fetch(`${API_URL}/pipelines/${name}`, {
+  savePipeline: async (name: string, yamlString: string) => {
+    const res = await fetch(`${API_URL}/pipelines/${name}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'text/yaml' },
       body: yamlString,
-    }).then((res) => {
-      if (!res.ok) throw new Error(`API error: ${res.status}`);
-      return res.json() as Promise<{ config: PipelineConfig }>;
-    }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      const detail = (body as { error?: string } | null)?.error;
+      throw new Error(detail ?? `Pipeline save failed (${res.status})`);
+    }
+    return res.json() as Promise<{ config: PipelineConfig }>;
+  },
   getMetrics: (period = '24h') => request<MetricsResponse>(`/metrics?period=${period}`),
 };
 

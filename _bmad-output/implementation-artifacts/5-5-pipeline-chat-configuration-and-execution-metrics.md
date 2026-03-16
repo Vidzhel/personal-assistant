@@ -1,6 +1,6 @@
 # Story 5.5: Pipeline Chat Configuration & Execution Metrics
 
-Status: review
+Status: done
 
 ## Story
 
@@ -266,6 +266,7 @@ Claude Opus 4.6 (1M context)
 
 ### Change Log
 - 2026-03-16: Implemented all 7 tasks for Story 5.5 — pipeline metrics API, chat YAML preview, execution metrics page
+- 2026-03-17: Code review fixes — ChatPanel renders surrounding markdown around YAML preview (M1), savePipeline surfaces server validation errors (M2)
 
 ### File List
 - `packages/core/src/api/routes/metrics.ts` (NEW)

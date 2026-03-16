@@ -9,12 +9,23 @@ import { PipelinePreview } from './PipelinePreview';
 const PIPELINE_KEYS = ['name:', 'trigger:', 'nodes:', 'connections:'];
 const MIN_PIPELINE_KEYS = 3;
 
-function extractPipelineYaml(content: string): string | null {
+interface YamlSplit {
+  before: string;
+  yaml: string;
+  after: string;
+}
+
+function splitPipelineYaml(content: string): YamlSplit | null {
   const match = /```ya?ml\n([\s\S]*?)```/.exec(content);
   if (!match) return null;
   const yaml = match[1].trim();
   const matchedKeys = PIPELINE_KEYS.filter((k) => yaml.includes(k));
-  return matchedKeys.length >= MIN_PIPELINE_KEYS ? yaml : null;
+  if (matchedKeys.length < MIN_PIPELINE_KEYS) return null;
+  return {
+    before: content.slice(0, match.index).trim(),
+    yaml,
+    after: content.slice(match.index + match[0].length).trim(),
+  };
 }
 
 // eslint-disable-next-line max-lines-per-function -- chat panel with message list, input, and controls
@@ -151,11 +162,28 @@ function ThinkingBubble({ content }: { content: string }) {
   );
 }
 
-function PipelineYamlBubble({ yaml, onDismiss }: { yaml: string; onDismiss: () => void }) {
+function MarkdownBlock({ content }: { content: string }) {
+  return (
+    <div
+      className="max-w-[80%] px-4 py-2 rounded-lg text-sm markdown-content"
+      style={{
+        background: 'var(--bg-card)',
+        color: 'var(--text)',
+        border: '1px solid var(--border)',
+      }}
+    >
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+    </div>
+  );
+}
+
+function PipelineYamlBubble({ split, onDismiss }: { split: YamlSplit; onDismiss: () => void }) {
   return (
     <div className="flex justify-start">
-      <div className="max-w-[80%] w-full">
-        <PipelinePreview yaml={yaml} onDismiss={onDismiss} />
+      <div className="max-w-[80%] w-full space-y-2">
+        {split.before && <MarkdownBlock content={split.before} />}
+        <PipelinePreview yaml={split.yaml} onDismiss={onDismiss} />
+        {split.after && <MarkdownBlock content={split.after} />}
       </div>
     </div>
   );
@@ -196,9 +224,9 @@ function MessageBubble({
   if (message.role === 'thinking') return <ThinkingBubble content={message.content} />;
 
   const isUser = message.role === 'user';
-  const pipelineYaml = !isUser && !dismissed ? extractPipelineYaml(message.content) : null;
+  const split = !isUser && !dismissed ? splitPipelineYaml(message.content) : null;
 
-  if (pipelineYaml) return <PipelineYamlBubble yaml={pipelineYaml} onDismiss={onDismissYaml} />;
+  if (split) return <PipelineYamlBubble split={split} onDismiss={onDismissYaml} />;
   return <ContentBubble message={message} />;
 }
 
