@@ -29,6 +29,7 @@ export interface MessageStore {
   getRawMessages: (sessionId: string) => string[];
 }
 
+// eslint-disable-next-line max-lines-per-function -- factory function that initializes all message store methods
 export function createMessageStore(options: MessageStoreOptions): MessageStore {
   const { basePath } = options;
 

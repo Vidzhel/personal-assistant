@@ -1,7 +1,12 @@
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentBackend, BackendOptions, BackendResult } from './agent-backend.ts';
 
+const INPUT_SUMMARY_MAX_LENGTH = 200;
+const TOOL_RESULT_MAX_LENGTH = 500;
+
+// eslint-disable-next-line max-lines-per-function -- manages SDK lifecycle with streaming message parsing
 export function createSdkBackend(): AgentBackend {
+  // eslint-disable-next-line max-lines-per-function, complexity -- SDK query with streaming message type routing
   return async (opts: BackendOptions): Promise<BackendResult> => {
     let sessionId: string | undefined;
     let resultText = '';
@@ -59,7 +64,9 @@ export function createSdkBackend(): AgentBackend {
               opts.onAssistantMessage(block.text, { parentToolUseId });
             }
             if (block.type === 'tool_use' && block.name && opts.onToolUse) {
-              const inputSummary = block.input ? JSON.stringify(block.input).slice(0, 200) : '';
+              const inputSummary = block.input
+                ? JSON.stringify(block.input).slice(0, INPUT_SUMMARY_MAX_LENGTH)
+                : '';
               opts.onToolUse(block.name, inputSummary, {
                 parentToolUseId,
                 toolUseId: block.id,
@@ -85,7 +92,7 @@ export function createSdkBackend(): AgentBackend {
               const output =
                 typeof block.content === 'string'
                   ? block.content
-                  : JSON.stringify(block.content ?? '').slice(0, 500);
+                  : JSON.stringify(block.content ?? '').slice(0, TOOL_RESULT_MAX_LENGTH);
               opts.onToolResult({
                 toolUseId: block.tool_use_id,
                 output,

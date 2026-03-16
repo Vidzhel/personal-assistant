@@ -15,6 +15,8 @@ import type { MessageStore } from '../session-manager/message-store.ts';
 
 const log = createLogger('orchestrator');
 
+const LOG_MESSAGE_PREVIEW_LENGTH = 100;
+
 export interface OrchestratorDeps {
   eventBus: EventBus;
   suiteRegistry: SuiteRegistry;
@@ -119,7 +121,7 @@ export class Orchestrator {
 
   private handleUserChat(event: UserChatMessageEvent): void {
     const { projectId, sessionId, message, topicId, topicName } = event.payload;
-    log.info(`User chat in project ${projectId}: ${message.slice(0, 100)}`);
+    log.info(`User chat in project ${projectId}: ${message.slice(0, LOG_MESSAGE_PREVIEW_LENGTH)}`);
 
     // Use the specific session if provided, otherwise fall back to getOrCreateSession
     const session =

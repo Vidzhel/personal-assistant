@@ -1,3 +1,5 @@
+const RECONNECT_INTERVAL_MS = 3000;
+
 type MessageHandler = (msg: WsMessage) => void;
 
 export interface WsMessage {
@@ -41,7 +43,7 @@ export class WsClient {
     };
 
     this.ws.onclose = () => {
-      this.reconnectTimer = setTimeout(() => this.doConnect(), 3000);
+      this.reconnectTimer = setTimeout(() => this.doConnect(), RECONNECT_INTERVAL_MS);
     };
   }
 

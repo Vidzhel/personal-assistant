@@ -1,8 +1,11 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useChat, type ChatMessage } from '@/hooks/useChat';
 
+// eslint-disable-next-line max-lines-per-function -- chat panel with message list, input, and controls
 export function ChatPanel({
   projectId,
   sessionId,
@@ -109,14 +112,18 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div
-        className="max-w-[80%] px-4 py-2 rounded-lg text-sm whitespace-pre-wrap"
+        className={`max-w-[80%] px-4 py-2 rounded-lg text-sm${isUser ? ' whitespace-pre-wrap' : ' markdown-content'}`}
         style={{
           background: isUser ? 'var(--accent)' : 'var(--bg-card)',
           color: 'var(--text)',
           border: isUser ? 'none' : '1px solid var(--border)',
         }}
       >
-        {message.content}
+        {isUser ? (
+          message.content
+        ) : (
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+        )}
       </div>
     </div>
   );

@@ -3,6 +3,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { api, type SessionDebug } from '@/lib/api-client';
 
+const COPY_FEEDBACK_DURATION_MS = 1500;
+const SESSION_ID_DISPLAY_LENGTH = 12;
+
 interface SessionDebugPanelProps {
   sessionId: string;
   onClose: () => void;
@@ -22,7 +25,7 @@ function CollapsibleSection({ title, count, data, defaultOpen = false }: Collaps
   const handleCopy = () => {
     navigator.clipboard.writeText(JSON.stringify(data, null, 2));
     setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    setTimeout(() => setCopied(false), COPY_FEEDBACK_DURATION_MS);
   };
 
   return (
@@ -62,6 +65,7 @@ function CollapsibleSection({ title, count, data, defaultOpen = false }: Collaps
   );
 }
 
+// eslint-disable-next-line max-lines-per-function -- debug panel with overlay, header, and collapsible sections
 export function SessionDebugPanel({ sessionId, onClose }: SessionDebugPanelProps) {
   const [debugData, setDebugData] = useState<SessionDebug | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -80,7 +84,7 @@ export function SessionDebugPanel({ sessionId, onClose }: SessionDebugPanelProps
     if (!debugData) return;
     navigator.clipboard.writeText(JSON.stringify(debugData, null, 2));
     setCopiedAll(true);
-    setTimeout(() => setCopiedAll(false), 1500);
+    setTimeout(() => setCopiedAll(false), COPY_FEEDBACK_DURATION_MS);
   }, [debugData]);
 
   return (
@@ -112,7 +116,7 @@ export function SessionDebugPanel({ sessionId, onClose }: SessionDebugPanelProps
               Session Debug
             </h3>
             <span className="text-xs font-mono" style={{ color: 'var(--text-muted)' }}>
-              {sessionId.slice(0, 12)}...
+              {sessionId.slice(0, SESSION_ID_DISPLAY_LENGTH)}...
             </span>
           </div>
           <div className="flex items-center gap-2">

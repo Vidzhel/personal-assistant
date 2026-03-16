@@ -31,6 +31,9 @@ export interface AuditLogFilter {
   offset?: number;
 }
 
+const MAX_AUDIT_LIMIT = 1000;
+const DEFAULT_AUDIT_LIMIT = 100;
+
 export const AuditLogFilterSchema = z.object({
   skillName: z.string().optional(),
   tier: PermissionTierSchema.optional(),
@@ -38,7 +41,13 @@ export const AuditLogFilterSchema = z.object({
   sessionId: z.string().optional(),
   from: z.string().optional(),
   to: z.string().optional(),
-  limit: z.coerce.number().int().min(1).max(1000).optional().default(100),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_AUDIT_LIMIT)
+    .optional()
+    .default(DEFAULT_AUDIT_LIMIT),
   offset: z.coerce.number().int().min(0).optional().default(0),
 });
 

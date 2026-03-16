@@ -1,5 +1,7 @@
 import type { DatabaseInterface, PipelineRunRecord } from '@raven/shared';
 
+const DEFAULT_RUNS_LIMIT = 10;
+
 export interface PipelineStore {
   insertRun: (run: PipelineRunRecord) => void;
   updateRun: (
@@ -10,6 +12,7 @@ export interface PipelineStore {
   getRecentRuns: (pipelineName: string, limit?: number) => PipelineRunRecord[];
 }
 
+// eslint-disable-next-line max-lines-per-function -- factory function that initializes all pipeline store methods
 export function createPipelineStore(deps: { db: DatabaseInterface }): PipelineStore {
   const { db } = deps;
 
@@ -65,7 +68,7 @@ export function createPipelineStore(deps: { db: DatabaseInterface }): PipelineSt
       return db.get<PipelineRunRecord>('SELECT * FROM pipeline_runs WHERE id = ?', id);
     },
 
-    getRecentRuns(pipelineName: string, limit = 10): PipelineRunRecord[] {
+    getRecentRuns(pipelineName: string, limit = DEFAULT_RUNS_LIMIT): PipelineRunRecord[] {
       return db.all<PipelineRunRecord>(
         'SELECT * FROM pipeline_runs WHERE pipeline_name = ? ORDER BY started_at DESC LIMIT ?',
         pipelineName,

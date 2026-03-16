@@ -13,6 +13,9 @@ import { createCliBackend } from './cli-backend.ts';
 
 const log = createLogger('agent-session');
 
+const STDERR_LOG_TAIL_LENGTH = -2000;
+const STDERR_ERROR_TAIL_LENGTH = -500;
+
 let activeBackend: AgentBackend | null = null;
 
 export function initializeBackend(apiKey: string): void {
@@ -63,6 +66,7 @@ export interface GateResult {
   reason?: string;
 }
 
+// eslint-disable-next-line max-lines-per-function -- handles green/yellow/red permission tiers with audit and event emission
 export function enforcePermissionGate(
   actionName: string,
   deps: PermissionDeps & { eventBus: EventBus },
@@ -169,6 +173,7 @@ function formatConversationHistory(messages: StoredMessage[], currentPrompt: str
  * This is the core execution unit - each call spawns a fresh agent
  * with only the MCPs needed for this specific task.
  */
+// eslint-disable-next-line max-lines-per-function, complexity -- core orchestration function managing full agent lifecycle
 export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult> {
   const {
     task,
@@ -302,6 +307,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
           },
         });
       },
+      // eslint-disable-next-line complexity -- tool routing with sub-agent tracking and event dispatch
       onToolUse: (toolName: string, toolInput: string, meta?: ToolUseMeta) => {
         // Track Agent tool invocations for sub-agent attribution
         if (toolName === 'Agent' && !meta?.parentToolUseId && meta?.toolUseId) {
@@ -379,11 +385,11 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
     const stderrOutput = stderrChunks.join('');
     log.error(`Agent task ${task.id} failed: ${errMsg}`);
     if (stderrOutput) {
-      log.error(`Agent stderr output: ${stderrOutput.slice(-2000)}`);
+      log.error(`Agent stderr output: ${stderrOutput.slice(STDERR_LOG_TAIL_LENGTH)}`);
     }
     errors.push(errMsg);
     if (stderrOutput) {
-      errors.push(`stderr: ${stderrOutput.slice(-500)}`);
+      errors.push(`stderr: ${stderrOutput.slice(STDERR_ERROR_TAIL_LENGTH)}`);
     }
   }
 

@@ -20,6 +20,7 @@ interface UseChatOptions {
   sessionId?: string | null;
 }
 
+// eslint-disable-next-line max-lines-per-function -- chat hook managing WebSocket state, history, and message routing
 export function useChat(opts: UseChatOptions): {
   messages: ChatMessage[];
   sendMessage: (message: string) => void;
@@ -86,6 +87,7 @@ export function useChat(opts: UseChatOptions): {
   }, [projectId, externalSessionId]);
 
   // Handle incoming WebSocket messages
+  // eslint-disable-next-line max-lines-per-function, complexity -- WebSocket message routing with multiple event types
   useEffect(() => {
     const newMessages = wsMessages.slice(processedWsRef.current);
     processedWsRef.current = wsMessages.length;

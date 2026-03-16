@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useAppStore } from '@/stores/app-store';
 
+// eslint-disable-next-line max-lines-per-function -- page component with skill cards layout
 export default function SkillsPage() {
   const { skills, fetchSkills } = useAppStore();
 

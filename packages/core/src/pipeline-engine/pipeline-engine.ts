@@ -44,6 +44,7 @@ export interface PipelineEngineDeps {
   pipelineStore?: PipelineStore;
 }
 
+// eslint-disable-next-line max-lines-per-function -- factory function that initializes pipeline engine with loader, executor, and CRUD operations
 export function createPipelineEngine(deps: PipelineEngineDeps): PipelineEngine {
   let loader: PipelineLoader | null = null;
   let executor: PipelineExecutor | null = null;

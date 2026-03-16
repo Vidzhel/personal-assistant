@@ -3,6 +3,9 @@
 import { useEffect, useState } from 'react';
 import { api, type EventRecord } from '@/lib/api-client';
 
+const REFRESH_INTERVAL_MS = 5000;
+
+// eslint-disable-next-line max-lines-per-function -- page component with layout and data fetching
 export default function ActivityPage() {
   const [events, setEvents] = useState<EventRecord[]>([]);
 
@@ -16,7 +19,7 @@ export default function ActivityPage() {
         .getEvents({ limit: 100 })
         .then(setEvents)
         .catch(() => {});
-    }, 5000);
+    }, REFRESH_INTERVAL_MS);
     return () => clearInterval(interval);
   }, []);
 

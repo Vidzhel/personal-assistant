@@ -2,13 +2,15 @@ import { z } from 'zod';
 
 // --- Agent Definition ---
 
+const DEFAULT_MAX_TURNS = 10;
+
 const AgentDefinitionSchema = z.object({
   name: z.string().regex(/^[a-z][a-z0-9-]*$/, 'Agent name must be lowercase kebab-case'),
   description: z.string().min(1),
   model: z.enum(['sonnet', 'opus', 'haiku']).default('sonnet'),
   tools: z.array(z.string()).default([]),
   mcpServers: z.array(z.string()).optional(),
-  maxTurns: z.number().int().positive().default(10),
+  maxTurns: z.number().int().positive().default(DEFAULT_MAX_TURNS),
   prompt: z.string().min(1),
 });
 

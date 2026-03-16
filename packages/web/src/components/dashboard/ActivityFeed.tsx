@@ -11,6 +11,9 @@ interface ActivityItem {
   timestamp: number;
 }
 
+const MAX_ACTIVITY_ITEMS = 49;
+
+// eslint-disable-next-line max-lines-per-function -- feed component with WebSocket integration and event rendering
 export function ActivityFeed() {
   const [items, setItems] = useState<ActivityItem[]>([]);
   const channels = useMemo(() => ['global'], []);
@@ -38,7 +41,7 @@ export function ActivityFeed() {
               event.type,
             timestamp: event.timestamp,
           },
-          ...prev.slice(0, 49),
+          ...prev.slice(0, MAX_ACTIVITY_ITEMS),
         ]);
       }
     }

@@ -4,6 +4,8 @@ import type { AgentTask } from '@raven/shared';
 
 const log = createLogger('execution-logger');
 
+const DEFAULT_QUERY_LIMIT = 50;
+
 export interface TaskRecord {
   id: string;
   sessionId?: string;
@@ -106,6 +108,7 @@ interface StatsRow {
   last_task_at: number | null;
 }
 
+// eslint-disable-next-line max-lines-per-function -- factory function that initializes all store methods
 export function createExecutionLogger(deps: { db: Database.Database }): ExecutionLogger {
   const { db } = deps;
 
@@ -164,7 +167,7 @@ export function createExecutionLogger(deps: { db: Database.Database }): Executio
       }
 
       const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-      const limit = opts.limit ?? 50;
+      const limit = opts.limit ?? DEFAULT_QUERY_LIMIT;
       const offset = opts.offset ?? 0;
 
       const rows = db

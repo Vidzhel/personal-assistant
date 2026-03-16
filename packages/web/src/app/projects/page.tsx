@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useAppStore } from '@/stores/app-store';
 import { api } from '@/lib/api-client';
 
+// eslint-disable-next-line max-lines-per-function -- page component with project creation form and listing
 export default function ProjectsPage() {
   const { projects, skills, fetchProjects, fetchSkills } = useAppStore();
   const [showCreate, setShowCreate] = useState(false);

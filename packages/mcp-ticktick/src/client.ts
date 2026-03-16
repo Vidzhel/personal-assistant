@@ -1,4 +1,5 @@
 const BASE_URL = 'https://api.ticktick.com/open/v1';
+const HTTP_NO_CONTENT = 204;
 
 export interface TickTickProject {
   id: string;
@@ -146,13 +147,14 @@ async function request<T>(
     throw new Error(`TickTick API ${method} ${path} failed (${res.status}): ${text}`);
   }
 
-  if (res.status === 204 || res.headers.get('content-length') === '0') {
+  if (res.status === HTTP_NO_CONTENT || res.headers.get('content-length') === '0') {
     return undefined as T;
   }
 
   return (await res.json()) as T;
 }
 
+// eslint-disable-next-line max-lines-per-function -- factory returns many thin method wrappers
 export function createClient(token: string): {
   getProjects: () => Promise<TickTickProject[]>;
   getProject: (projectId: string) => Promise<TickTickProject>;

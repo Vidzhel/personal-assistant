@@ -6,6 +6,10 @@ import { api, type Project, type Session } from '@/lib/api-client';
 import { ChatPanel } from '@/components/chat/ChatPanel';
 import { SessionDebugPanel } from '@/components/session/SessionDebugPanel';
 
+const COPY_FEEDBACK_DURATION_MS = 1500;
+const ID_DISPLAY_LENGTH = 8;
+
+// eslint-disable-next-line max-lines-per-function -- page component with session management and layout
 export default function ProjectPage() {
   const params = useParams();
   const id = params.id as string;
@@ -49,7 +53,7 @@ export default function ProjectPage() {
     if (!activeSession) return;
     navigator.clipboard.writeText(activeSession.id);
     setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    setTimeout(() => setCopied(false), COPY_FEEDBACK_DURATION_MS);
   }, [activeSession]);
 
   if (error) {
@@ -100,7 +104,9 @@ export default function ProjectPage() {
               <span className="truncate">
                 {activeSession ? (
                   <>
-                    <span className="font-mono opacity-60">{activeSession.id.slice(0, 8)}</span>
+                    <span className="font-mono opacity-60">
+                      {activeSession.id.slice(0, ID_DISPLAY_LENGTH)}
+                    </span>
                     {' · '}
                     {new Date(activeSession.createdAt).toLocaleDateString()}
                     {' · '}
@@ -161,7 +167,7 @@ export default function ProjectPage() {
                   }}
                 >
                   <span className="truncate">
-                    <span className="font-mono opacity-60">{s.id.slice(0, 8)}</span>
+                    <span className="font-mono opacity-60">{s.id.slice(0, ID_DISPLAY_LENGTH)}</span>
                     {' · '}
                     {new Date(s.createdAt).toLocaleString()}
                   </span>

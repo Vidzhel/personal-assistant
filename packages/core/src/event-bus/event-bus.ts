@@ -4,13 +4,15 @@ import type { RavenEvent, RavenEventType } from '@raven/shared';
 
 const log = createLogger('event-bus');
 
+const MAX_LISTENERS = 50;
+
 type EventHandler<T = RavenEvent> = (event: T) => void;
 
 export class EventBus {
   private emitter = new EventEmitter();
 
   constructor() {
-    this.emitter.setMaxListeners(50);
+    this.emitter.setMaxListeners(MAX_LISTENERS);
   }
 
   emit(event: RavenEvent): void {

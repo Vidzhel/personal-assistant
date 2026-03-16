@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { HTTP_STATUS } from '@raven/shared';
 import type { ApiDeps } from '../server.ts';
 
 export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void {
@@ -18,14 +19,14 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
 
   app.get<{ Params: { id: string } }>('/api/sessions/:id', async (req, reply) => {
     const session = deps.sessionManager.getSession(req.params.id);
-    if (!session) return reply.status(404).send({ error: 'Not found' });
+    if (!session) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
     return session;
   });
 
   // Debug: consolidated session data for investigation
   app.get<{ Params: { id: string } }>('/api/sessions/:id/debug', async (req, reply) => {
     const session = deps.sessionManager.getSession(req.params.id);
-    if (!session) return reply.status(404).send({ error: 'Session not found' });
+    if (!session) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Session not found' });
 
     const messages = deps.messageStore.getMessages(req.params.id);
     const tasks = deps.executionLogger.queryTasks({ sessionId: req.params.id });
@@ -41,7 +42,7 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
     Querystring: { limit?: string; offset?: string };
   }>('/api/sessions/:id/messages', async (req, reply) => {
     const session = deps.sessionManager.getSession(req.params.id);
-    if (!session) return reply.status(404).send({ error: 'Session not found' });
+    if (!session) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Session not found' });
 
     const limit = req.query.limit ? parseInt(req.query.limit, 10) : undefined;
     const offset = req.query.offset ? parseInt(req.query.offset, 10) : undefined;

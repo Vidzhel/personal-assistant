@@ -29,6 +29,7 @@ export function matchesFilter(
   });
 }
 
+// eslint-disable-next-line max-lines-per-function -- factory function that manages event listener lifecycle for pipeline triggers
 export function createPipelineEventTrigger(deps: PipelineEventTriggerDeps): PipelineEventTrigger {
   const { pipelineEngine, eventBus } = deps;
   const handlers: Array<{ eventType: RavenEventType; handler: (event: RavenEvent) => void }> = [];

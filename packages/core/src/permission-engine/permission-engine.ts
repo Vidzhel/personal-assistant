@@ -14,6 +14,7 @@ import type { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 
 const log = createLogger('permission-engine');
 const CONFIG_FILENAME = 'permissions.json';
+const FILE_CHANGE_DEBOUNCE_MS = 100;
 
 export interface PermissionEngine {
   initialize: (configDir: string) => void;
@@ -27,6 +28,7 @@ interface PermissionEngineDeps {
   eventBus: EventBus;
 }
 
+// eslint-disable-next-line max-lines-per-function -- factory function that initializes permission engine with config loading and file watching
 export function createPermissionEngine(deps: PermissionEngineDeps): PermissionEngine {
   const { suiteRegistry, eventBus } = deps;
   let currentConfig: PermissionConfig = {};
@@ -107,7 +109,7 @@ export function createPermissionEngine(deps: PermissionEngineDeps): PermissionEn
       watcher = watch(configDir, (_eventType, filename) => {
         if (!filename || filename !== CONFIG_FILENAME) return;
         if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(handleFileChange, 100);
+        debounceTimer = setTimeout(handleFileChange, FILE_CHANGE_DEBOUNCE_MS);
       });
 
       watcher.on('error', (err) => {

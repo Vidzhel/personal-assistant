@@ -8,7 +8,6 @@ vi.mock('node:child_process', () => ({
 import { execFile } from 'node:child_process';
 import { gitAutoCommit } from '../utils/git-commit.ts';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockExecFile = execFile as any;
 
 function simulateSuccess(): void {

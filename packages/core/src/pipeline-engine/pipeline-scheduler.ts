@@ -17,6 +17,7 @@ export interface PipelineSchedulerDeps {
   timezone: string;
 }
 
+// eslint-disable-next-line max-lines-per-function -- factory function that manages cron job lifecycle for pipeline triggers
 export function createPipelineScheduler(deps: PipelineSchedulerDeps): PipelineScheduler {
   const { pipelineEngine, eventBus, timezone } = deps;
   const cronJobs = new Map<string, Cron>();

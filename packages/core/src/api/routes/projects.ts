@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
-import { generateId, type Project } from '@raven/shared';
+import { generateId, HTTP_STATUS, type Project } from '@raven/shared';
 import { getDb } from '../../db/database.ts';
 
+// eslint-disable-next-line max-lines-per-function -- route registration for all project CRUD endpoints
 export function registerProjectRoutes(app: FastifyInstance): void {
   app.get('/api/projects', async () => {
     const db = getDb();
@@ -12,7 +13,7 @@ export function registerProjectRoutes(app: FastifyInstance): void {
   app.get<{ Params: { id: string } }>('/api/projects/:id', async (req, reply) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
-    if (!row) return reply.status(404).send({ error: 'Not found' });
+    if (!row) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
     return parseProjectRow(row);
   });
 
@@ -53,7 +54,7 @@ export function registerProjectRoutes(app: FastifyInstance): void {
   }>('/api/projects/:id', async (req, reply) => {
     const db = getDb();
     const existing = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
-    if (!existing) return reply.status(404).send({ error: 'Not found' });
+    if (!existing) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
 
     const updates = req.body;
     const now = Date.now();
@@ -74,7 +75,8 @@ export function registerProjectRoutes(app: FastifyInstance): void {
   app.delete<{ Params: { id: string } }>('/api/projects/:id', async (req, reply) => {
     const db = getDb();
     const result = db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id);
-    if (result.changes === 0) return reply.status(404).send({ error: 'Not found' });
+    if (result.changes === 0)
+      return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
     return { success: true };
   });
 }

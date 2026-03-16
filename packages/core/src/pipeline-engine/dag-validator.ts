@@ -7,6 +7,7 @@ export interface DagValidationResult {
   error?: string;
 }
 
+// eslint-disable-next-line max-lines-per-function, complexity -- graph validation is inherently complex (Kahn's algorithm)
 export function validateDag(
   nodes: Record<string, PipelineNode>,
   connections: PipelineConnection[],

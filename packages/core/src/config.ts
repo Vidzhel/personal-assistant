@@ -11,15 +11,20 @@ export const projectRoot = resolve(__dirname, '..', '..', '..');
 // Load .env from project root — not CWD (which differs in workspace scripts)
 dotenv.config({ path: resolve(projectRoot, '.env') });
 
+const DEFAULT_PORT = 4001;
+const DEFAULT_MAX_CONCURRENT = 3;
+const DEFAULT_MAX_TURNS = 25;
+const DEFAULT_BUDGET_USD = 5.0;
+
 const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().default(''), // Empty = use `claude` CLI auth (MAX plan)
   CLAUDE_MODEL: z.string().default('claude-sonnet-4-6'),
-  RAVEN_PORT: z.coerce.number().default(4001),
+  RAVEN_PORT: z.coerce.number().default(DEFAULT_PORT),
   RAVEN_TIMEZONE: z.string().default('UTC'),
   RAVEN_DIGEST_TIME: z.string().default('08:00'),
-  RAVEN_MAX_CONCURRENT_AGENTS: z.coerce.number().default(3),
-  RAVEN_AGENT_MAX_TURNS: z.coerce.number().default(25),
-  RAVEN_MAX_BUDGET_USD_PER_DAY: z.coerce.number().default(5.0),
+  RAVEN_MAX_CONCURRENT_AGENTS: z.coerce.number().default(DEFAULT_MAX_CONCURRENT),
+  RAVEN_AGENT_MAX_TURNS: z.coerce.number().default(DEFAULT_MAX_TURNS),
+  RAVEN_MAX_BUDGET_USD_PER_DAY: z.coerce.number().default(DEFAULT_BUDGET_USD),
   DATABASE_PATH: z.string().default('./data/raven.db'),
   SESSION_PATH: z.string().default('./data/sessions'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
@@ -49,7 +54,7 @@ export function loadConfig(): AppConfig {
   const result = envSchema.safeParse(process.env);
   if (!result.success) {
     // eslint-disable-next-line no-console -- runs before logger init
-    console.error('Invalid configuration:', result.error.format());
+    console.error('Invalid configuration:', z.treeifyError(result.error));
     process.exit(1);
   }
   config = result.data;

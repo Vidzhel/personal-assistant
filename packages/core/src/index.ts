@@ -25,6 +25,7 @@ import { createPipelineEventTrigger } from './pipeline-engine/pipeline-event-tri
 
 const log = createLogger('raven');
 
+// eslint-disable-next-line max-lines-per-function -- boot sequence that initializes all subsystems
 async function main(): Promise<void> {
   log.info('Starting Raven...');
 

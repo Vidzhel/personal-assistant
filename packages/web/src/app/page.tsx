@@ -5,12 +5,18 @@ import { useAppStore } from '@/stores/app-store';
 import { StatusCards } from '@/components/dashboard/StatusCards';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 
+const HEALTH_REFRESH_INTERVAL_MS = 10000;
+
+// eslint-disable-next-line max-lines-per-function -- page component with layout and data fetching
 export default function DashboardPage() {
   const { health, projects, schedules, loading, fetchAll } = useAppStore();
 
   useEffect(() => {
     fetchAll();
-    const interval = setInterval(() => useAppStore.getState().fetchHealth(), 10000);
+    const interval = setInterval(
+      () => useAppStore.getState().fetchHealth(),
+      HEALTH_REFRESH_INTERVAL_MS,
+    );
     return () => clearInterval(interval);
   }, [fetchAll]);
 

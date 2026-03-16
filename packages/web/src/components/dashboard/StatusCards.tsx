@@ -12,6 +12,7 @@ interface StatusCardsProps {
   scheduleCount: number;
 }
 
+// eslint-disable-next-line max-lines-per-function, complexity -- status cards with conditional styling per card
 export function StatusCards({ health, projectCount, scheduleCount }: StatusCardsProps) {
   const cards = [
     {

@@ -9,6 +9,7 @@ import { validateDag, type DagValidationResult } from './dag-validator.ts';
 const log = createLogger('pipeline-loader');
 
 const IGNORED_SUFFIXES = ['.swp', '~', '.tmp'];
+const FILE_CHANGE_DEBOUNCE_MS = 200;
 
 export interface ValidatedPipeline {
   config: PipelineConfig;
@@ -44,6 +45,7 @@ function pipelineNameFromFile(filePath: string): string {
   return basename(filePath).replace(/\.ya?ml$/, '');
 }
 
+// eslint-disable-next-line max-lines-per-function -- factory function that initializes pipeline loader with file watching and hot-reload
 export function createPipelineLoader(deps: PipelineLoaderDeps): PipelineLoader {
   const { eventBus } = deps;
   const pipelines = new Map<string, ValidatedPipeline>();
@@ -183,7 +185,7 @@ export function createPipelineLoader(deps: PipelineLoaderDeps): PipelineLoader {
           setTimeout(() => {
             debounceTimers.delete(filename);
             handleFileChange(dir, filename);
-          }, 200),
+          }, FILE_CHANGE_DEBOUNCE_MS),
         );
       });
     },

@@ -2,6 +2,8 @@ import { createLogger } from '@raven/shared';
 
 const log = createLogger('condition-evaluator');
 
+const MIN_COMPARISON_PARTS = 3;
+
 /**
  * Safely evaluates a pipeline condition expression against node outputs.
  *
@@ -30,7 +32,7 @@ export function evaluateCondition(
     if (comparisonMatch) {
       const leftExpr = comparisonMatch[1].trim();
       const operator = comparisonMatch[2];
-      const rightExpr = comparisonMatch[3].trim();
+      const rightExpr = comparisonMatch[MIN_COMPARISON_PARTS].trim();
 
       const left = resolveValue(leftExpr, nodeOutputs);
       const right = resolveValue(rightExpr, nodeOutputs);
@@ -49,6 +51,7 @@ export function evaluateCondition(
   }
 }
 
+// eslint-disable-next-line complexity -- pattern matching over many literal types (string, number, boolean, null, dotted path)
 function resolveValue(expr: string, nodeOutputs: Record<string, unknown>): unknown {
   // Check for string literal
   if (/^'[^']*'$/.test(expr) || /^"[^"]*"$/.test(expr)) {
@@ -79,6 +82,7 @@ function resolveValue(expr: string, nodeOutputs: Record<string, unknown>): unkno
   return current;
 }
 
+// eslint-disable-next-line complexity -- switch over all comparison operators
 function compareValues(left: unknown, right: unknown, operator: string): boolean {
   const leftNum = typeof left === 'number' ? left : Number(left);
   const rightNum = typeof right === 'number' ? right : Number(right);

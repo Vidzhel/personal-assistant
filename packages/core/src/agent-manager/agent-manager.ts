@@ -130,6 +130,7 @@ export class AgentManager {
     }
   }
 
+  // eslint-disable-next-line max-lines-per-function, complexity -- core agent task runner with many state transitions
   private async runTask(task: AgentTask): Promise<void> {
     task.status = 'running';
     task.startedAt = Date.now();

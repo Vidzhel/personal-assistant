@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+const DEFAULT_RULE_PRIORITY = 10;
+
 export const EmailTriageMatchSchema = z.object({
   from: z.array(z.string()).optional(),
   subject: z.array(z.string()).optional(),
@@ -20,7 +22,7 @@ export const EmailTriageRuleSchema = z.object({
   match: EmailTriageMatchSchema,
   actions: EmailTriageActionsSchema,
   enabled: z.boolean().default(true),
-  priority: z.number().default(10),
+  priority: z.number().default(DEFAULT_RULE_PRIORITY),
 });
 
 export const EmailTriageConfigSchema = z.object({

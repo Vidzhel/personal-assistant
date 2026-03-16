@@ -49,7 +49,9 @@
       "Skill(browser-testing)",
       "Bash(.claude/skills/browser-testing/scripts/check-devserver.sh)",
       "Bash(find:*)",
-      "Bash(bash /home/user/projects/personal-assistant/.claude/skills/browser-testing/scripts/check-devserver.sh)"
+      "Bash(bash /home/user/projects/personal-assistant/.claude/skills/browser-testing/scripts/check-devserver.sh)",
+      "Bash(/home/user/projects/personal-assistant/.claude/skills/browser-testing/scripts/check-devserver.sh)",
+      "Bash(eslint:*)"
     ]
   }
 }

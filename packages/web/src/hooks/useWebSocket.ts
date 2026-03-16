@@ -4,6 +4,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { WsClient, type WsMessage } from '@/lib/ws-client';
 
 const WS_URL = process.env.NEXT_PUBLIC_CORE_WS_URL || 'ws://localhost:4001/ws';
+const MESSAGE_BUFFER_OFFSET = -200;
 
 export function useWebSocket(channels: string[]): {
   messages: WsMessage[];
@@ -17,7 +18,7 @@ export function useWebSocket(channels: string[]): {
     clientRef.current = client;
 
     const unsub = client.onMessage((msg) => {
-      setMessages((prev) => [...prev.slice(-200), msg]);
+      setMessages((prev) => [...prev.slice(MESSAGE_BUFFER_OFFSET), msg]);
     });
 
     client.connect(channels);

@@ -53,6 +53,7 @@ function rowToApproval(row: PendingApprovalRow): PendingApproval {
   };
 }
 
+// eslint-disable-next-line max-lines-per-function -- factory function that initializes all pending approval methods
 export function createPendingApprovals(db: Database.Database): PendingApprovals {
   return {
     initialize(): void {

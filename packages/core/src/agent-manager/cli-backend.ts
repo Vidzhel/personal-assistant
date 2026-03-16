@@ -7,6 +7,9 @@ import type { AgentBackend, BackendOptions, BackendResult } from './agent-backen
 
 const log = createLogger('cli-backend');
 
+const INPUT_SUMMARY_MAX_LENGTH = 200;
+const TOOL_RESULT_MAX_LENGTH = 500;
+
 export function createCliBackend(): AgentBackend {
   return async (opts: BackendOptions): Promise<BackendResult> => {
     let tmpMcpDir: string | undefined;
@@ -56,7 +59,9 @@ export function createCliBackend(): AgentBackend {
   };
 }
 
+// eslint-disable-next-line max-lines-per-function -- manages complex subprocess lifecycle with streaming JSON parsing
 function spawnClaude(args: string[], opts: BackendOptions): Promise<BackendResult> {
+  // eslint-disable-next-line max-lines-per-function -- subprocess lifecycle with event handlers
   return new Promise((resolve, reject) => {
     let sessionId: string | undefined;
     let resultText = '';
@@ -85,6 +90,7 @@ function spawnClaude(args: string[], opts: BackendOptions): Promise<BackendResul
       opts.onStderr(chunk.toString());
     });
 
+    // eslint-disable-next-line max-lines-per-function, complexity -- streaming JSON parser with message type routing
     child.stdout.on('data', (chunk: Buffer) => {
       buffer += chunk.toString();
       const lines = buffer.split('\n');
@@ -120,7 +126,9 @@ function spawnClaude(args: string[], opts: BackendOptions): Promise<BackendResul
                   opts.onAssistantMessage(block.text, { parentToolUseId });
                 }
                 if (block.type === 'tool_use' && block.name && opts.onToolUse) {
-                  const inputSummary = block.input ? JSON.stringify(block.input).slice(0, 200) : '';
+                  const inputSummary = block.input
+                    ? JSON.stringify(block.input).slice(0, INPUT_SUMMARY_MAX_LENGTH)
+                    : '';
                   opts.onToolUse(block.name, inputSummary, {
                     parentToolUseId,
                     toolUseId: block.id,
@@ -146,7 +154,7 @@ function spawnClaude(args: string[], opts: BackendOptions): Promise<BackendResul
                   const output =
                     typeof block.content === 'string'
                       ? block.content
-                      : JSON.stringify(block.content ?? '').slice(0, 500);
+                      : JSON.stringify(block.content ?? '').slice(0, TOOL_RESULT_MAX_LENGTH);
                   opts.onToolResult({
                     toolUseId: block.tool_use_id,
                     output,
@@ -175,6 +183,7 @@ function spawnClaude(args: string[], opts: BackendOptions): Promise<BackendResul
       reject(new Error(`Failed to spawn claude CLI: ${err.message}`));
     });
 
+    // eslint-disable-next-line complexity -- final buffer processing with error aggregation
     child.on('close', (code: number | null) => {
       // Process any remaining buffer
       if (buffer.trim()) {

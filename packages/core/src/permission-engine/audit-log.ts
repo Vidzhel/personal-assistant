@@ -3,6 +3,8 @@ import { createLogger, generateId, type AuditEntry, type AuditLogFilter } from '
 
 const log = createLogger('audit-log');
 
+const DEFAULT_QUERY_LIMIT = 100;
+
 export interface AuditLog {
   insert(entry: Omit<AuditEntry, 'id' | 'timestamp'>): AuditEntry;
   query(filters?: AuditLogFilter): AuditEntry[];
@@ -35,6 +37,7 @@ function rowToEntry(row: AuditLogRow): AuditEntry {
   };
 }
 
+// eslint-disable-next-line max-lines-per-function -- factory function that initializes all audit log methods
 export function createAuditLog(db: Database.Database): AuditLog {
   return {
     initialize(): void {
@@ -71,6 +74,7 @@ export function createAuditLog(db: Database.Database): AuditLog {
       return rowToEntry(inserted);
     },
 
+    // eslint-disable-next-line complexity -- linear filter-building, each branch is trivial
     query(filters?: AuditLogFilter): AuditEntry[] {
       const conditions: string[] = [];
       const params: unknown[] = [];
@@ -101,7 +105,7 @@ export function createAuditLog(db: Database.Database): AuditLog {
       }
 
       const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-      const limit = filters?.limit ?? 100;
+      const limit = filters?.limit ?? DEFAULT_QUERY_LIMIT;
       const offset = filters?.offset ?? 0;
 
       const rows = db

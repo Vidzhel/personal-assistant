@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
-import { AuditLogFilterSchema } from '@raven/shared';
+import { z } from 'zod';
+import { AuditLogFilterSchema, HTTP_STATUS } from '@raven/shared';
 import type { AuditLog } from '../../permission-engine/audit-log.ts';
 
 export function registerAuditLogRoutes(app: FastifyInstance, auditLog: AuditLog): void {
@@ -17,8 +18,8 @@ export function registerAuditLogRoutes(app: FastifyInstance, auditLog: AuditLog)
     const result = AuditLogFilterSchema.safeParse(req.query);
     if (!result.success) {
       return reply
-        .status(400)
-        .send({ error: 'Invalid query parameters', details: result.error.flatten().fieldErrors });
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .send({ error: 'Invalid query parameters', details: z.treeifyError(result.error) });
     }
 
     return auditLog.query(result.data);

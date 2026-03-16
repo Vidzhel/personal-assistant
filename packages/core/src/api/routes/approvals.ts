@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { createLogger, generateId } from '@raven/shared';
+import { createLogger, generateId, HTTP_STATUS } from '@raven/shared';
 import type { PermissionTier } from '@raven/shared';
 import type { FastifyInstance } from 'fastify';
 import type { PendingApprovals } from '../../permission-engine/pending-approvals.ts';
@@ -73,6 +73,7 @@ function emitDeniedEvent(
   });
 }
 
+// eslint-disable-next-line max-lines-per-function -- approval resolution with audit logging and post-execution
 async function resolveApproval(
   id: string,
   resolution: 'approved' | 'denied',
@@ -149,6 +150,7 @@ async function resolveApproval(
   }
 }
 
+// eslint-disable-next-line max-lines-per-function -- route registration for all approval endpoints
 export function registerApprovalRoutes(app: FastifyInstance, deps: ApprovalRouteDeps): void {
   app.get<{
     Querystring: { skillName?: string };
@@ -156,8 +158,8 @@ export function registerApprovalRoutes(app: FastifyInstance, deps: ApprovalRoute
     const result = PendingQuerySchema.safeParse(req.query);
     if (!result.success) {
       return reply
-        .status(400)
-        .send({ error: 'Invalid query parameters', details: result.error.flatten().fieldErrors });
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .send({ error: 'Invalid query parameters', details: z.treeifyError(result.error) });
     }
 
     const approvals = deps.pendingApprovals.query();
@@ -176,20 +178,22 @@ export function registerApprovalRoutes(app: FastifyInstance, deps: ApprovalRoute
     const bodyResult = ResolveBodySchema.safeParse(req.body);
     if (!bodyResult.success) {
       return reply
-        .status(400)
-        .send({ error: 'Invalid request body', details: bodyResult.error.flatten().fieldErrors });
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .send({ error: 'Invalid request body', details: z.treeifyError(bodyResult.error) });
     }
 
     const { id } = req.params;
     const result = await resolveApproval(id, bodyResult.data.resolution, deps);
 
     if (result.status === 'not_found') {
-      return reply.status(404).send({ error: 'Approval not found', code: 'NOT_FOUND' });
+      return reply
+        .status(HTTP_STATUS.NOT_FOUND)
+        .send({ error: 'Approval not found', code: 'NOT_FOUND' });
     }
 
     if (result.status === 'skipped') {
       return reply
-        .status(409)
+        .status(HTTP_STATUS.CONFLICT)
         .send({ error: 'Approval already resolved', code: 'ALREADY_RESOLVED' });
     }
 
@@ -202,8 +206,8 @@ export function registerApprovalRoutes(app: FastifyInstance, deps: ApprovalRoute
     const bodyResult = BatchBodySchema.safeParse(req.body);
     if (!bodyResult.success) {
       return reply
-        .status(400)
-        .send({ error: 'Invalid request body', details: bodyResult.error.flatten().fieldErrors });
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .send({ error: 'Invalid request body', details: z.treeifyError(bodyResult.error) });
     }
 
     const { ids, resolution } = bodyResult.data;

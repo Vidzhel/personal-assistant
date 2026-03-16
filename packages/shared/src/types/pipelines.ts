@@ -17,14 +17,26 @@ export const PipelineTriggerSchema = z.discriminatedUnion('type', [
   }),
 ]);
 
+// Pipeline retry defaults
+const MAX_RETRY_ATTEMPTS = 10;
+const DEFAULT_RETRY_ATTEMPTS = 3;
+const MIN_BACKOFF_MS = 100;
+const MAX_BACKOFF_MS = 60_000;
+const DEFAULT_BACKOFF_MS = 5_000;
+
+// Pipeline timeout defaults
+const MIN_TIMEOUT_MS = 1_000;
+const MAX_TIMEOUT_MS = 3_600_000;
+const DEFAULT_TIMEOUT_MS = 600_000;
+
 export const PipelineRetrySchema = z.object({
-  maxAttempts: z.number().int().min(1).max(10).default(3),
-  backoffMs: z.number().int().min(100).max(60000).default(5000),
+  maxAttempts: z.number().int().min(1).max(MAX_RETRY_ATTEMPTS).default(DEFAULT_RETRY_ATTEMPTS),
+  backoffMs: z.number().int().min(MIN_BACKOFF_MS).max(MAX_BACKOFF_MS).default(DEFAULT_BACKOFF_MS),
 });
 
 export const PipelineSettingsSchema = z.object({
   retry: PipelineRetrySchema.optional(),
-  timeout: z.number().int().min(1000).max(3600000).default(600000),
+  timeout: z.number().int().min(MIN_TIMEOUT_MS).max(MAX_TIMEOUT_MS).default(DEFAULT_TIMEOUT_MS),
   onError: z
     .string()
     .regex(/^(stop|continue|goto:.+)$/)

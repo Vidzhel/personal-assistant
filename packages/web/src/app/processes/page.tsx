@@ -3,15 +3,21 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api, type ActiveTaskInfo } from '@/lib/api-client';
 
+const MS_PER_SECOND = 1000;
+const SECONDS_PER_MINUTE = 60;
+const TASK_ID_DISPLAY_LENGTH = 8;
+const REFRESH_INTERVAL_MS = 3000;
+
 function formatDuration(ms?: number): string {
   if (!ms) return '-';
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const remaining = seconds % 60;
+  const seconds = Math.floor(ms / MS_PER_SECOND);
+  if (seconds < SECONDS_PER_MINUTE) return `${seconds}s`;
+  const minutes = Math.floor(seconds / SECONDS_PER_MINUTE);
+  const remaining = seconds % SECONDS_PER_MINUTE;
   return `${minutes}m ${remaining}s`;
 }
 
+// eslint-disable-next-line max-lines-per-function -- table component with status badges and duration formatting
 function TaskTable({
   title,
   tasks,
@@ -67,7 +73,7 @@ function TaskTable({
             {tasks.map((task) => (
               <tr key={task.taskId} style={{ borderBottom: '1px solid var(--border)' }}>
                 <td className="px-3 py-2 font-mono" style={{ color: 'var(--text)' }}>
-                  {task.taskId.slice(0, 8)}
+                  {task.taskId.slice(0, TASK_ID_DISPLAY_LENGTH)}
                 </td>
                 <td className="px-3 py-2" style={{ color: 'var(--text)' }}>
                   {task.skillName}
@@ -114,7 +120,7 @@ export default function ProcessesPage() {
 
   useEffect(() => {
     fetchTasks();
-    const interval = setInterval(fetchTasks, 3000);
+    const interval = setInterval(fetchTasks, REFRESH_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [fetchTasks]);
 

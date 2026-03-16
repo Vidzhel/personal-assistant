@@ -1,6 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { getDb } from '../../db/database.ts';
 
+const DEFAULT_EVENT_LIMIT = 100;
+const MAX_EVENT_LIMIT = 500;
+
 export function registerEventRoutes(app: FastifyInstance): void {
   app.get<{
     Querystring: {
@@ -28,7 +31,7 @@ export function registerEventRoutes(app: FastifyInstance): void {
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    const limit = Math.min(Number(req.query.limit ?? 100), 500);
+    const limit = Math.min(Number(req.query.limit ?? DEFAULT_EVENT_LIMIT), MAX_EVENT_LIMIT);
 
     const rows = db
       .prepare(`SELECT * FROM events ${where} ORDER BY timestamp DESC LIMIT ?`)

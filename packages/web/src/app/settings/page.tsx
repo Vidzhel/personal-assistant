@@ -3,6 +3,9 @@
 import { useEffect } from 'react';
 import { useAppStore } from '@/stores/app-store';
 
+const SECONDS_PER_MINUTE = 60;
+
+// eslint-disable-next-line max-lines-per-function -- page component with system info display
 export default function SettingsPage() {
   const { health, fetchHealth } = useAppStore();
 
@@ -35,7 +38,7 @@ export default function SettingsPage() {
             <p style={{ color: 'var(--text-muted)' }}>Uptime</p>
             <p>
               {health
-                ? `${Math.floor(health.uptime / 60)}m ${Math.floor(health.uptime % 60)}s`
+                ? `${Math.floor(health.uptime / SECONDS_PER_MINUTE)}m ${Math.floor(health.uptime % SECONDS_PER_MINUTE)}s`
                 : '-'}
             </p>
           </div>

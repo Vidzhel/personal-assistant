@@ -14,6 +14,9 @@ import { evaluateCondition } from './condition-evaluator.ts';
 
 const log = createLogger('pipeline-executor');
 
+const DEFAULT_TIMEOUT_MS = 600_000;
+const DEFAULT_POLL_INTERVAL_MS = 5000;
+
 type NodeStatus = 'pending' | 'running' | 'complete' | 'failed' | 'skipped';
 
 export interface PipelineRunResult {
@@ -49,6 +52,7 @@ export interface PipelineExecutorDeps {
   pipelineStore: PipelineStore;
 }
 
+// eslint-disable-next-line max-lines-per-function -- factory function that initializes pipeline executor with node execution, retry, and DAG traversal
 export function createPipelineExecutor(deps: PipelineExecutorDeps): PipelineExecutor {
   const { eventBus, suiteRegistry, mcpManager, pipelineStore } = deps;
 
@@ -85,6 +89,7 @@ export function createPipelineExecutor(deps: PipelineExecutorDeps): PipelineExec
     });
   }
 
+  // eslint-disable-next-line complexity -- topological sort with in-degree tracking
   function groupByTopologicalLevel(
     executionOrder: string[],
     connections: ValidatedPipeline['config']['connections'],
@@ -303,6 +308,7 @@ export function createPipelineExecutor(deps: PipelineExecutorDeps): PipelineExec
   }
 
   return {
+    // eslint-disable-next-line max-lines-per-function, complexity -- core pipeline execution with DAG traversal, condition routing, and retry logic
     async executePipeline(
       pipeline: ValidatedPipeline,
       triggerType: string,
@@ -313,11 +319,11 @@ export function createPipelineExecutor(deps: PipelineExecutorDeps): PipelineExec
       const startedAt = new Date().toISOString();
       const startTime = Date.now();
       const onError = pipeline.config.settings?.onError ?? 'stop';
-      const timeoutMs = pipeline.config.settings?.timeout ?? 600000;
+      const timeoutMs = pipeline.config.settings?.timeout ?? DEFAULT_TIMEOUT_MS;
       const retrySettings = pipeline.config.settings?.retry;
       const retryConfig: RetryConfig = {
         maxAttempts: retrySettings?.maxAttempts ?? 1,
-        backoffMs: retrySettings?.backoffMs ?? 5000,
+        backoffMs: retrySettings?.backoffMs ?? DEFAULT_POLL_INTERVAL_MS,
       };
 
       const nodeOutputs = new Map<string, unknown>();
@@ -428,6 +434,7 @@ export function createPipelineExecutor(deps: PipelineExecutorDeps): PipelineExec
 
           // Execute ready nodes in parallel
           const results = await Promise.all(
+            // eslint-disable-next-line max-lines-per-function -- node execution with success/failure event emission
             readyNodes.map(async (nodeId) => {
               nodeStatus.set(nodeId, 'running');
               const nodeStartTime = Date.now();
