@@ -35,7 +35,7 @@ Prerequisites: Both servers running (`npm run dev`), verified via `.claude/skill
 1. navigate: `http://localhost:4000`
 2. snapshot → assert: heading "Dashboard"
 3. click: link "Projects" → wait: 1s → snapshot → assert: heading "Projects"
-4. click: link "Activity" → wait: 1s → snapshot → assert: heading "Activity Log"
+4. click: link "Activity" → wait: 1s → snapshot → assert: heading "Activity Timeline"
 5. click: link "Schedules" → wait: 1s → snapshot → assert: heading "Schedules"
 6. click: link "Skills" → wait: 1s → snapshot → assert: heading "Skills"
 7. click: link "Settings" → wait: 1s → snapshot → assert: heading "Settings"

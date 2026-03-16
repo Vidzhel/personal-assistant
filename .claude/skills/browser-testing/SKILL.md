@@ -170,7 +170,7 @@ Group related tests (e.g., all project CRUD tests together). Order tests so earl
 
 Use `playwright-cli` commands directly in conversation:
 
-1. `playwright-cli open http://localhost:4000 --headed` → open browser
+1. `playwright-cli open http://localhost:4000` → open browser
 2. `playwright-cli goto <url>` → navigate to target
 3. `playwright-cli snapshot` → read accessibility tree
 4. Verify assertions against the tree
@@ -186,7 +186,7 @@ Delegate to the `browser-tester` sub-agent for extensive testing. **Each agent m
 Use the Agent tool with subagent_type="browser-tester" and a prompt like:
 
 "IMPORTANT: Use named session `-s=dash` for ALL playwright commands.
-Open: `playwright-cli -s=dash open http://localhost:4000 --headed`
+Open: `playwright-cli -s=dash open http://localhost:4000`
 All commands: `playwright-cli -s=dash snapshot`, `playwright-cli -s=dash click <ref>`, etc.
 Close when done: `playwright-cli -s=dash close`
 
@@ -200,30 +200,27 @@ For each test case:
 Return a structured report with results for every test case."
 ```
 
-The sub-agent uses `playwright-cli` commands and knows the testing methodology. It will use `--headed` mode.
+The sub-agent uses `playwright-cli` commands and knows the testing methodology. It runs in headless mode.
 
 ### Parallel Execution with Named Sessions
 
 **CRITICAL**: When dispatching multiple `browser-tester` agents in parallel, each agent MUST use a unique named session (`-s=<name>`). Without named sessions, all agents share the same default browser and will interfere with each other.
 
-Each agent gets its own isolated headed browser instance via named sessions:
+Each agent gets its own isolated browser instance via named sessions:
 
 ```bash
 # Agent 1 (smoke tests) — uses -s=smoke for ALL commands
-playwright-cli -s=smoke open http://localhost:4000 --headed
-playwright-cli -s=smoke snapshot
+playwright-cli -s=smoke open http://localhost:4000playwright-cli -s=smoke snapshot
 playwright-cli -s=smoke click <ref>
 playwright-cli -s=smoke close
 
 # Agent 2 (dashboard tests) — uses -s=dash for ALL commands
-playwright-cli -s=dash open http://localhost:4000 --headed
-playwright-cli -s=dash snapshot
+playwright-cli -s=dash open http://localhost:4000playwright-cli -s=dash snapshot
 playwright-cli -s=dash click <ref>
 playwright-cli -s=dash close
 
 # Agent 3 (project tests) — uses -s=proj for ALL commands
-playwright-cli -s=proj open http://localhost:4000 --headed
-playwright-cli -s=proj snapshot
+playwright-cli -s=proj open http://localhost:4000playwright-cli -s=proj snapshot
 playwright-cli -s=proj click <ref>
 playwright-cli -s=proj close
 ```
@@ -271,7 +268,7 @@ When running multiple test files:
 ## playwright-cli Command Reference
 
 ### Core
-- `playwright-cli open <url> --headed` — Open browser in headed mode
+- `playwright-cli open <url>` — Open browser (headless)
 - `playwright-cli goto <url>` — Navigate to URL
 - `playwright-cli snapshot` — **Primary tool** — returns accessibility tree with `ref` IDs
 - `playwright-cli screenshot` — Visual capture (use sparingly — only on failures or when explicitly needed)

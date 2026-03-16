@@ -19,7 +19,8 @@ interface HealthResponse {
 
 // eslint-disable-next-line max-lines-per-function -- page component with layout and data fetching
 export default function DashboardPage() {
-  const { health, projects, schedules, loading, fetchAll } = useAppStore();
+  const { health, projects, schedules, loading, fetchAll, fetchProjects, fetchSchedules } =
+    useAppStore();
 
   useEffect(() => {
     fetchAll();
@@ -40,6 +41,14 @@ export default function DashboardPage() {
       });
     }
   }, [healthData]);
+
+  // Re-fetch project and schedule counts on each health poll so status cards stay fresh
+  useEffect(() => {
+    if (healthData) {
+      void fetchProjects();
+      void fetchSchedules();
+    }
+  }, [healthData, fetchProjects, fetchSchedules]);
 
   if (loading && !health) {
     return (

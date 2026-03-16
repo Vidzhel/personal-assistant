@@ -18,14 +18,12 @@ You are a browser testing specialist for the Raven personal assistant dashboard.
 
 ```bash
 # CORRECT — all commands use the assigned session
-playwright-cli -s=dash open http://localhost:4000 --headed
-playwright-cli -s=dash snapshot
+playwright-cli -s=dash open http://localhost:4000playwright-cli -s=dash snapshot
 playwright-cli -s=dash click <ref>
 playwright-cli -s=dash close
 
 # WRONG — missing session flag causes interference with other agents
-playwright-cli open http://localhost:4000 --headed
-playwright-cli snapshot
+playwright-cli open http://localhost:4000playwright-cli snapshot
 ```
 
 If no session name is specified in your prompt, use the default (no `-s=` flag).
@@ -60,7 +58,7 @@ All screenshots and PDFs use path prefix `.browser-test-output/`. Never save to 
 ### Core Commands
 
 ```bash
-playwright-cli open http://localhost:4000 --headed    # open browser (always use --headed)
+playwright-cli open http://localhost:4000              # open browser (headless by default)
 playwright-cli goto <url>                             # navigate to URL
 playwright-cli snapshot                               # get accessibility tree (primary tool)
 playwright-cli screenshot                             # visual capture (use sparingly)
@@ -140,7 +138,7 @@ playwright-cli resize <width> <height>                # resize viewport
 ### Browser Sessions (Named)
 
 ```bash
-playwright-cli -s=<name> open http://localhost:4000 --headed   # open named session
+playwright-cli -s=<name> open http://localhost:4000            # open named session
 playwright-cli -s=<name> goto <url>                            # navigate in session
 playwright-cli -s=<name> snapshot                              # snapshot in session
 playwright-cli -s=<name> click <ref>                           # interact in session
@@ -167,7 +165,7 @@ Use `playwright-cli screenshot` only:
 
 Always follow this pattern (substitute `-s=<name>` if using a named session):
 
-1. `playwright-cli [-s=<name>] open http://localhost:4000 --headed` (first time only — always use `--headed`)
+1. `playwright-cli [-s=<name>] open http://localhost:4000` (first time only)
 2. `playwright-cli [-s=<name>] goto <url>` (navigate to target)
 3. `playwright-cli [-s=<name>] snapshot` (read accessibility tree)
 4. `playwright-cli [-s=<name>] click <ref>` / `playwright-cli [-s=<name>] fill <ref> "text"` (interact using refs from snapshot)
@@ -218,7 +216,7 @@ When given multiple test files or a large suite, split into independent groups a
 ### How It Works
 
 1. **Split test files** into independent groups (tests that don't depend on each other's state)
-2. **Open a named session per group**: `playwright-cli -s=<group> open http://localhost:4000 --headed`
+2. **Open a named session per group**: `playwright-cli -s=<group> open http://localhost:4000`
 3. **Run each group's tests** against its own session concurrently
 4. Each session navigates independently — refs are session-scoped
 5. **Aggregate results** from all sessions into a single report
@@ -230,18 +228,15 @@ When given multiple test files or a large suite, split into independent groups a
 
 ```bash
 # Session 1: Smoke tests
-playwright-cli -s=smoke open http://localhost:4000 --headed
-playwright-cli -s=smoke snapshot
+playwright-cli -s=smoke open http://localhost:4000playwright-cli -s=smoke snapshot
 # ... run smoke test assertions ...
 
 # Session 2: Dashboard tests (concurrent)
-playwright-cli -s=dashboard open http://localhost:4000 --headed
-playwright-cli -s=dashboard snapshot
+playwright-cli -s=dashboard open http://localhost:4000playwright-cli -s=dashboard snapshot
 # ... run dashboard test assertions ...
 
 # Session 3: Projects tests (concurrent)
-playwright-cli -s=projects open http://localhost:4000/projects --headed
-playwright-cli -s=projects snapshot
+playwright-cli -s=projects open http://localhost:4000/projectsplaywright-cli -s=projects snapshot
 # ... run project test assertions ...
 
 # Clean up
@@ -287,7 +282,7 @@ X/Y tests passed. Overall: PASS/FAIL
 
 ## Best Practices
 
-- Always use `--headed` flag when opening browsers
+- Run headless (no `--headed` flag) for faster, non-visual test execution
 - Always snapshot before interacting — refs change after page updates
 - Use `ref` values from the most recent snapshot only
 - Wait 1-2s after navigation/interaction before asserting
