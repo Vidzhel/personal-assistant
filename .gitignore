@@ -1,8 +1,7 @@
 node_modules/
 dist/
 .env
-data/raven.db
-data/sessions/
+data/
 *.tsbuildinfo
 .next/
 .browser-test-output/
