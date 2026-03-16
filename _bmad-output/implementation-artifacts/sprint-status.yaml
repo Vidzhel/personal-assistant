@@ -84,7 +84,7 @@ development_status:
   5-1-polling-and-sse-infrastructure-hooks: done
   5-2-activity-timeline: done
   5-3-pipeline-monitor: done
-  5-4-kanban-agent-task-board: review
+  5-4-kanban-agent-task-board: done
   5-5-pipeline-chat-configuration-and-execution-metrics: backlog
   epic-5-retrospective: optional
 

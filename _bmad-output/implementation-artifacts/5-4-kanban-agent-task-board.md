@@ -1,6 +1,6 @@
 # Story 5.4: Kanban Agent Task Board
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -297,3 +297,4 @@ Claude Opus 4.6 (1M context)
 
 ### Change Log
 - 2026-03-16: Implemented story 5.4 — Kanban Agent Task Board with all 7 tasks complete
+- 2026-03-16: Code review fixes — M1: SSE agent-complete now triggers board refresh via onComplete callback; M2: TaskDetail shows error state instead of silently swallowing fetch failures; removed unused initialStatus fallback (also fixes L1: broken SSE for non-existent tasks); extracted useStreamChunks hook to satisfy max-lines-per-function

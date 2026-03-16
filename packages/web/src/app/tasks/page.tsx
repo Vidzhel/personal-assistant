@@ -97,7 +97,6 @@ function EmptyColumn({ status }: { status: string }) {
 // eslint-disable-next-line max-lines-per-function -- page component with 4 columns, polling, and detail panel
 export default function TasksPage() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [selectedStatus, setSelectedStatus] = useState<string>('');
 
   const {
     data: activeTasks,
@@ -126,9 +125,8 @@ export default function TasksPage() {
   const queued = (activeTasks?.queued ?? []).map(normalizeActiveTask);
   const running = (activeTasks?.running ?? []).map(normalizeActiveTask);
 
-  const handleSelect = (id: string, status: string): void => {
+  const handleSelect = (id: string): void => {
     setSelectedTaskId(id);
-    setSelectedStatus(status);
   };
 
   const handleRefresh = (): void => {
@@ -164,7 +162,6 @@ export default function TasksPage() {
       {selectedTaskId && (
         <TaskDetail
           taskId={selectedTaskId}
-          initialStatus={selectedStatus}
           onClose={() => setSelectedTaskId(null)}
           onRefresh={handleRefresh}
         />
@@ -194,7 +191,7 @@ export default function TasksPage() {
                           prompt: 'prompt' in task ? task.prompt : undefined,
                           errors: 'errors' in task ? task.errors : undefined,
                         }}
-                        onSelect={(tid) => handleSelect(tid, col.key)}
+                        onSelect={handleSelect}
                       />
                     );
                   })}

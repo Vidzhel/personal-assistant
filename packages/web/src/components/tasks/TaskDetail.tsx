@@ -15,7 +15,6 @@ const DISABLED_OPACITY = 0.7;
 
 interface TaskDetailProps {
   taskId: string;
-  initialStatus: string;
   onClose: () => void;
   onRefresh: () => void;
 }
@@ -64,9 +63,8 @@ function DetailMeta({ task }: { task: TaskRecord }) {
   );
 }
 
-function StreamingOutput({ taskId }: { taskId: string }) {
+function useStreamChunks(taskId: string, onRefresh: () => void) {
   const [chunks, setChunks] = useState<string[]>([]);
-  const containerRef = useRef<HTMLDivElement>(null);
 
   const handleMessage = useCallback((event: SSEEvent) => {
     const data = event.data as { chunk?: string };
@@ -76,7 +74,21 @@ function StreamingOutput({ taskId }: { taskId: string }) {
     }
   }, []);
 
-  const { connected } = useSSE(`/agent-tasks/${taskId}/stream`, { onMessage: handleMessage });
+  const handleComplete = useCallback(() => {
+    onRefresh();
+  }, [onRefresh]);
+
+  const { connected } = useSSE(`/agent-tasks/${taskId}/stream`, {
+    onMessage: handleMessage,
+    onComplete: handleComplete,
+  });
+
+  return { chunks, connected };
+}
+
+function StreamingOutput({ taskId, onRefresh }: { taskId: string; onRefresh: () => void }) {
+  const { chunks, connected } = useStreamChunks(taskId, onRefresh);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (containerRef.current) {
@@ -187,25 +199,31 @@ function CancelButton({ task, onRefresh }: { task: TaskRecord; onRefresh: () => 
   );
 }
 
-function TaskBody({ task }: { task: TaskRecord }) {
-  if (task.status === 'running') return <StreamingOutput taskId={task.id} />;
+function TaskBody({ task, onRefresh }: { task: TaskRecord; onRefresh: () => void }) {
+  if (task.status === 'running') return <StreamingOutput taskId={task.id} onRefresh={onRefresh} />;
   if (task.status === 'failed') return <FailedErrors errors={task.errors} />;
   return <CompletedResult result={task.result} />;
 }
 
 // eslint-disable-next-line max-lines-per-function -- detail panel with fetch, SSE, and multiple sections
-export function TaskDetail({ taskId, initialStatus, onClose, onRefresh }: TaskDetailProps) {
+export function TaskDetail({ taskId, onClose, onRefresh }: TaskDetailProps) {
   const [task, setTask] = useState<TaskRecord | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const fetchTask = async (): Promise<void> => {
       try {
         const data = await api.getAgentTask(taskId);
-        if (!cancelled) setTask(data);
-      } catch {
-        // task may have been cleaned up
+        if (!cancelled) {
+          setTask(data);
+          setError(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to load task');
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -239,35 +257,50 @@ export function TaskDetail({ taskId, initialStatus, onClose, onRefresh }: TaskDe
     );
   }
 
-  const displayTask =
-    task ??
-    ({
-      id: taskId,
-      status: initialStatus,
-      skillName: 'Unknown',
-      prompt: '',
-      priority: 'normal',
-      blocked: false,
-      createdAt: '',
-    } as TaskRecord);
+  if (error) {
+    return (
+      <div
+        className="p-4 rounded-lg space-y-3"
+        style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
+      >
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-mono" style={{ color: 'var(--text-muted)' }}>
+            {taskId.slice(0, TASK_ID_DISPLAY_LENGTH)}
+          </span>
+          <button
+            className="px-2 py-1 rounded text-xs"
+            style={{ color: 'var(--text-muted)' }}
+            onClick={onClose}
+          >
+            Close
+          </button>
+        </div>
+        <p className="text-xs" style={{ color: 'var(--error)' }}>
+          {error}
+        </p>
+      </div>
+    );
+  }
+
+  if (!task) return null;
 
   return (
     <div
       className="p-4 rounded-lg space-y-4"
       style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
     >
-      <DetailHeader task={displayTask} onClose={onClose} />
-      <DetailMeta task={displayTask} />
-      {displayTask.prompt && (
+      <DetailHeader task={task} onClose={onClose} />
+      <DetailMeta task={task} />
+      {task.prompt && (
         <div>
           <h3 className="text-sm font-semibold mb-1">Prompt</h3>
           <p className="text-xs" style={{ color: 'var(--text-muted)', whiteSpace: 'pre-wrap' }}>
-            {displayTask.prompt}
+            {task.prompt}
           </p>
         </div>
       )}
-      <TaskBody task={displayTask} />
-      <CancelButton task={displayTask} onRefresh={onRefresh} />
+      <TaskBody task={task} onRefresh={onRefresh} />
+      <CancelButton task={task} onRefresh={onRefresh} />
     </div>
   );
 }
