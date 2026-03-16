@@ -256,6 +256,72 @@ describe('API routes', () => {
     });
   });
 
+  describe('GET /api/events', () => {
+    it('filters events by source query param', async () => {
+      const db = getDb();
+      const now = Date.now();
+      db.prepare(
+        'INSERT INTO events (id, type, source, project_id, payload, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
+      ).run('ev-gmail-1', 'email:new', 'gmail', null, '{"from":"a@b.com"}', now);
+      db.prepare(
+        'INSERT INTO events (id, type, source, project_id, payload, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
+      ).run(
+        'ev-tick-1',
+        'task-management:autonomous:completed',
+        'ticktick',
+        null,
+        '{"action":"done"}',
+        now - 1000,
+      );
+
+      const res = await app.inject({ method: 'GET', url: '/api/events?source=gmail' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body.length).toBe(1);
+      expect(body[0].source).toBe('gmail');
+    });
+  });
+
+  describe('GET /api/events/sources', () => {
+    it('returns distinct source values', async () => {
+      const db = getDb();
+      const now = Date.now();
+      db.prepare(
+        'INSERT INTO events (id, type, source, project_id, payload, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
+      ).run('ev-src-1', 'email:new', 'gmail', null, '{}', now);
+      db.prepare(
+        'INSERT INTO events (id, type, source, project_id, payload, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
+      ).run('ev-src-2', 'pipeline:complete', 'scheduler', null, '{}', now - 1000);
+
+      const res = await app.inject({ method: 'GET', url: '/api/events/sources' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(Array.isArray(body)).toBe(true);
+      expect(body).toContain('gmail');
+      expect(body).toContain('scheduler');
+    });
+  });
+
+  describe('GET /api/events/types', () => {
+    it('returns distinct event type values', async () => {
+      const db = getDb();
+      const now = Date.now();
+      db.prepare(
+        'INSERT INTO events (id, type, source, project_id, payload, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
+      ).run('ev-type-1', 'email:new', 'gmail', null, '{}', now);
+      db.prepare(
+        'INSERT INTO events (id, type, source, project_id, payload, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
+      ).run('ev-type-2', 'pipeline:complete', 'scheduler', null, '{}', now - 1000);
+
+      const res = await app.inject({ method: 'GET', url: '/api/events/types' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(Array.isArray(body)).toBe(true);
+      expect(body).toContain('email:new');
+      expect(body).toContain('pipeline:complete');
+    });
+  });
+
   describe('DELETE /api/projects/:id', () => {
     it('deletes a project', async () => {
       const createRes = await app.inject({

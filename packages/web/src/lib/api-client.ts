@@ -33,13 +33,16 @@ export const api = {
   deleteProject: (id: string) => request(`/projects/${id}`, { method: 'DELETE' }),
   getSkills: () => request<Skill[]>('/skills'),
   getSchedules: () => request<Schedule[]>('/schedules'),
-  getEvents: (params?: { since?: number; type?: string; limit?: number }) => {
+  getEvents: (params?: { since?: number; type?: string; source?: string; limit?: number }) => {
     const qs = new URLSearchParams();
     if (params?.since) qs.set('since', String(params.since));
     if (params?.type) qs.set('type', params.type);
+    if (params?.source) qs.set('source', params.source);
     if (params?.limit) qs.set('limit', String(params.limit));
     return request<EventRecord[]>(`/events?${qs}`);
   },
+  getEventSources: () => request<string[]>('/events/sources'),
+  getEventTypes: () => request<string[]>('/events/types'),
   sendChat: (projectId: string, message: string) =>
     request(`/projects/${projectId}/chat`, { method: 'POST', body: JSON.stringify({ message }) }),
   getProjectSessions: (projectId: string) => request<Session[]>(`/projects/${projectId}/sessions`),

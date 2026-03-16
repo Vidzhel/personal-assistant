@@ -34,6 +34,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-12
+last_updated: 2026-03-16
 project: personal-assistant
 project_key: NOKEY
 tracking_system: file-system
@@ -79,9 +80,9 @@ development_status:
   epic-4-retrospective: optional
 
   # Epic 5: Rich Dashboard & Real-Time Monitoring (Growth)
-  epic-5: backlog
-  5-1-polling-and-sse-infrastructure-hooks: backlog
-  5-2-activity-timeline: backlog
+  epic-5: in-progress
+  5-1-polling-and-sse-infrastructure-hooks: done
+  5-2-activity-timeline: done
   5-3-pipeline-monitor: backlog
   5-4-kanban-agent-task-board: backlog
   5-5-pipeline-chat-configuration-and-execution-metrics: backlog
