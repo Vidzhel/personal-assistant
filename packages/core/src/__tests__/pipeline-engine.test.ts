@@ -769,6 +769,14 @@ describe('Pipeline API routes', () => {
         }
         return [];
       },
+      getGlobalStats: () => ({
+        total: 0,
+        succeeded: 0,
+        failed: 0,
+        successRate: 0,
+        avgDurationMs: null,
+      }),
+      getPerPipelineStats: () => [],
     };
 
     const engine = {

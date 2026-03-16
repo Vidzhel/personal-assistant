@@ -1,9 +1,21 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useChat, type ChatMessage } from '@/hooks/useChat';
+import { PipelinePreview } from './PipelinePreview';
+
+const PIPELINE_KEYS = ['name:', 'trigger:', 'nodes:', 'connections:'];
+const MIN_PIPELINE_KEYS = 3;
+
+function extractPipelineYaml(content: string): string | null {
+  const match = /```ya?ml\n([\s\S]*?)```/.exec(content);
+  if (!match) return null;
+  const yaml = match[1].trim();
+  const matchedKeys = PIPELINE_KEYS.filter((k) => yaml.includes(k));
+  return matchedKeys.length >= MIN_PIPELINE_KEYS ? yaml : null;
+}
 
 // eslint-disable-next-line max-lines-per-function -- chat panel with message list, input, and controls
 export function ChatPanel({
@@ -18,6 +30,7 @@ export function ChatPanel({
     sessionId,
   });
   const [input, setInput] = useState('');
+  const [dismissedYaml, setDismissedYaml] = useState<Set<string>>(new Set());
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -31,6 +44,10 @@ export function ChatPanel({
     setInput('');
   };
 
+  const handleDismissYaml = useCallback((msgId: string) => {
+    setDismissedYaml((prev) => new Set(prev).add(msgId));
+  }, []);
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -39,75 +56,112 @@ export function ChatPanel({
             <p className="text-sm">Loading history...</p>
           </div>
         )}
-        {!loading && messages.length === 0 && (
-          <div className="text-center py-12" style={{ color: 'var(--text-muted)' }}>
-            <p className="text-lg">Start a conversation</p>
-            <p className="text-sm mt-1">
-              Ask Raven to manage tasks, check email, or plan your day.
-            </p>
-          </div>
-        )}
+        {!loading && messages.length === 0 && <EmptyState />}
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} />
+          <MessageBubble
+            key={msg.id}
+            message={msg}
+            dismissed={dismissedYaml.has(msg.id)}
+            onDismissYaml={() => handleDismissYaml(msg.id)}
+          />
         ))}
         <div ref={bottomRef} />
       </div>
-      <div className="border-t p-4" style={{ borderColor: 'var(--border)' }}>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
-            placeholder="Ask Raven..."
-            className="flex-1 px-4 py-2 rounded-lg text-sm outline-none"
-            style={{
-              background: 'var(--bg-hover)',
-              color: 'var(--text)',
-              border: '1px solid var(--border)',
-            }}
-          />
-          {activeTaskId ? (
-            <button
-              onClick={stopTask}
-              className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-              style={{ background: '#ef4444', color: 'white' }}
-            >
-              Stop
-            </button>
-          ) : (
-            <button
-              onClick={handleSend}
-              className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-              style={{ background: 'var(--accent)', color: 'white' }}
-            >
-              Send
-            </button>
-          )}
-        </div>
+      <ChatInput
+        input={input}
+        setInput={setInput}
+        onSend={handleSend}
+        activeTaskId={activeTaskId}
+        stopTask={stopTask}
+      />
+    </div>
+  );
+}
+
+function EmptyState() {
+  return (
+    <div className="text-center py-12" style={{ color: 'var(--text-muted)' }}>
+      <p className="text-lg">Start a conversation</p>
+      <p className="text-sm mt-1">Ask Raven to manage tasks, check email, or plan your day.</p>
+    </div>
+  );
+}
+
+function ChatInput({
+  input,
+  setInput,
+  onSend,
+  activeTaskId,
+  stopTask,
+}: {
+  input: string;
+  setInput: (v: string) => void;
+  onSend: () => void;
+  activeTaskId: string | null;
+  stopTask: () => void;
+}) {
+  return (
+    <div className="border-t p-4" style={{ borderColor: 'var(--border)' }}>
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && onSend()}
+          placeholder="Ask Raven..."
+          className="flex-1 px-4 py-2 rounded-lg text-sm outline-none"
+          style={{
+            background: 'var(--bg-hover)',
+            color: 'var(--text)',
+            border: '1px solid var(--border)',
+          }}
+        />
+        {activeTaskId ? (
+          <button
+            onClick={stopTask}
+            className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            style={{ background: '#ef4444', color: 'white' }}
+          >
+            Stop
+          </button>
+        ) : (
+          <button
+            onClick={onSend}
+            className="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            style={{ background: 'var(--accent)', color: 'white' }}
+          >
+            Send
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
-function MessageBubble({ message }: { message: ChatMessage }) {
-  if (message.role === 'action') {
-    return <ActionBubble message={message} />;
-  }
-
-  if (message.role === 'thinking') {
-    return (
-      <div className="flex justify-start">
-        <div
-          className="max-w-[80%] px-3 py-1.5 rounded-lg text-xs italic"
-          style={{ color: 'var(--text-muted)' }}
-        >
-          {message.content}
-        </div>
+function ThinkingBubble({ content }: { content: string }) {
+  return (
+    <div className="flex justify-start">
+      <div
+        className="max-w-[80%] px-3 py-1.5 rounded-lg text-xs italic"
+        style={{ color: 'var(--text-muted)' }}
+      >
+        {content}
       </div>
-    );
-  }
+    </div>
+  );
+}
 
+function PipelineYamlBubble({ yaml, onDismiss }: { yaml: string; onDismiss: () => void }) {
+  return (
+    <div className="flex justify-start">
+      <div className="max-w-[80%] w-full">
+        <PipelinePreview yaml={yaml} onDismiss={onDismiss} />
+      </div>
+    </div>
+  );
+}
+
+function ContentBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === 'user';
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -127,6 +181,25 @@ function MessageBubble({ message }: { message: ChatMessage }) {
       </div>
     </div>
   );
+}
+
+function MessageBubble({
+  message,
+  dismissed,
+  onDismissYaml,
+}: {
+  message: ChatMessage;
+  dismissed: boolean;
+  onDismissYaml: () => void;
+}) {
+  if (message.role === 'action') return <ActionBubble message={message} />;
+  if (message.role === 'thinking') return <ThinkingBubble content={message.content} />;
+
+  const isUser = message.role === 'user';
+  const pipelineYaml = !isUser && !dismissed ? extractPipelineYaml(message.content) : null;
+
+  if (pipelineYaml) return <PipelineYamlBubble yaml={pipelineYaml} onDismiss={onDismissYaml} />;
+  return <ContentBubble message={message} />;
 }
 
 function ActionBubble({ message }: { message: ChatMessage }) {

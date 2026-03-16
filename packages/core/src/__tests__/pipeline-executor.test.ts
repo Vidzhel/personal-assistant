@@ -35,6 +35,10 @@ function makeMockPipelineStore(): PipelineStore {
     }),
     getRun: vi.fn((id) => runs.get(id)),
     getRecentRuns: vi.fn().mockReturnValue([]),
+    getGlobalStats: vi
+      .fn()
+      .mockReturnValue({ total: 0, succeeded: 0, failed: 0, successRate: 0, avgDurationMs: null }),
+    getPerPipelineStats: vi.fn().mockReturnValue([]),
   };
 }
 

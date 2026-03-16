@@ -25,6 +25,7 @@ import { registerAuditLogRoutes } from './routes/audit-logs.ts';
 import { registerApprovalRoutes } from './routes/approvals.ts';
 import { registerAgentTaskRoutes } from './routes/agent-tasks.ts';
 import { registerPipelineRoutes } from './routes/pipelines.ts';
+import { registerMetricsRoute } from './routes/metrics.ts';
 import { registerSSERoutes } from './sse/stream.ts';
 import { registerWebSocketHandler } from './ws/handler.ts';
 
@@ -79,6 +80,10 @@ export async function createApiServer(
     pipelineEngine: deps.pipelineEngine,
     pipelineStore: deps.pipelineStore,
     pipelineScheduler: deps.pipelineScheduler,
+  });
+  registerMetricsRoute(app, {
+    executionLogger: deps.executionLogger,
+    pipelineStore: deps.pipelineStore,
   });
 
   // SSE streaming

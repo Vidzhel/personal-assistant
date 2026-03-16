@@ -34,7 +34,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-12
-last_updated: 2026-03-16T00:00:00.000Z
+last_updated: 2026-03-16
 project: personal-assistant
 project_key: NOKEY
 tracking_system: file-system
@@ -85,7 +85,7 @@ development_status:
   5-2-activity-timeline: done
   5-3-pipeline-monitor: done
   5-4-kanban-agent-task-board: done
-  5-5-pipeline-chat-configuration-and-execution-metrics: backlog
+  5-5-pipeline-chat-configuration-and-execution-metrics: review
   epic-5-retrospective: optional
 
   # Epic 6: Knowledge System (Growth)

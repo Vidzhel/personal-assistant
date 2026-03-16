@@ -73,6 +73,16 @@ export const api = {
   },
   triggerPipeline: (name: string) =>
     request<{ runId: string; status: string }>(`/pipelines/${name}/trigger`, { method: 'POST' }),
+  savePipeline: (name: string, yamlString: string) =>
+    fetch(`${API_URL}/pipelines/${name}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'text/yaml' },
+      body: yamlString,
+    }).then((res) => {
+      if (!res.ok) throw new Error(`API error: ${res.status}`);
+      return res.json() as Promise<{ config: PipelineConfig }>;
+    }),
+  getMetrics: (period = '24h') => request<MetricsResponse>(`/metrics?period=${period}`),
 };
 
 export interface Project {
@@ -208,4 +218,20 @@ export interface EnrichedPipeline {
   loadedAt: string;
   lastRun: PipelineRunRecord | null;
   nextRun: string | null;
+}
+
+interface StatsBlock {
+  total: number;
+  succeeded: number;
+  failed: number;
+  successRate: number;
+  avgDurationMs: number | null;
+}
+
+export interface MetricsResponse {
+  period: string;
+  tasks: StatsBlock;
+  pipelines: StatsBlock;
+  perSkill: Array<StatsBlock & { skillName: string }>;
+  perPipeline: Array<StatsBlock & { pipelineName: string }>;
 }

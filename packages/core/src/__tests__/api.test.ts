@@ -15,6 +15,7 @@ import { registerEventRoutes } from '../api/routes/events.ts';
 import { registerAuditLogRoutes } from '../api/routes/audit-logs.ts';
 import { registerPipelineRoutes } from '../api/routes/pipelines.ts';
 import { registerAgentTaskRoutes } from '../api/routes/agent-tasks.ts';
+import { registerMetricsRoute } from '../api/routes/metrics.ts';
 import { createAuditLog } from '../permission-engine/audit-log.ts';
 import { createPendingApprovals } from '../permission-engine/pending-approvals.ts';
 import { createExecutionLogger } from '../agent-manager/execution-logger.ts';
@@ -161,6 +162,11 @@ describe('API routes', () => {
     registerAgentTaskRoutes(app, {
       executionLogger,
       agentManager: mockAgentManager as any,
+    });
+
+    registerMetricsRoute(app, {
+      executionLogger,
+      pipelineStore,
     });
 
     await app.ready();
@@ -506,6 +512,122 @@ describe('API routes', () => {
     it('returns 404 for nonexistent task', async () => {
       const res = await app.inject({ method: 'GET', url: '/api/agent-tasks/no-such-task' });
       expect(res.statusCode).toBe(404);
+    });
+  });
+
+  describe('GET /api/metrics', () => {
+    it('returns correct shape with default period', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/metrics' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body.period).toBe('24h');
+      expect(body.tasks).toHaveProperty('total');
+      expect(body.tasks).toHaveProperty('succeeded');
+      expect(body.tasks).toHaveProperty('failed');
+      expect(body.tasks).toHaveProperty('successRate');
+      expect(body.tasks).toHaveProperty('avgDurationMs');
+      expect(body.pipelines).toHaveProperty('total');
+      expect(body.pipelines).toHaveProperty('successRate');
+      expect(Array.isArray(body.perSkill)).toBe(true);
+      expect(Array.isArray(body.perPipeline)).toBe(true);
+    });
+
+    it('respects period query param', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/metrics?period=1h' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body.period).toBe('1h');
+    });
+
+    it('returns 400 for invalid period', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/metrics?period=99z' });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('reflects inserted test data accurately', async () => {
+      const db = getDb();
+      const now = new Date();
+      const fiveMinAgo = new Date(now.getTime() - 300000);
+
+      // Insert pipeline runs
+      db.prepare(
+        'INSERT INTO pipeline_runs (id, pipeline_name, trigger_type, status, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?)',
+      ).run(
+        'metrics-run-1',
+        'daily-digest',
+        'cron',
+        'completed',
+        fiveMinAgo.toISOString(),
+        now.toISOString(),
+      );
+      db.prepare(
+        'INSERT INTO pipeline_runs (id, pipeline_name, trigger_type, status, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?)',
+      ).run('metrics-run-2', 'daily-digest', 'cron', 'failed', fiveMinAgo.toISOString(), null);
+
+      // Insert agent tasks
+      db.prepare(
+        'INSERT INTO agent_tasks (id, skill_name, prompt, status, priority, blocked, created_at, completed_at, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      ).run(
+        'metrics-task-1',
+        'gmail',
+        'Check email',
+        'completed',
+        'normal',
+        0,
+        now.getTime(),
+        now.getTime(),
+        1500,
+      );
+      db.prepare(
+        'INSERT INTO agent_tasks (id, skill_name, prompt, status, priority, blocked, created_at, completed_at, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      ).run(
+        'metrics-task-2',
+        'gmail',
+        'Send reply',
+        'failed',
+        'normal',
+        0,
+        now.getTime(),
+        now.getTime(),
+        3000,
+      );
+      db.prepare(
+        'INSERT INTO agent_tasks (id, skill_name, prompt, status, priority, blocked, created_at, completed_at, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      ).run(
+        'metrics-task-3',
+        'ticktick',
+        'Create task',
+        'completed',
+        'normal',
+        0,
+        now.getTime(),
+        now.getTime(),
+        800,
+      );
+
+      const res = await app.inject({ method: 'GET', url: '/api/metrics?period=1h' });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+
+      // Task stats should include our inserted tasks (and possibly tasks from other tests)
+      expect(body.tasks.total).toBeGreaterThanOrEqual(3);
+      expect(body.tasks.succeeded).toBeGreaterThanOrEqual(2);
+      expect(body.tasks.failed).toBeGreaterThanOrEqual(1);
+
+      // Pipeline stats
+      expect(body.pipelines.total).toBeGreaterThanOrEqual(2);
+
+      // Per-skill breakdown
+      expect(body.perSkill.length).toBeGreaterThanOrEqual(2);
+      const gmailSkill = body.perSkill.find((s: any) => s.skillName === 'gmail');
+      expect(gmailSkill).toBeDefined();
+      expect(gmailSkill.total).toBeGreaterThanOrEqual(2);
+
+      // Per-pipeline breakdown
+      expect(body.perPipeline.length).toBeGreaterThanOrEqual(1);
+      const digestPipeline = body.perPipeline.find((p: any) => p.pipelineName === 'daily-digest');
+      expect(digestPipeline).toBeDefined();
+      expect(digestPipeline.total).toBeGreaterThanOrEqual(2);
     });
   });
 });

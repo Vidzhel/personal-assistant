@@ -5,6 +5,7 @@ import type { AgentTask } from '@raven/shared';
 const log = createLogger('execution-logger');
 
 const DEFAULT_QUERY_LIMIT = 50;
+const PERCENT = 100;
 
 export interface TaskRecord {
   id: string;
@@ -40,12 +41,22 @@ export interface TaskStats {
   lastTaskAt: string | null;
 }
 
+export interface PerSkillStats {
+  skillName: string;
+  total: number;
+  succeeded: number;
+  failed: number;
+  successRate: number;
+  avgDurationMs: number | null;
+}
+
 export interface ExecutionLogger {
   logTaskStart: (task: AgentTask) => void;
   logTaskComplete: (task: AgentTask) => void;
   queryTasks: (opts: TaskQueryOpts) => TaskRecord[];
   getTaskById: (id: string) => TaskRecord | undefined;
   getTaskStats: (sinceMs: number) => TaskStats;
+  getPerSkillStats: (sinceMs: number) => PerSkillStats[];
 }
 
 interface AgentTaskRow {
@@ -206,6 +217,39 @@ export function createExecutionLogger(deps: { db: Database.Database }): Executio
         avgDurationMs: row.avg_duration_ms !== null ? Math.round(row.avg_duration_ms) : null,
         lastTaskAt: row.last_task_at !== null ? new Date(row.last_task_at).toISOString() : null,
       };
+    },
+
+    getPerSkillStats(sinceMs: number): PerSkillStats[] {
+      const cutoff = Date.now() - sinceMs;
+      const rows = db
+        .prepare(
+          `SELECT
+            skill_name,
+            COUNT(*) as total,
+            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as succeeded,
+            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+            AVG(CASE WHEN duration_ms IS NOT NULL THEN duration_ms END) as avg_duration_ms
+          FROM agent_tasks
+          WHERE completed_at > ?
+          GROUP BY skill_name
+          ORDER BY total DESC`,
+        )
+        .all(cutoff) as Array<{
+        skill_name: string;
+        total: number;
+        succeeded: number;
+        failed: number;
+        avg_duration_ms: number | null;
+      }>;
+
+      return rows.map((row) => ({
+        skillName: row.skill_name,
+        total: row.total,
+        succeeded: row.succeeded,
+        failed: row.failed,
+        successRate: row.total > 0 ? Math.round((row.succeeded / row.total) * PERCENT) : 0,
+        avgDurationMs: row.avg_duration_ms !== null ? Math.round(row.avg_duration_ms) : null,
+      }));
     },
   };
 }
