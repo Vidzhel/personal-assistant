@@ -34,7 +34,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-12
-last_updated: 2026-03-17 # story 6.5 ready-for-dev
+last_updated: 2026-03-17 # story 6.5 refined, story 6.8 created
 project: personal-assistant
 project_key: NOKEY
 tracking_system: file-system
@@ -97,6 +97,7 @@ development_status:
   6-5-knowledge-management-agent-and-context-injection: ready-for-dev
   6-6-knowledge-lifecycle-and-retrospective: backlog
   6-7-knowledge-graph-visualization: backlog
+  6-8-knowledge-context-ui-and-project-memory: backlog
   epic-6-retrospective: optional
 
   # Epic 7: Proactive Intelligence & Friend Protocol (Growth)
