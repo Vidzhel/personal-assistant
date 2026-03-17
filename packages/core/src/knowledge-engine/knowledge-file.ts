@@ -9,6 +9,8 @@ export interface BubbleFrontmatter {
   title: string;
   tags: string[];
   source: string | null;
+  source_file: string | null;
+  source_url: string | null;
   created_at: string;
   updated_at: string;
 }

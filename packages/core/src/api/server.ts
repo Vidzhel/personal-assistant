@@ -15,6 +15,7 @@ import type { PipelineEngine } from '../pipeline-engine/pipeline-engine.ts';
 import type { PipelineStore } from '../pipeline-engine/pipeline-store.ts';
 import type { PipelineScheduler } from '../pipeline-engine/pipeline-scheduler.ts';
 import type { KnowledgeStore } from '../knowledge-engine/knowledge-store.ts';
+import type { IngestionProcessor } from '../knowledge-engine/ingestion.ts';
 import { registerHealthRoute } from './routes/health.ts';
 import { registerProjectRoutes } from './routes/projects.ts';
 import { registerSessionRoutes } from './routes/sessions.ts';
@@ -47,9 +48,11 @@ export interface ApiDeps {
   pipelineStore?: PipelineStore;
   pipelineScheduler?: PipelineScheduler;
   knowledgeStore?: KnowledgeStore;
+  ingestionProcessor?: IngestionProcessor;
   configuredSuiteCount: number;
 }
 
+// eslint-disable-next-line max-lines-per-function -- server setup registers all route groups
 export async function createApiServer(
   deps: ApiDeps,
   port: number,
@@ -88,10 +91,12 @@ export async function createApiServer(
     executionLogger: deps.executionLogger,
     pipelineStore: deps.pipelineStore,
   });
-  if (deps.knowledgeStore) {
+  if (deps.knowledgeStore && deps.ingestionProcessor) {
     registerKnowledgeRoutes(app, {
       eventBus: deps.eventBus,
       knowledgeStore: deps.knowledgeStore,
+      ingestionProcessor: deps.ingestionProcessor,
+      executionLogger: deps.executionLogger,
     });
   }
 

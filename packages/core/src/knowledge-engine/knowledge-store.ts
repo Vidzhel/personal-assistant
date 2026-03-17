@@ -43,6 +43,8 @@ interface IndexRow {
   file_path: string;
   content_preview: string | null;
   source: string | null;
+  source_file: string | null;
+  source_url: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -73,6 +75,8 @@ interface FrontmatterInput {
   title: string;
   tags: string[];
   source: string | null;
+  sourceFile: string | null;
+  sourceUrl: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -83,6 +87,8 @@ function buildFrontmatter(input: FrontmatterInput): BubbleFrontmatter {
     title: input.title,
     tags: input.tags,
     source: input.source,
+    source_file: input.sourceFile,
+    source_url: input.sourceUrl,
     created_at: input.createdAt,
     updated_at: input.updatedAt,
   };
@@ -95,6 +101,8 @@ function rowToSummary(row: IndexRow, tags: string[]): KnowledgeBubbleSummary {
     contentPreview: row.content_preview ?? '',
     filePath: row.file_path,
     source: row.source,
+    sourceFile: row.source_file ?? null,
+    sourceUrl: row.source_url ?? null,
     tags,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -103,13 +111,15 @@ function rowToSummary(row: IndexRow, tags: string[]): KnowledgeBubbleSummary {
 
 function insertIndexRow(db: DatabaseInterface, row: IndexRow): void {
   db.run(
-    `INSERT INTO knowledge_index (id, title, file_path, content_preview, source, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO knowledge_index (id, title, file_path, content_preview, source, source_file, source_url, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     row.id,
     row.title,
     row.file_path,
     row.content_preview,
     row.source,
+    row.source_file,
+    row.source_url,
     row.created_at,
     row.updated_at,
   );
@@ -152,17 +162,21 @@ interface UpdateIndexInput {
   fileName: string;
   content: string;
   source: string | null;
+  sourceFile: string | null;
+  sourceUrl: string | null;
   updatedAt: string;
   tags: string[];
 }
 
 function updateIndex(db: DatabaseInterface, input: UpdateIndexInput): void {
   db.run(
-    `UPDATE knowledge_index SET title = ?, file_path = ?, content_preview = ?, source = ?, updated_at = ? WHERE id = ?`,
+    `UPDATE knowledge_index SET title = ?, file_path = ?, content_preview = ?, source = ?, source_file = ?, source_url = ?, updated_at = ? WHERE id = ?`,
     input.title,
     input.fileName,
     contentPreview(input.content),
     input.source,
+    input.sourceFile,
+    input.sourceUrl,
     input.updatedAt,
     input.id,
   );
@@ -179,17 +193,22 @@ export function createKnowledgeStore(deps: {
 }): KnowledgeStore {
   const { db, knowledgeDir } = deps;
 
+  // eslint-disable-next-line max-lines-per-function -- CRUD with source file/URL field mapping
   function insertBubble(input: CreateKnowledgeBubble): KnowledgeBubble {
     const id = generateId();
     const now = new Date().toISOString();
     const slug = slugify(input.title);
     const fileName = resolveFilename(knowledgeDir, slug);
     const source = input.source ?? null;
+    const sourceFile = input.sourceFile ?? null;
+    const sourceUrl = input.sourceUrl ?? null;
     const meta = buildFrontmatter({
       id,
       title: input.title,
       tags: input.tags,
       source,
+      sourceFile,
+      sourceUrl,
       createdAt: now,
       updatedAt: now,
     });
@@ -202,6 +221,8 @@ export function createKnowledgeStore(deps: {
       file_path: fileName,
       content_preview: contentPreview(input.content),
       source,
+      source_file: sourceFile,
+      source_url: sourceUrl,
       created_at: now,
       updated_at: now,
     };
@@ -224,12 +245,15 @@ export function createKnowledgeStore(deps: {
       content: input.content,
       filePath: fileName,
       source,
+      sourceFile,
+      sourceUrl,
       tags: input.tags,
       createdAt: now,
       updatedAt: now,
     };
   }
 
+  // eslint-disable-next-line max-lines-per-function, complexity -- CRUD update with source file/URL field mapping
   function updateBubble(id: string, input: UpdateKnowledgeBubble): KnowledgeBubble | undefined {
     const existing = db.get<IndexRow>('SELECT * FROM knowledge_index WHERE id = ?', id);
     if (!existing) return undefined;
@@ -238,6 +262,10 @@ export function createKnowledgeStore(deps: {
     const title = input.title ?? existing.title;
     const content = input.content ?? file.content;
     const source = input.source !== undefined ? input.source : existing.source;
+    const sourceFile =
+      input.sourceFile !== undefined ? input.sourceFile : (existing.source_file ?? null);
+    const sourceUrl =
+      input.sourceUrl !== undefined ? input.sourceUrl : (existing.source_url ?? null);
     const tags = input.tags ?? getTagsForBubble(db, id);
     const now = new Date().toISOString();
 
@@ -253,6 +281,8 @@ export function createKnowledgeStore(deps: {
       title,
       tags,
       source,
+      sourceFile,
+      sourceUrl,
       createdAt: existing.created_at,
       updatedAt: now,
     });
@@ -260,7 +290,17 @@ export function createKnowledgeStore(deps: {
 
     db.run('BEGIN');
     try {
-      updateIndex(db, { id, title, fileName, content, source, updatedAt: now, tags });
+      updateIndex(db, {
+        id,
+        title,
+        fileName,
+        content,
+        source,
+        sourceFile,
+        sourceUrl,
+        updatedAt: now,
+        tags,
+      });
       db.run('COMMIT');
     } catch (err) {
       db.run('ROLLBACK');
@@ -274,6 +314,8 @@ export function createKnowledgeStore(deps: {
       content,
       filePath: fileName,
       source,
+      sourceFile,
+      sourceUrl,
       tags,
       createdAt: existing.created_at,
       updatedAt: now,
@@ -312,6 +354,8 @@ export function createKnowledgeStore(deps: {
       content: file.content,
       filePath: row.file_path,
       source: row.source,
+      sourceFile: row.source_file ?? null,
+      sourceUrl: row.source_url ?? null,
       tags,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -369,6 +413,7 @@ export function createKnowledgeStore(deps: {
     );
   }
 
+  // eslint-disable-next-line complexity -- reindex iterates files with multiple fallback paths
   function reindexAll(): { indexed: number; errors: string[] } {
     const files = listMarkdownFiles(knowledgeDir);
     const errors: string[] = [];
@@ -395,6 +440,8 @@ export function createKnowledgeStore(deps: {
           file_path: fileName,
           content_preview: contentPreview(parsed.content),
           source: meta.source ?? null,
+          source_file: meta.source_file ?? null,
+          source_url: meta.source_url ?? null,
           created_at: meta.created_at ?? new Date().toISOString(),
           updated_at: meta.updated_at ?? new Date().toISOString(),
         };

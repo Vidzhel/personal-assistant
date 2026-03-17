@@ -23,6 +23,7 @@ import { createPipelineStore } from './pipeline-engine/pipeline-store.ts';
 import { createPipelineScheduler } from './pipeline-engine/pipeline-scheduler.ts';
 import { createPipelineEventTrigger } from './pipeline-engine/pipeline-event-trigger.ts';
 import { createKnowledgeStore } from './knowledge-engine/knowledge-store.ts';
+import { createIngestionProcessor } from './knowledge-engine/ingestion.ts';
 
 const log = createLogger('raven');
 
@@ -193,6 +194,17 @@ async function main(): Promise<void> {
   const reindexResult = knowledgeStore.reindexAll();
   log.info(`Knowledge store: ${reindexResult.indexed} bubbles indexed`);
 
+  // 12e. Init knowledge ingestion processor
+  const mediaDir = resolve(projectRoot, 'data/media');
+  if (!existsSync(mediaDir)) mkdirSync(mediaDir, { recursive: true });
+  const ingestionProcessor = createIngestionProcessor({
+    knowledgeStore,
+    eventBus,
+    executionLogger,
+    mediaDir,
+  });
+  ingestionProcessor.start();
+
   // 13. Start API server
   const server = await createApiServer(
     {
@@ -209,6 +221,7 @@ async function main(): Promise<void> {
       pipelineStore,
       pipelineScheduler,
       knowledgeStore,
+      ingestionProcessor,
       configuredSuiteCount,
     },
     config.RAVEN_PORT,

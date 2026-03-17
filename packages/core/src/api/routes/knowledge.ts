@@ -5,13 +5,18 @@ import {
   CreateKnowledgeBubbleSchema,
   UpdateKnowledgeBubbleSchema,
   KnowledgeQuerySchema,
+  IngestKnowledgeSchema,
 } from '@raven/shared';
 import type { EventBus } from '../../event-bus/event-bus.ts';
 import type { KnowledgeStore } from '../../knowledge-engine/knowledge-store.ts';
+import type { IngestionProcessor } from '../../knowledge-engine/ingestion.ts';
+import type { ExecutionLogger } from '../../agent-manager/execution-logger.ts';
 
 export interface KnowledgeRouteDeps {
   eventBus: EventBus;
   knowledgeStore: KnowledgeStore;
+  ingestionProcessor: IngestionProcessor;
+  executionLogger: ExecutionLogger;
 }
 
 function emitKnowledgeEvent(
@@ -30,7 +35,7 @@ function emitKnowledgeEvent(
 
 // eslint-disable-next-line max-lines-per-function -- route registration for all knowledge CRUD endpoints
 export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRouteDeps): void {
-  const { eventBus, knowledgeStore } = deps;
+  const { eventBus, knowledgeStore, ingestionProcessor, executionLogger } = deps;
 
   // Static routes BEFORE parameterized routes
   app.get('/api/knowledge/tags', async () => {
@@ -39,6 +44,21 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
 
   app.post('/api/knowledge/reindex', async () => {
     return knowledgeStore.reindexAll();
+  });
+
+  app.post('/api/knowledge/ingest', async (req, reply) => {
+    const result = IngestKnowledgeSchema.safeParse(req.body);
+    if (!result.success) {
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: result.error.message });
+    }
+    const { taskId } = await ingestionProcessor.ingest(result.data);
+    return reply.status(HTTP_STATUS.ACCEPTED).send({ taskId });
+  });
+
+  app.get<{ Params: { taskId: string } }>('/api/knowledge/ingest/:taskId', async (req, reply) => {
+    const task = executionLogger.getTaskById(req.params.taskId);
+    if (!task) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Task not found' });
+    return { taskId: task.id, status: task.status, result: task.result };
   });
 
   app.get('/api/knowledge', async (req, reply) => {
