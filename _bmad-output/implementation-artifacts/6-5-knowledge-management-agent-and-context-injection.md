@@ -1,6 +1,6 @@
 # Story 6.5: Knowledge Management Agent & Context Injection
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -577,6 +577,7 @@ Claude Opus 4.6 (1M context)
 ### Change Log
 
 - 2026-03-17: Story 6.5 implemented — knowledge management agent and pervasive context injection
+- 2026-03-17: Code review fixes — eliminated regex state leak in reference parser (sessions.ts), added NaN guard for env var budget (context-injector.ts)
 
 ### File List
 

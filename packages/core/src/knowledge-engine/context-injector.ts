@@ -18,7 +18,8 @@ export function createContextInjector(deps: ContextInjectorDeps): {
   formatContext: (ctx: KnowledgeContext) => string;
 } {
   const envBudget = process.env['RAVEN_KNOWLEDGE_CONTEXT_BUDGET'];
-  const configuredBudget = envBudget ? parseInt(envBudget, 10) : DEFAULT_CONTEXT_BUDGET;
+  const parsedEnvBudget = envBudget ? parseInt(envBudget, 10) : NaN;
+  const configuredBudget = Number.isNaN(parsedEnvBudget) ? DEFAULT_CONTEXT_BUDGET : parsedEnvBudget;
 
   async function retrieveContext(
     query: string,

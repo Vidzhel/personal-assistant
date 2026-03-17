@@ -24,10 +24,7 @@ function classifyLine(
   return state;
 }
 
-function parseContextMessage(
-  msg: StoredMessage,
-  refPattern: RegExp,
-): { taskId: string; refs: ParsedReference[] } {
+function parseContextMessage(msg: StoredMessage): { taskId: string; refs: ParsedReference[] } {
   const taskId = msg.taskId ?? 'unknown';
   const refs: ParsedReference[] = [];
   const lines = msg.content.split('\n');
@@ -35,7 +32,7 @@ function parseContextMessage(
 
   for (const line of lines) {
     state = classifyLine(line, state);
-    const refMatch = refPattern.exec(line);
+    const refMatch = /\[ref:\s*([^\]]+)\]/.exec(line);
     if (refMatch) {
       const bubbleId = refMatch[1].trim();
       if (!refs.some((r) => r.bubbleId === bubbleId)) {
@@ -43,18 +40,16 @@ function parseContextMessage(
       }
     }
   }
-  refPattern.lastIndex = 0;
   return { taskId, refs };
 }
 
 function parseReferencesFromContextMessages(
   contextMessages: StoredMessage[],
 ): Record<string, ParsedReference[]> {
-  const refPattern = /\[ref:\s*([^\]]+)\]/g;
   const grouped: Record<string, ParsedReference[]> = {};
 
   for (const msg of contextMessages) {
-    const { taskId, refs } = parseContextMessage(msg, refPattern);
+    const { taskId, refs } = parseContextMessage(msg);
     if (!grouped[taskId]) grouped[taskId] = [];
     grouped[taskId].push(...refs);
   }
