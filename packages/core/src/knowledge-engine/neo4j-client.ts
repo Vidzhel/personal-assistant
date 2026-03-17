@@ -124,6 +124,14 @@ export function createNeo4jClient(deps: Neo4jClientDeps): Neo4jClient {
          \`vector.dimensions\`: ${EMBEDDING_DIMENSIONS},
          \`vector.similarity_function\`: 'cosine'
        }}`,
+
+      // Story 6.4: Chunk node constraint and vector index
+      'CREATE CONSTRAINT chunk_id IF NOT EXISTS FOR (c:Chunk) REQUIRE c.id IS UNIQUE',
+      `CREATE VECTOR INDEX chunk_embedding IF NOT EXISTS FOR (c:Chunk) ON (c.embedding)
+       OPTIONS {indexConfig: {
+         \`vector.dimensions\`: ${EMBEDDING_DIMENSIONS},
+         \`vector.similarity_function\`: 'cosine'
+       }}`,
     ];
 
     for (const stmt of statements) {

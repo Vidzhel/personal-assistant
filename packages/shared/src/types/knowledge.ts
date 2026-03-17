@@ -199,3 +199,104 @@ export interface IngestionResult {
 export type CreateKnowledgeBubble = z.infer<typeof CreateKnowledgeBubbleSchema>;
 export type UpdateKnowledgeBubble = z.infer<typeof UpdateKnowledgeBubbleSchema>;
 export type KnowledgeQuery = z.infer<typeof KnowledgeQuerySchema>;
+
+// --- Story 6.4: Chunk & Retrieval Types ---
+
+export interface KnowledgeChunk {
+  id: string;
+  bubbleId: string;
+  index: number;
+  text: string;
+  startOffset: number;
+  endOffset: number;
+}
+
+export type QueryType = 'precise' | 'timeline' | 'generic';
+
+export interface RetrievalOptions {
+  tokenBudget?: number;
+  limit?: number;
+  includeSourceContent?: boolean;
+  topK?: number;
+  dimensions?: string[];
+  type?: QueryType;
+}
+
+export interface RetrievalResultItem {
+  bubbleId: string;
+  title: string;
+  contentPreview: string;
+  chunkText?: string;
+  score: number;
+  provenance: {
+    tier: number;
+    tierName: string;
+    rawScore: number;
+    permanenceWeight: number;
+  };
+  sourceFile?: string;
+  sourceContent?: string;
+  tags: string[];
+  domains: string[];
+  permanence: Permanence;
+}
+
+export interface RetrievalResult {
+  results: RetrievalResultItem[];
+  query: string;
+  queryType: QueryType;
+  totalCandidates: number;
+  tokenBudgetUsed: number;
+  tokenBudgetTotal: number;
+}
+
+export interface TimelineOptions {
+  dimension: string;
+  cursor?: string;
+  direction?: 'forward' | 'backward';
+  limit?: number;
+  filter?: Record<string, string>;
+}
+
+export interface TimelineResult {
+  bubbles: KnowledgeBubbleSummary[];
+  nextCursor: string | null;
+  prevCursor: string | null;
+  dimension: string;
+  total: number;
+}
+
+export interface IndexStatus {
+  totalBubbles: number;
+  indexedBubbles: number;
+  totalChunks: number;
+  lastIndexed: string | null;
+}
+
+const SEARCH_MIN_BUDGET = 100;
+const SEARCH_MAX_BUDGET = 100_000;
+const SEARCH_DEFAULT_BUDGET = 4000;
+const SEARCH_MAX_LIMIT = 200;
+const SEARCH_DEFAULT_LIMIT = 20;
+const TIMELINE_MAX_LIMIT = 100;
+const TIMELINE_DEFAULT_LIMIT = 20;
+
+export const SearchQuerySchema = z.object({
+  query: z.string().min(1),
+  type: z.enum(['precise', 'timeline', 'generic', 'auto']).default('auto'),
+  tokenBudget: z.coerce
+    .number()
+    .int()
+    .min(SEARCH_MIN_BUDGET)
+    .max(SEARCH_MAX_BUDGET)
+    .default(SEARCH_DEFAULT_BUDGET),
+  includeSourceContent: z.coerce.boolean().default(false),
+  limit: z.coerce.number().int().min(1).max(SEARCH_MAX_LIMIT).default(SEARCH_DEFAULT_LIMIT),
+});
+
+export const TimelineQuerySchema = z.object({
+  dimension: z.string().min(1),
+  cursor: z.string().optional(),
+  direction: z.enum(['forward', 'backward']).default('forward'),
+  limit: z.coerce.number().int().min(1).max(TIMELINE_MAX_LIMIT).default(TIMELINE_DEFAULT_LIMIT),
+});

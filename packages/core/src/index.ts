@@ -26,6 +26,8 @@ import { createKnowledgeStore } from './knowledge-engine/knowledge-store.ts';
 import { createIngestionProcessor } from './knowledge-engine/ingestion.ts';
 import { createEmbeddingEngine } from './knowledge-engine/embeddings.ts';
 import { createClusteringEngine } from './knowledge-engine/clustering.ts';
+import { createChunkingEngine } from './knowledge-engine/chunking.ts';
+import { createRetrievalEngine } from './knowledge-engine/retrieval.ts';
 import { loadKnowledgeDomainConfig } from './knowledge-engine/domain-config.ts';
 import { createNeo4jClient } from './knowledge-engine/neo4j-client.ts';
 
@@ -234,6 +236,29 @@ async function main(): Promise<void> {
   await clusteringEngine.start();
   log.info('Knowledge intelligence engine initialized (embeddings + clustering)');
 
+  // 12i. Init chunking engine (chunk-level embeddings for retrieval)
+  const chunkingEngine = createChunkingEngine({
+    neo4j: neo4jClient,
+    eventBus,
+    knowledgeStore,
+    knowledgeDir,
+  });
+  chunkingEngine.start();
+
+  // 12j. Init retrieval engine (multi-tier search pipeline)
+  const retrievalEngine = createRetrievalEngine({
+    neo4j: neo4jClient,
+    knowledgeStore,
+    knowledgeDir,
+  });
+  log.info('Knowledge retrieval engine initialized (chunking + multi-tier search)');
+
+  // 12k. Backfill chunk embeddings for any un-chunked bubbles (non-blocking)
+  chunkingEngine.backfillChunks().catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    log.error(`Chunk backfill failed: ${msg}`);
+  });
+
   // 13. Start API server
   const server = await createApiServer(
     {
@@ -253,6 +278,8 @@ async function main(): Promise<void> {
       ingestionProcessor,
       embeddingEngine,
       clusteringEngine,
+      chunkingEngine,
+      retrievalEngine,
       neo4jClient,
       configuredSuiteCount,
     },

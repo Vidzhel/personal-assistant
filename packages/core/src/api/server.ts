@@ -18,6 +18,8 @@ import type { KnowledgeStore } from '../knowledge-engine/knowledge-store.ts';
 import type { IngestionProcessor } from '../knowledge-engine/ingestion.ts';
 import type { EmbeddingEngine } from '../knowledge-engine/embeddings.ts';
 import type { ClusteringEngine } from '../knowledge-engine/clustering.ts';
+import type { ChunkingEngine } from '../knowledge-engine/chunking.ts';
+import type { RetrievalEngine } from '../knowledge-engine/retrieval.ts';
 import type { Neo4jClient } from '../knowledge-engine/neo4j-client.ts';
 import { registerHealthRoute } from './routes/health.ts';
 import { registerProjectRoutes } from './routes/projects.ts';
@@ -54,6 +56,8 @@ export interface ApiDeps {
   ingestionProcessor?: IngestionProcessor;
   embeddingEngine?: EmbeddingEngine;
   clusteringEngine?: ClusteringEngine;
+  chunkingEngine?: ChunkingEngine;
+  retrievalEngine?: RetrievalEngine;
   neo4jClient?: Neo4jClient;
   configuredSuiteCount: number;
 }
@@ -106,6 +110,8 @@ export async function createApiServer(
       neo4j: deps.neo4jClient,
       embeddingEngine: deps.embeddingEngine,
       clusteringEngine: deps.clusteringEngine,
+      chunkingEngine: deps.chunkingEngine,
+      retrievalEngine: deps.retrievalEngine,
     });
   }
 

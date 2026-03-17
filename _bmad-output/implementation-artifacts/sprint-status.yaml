@@ -34,7 +34,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-12
-last_updated: 2026-03-17
+last_updated: 2026-03-17 # story 6.5 ready-for-dev
 project: personal-assistant
 project_key: NOKEY
 tracking_system: file-system
@@ -92,9 +92,9 @@ development_status:
   epic-6: in-progress
   6-1-knowledge-bubble-storage-and-crud: done
   6-2-knowledge-ingestion-pipeline: done
-  6-3-knowledge-intelligence-engine: review
-  6-4-knowledge-retrieval-engine-and-full-content-indexing: backlog
-  6-5-knowledge-management-agent-and-context-injection: backlog
+  6-3-knowledge-intelligence-engine: done
+  6-4-knowledge-retrieval-engine-and-full-content-indexing: done
+  6-5-knowledge-management-agent-and-context-injection: ready-for-dev
   6-6-knowledge-lifecycle-and-retrospective: backlog
   6-7-knowledge-graph-visualization: backlog
   epic-6-retrospective: optional

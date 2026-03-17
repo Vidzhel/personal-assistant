@@ -589,6 +589,32 @@ export interface KnowledgeHubDetectedEvent extends BaseEvent {
   };
 }
 
+export interface KnowledgeChunkIndexedEvent extends BaseEvent {
+  type: 'knowledge:chunk:indexed';
+  payload: {
+    bubbleId: string;
+    chunkCount: number;
+  };
+}
+
+export interface KnowledgeReindexProgressEvent extends BaseEvent {
+  type: 'knowledge:reindex:progress';
+  payload: {
+    completed: number;
+    total: number;
+    bubbleId: string;
+  };
+}
+
+export interface KnowledgeReindexCompleteEvent extends BaseEvent {
+  type: 'knowledge:reindex:complete';
+  payload: {
+    total: number;
+    indexed: number;
+    errors: string[];
+  };
+}
+
 export interface SystemHealthAlertEvent extends BaseEvent {
   type: 'system:health:alert';
   payload: {
@@ -651,7 +677,10 @@ export type RavenEvent =
   | KnowledgeLinksSuggestedEvent
   | KnowledgeClusteringCompleteEvent
   | KnowledgeMergeDetectedEvent
-  | KnowledgeHubDetectedEvent;
+  | KnowledgeHubDetectedEvent
+  | KnowledgeChunkIndexedEvent
+  | KnowledgeReindexProgressEvent
+  | KnowledgeReindexCompleteEvent;
 
 export type RavenEventType = RavenEvent['type'];
 

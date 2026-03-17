@@ -968,45 +968,121 @@ So that information is captured automatically without manual note-taking.
 **When** the pipeline triggers (e.g., new file in Google Drive)
 **Then** the file is processed through the ingestion sub-agent automatically
 
-### Story 6.3: Knowledge Auto-Clustering & Tag Management
+### Story 6.3: Knowledge Intelligence Engine
 
 As the system operator,
-I want related knowledge bubbles automatically clustered and tag indexes maintained,
-So that information self-organizes and stays discoverable.
+I want knowledge bubbles to have local embeddings, hierarchical tags, knowledge domains, inter-bubble links with clear distinction from tags, permanence levels, hub bubble splitting, and embedding-based similarity operations,
+So that my knowledge base self-organizes at scale with proper structure, hierarchy, and knowledge quality signals.
 
 **Acceptance Criteria:**
 
-**Given** 5 knowledge bubbles about "event-driven architecture"
-**When** the clustering sub-agent runs
-**Then** they are grouped into a cluster with a generated cluster label
+**Given** a new knowledge bubble is created or updated
+**When** the embedding pipeline runs
+**Then** a local vector embedding is generated (via @huggingface/transformers, bge-small-en-v1.5) and stored in the database
+
+**Given** knowledge domains are configured (e.g., "health", "finances", "work") with classification rules
+**When** a new bubble is ingested
+**Then** it is automatically assigned to the appropriate domain(s) — a bubble can belong to multiple domains
+
+**Given** tags are organized in a hierarchy (domain → category → specific)
+**When** a new tag is created during ingestion or suggestion
+**Then** it is placed in the correct position in the tag tree, with parent-child relationships maintained
+
+**Given** a tag subtree has many sparse tags (few bubbles each, weak content connections)
+**When** tag rebalancing runs
+**Then** sparse tags are merged or restructured based on content similarity of their bubbles
+
+**Given** two related knowledge bubbles exist
+**When** similarity analysis detects a strong connection (cosine similarity > threshold)
+**Then** a bidirectional link is suggested — links are for specific semantic relationships between exactly two bubbles ("extends", "contradicts", "related"), while tags are for reusable categorical metadata
+
+**Given** a knowledge bubble has 10+ direct links
+**When** hub detection runs
+**Then** the linked bubbles are clustered into groups, a synthesis bubble is created for each group summarizing its content, and the synthesis bubbles are linked back to the hub — creating a navigable hierarchy
+
+**Given** a new knowledge bubble is created
+**When** permanence classification runs
+**Then** the bubble is assigned a permanence level: `temporary` (flagged for review), `normal` (standard), or `robust` (high-value, prioritized in retrieval) — defaulting to `normal`, adjustable by user
+
+**Given** 2+ knowledge bubbles have high embedding similarity
+**When** clustering runs (triggered via API)
+**Then** they are grouped into a cluster — embeddings for grouping, LLM only for label generation
+
+**Given** two bubbles have cosine similarity > 0.9
+**When** merge detection runs
+**Then** they are flagged for user review — never auto-merged
 
 **Given** a new knowledge bubble is created
 **When** auto-tagging runs
-**Then** relevant tags are suggested based on content similarity to existing bubbles
+**Then** relevant tags are suggested from the hierarchical tag tree based on embedding similarity to existing bubbles — no LLM needed
 
-**Given** two bubbles have >80% content overlap
-**When** merge detection runs
-**Then** they are flagged for user review with a "merge" suggestion, not auto-merged
-
-**Given** the user queries `/api/knowledge/tags`
-**When** the tag index is returned
-**Then** it shows all tags with bubble counts, sorted by frequency
-
-### Story 6.4: Knowledge Context Injection for Sub-Agents
+### Story 6.4: Knowledge Retrieval Engine & Full-Content Indexing
 
 As the system operator,
-I want sub-agents to automatically receive relevant knowledge context during task execution,
-So that Raven's accumulated knowledge improves every interaction.
+I want all knowledge bubble content chunked, embedded, and searchable through a multi-tier retrieval pipeline supporting precise, timeline, and generic query types across multiple dimensions, with concurrent query support,
+So that querying my second brain returns deeply relevant, contextually enriched results at any scale.
 
 **Acceptance Criteria:**
 
+**Given** a knowledge bubble has content longer than ~300 tokens
+**When** the chunking engine processes it
+**Then** the content is split into overlapping chunks (~300 tokens, 50 token overlap), each embedded with metadata prefix and stored in the database
+
+**Given** the application starts
+**When** the indexing check runs
+**Then** any knowledge bubbles without chunk embeddings are automatically indexed (backfill), and already-indexed bubbles are skipped
+
+**Given** a knowledge bubble is created or updated
+**When** the incremental indexer runs
+**Then** old chunks are removed and new chunks are generated and embedded
+
+**Given** the user triggers `POST /api/knowledge/reindex-embeddings`
+**When** the full re-index runs
+**Then** all chunk embeddings are rebuilt from scratch (useful after model change), with progress tracking
+
+**Given** a precise query like "What happened on March 5th?"
+**When** the retrieval engine processes it
+**Then** results are filtered by date dimension, returning specific bubbles and their references
+
+**Given** a timeline query
+**When** the user navigates forward/backward
+**Then** they can traverse knowledge along dimensions: date/time, domain, source type, permanence, cluster, connection degree, recency of access, confidence
+
+**Given** a generic query like "What do I like eating?"
+**When** the multi-tier retrieval runs
+**Then** results combine: (1) top-K matching chunks by vector similarity, (2) expanded to full parent bubbles, (3) linked bubbles via graph traversal, (4) cluster siblings, (5) tag hierarchy co-occurrence, (6) optional source file enrichment — all deduplicated, ranked, and summarized with references for further exploration
+
+**Given** multiple concurrent search requests
+**When** the embedding pipeline processes them
+**Then** queries are handled concurrently via a shared pipeline instance with proper serialization, without blocking each other
+
+**Given** a retrieval query with a token budget
+**When** results are assembled
+**Then** content is ranked to fit within budget, with provenance trail showing which tier and dimension contributed each result, and bubble references for drill-down
+
+**Given** retrieval results reference source files
+**When** source enrichment is enabled
+**Then** original source content (PDFs, documents from data/media/) is available for deep-dive context
+
+### Story 6.5: Knowledge Management Agent & Context Injection
+
+As the system operator,
+I want a dedicated knowledge management agent that can retrieve, update, organize, and inject relevant knowledge into any sub-agent's context,
+So that Raven acts as my second brain — searchable, conversational, and always providing relevant context.
+
+**Acceptance Criteria:**
+
+**Given** the user asks Raven about a topic in their knowledge base
+**When** the orchestrator routes to the knowledge agent
+**Then** the agent uses the multi-tier retrieval engine to find relevant bubbles, presents organized results with references, and can update/link/tag bubbles conversationally
+
 **Given** a sub-agent task about "SQLite backup strategies"
 **When** the prompt builder prepares the prompt
-**Then** relevant knowledge bubbles about SQLite and backups are retrieved and injected as context
+**Then** relevant knowledge is retrieved by the retrieval engine and injected as context
 
 **Given** the knowledge retrieval finds 10 relevant bubbles
 **When** the token budget is 2000 tokens
-**Then** only the top-ranked bubbles fitting within the budget are injected
+**Then** only the top-ranked bubbles (by embedding similarity + recency + permanence weight) fitting within the budget are injected
 
 **Given** no relevant knowledge exists for a task
 **When** retrieval returns empty results
@@ -1014,7 +1090,83 @@ So that Raven's accumulated knowledge improves every interaction.
 
 **Given** a knowledge bubble was updated recently
 **When** relevance scoring runs
-**Then** recency is factored in — newer relevant bubbles rank higher than older ones
+**Then** recency is factored in — newer relevant bubbles rank higher; `robust` permanence bubbles get a retrieval boost
+
+**Given** the user asks the knowledge agent to organize or link bubbles
+**When** the agent processes the request
+**Then** it can create/remove links, reassign domains, adjust permanence, merge bubbles, and update tags through the knowledge store API
+
+### Story 6.6: Knowledge Lifecycle & Retrospective
+
+As the system operator,
+I want a weekly knowledge retrospective that summarizes brain changes, surfaces stale knowledge, and lets me decide what to keep, prioritize, remove, or snooze,
+So that my second brain stays lean, relevant, and doesn't accumulate noise over time.
+
+**Acceptance Criteria:**
+
+**Given** a week has passed since the last retrospective
+**When** the retrospective pipeline triggers (scheduled)
+**Then** a summary is generated: new bubbles added, bubbles updated, links created, domains changed, tags reorganized — delivered via Telegram or dashboard
+
+**Given** knowledge bubbles exist with `temporary` permanence
+**When** the retrospective runs
+**Then** each temporary bubble is presented for review: keep (upgrade to normal/robust), snooze (defer review for N days), or remove (delete bubble + source files from data/media/)
+
+**Given** knowledge bubbles have not been accessed or referenced for a configurable period (e.g., 30 days)
+**When** stale detection runs
+**Then** stale bubbles are surfaced with options: update with fresh content, snooze (stop asking for N days), shrink (merge with related bubbles), or remove completely
+
+**Given** the user chooses to shrink/merge stale knowledge
+**When** the merge is executed
+**Then** related stale bubbles are combined into a single summary bubble, old bubbles are removed, and links are re-pointed to the merged bubble
+
+**Given** the user sets a bubble's permanence to `robust`
+**When** retrieval scoring runs
+**Then** robust bubbles receive a priority boost in all retrieval results and are never flagged as stale
+
+**Given** knowledge has different permanence levels
+**When** ingestion creates a new bubble
+**Then** the default permanence is `normal`; the user can override via API or conversational agent; homework/transient content can be marked `temporary` immediately
+
+### Story 6.7: Knowledge Graph Visualization
+
+As the system operator,
+I want an interactive knowledge graph visualization similar to Obsidian, where I can explore, query, filter, and modify my knowledge visually,
+So that I can understand the structure of my second brain and interact with it spatially.
+
+**Acceptance Criteria:**
+
+**Given** the knowledge graph page loads
+**When** the visualization renders
+**Then** knowledge bubbles appear as interactive nodes with connections (links) as edges, supporting pan, zoom, and click for detail
+
+**Given** the user clicks a node
+**When** the detail panel opens
+**Then** it shows the full bubble content, tags, domain, permanence, links, cluster membership, and source file (with file opening capability)
+
+**Given** multiple view dimensions exist
+**When** the user switches view mode
+**Then** the graph re-renders for: direct link connections, tag hierarchy connections, timeline (chronological layout), cluster grouping, or domain grouping
+
+**Given** nodes have varying properties
+**When** color coding is applied
+**Then** nodes are colored by selectable dimension: domain, connection degree (hub vs leaf), permanence level, relevance to current query, recency, or cluster membership
+
+**Given** the user enters a search query
+**When** the multi-tier retrieval engine returns results
+**Then** matched nodes are highlighted in the graph, non-matches are dimmed, and the graph centers on the result cluster
+
+**Given** the user applies tag or dimension filters
+**When** the filter is active
+**Then** only matching nodes and their connections are visible; the rest are hidden
+
+**Given** the user opens the chat panel alongside the graph
+**When** they discuss knowledge ("shrink this node and surroundings", "link these two", "what connects these clusters?")
+**Then** the knowledge agent executes the request and the graph updates in real-time
+
+**Given** the user selects multiple nodes
+**When** they choose a bulk action (merge, re-tag, change permanence, delete)
+**Then** the action is applied and the graph re-renders with updated structure
 
 ## Epic 7: Proactive Intelligence & Friend Protocol
 

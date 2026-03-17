@@ -11,12 +11,16 @@ import {
   ResolveLinkSchema,
   ResolveMergeSchema,
   PermanenceSchema,
+  SearchQuerySchema,
+  TimelineQuerySchema,
 } from '@raven/shared';
 import type { EventBus } from '../../event-bus/event-bus.ts';
 import type { KnowledgeStore } from '../../knowledge-engine/knowledge-store.ts';
 import type { IngestionProcessor } from '../../knowledge-engine/ingestion.ts';
 import type { EmbeddingEngine } from '../../knowledge-engine/embeddings.ts';
 import type { ClusteringEngine } from '../../knowledge-engine/clustering.ts';
+import type { ChunkingEngine } from '../../knowledge-engine/chunking.ts';
+import type { RetrievalEngine } from '../../knowledge-engine/retrieval.ts';
 import type { ExecutionLogger } from '../../agent-manager/execution-logger.ts';
 import type { Neo4jClient } from '../../knowledge-engine/neo4j-client.ts';
 
@@ -30,6 +34,8 @@ export interface KnowledgeRouteDeps {
   neo4j?: Neo4jClient;
   embeddingEngine?: EmbeddingEngine;
   clusteringEngine?: ClusteringEngine;
+  chunkingEngine?: ChunkingEngine;
+  retrievalEngine?: RetrievalEngine;
 }
 
 function emitKnowledgeEvent(
@@ -167,8 +173,17 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
     if (!clusteringEngine) {
       return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Not available' });
     }
-    await clusteringEngine.splitHub(req.params.id);
-    return reply.status(HTTP_STATUS.ACCEPTED).send({ status: 'splitting' });
+    const taskId = generateId();
+    clusteringEngine
+      .splitHub(req.params.id)
+      .then(() => {
+        log.info(`Hub split complete for ${req.params.id} (task ${taskId})`);
+      })
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        log.error(`Hub split failed for ${req.params.id}: ${msg}`);
+      });
+    return reply.status(HTTP_STATUS.ACCEPTED).send({ taskId, status: 'splitting' });
   });
 
   // --- New routes: links ---
@@ -205,6 +220,70 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
     const resolved = await clusteringEngine.resolveLink(req.params.id, result.data.action);
     if (!resolved) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
     return { success: true };
+  });
+
+  // --- Story 6.4: Search & Retrieval routes ---
+  const { chunkingEngine, retrievalEngine } = deps;
+
+  app.post('/api/knowledge/search', async (req, reply) => {
+    if (!retrievalEngine) {
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Retrieval not available' });
+    }
+    const result = SearchQuerySchema.safeParse(req.body);
+    if (!result.success) {
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: result.error.message });
+    }
+    const { query, type, tokenBudget, includeSourceContent, limit: resultLimit } = result.data;
+    return retrievalEngine.search(query, {
+      tokenBudget,
+      includeSourceContent,
+      limit: resultLimit,
+      ...(type !== 'auto' ? { type } : {}),
+    });
+  });
+
+  app.get('/api/knowledge/timeline', async (req, reply) => {
+    if (!retrievalEngine) {
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Retrieval not available' });
+    }
+    const result = TimelineQuerySchema.safeParse(req.query);
+    if (!result.success) {
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: result.error.message });
+    }
+    return retrievalEngine.retrieveTimeline(result.data);
+  });
+
+  app.post('/api/knowledge/reindex-embeddings', async (_req, reply) => {
+    if (!chunkingEngine) {
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Chunking not available' });
+    }
+    const taskId = generateId();
+    chunkingEngine
+      .reindexAllChunks()
+      .then((result) => {
+        log.info(`Chunk reindex complete (task ${taskId}): ${result.indexed}/${result.total}`);
+      })
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        log.error(`Chunk reindex failed (task ${taskId}): ${msg}`);
+      });
+    return reply.status(HTTP_STATUS.ACCEPTED).send({ taskId, status: 'reindexing' });
+  });
+
+  app.get<{ Params: { taskId: string } }>(
+    '/api/knowledge/reindex-embeddings/:taskId',
+    async (req, reply) => {
+      const task = executionLogger.getTaskById(req.params.taskId);
+      if (!task) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Task not found' });
+      return { taskId: task.id, status: task.status, result: task.result };
+    },
+  );
+
+  app.get('/api/knowledge/index-status', async (_req, reply) => {
+    if (!retrievalEngine) {
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Retrieval not available' });
+    }
+    return retrievalEngine.getIndexStatus();
   });
 
   // --- New routes: permanence ---
