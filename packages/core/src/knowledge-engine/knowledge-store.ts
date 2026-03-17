@@ -144,7 +144,8 @@ export function createKnowledgeStore(deps: {
             id: $id, title: $title, filePath: $filePath,
             contentPreview: $contentPreview, source: $source,
             sourceFile: $sourceFile, sourceUrl: $sourceUrl,
-            permanence: $permanence, createdAt: $createdAt, updatedAt: $updatedAt
+            permanence: $permanence, createdAt: $createdAt, updatedAt: $updatedAt,
+            lastAccessedAt: $lastAccessedAt
           })`,
           {
             id,
@@ -157,6 +158,7 @@ export function createKnowledgeStore(deps: {
             permanence,
             createdAt: now,
             updatedAt: now,
+            lastAccessedAt: now,
           },
         );
 
@@ -318,6 +320,10 @@ export function createKnowledgeStore(deps: {
     );
     if (!row) return undefined;
     const node = row.node;
+
+    // Bump lastAccessedAt on read (access tracking for stale detection)
+    const now = new Date().toISOString();
+    await neo4j.run(`MATCH (b:Bubble {id: $id}) SET b.lastAccessedAt = $now`, { id, now });
 
     const file = readBubbleFile(join(knowledgeDir, node.filePath));
     const tagRows = await neo4j.query<{ name: string }>(
@@ -486,12 +492,14 @@ export function createKnowledgeStore(deps: {
         const now = new Date().toISOString();
 
         await neo4j.withTransaction(async (tx) => {
+          const updatedAt = meta.updated_at ?? now;
           await tx.run(
             `CREATE (b:Bubble {
               id: $id, title: $title, filePath: $filePath,
               contentPreview: $contentPreview, source: $source,
               sourceFile: $sourceFile, sourceUrl: $sourceUrl,
-              permanence: $permanence, createdAt: $createdAt, updatedAt: $updatedAt
+              permanence: $permanence, createdAt: $createdAt, updatedAt: $updatedAt,
+              lastAccessedAt: $lastAccessedAt
             })`,
             {
               id,
@@ -503,7 +511,8 @@ export function createKnowledgeStore(deps: {
               sourceUrl: meta.source_url ?? null,
               permanence: 'normal',
               createdAt: meta.created_at ?? now,
-              updatedAt: meta.updated_at ?? now,
+              updatedAt,
+              lastAccessedAt: updatedAt,
             },
           );
 

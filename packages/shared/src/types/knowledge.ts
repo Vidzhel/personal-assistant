@@ -200,6 +200,42 @@ export type CreateKnowledgeBubble = z.infer<typeof CreateKnowledgeBubbleSchema>;
 export type UpdateKnowledgeBubble = z.infer<typeof UpdateKnowledgeBubbleSchema>;
 export type KnowledgeQuery = z.infer<typeof KnowledgeQuerySchema>;
 
+// --- Story 6.6: Lifecycle & Retrospective Types ---
+
+const MAX_SNOOZE_DAYS = 365;
+const MAX_MERGE_BUBBLES = 10;
+const MIN_MERGE_BUBBLES = 2;
+
+export interface StaleBubble {
+  id: string;
+  title: string;
+  permanence: Permanence;
+  lastAccessedAt: string;
+  daysSinceAccess: number;
+  reason: 'temporary-expired' | 'normal-stale';
+  tags: string[];
+  domains: string[];
+}
+
+export interface RetrospectiveSummary {
+  period: { since: string; until: string };
+  bubblesCreated: { count: number; titles: string[] };
+  bubblesUpdated: { count: number; titles: string[] };
+  linksCreated: number;
+  domainsChanged: number;
+  tagsReorganized: number;
+  staleBubbles: StaleBubble[];
+  temporaryBubbles: StaleBubble[];
+}
+
+export const SnoozeSchema = z.object({
+  days: z.number().int().min(1).max(MAX_SNOOZE_DAYS),
+});
+
+export const MergeBubblesSchema = z.object({
+  bubbleIds: z.array(z.uuid()).min(MIN_MERGE_BUBBLES).max(MAX_MERGE_BUBBLES),
+});
+
 // --- Story 6.4: Chunk & Retrieval Types ---
 
 export interface KnowledgeChunk {

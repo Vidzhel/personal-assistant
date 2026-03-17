@@ -13,6 +13,7 @@ import type { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 import type { SessionManager } from '../session-manager/session-manager.ts';
 import type { MessageStore } from '../session-manager/message-store.ts';
 import type { ContextInjector } from '../knowledge-engine/context-injector.ts';
+import type { Retrospective } from '../knowledge-engine/retrospective.ts';
 import { createKnowledgeAgentDefinition } from '../knowledge-engine/knowledge-agent.ts';
 
 const log = createLogger('orchestrator');
@@ -25,6 +26,7 @@ export interface OrchestratorDeps {
   sessionManager: SessionManager;
   messageStore: MessageStore;
   contextInjector?: ContextInjector;
+  retrospective?: Retrospective;
   port: number;
 }
 
@@ -40,6 +42,7 @@ export class Orchestrator {
   private sessionManager: SessionManager;
   private messageStore: MessageStore;
   private contextInjector?: ContextInjector;
+  private retrospective?: Retrospective;
   private port: number;
 
   constructor(deps: OrchestratorDeps) {
@@ -48,6 +51,7 @@ export class Orchestrator {
     this.sessionManager = deps.sessionManager;
     this.messageStore = deps.messageStore;
     this.contextInjector = deps.contextInjector;
+    this.retrospective = deps.retrospective;
     this.port = deps.port;
     this.eventBus.on<NewEmailEvent>('email:new', (e) => {
       this.handleNewEmail(e).catch((err: unknown) => log.error(`handleNewEmail failed: ${err}`));
@@ -118,6 +122,16 @@ export class Orchestrator {
   private async handleSchedule(event: ScheduleTriggeredEvent): Promise<void> {
     const { taskType, scheduleName } = event.payload;
     log.info(`Schedule triggered: ${scheduleName} (${taskType})`);
+
+    // Handle knowledge:retrospective inline — no agent needed, just run summary + stale detection
+    if (taskType === 'knowledge:retrospective') {
+      if (!this.retrospective) {
+        log.warn('Retrospective not available, ignoring schedule trigger');
+        return;
+      }
+      await this.retrospective.runFullRetrospective();
+      return;
+    }
 
     const suite = this.suiteRegistry.findSuiteForTaskType(taskType);
     if (!suite) {

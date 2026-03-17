@@ -14,5 +14,13 @@
     "taskType": "autonomous-task-management",
     "skillName": "task-management",
     "enabled": true
+  },
+  {
+    "id": "knowledge-retrospective",
+    "name": "Weekly Knowledge Retrospective",
+    "cron": "0 9 * * 1",
+    "taskType": "knowledge:retrospective",
+    "skillName": "knowledge",
+    "enabled": true
   }
 ]

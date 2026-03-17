@@ -579,6 +579,16 @@ export function createRetrievalEngine(deps: RetrievalDeps): RetrievalEngine {
     return { ...result, results: enriched };
   }
 
+  // --- Bump lastAccessedAt for all bubbles in search results ---
+  async function bumpAccessTimestamps(bubbleIds: string[]): Promise<void> {
+    if (bubbleIds.length === 0) return;
+    const now = new Date().toISOString();
+    await neo4j.run(`UNWIND $ids AS bid MATCH (b:Bubble {id: bid}) SET b.lastAccessedAt = $now`, {
+      ids: bubbleIds,
+      now,
+    });
+  }
+
   // --- Main search entry point (with semaphore) ---
   async function search(query: string, options?: RetrievalOptions): Promise<RetrievalResult> {
     return semaphore.acquire(async () => {
@@ -624,6 +634,12 @@ export function createRetrievalEngine(deps: RetrievalDeps): RetrievalEngine {
       if (opts.includeSourceContent) {
         result = await applySourceEnrichment(result);
       }
+
+      // Bump lastAccessedAt for all returned bubbles (access tracking for stale detection)
+      bumpAccessTimestamps(result.results.map((r) => r.bubbleId)).catch(() => {
+        // Non-critical — don't fail the search if access tracking fails
+      });
+
       return result;
     });
   }

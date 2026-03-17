@@ -29,6 +29,8 @@ import { createClusteringEngine } from './knowledge-engine/clustering.ts';
 import { createChunkingEngine } from './knowledge-engine/chunking.ts';
 import { createRetrievalEngine } from './knowledge-engine/retrieval.ts';
 import { createContextInjector } from './knowledge-engine/context-injector.ts';
+import { createKnowledgeLifecycle } from './knowledge-engine/knowledge-lifecycle.ts';
+import { createRetrospective } from './knowledge-engine/retrospective.ts';
 import { loadKnowledgeDomainConfig } from './knowledge-engine/domain-config.ts';
 import { createNeo4jClient } from './knowledge-engine/neo4j-client.ts';
 
@@ -251,6 +253,24 @@ async function main(): Promise<void> {
   // 12k. Init context injector for pervasive knowledge injection
   const contextInjector = createContextInjector({ retrievalEngine });
 
+  // 12l. Init knowledge lifecycle engine (stale detection, snooze, merge, remove)
+  const knowledgeLifecycle = createKnowledgeLifecycle({
+    neo4j: neo4jClient,
+    knowledgeStore,
+    eventBus,
+    embeddingEngine,
+    chunkingEngine,
+    knowledgeDir,
+  });
+
+  // 12m. Init retrospective engine (weekly summary generation)
+  const retrospective = createRetrospective({
+    neo4j: neo4jClient,
+    eventBus,
+    lifecycle: knowledgeLifecycle,
+  });
+  log.info('Knowledge lifecycle & retrospective engines initialized');
+
   // 11. Init orchestrator (after knowledge engine for context injection)
   const _orchestrator = new Orchestrator({
     eventBus,
@@ -258,10 +278,11 @@ async function main(): Promise<void> {
     sessionManager,
     messageStore,
     contextInjector,
+    retrospective,
     port: config.RAVEN_PORT,
   });
 
-  // 12l. Backfill chunk embeddings for any un-chunked bubbles (non-blocking)
+  // 12n. Backfill chunk embeddings for any un-chunked bubbles (non-blocking)
   chunkingEngine.backfillChunks().catch((err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err);
     log.error(`Chunk backfill failed: ${msg}`);
@@ -289,6 +310,8 @@ async function main(): Promise<void> {
       chunkingEngine,
       retrievalEngine,
       neo4jClient,
+      knowledgeLifecycle,
+      retrospective,
       configuredSuiteCount,
     },
     config.RAVEN_PORT,

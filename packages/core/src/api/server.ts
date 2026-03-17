@@ -21,6 +21,8 @@ import type { ClusteringEngine } from '../knowledge-engine/clustering.ts';
 import type { ChunkingEngine } from '../knowledge-engine/chunking.ts';
 import type { RetrievalEngine } from '../knowledge-engine/retrieval.ts';
 import type { Neo4jClient } from '../knowledge-engine/neo4j-client.ts';
+import type { KnowledgeLifecycle } from '../knowledge-engine/knowledge-lifecycle.ts';
+import type { Retrospective } from '../knowledge-engine/retrospective.ts';
 import { registerHealthRoute } from './routes/health.ts';
 import { registerProjectRoutes } from './routes/projects.ts';
 import { registerSessionRoutes } from './routes/sessions.ts';
@@ -59,6 +61,8 @@ export interface ApiDeps {
   chunkingEngine?: ChunkingEngine;
   retrievalEngine?: RetrievalEngine;
   neo4jClient?: Neo4jClient;
+  knowledgeLifecycle?: KnowledgeLifecycle;
+  retrospective?: Retrospective;
   configuredSuiteCount: number;
 }
 
@@ -112,6 +116,8 @@ export async function createApiServer(
       clusteringEngine: deps.clusteringEngine,
       chunkingEngine: deps.chunkingEngine,
       retrievalEngine: deps.retrievalEngine,
+      knowledgeLifecycle: deps.knowledgeLifecycle,
+      retrospective: deps.retrospective,
     });
   }
 

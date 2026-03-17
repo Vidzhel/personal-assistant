@@ -13,6 +13,8 @@ import {
   PermanenceSchema,
   SearchQuerySchema,
   TimelineQuerySchema,
+  SnoozeSchema,
+  MergeBubblesSchema,
 } from '@raven/shared';
 import type { EventBus } from '../../event-bus/event-bus.ts';
 import type { KnowledgeStore } from '../../knowledge-engine/knowledge-store.ts';
@@ -23,6 +25,8 @@ import type { ChunkingEngine } from '../../knowledge-engine/chunking.ts';
 import type { RetrievalEngine } from '../../knowledge-engine/retrieval.ts';
 import type { ExecutionLogger } from '../../agent-manager/execution-logger.ts';
 import type { Neo4jClient } from '../../knowledge-engine/neo4j-client.ts';
+import type { KnowledgeLifecycle } from '../../knowledge-engine/knowledge-lifecycle.ts';
+import type { Retrospective } from '../../knowledge-engine/retrospective.ts';
 
 const log = createLogger('knowledge-api');
 
@@ -36,6 +40,8 @@ export interface KnowledgeRouteDeps {
   clusteringEngine?: ClusteringEngine;
   chunkingEngine?: ChunkingEngine;
   retrievalEngine?: RetrievalEngine;
+  knowledgeLifecycle?: KnowledgeLifecycle;
+  retrospective?: Retrospective;
 }
 
 function emitKnowledgeEvent(
@@ -284,6 +290,66 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
       return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Retrieval not available' });
     }
     return retrievalEngine.getIndexStatus();
+  });
+
+  // --- Story 6.6: Lifecycle & Retrospective routes ---
+  const { knowledgeLifecycle, retrospective } = deps;
+
+  app.get('/api/knowledge/stale', async (req, reply) => {
+    if (!knowledgeLifecycle) {
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Lifecycle not available' });
+    }
+    const query = req.query as Record<string, string>;
+    const days = query.days ? parseInt(query.days, 10) : undefined;
+    const overrideDays = days && !isNaN(days) ? days : undefined;
+    return knowledgeLifecycle.detectStaleBubbles(overrideDays);
+  });
+
+  app.post<{ Params: { id: string } }>('/api/knowledge/:id/snooze', async (req, reply) => {
+    if (!knowledgeLifecycle) {
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Lifecycle not available' });
+    }
+    const result = SnoozeSchema.safeParse(req.body);
+    if (!result.success) {
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: result.error.message });
+    }
+    const success = await knowledgeLifecycle.snoozeBubble(req.params.id, result.data.days);
+    if (!success) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
+    return { success: true, snoozedDays: result.data.days };
+  });
+
+  app.post('/api/knowledge/merge', async (req, reply) => {
+    if (!knowledgeLifecycle) {
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Lifecycle not available' });
+    }
+    const result = MergeBubblesSchema.safeParse(req.body);
+    if (!result.success) {
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: result.error.message });
+    }
+    const mergedId = await knowledgeLifecycle.mergeBubbles(result.data.bubbleIds);
+    if (!mergedId) {
+      return reply
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .send({ error: 'Merge failed — not enough valid bubbles' });
+    }
+    return reply.status(HTTP_STATUS.CREATED).send({ mergedBubbleId: mergedId });
+  });
+
+  app.get('/api/knowledge/retrospective', async (req, reply) => {
+    if (!retrospective) {
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Retrospective not available' });
+    }
+    const query = req.query as Record<string, string>;
+    const since = query.since;
+    return retrospective.generateSummary(since);
+  });
+
+  app.post('/api/knowledge/retrospective/trigger', async (_req, reply) => {
+    if (!retrospective) {
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Retrospective not available' });
+    }
+    const summary = await retrospective.runFullRetrospective();
+    return { triggered: true, summary };
   });
 
   // --- New routes: permanence ---

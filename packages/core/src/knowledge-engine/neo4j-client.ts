@@ -146,6 +146,16 @@ export function createNeo4jClient(deps: Neo4jClientDeps): Neo4jClient {
       }
     }
 
+    // Story 6.6: Backfill lastAccessedAt for existing bubbles without it
+    try {
+      await run(
+        `MATCH (b:Bubble) WHERE b.lastAccessedAt IS NULL SET b.lastAccessedAt = b.updatedAt`,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.warn(`lastAccessedAt backfill warning: ${msg}`);
+    }
+
     log.info('Neo4j schema ensured (constraints, indexes, vector index)');
   }
 
