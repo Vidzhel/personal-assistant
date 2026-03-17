@@ -538,6 +538,57 @@ export interface KnowledgeBubbleDeletedEvent extends BaseEvent {
   };
 }
 
+export interface KnowledgeEmbeddingGeneratedEvent extends BaseEvent {
+  type: 'knowledge:embedding:generated';
+  payload: {
+    bubbleId: string;
+  };
+}
+
+export interface KnowledgeTagsSuggestedEvent extends BaseEvent {
+  type: 'knowledge:tags:suggested';
+  payload: {
+    bubbleId: string;
+    suggestedTags: Array<{ tag: string; confidence: number; parentTag: string | null }>;
+  };
+}
+
+export interface KnowledgeLinksSuggestedEvent extends BaseEvent {
+  type: 'knowledge:links:suggested';
+  payload: {
+    bubbleId: string;
+    links: Array<{
+      targetBubbleId: string;
+      confidence: number;
+      relationshipType: string;
+    }>;
+  };
+}
+
+export interface KnowledgeClusteringCompleteEvent extends BaseEvent {
+  type: 'knowledge:clustering:complete';
+  payload: {
+    clusterCount: number;
+    clusteredBubbles: number;
+    taskId: string;
+  };
+}
+
+export interface KnowledgeMergeDetectedEvent extends BaseEvent {
+  type: 'knowledge:merge:detected';
+  payload: {
+    mergeCount: number;
+  };
+}
+
+export interface KnowledgeHubDetectedEvent extends BaseEvent {
+  type: 'knowledge:hub:detected';
+  payload: {
+    bubbleId: string;
+    linkCount: number;
+  };
+}
+
 export interface SystemHealthAlertEvent extends BaseEvent {
   type: 'system:health:alert';
   payload: {
@@ -594,7 +645,13 @@ export type RavenEvent =
   | KnowledgeIngestFailedEvent
   | KnowledgeBubbleCreatedEvent
   | KnowledgeBubbleUpdatedEvent
-  | KnowledgeBubbleDeletedEvent;
+  | KnowledgeBubbleDeletedEvent
+  | KnowledgeEmbeddingGeneratedEvent
+  | KnowledgeTagsSuggestedEvent
+  | KnowledgeLinksSuggestedEvent
+  | KnowledgeClusteringCompleteEvent
+  | KnowledgeMergeDetectedEvent
+  | KnowledgeHubDetectedEvent;
 
 export type RavenEventType = RavenEvent['type'];
 

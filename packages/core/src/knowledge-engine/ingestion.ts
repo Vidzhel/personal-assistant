@@ -230,6 +230,7 @@ export function createIngestionProcessor(deps: IngestionDeps): IngestionProcesso
       }
 
       const parsed = parseIngestionResult(completion.result ?? '');
+      const permanence = input.type === 'voice-memo' ? ('temporary' as const) : undefined;
       const bubble = knowledgeStore.insert({
         title: parsed.title,
         content: extracted.content,
@@ -237,6 +238,7 @@ export function createIngestionProcessor(deps: IngestionDeps): IngestionProcesso
         tags: parsed.tags,
         sourceFile: extracted.sourceFile,
         sourceUrl: extracted.sourceUrl,
+        permanence,
       });
 
       emitCompleteEvent({

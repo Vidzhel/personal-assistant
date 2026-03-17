@@ -8,6 +8,7 @@ import {
   type CreateKnowledgeBubble,
   type UpdateKnowledgeBubble,
   type KnowledgeQuery,
+  type Permanence,
 } from '@raven/shared';
 import {
   slugify,
@@ -45,8 +46,13 @@ interface IndexRow {
   source: string | null;
   source_file: string | null;
   source_url: string | null;
+  permanence: string;
   created_at: string;
   updated_at: string;
+}
+
+interface DomainRow {
+  domain: string;
 }
 
 interface TagRow {
@@ -94,7 +100,13 @@ function buildFrontmatter(input: FrontmatterInput): BubbleFrontmatter {
   };
 }
 
-function rowToSummary(row: IndexRow, tags: string[]): KnowledgeBubbleSummary {
+function getDomainsForBubble(db: DatabaseInterface, bubbleId: string): string[] {
+  return db
+    .all<DomainRow>('SELECT domain FROM knowledge_bubble_domains WHERE bubble_id = ?', bubbleId)
+    .map((r) => r.domain);
+}
+
+function rowToSummary(row: IndexRow, tags: string[], domains: string[]): KnowledgeBubbleSummary {
   return {
     id: row.id,
     title: row.title,
@@ -104,6 +116,8 @@ function rowToSummary(row: IndexRow, tags: string[]): KnowledgeBubbleSummary {
     sourceFile: row.source_file ?? null,
     sourceUrl: row.source_url ?? null,
     tags,
+    domains,
+    permanence: (row.permanence ?? 'normal') as Permanence,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -111,8 +125,8 @@ function rowToSummary(row: IndexRow, tags: string[]): KnowledgeBubbleSummary {
 
 function insertIndexRow(db: DatabaseInterface, row: IndexRow): void {
   db.run(
-    `INSERT INTO knowledge_index (id, title, file_path, content_preview, source, source_file, source_url, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO knowledge_index (id, title, file_path, content_preview, source, source_file, source_url, permanence, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     row.id,
     row.title,
     row.file_path,
@@ -120,6 +134,7 @@ function insertIndexRow(db: DatabaseInterface, row: IndexRow): void {
     row.source,
     row.source_file,
     row.source_url,
+    row.permanence,
     row.created_at,
     row.updated_at,
   );
@@ -202,6 +217,7 @@ export function createKnowledgeStore(deps: {
     const source = input.source ?? null;
     const sourceFile = input.sourceFile ?? null;
     const sourceUrl = input.sourceUrl ?? null;
+    const permanence = input.permanence ?? 'normal';
     const meta = buildFrontmatter({
       id,
       title: input.title,
@@ -223,6 +239,7 @@ export function createKnowledgeStore(deps: {
       source,
       source_file: sourceFile,
       source_url: sourceUrl,
+      permanence,
       created_at: now,
       updated_at: now,
     };
@@ -248,6 +265,8 @@ export function createKnowledgeStore(deps: {
       sourceFile,
       sourceUrl,
       tags: input.tags,
+      domains: [],
+      permanence,
       createdAt: now,
       updatedAt: now,
     };
@@ -317,6 +336,8 @@ export function createKnowledgeStore(deps: {
       sourceFile,
       sourceUrl,
       tags,
+      domains: getDomainsForBubble(db, id),
+      permanence: (existing.permanence ?? 'normal') as Permanence,
       createdAt: existing.created_at,
       updatedAt: now,
     };
@@ -357,11 +378,14 @@ export function createKnowledgeStore(deps: {
       sourceFile: row.source_file ?? null,
       sourceUrl: row.source_url ?? null,
       tags,
+      domains: getDomainsForBubble(db, id),
+      permanence: (row.permanence ?? 'normal') as Permanence,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
   }
 
+  // eslint-disable-next-line complexity -- query building with multiple optional filters
   function listBubbles(query: KnowledgeQuery): KnowledgeBubbleSummary[] {
     if (query.q) {
       return searchBubbles(query.q, query.limit ?? DEFAULT_LIMIT, query.offset ?? 0);
@@ -378,13 +402,23 @@ export function createKnowledgeStore(deps: {
       conditions.push('ki.source = ?');
       params.push(query.source);
     }
+    if (query.domain) {
+      conditions.push('ki.id IN (SELECT bubble_id FROM knowledge_bubble_domains WHERE domain = ?)');
+      params.push(query.domain);
+    }
+    if (query.permanence) {
+      conditions.push('ki.permanence = ?');
+      params.push(query.permanence);
+    }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const sql = `SELECT ki.* FROM knowledge_index ki ${whereClause} ORDER BY ki.updated_at DESC LIMIT ? OFFSET ?`;
     params.push(query.limit ?? DEFAULT_LIMIT, query.offset ?? 0);
 
     const rows = db.all<IndexRow>(sql, ...params);
-    return rows.map((row) => rowToSummary(row, getTagsForBubble(db, row.id)));
+    return rows.map((row) =>
+      rowToSummary(row, getTagsForBubble(db, row.id), getDomainsForBubble(db, row.id)),
+    );
   }
 
   function searchBubbles(query: string, limit: number, offset: number): KnowledgeBubbleSummary[] {
@@ -402,7 +436,7 @@ export function createKnowledgeStore(deps: {
       .map((fts) => {
         const row = db.get<IndexRow>('SELECT * FROM knowledge_index WHERE id = ?', fts.bubble_id);
         if (!row) return undefined;
-        return rowToSummary(row, getTagsForBubble(db, row.id));
+        return rowToSummary(row, getTagsForBubble(db, row.id), getDomainsForBubble(db, row.id));
       })
       .filter((r): r is KnowledgeBubbleSummary => r !== undefined);
   }
@@ -442,6 +476,7 @@ export function createKnowledgeStore(deps: {
           source: meta.source ?? null,
           source_file: meta.source_file ?? null,
           source_url: meta.source_url ?? null,
+          permanence: 'normal',
           created_at: meta.created_at ?? new Date().toISOString(),
           updated_at: meta.updated_at ?? new Date().toISOString(),
         };

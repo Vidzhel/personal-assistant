@@ -24,6 +24,9 @@ import { createPipelineScheduler } from './pipeline-engine/pipeline-scheduler.ts
 import { createPipelineEventTrigger } from './pipeline-engine/pipeline-event-trigger.ts';
 import { createKnowledgeStore } from './knowledge-engine/knowledge-store.ts';
 import { createIngestionProcessor } from './knowledge-engine/ingestion.ts';
+import { createEmbeddingEngine } from './knowledge-engine/embeddings.ts';
+import { createClusteringEngine } from './knowledge-engine/clustering.ts';
+import { loadKnowledgeDomainConfig } from './knowledge-engine/domain-config.ts';
 
 const log = createLogger('raven');
 
@@ -205,6 +208,21 @@ async function main(): Promise<void> {
   });
   ingestionProcessor.start();
 
+  // 12f. Init embedding engine (lazy model init — loads on first use)
+  const embeddingEngine = createEmbeddingEngine({ db: dbInterface, eventBus });
+  embeddingEngine.start();
+
+  // 12g. Init clustering engine
+  const domainConfig = loadKnowledgeDomainConfig(configDir);
+  const clusteringEngine = createClusteringEngine({
+    db: dbInterface,
+    eventBus,
+    embeddingEngine,
+    domainConfig,
+  });
+  clusteringEngine.start();
+  log.info('Knowledge intelligence engine initialized (embeddings + clustering)');
+
   // 13. Start API server
   const server = await createApiServer(
     {
@@ -222,6 +240,9 @@ async function main(): Promise<void> {
       pipelineScheduler,
       knowledgeStore,
       ingestionProcessor,
+      embeddingEngine,
+      clusteringEngine,
+      dbInterface,
       configuredSuiteCount,
     },
     config.RAVEN_PORT,

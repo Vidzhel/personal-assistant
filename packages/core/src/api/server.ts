@@ -14,8 +14,11 @@ import type { MessageStore } from '../session-manager/message-store.ts';
 import type { PipelineEngine } from '../pipeline-engine/pipeline-engine.ts';
 import type { PipelineStore } from '../pipeline-engine/pipeline-store.ts';
 import type { PipelineScheduler } from '../pipeline-engine/pipeline-scheduler.ts';
+import type { DatabaseInterface } from '@raven/shared';
 import type { KnowledgeStore } from '../knowledge-engine/knowledge-store.ts';
 import type { IngestionProcessor } from '../knowledge-engine/ingestion.ts';
+import type { EmbeddingEngine } from '../knowledge-engine/embeddings.ts';
+import type { ClusteringEngine } from '../knowledge-engine/clustering.ts';
 import { registerHealthRoute } from './routes/health.ts';
 import { registerProjectRoutes } from './routes/projects.ts';
 import { registerSessionRoutes } from './routes/sessions.ts';
@@ -49,6 +52,9 @@ export interface ApiDeps {
   pipelineScheduler?: PipelineScheduler;
   knowledgeStore?: KnowledgeStore;
   ingestionProcessor?: IngestionProcessor;
+  embeddingEngine?: EmbeddingEngine;
+  clusteringEngine?: ClusteringEngine;
+  dbInterface?: DatabaseInterface;
   configuredSuiteCount: number;
 }
 
@@ -97,6 +103,9 @@ export async function createApiServer(
       knowledgeStore: deps.knowledgeStore,
       ingestionProcessor: deps.ingestionProcessor,
       executionLogger: deps.executionLogger,
+      db: deps.dbInterface,
+      embeddingEngine: deps.embeddingEngine,
+      clusteringEngine: deps.clusteringEngine,
     });
   }
 

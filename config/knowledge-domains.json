@@ -1,0 +1,26 @@
+[
+  {
+    "name": "health",
+    "description": "Physical health, mental health, fitness, nutrition, medical",
+    "rules": {
+      "tags": ["health", "fitness", "nutrition", "medical", "exercise", "mental-health", "sleep", "diet"],
+      "keywords": ["doctor", "workout", "calories", "medication", "therapy", "symptom"]
+    }
+  },
+  {
+    "name": "finances",
+    "description": "Money, investments, budgeting, banking, taxes",
+    "rules": {
+      "tags": ["finance", "money", "investment", "budget", "tax", "banking", "crypto", "savings"],
+      "keywords": ["account", "payment", "portfolio", "expense", "income", "interest"]
+    }
+  },
+  {
+    "name": "work",
+    "description": "Professional projects, career, colleagues, meetings",
+    "rules": {
+      "tags": ["work", "project", "career", "meeting", "team", "deadline", "client"],
+      "keywords": ["sprint", "standup", "deploy", "review", "stakeholder", "milestone"]
+    }
+  }
+]

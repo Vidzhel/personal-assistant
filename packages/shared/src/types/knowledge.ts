@@ -18,6 +18,8 @@ export interface KnowledgeBubble {
   sourceFile: string | null;
   sourceUrl: string | null;
   tags: string[];
+  domains: string[];
+  permanence: Permanence;
   createdAt: string;
   updatedAt: string;
 }
@@ -32,8 +34,103 @@ export interface KnowledgeBubbleSummary {
   sourceFile: string | null;
   sourceUrl: string | null;
   tags: string[];
+  domains: string[];
+  permanence: Permanence;
   createdAt: string;
   updatedAt: string;
+}
+
+export type Permanence = 'temporary' | 'normal' | 'robust';
+
+export const PermanenceSchema = z.enum(['temporary', 'normal', 'robust']);
+
+export interface TagTreeNode {
+  tag: string;
+  parentTag: string | null;
+  level: number;
+  domain: string | null;
+  children: TagTreeNode[];
+  bubbleCount?: number;
+}
+
+export const TagTreeNodeSchema = z.object({
+  tag: z.string(),
+  parentTag: z.string().nullable(),
+  level: z.number(),
+  domain: z.string().nullable(),
+});
+
+export interface KnowledgeLink {
+  id: string;
+  sourceBubbleId: string;
+  targetBubbleId: string;
+  relationshipType: string;
+  confidence: number | null;
+  autoSuggested: boolean;
+  status: string;
+  createdAt: string;
+}
+
+export const KnowledgeLinkSchema = z.object({
+  sourceBubbleId: z.string(),
+  targetBubbleId: z.string(),
+  relationshipType: z
+    .enum(['related', 'extends', 'contradicts', 'supports', 'derived-from'])
+    .default('related'),
+  confidence: z.number().min(0).max(1).nullable().optional(),
+});
+
+export const ResolveLinkSchema = z.object({
+  action: z.enum(['accept', 'dismiss']),
+});
+
+export interface KnowledgeDomain {
+  name: string;
+  description: string;
+  rules: {
+    tags: string[];
+    keywords: string[];
+  };
+}
+
+export const KnowledgeDomainConfigSchema = z.array(
+  z.object({
+    name: z.string(),
+    description: z.string(),
+    rules: z.object({
+      tags: z.array(z.string()),
+      keywords: z.array(z.string()),
+    }),
+  }),
+);
+
+export interface KnowledgeCluster {
+  id: string;
+  label: string;
+  description: string | null;
+  memberCount?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KnowledgeMergeSuggestion {
+  id: string;
+  bubbleId1: string;
+  bubbleId2: string;
+  overlapReason: string | null;
+  confidence: number | null;
+  status: string;
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+export const ResolveMergeSchema = z.object({
+  action: z.enum(['accept', 'dismiss']),
+});
+
+export interface SimilarBubble {
+  bubbleId: string;
+  similarity: number;
 }
 
 export const CreateKnowledgeBubbleSchema = z.object({
@@ -43,6 +140,7 @@ export const CreateKnowledgeBubbleSchema = z.object({
   tags: z.array(z.string().min(1).max(MAX_TAG_LENGTH)).max(MAX_TAGS_COUNT).default([]),
   sourceFile: z.string().max(MAX_SOURCE_FILE_LENGTH).nullable().optional(),
   sourceUrl: z.url().nullable().optional(),
+  permanence: PermanenceSchema.optional(),
 });
 
 export const UpdateKnowledgeBubbleSchema = z.object({
@@ -58,6 +156,8 @@ export const KnowledgeQuerySchema = z.object({
   q: z.string().optional(),
   tag: z.string().optional(),
   source: z.string().optional(),
+  domain: z.string().optional(),
+  permanence: PermanenceSchema.optional(),
   limit: z.coerce.number().int().min(1).max(MAX_QUERY_LIMIT).default(DEFAULT_QUERY_LIMIT),
   offset: z.coerce.number().int().min(0).default(0),
 });

@@ -12,6 +12,7 @@
     "@anthropic-ai/claude-agent-sdk": "^0.2.71",
     "@fastify/cors": "^11.2.0",
     "@fastify/websocket": "^11.2.0",
+    "@huggingface/transformers": "^3.8.1",
     "@raven/shared": "*",
     "better-sqlite3": "^12.6.2",
     "croner": "^10.0.1",
