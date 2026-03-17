@@ -1,3 +1,2 @@
--- Add source file and URL reference columns to knowledge_index
-ALTER TABLE knowledge_index ADD COLUMN source_file TEXT;
-ALTER TABLE knowledge_index ADD COLUMN source_url TEXT;
+-- Knowledge source refs moved to Neo4j (Bubble node properties: sourceFile, sourceUrl).
+-- This migration kept as placeholder for sequential migration numbering.

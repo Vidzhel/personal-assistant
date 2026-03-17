@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import {
   HTTP_STATUS,
   generateId,
+  createLogger,
   CreateKnowledgeBubbleSchema,
   UpdateKnowledgeBubbleSchema,
   KnowledgeQuerySchema,
@@ -11,20 +12,22 @@ import {
   ResolveMergeSchema,
   PermanenceSchema,
 } from '@raven/shared';
-import type { DatabaseInterface } from '@raven/shared';
 import type { EventBus } from '../../event-bus/event-bus.ts';
 import type { KnowledgeStore } from '../../knowledge-engine/knowledge-store.ts';
 import type { IngestionProcessor } from '../../knowledge-engine/ingestion.ts';
 import type { EmbeddingEngine } from '../../knowledge-engine/embeddings.ts';
 import type { ClusteringEngine } from '../../knowledge-engine/clustering.ts';
 import type { ExecutionLogger } from '../../agent-manager/execution-logger.ts';
+import type { Neo4jClient } from '../../knowledge-engine/neo4j-client.ts';
+
+const log = createLogger('knowledge-api');
 
 export interface KnowledgeRouteDeps {
   eventBus: EventBus;
   knowledgeStore: KnowledgeStore;
   ingestionProcessor: IngestionProcessor;
   executionLogger: ExecutionLogger;
-  db?: DatabaseInterface;
+  neo4j?: Neo4jClient;
   embeddingEngine?: EmbeddingEngine;
   clusteringEngine?: ClusteringEngine;
 }
@@ -89,21 +92,27 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
   });
 
   // --- New routes: clustering ---
+  // M1 FIX: Added .catch() to runClustering() promise
   app.post('/api/knowledge/cluster', async (_req, reply) => {
     if (!clusteringEngine) {
       return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Clustering not available' });
     }
     const taskId = generateId();
-    // Run async
-    clusteringEngine.runClustering().then((result) => {
-      eventBus.emit({
-        id: generateId(),
-        timestamp: Date.now(),
-        source: 'knowledge-api',
-        type: 'knowledge:clustering:complete',
-        payload: { ...result, taskId },
+    clusteringEngine
+      .runClustering()
+      .then((result) => {
+        eventBus.emit({
+          id: generateId(),
+          timestamp: Date.now(),
+          source: 'knowledge-api',
+          type: 'knowledge:clustering:complete',
+          payload: { ...result, taskId },
+        });
+      })
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        log.error(`Clustering failed for task ${taskId}: ${msg}`);
       });
-    });
     return reply.status(HTTP_STATUS.ACCEPTED).send({ taskId });
   });
 
@@ -116,10 +125,10 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
     if (!clusteringEngine) {
       return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Clustering not available' });
     }
-    const clusters = clusteringEngine.getClusters();
+    const clusters = await clusteringEngine.getClusters();
     const cluster = clusters.find((c) => c.id === req.params.id);
     if (!cluster) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Cluster not found' });
-    const members = clusteringEngine.getClusterMembers(req.params.id);
+    const members = await clusteringEngine.getClusterMembers(req.params.id);
     return { ...cluster, members };
   });
 
@@ -143,7 +152,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
     if (!result.success) {
       return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: result.error.message });
     }
-    const resolved = clusteringEngine.resolveMerge(req.params.id, result.data.action);
+    const resolved = await clusteringEngine.resolveMerge(req.params.id, result.data.action);
     if (!resolved) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
     return { success: true };
   });
@@ -158,7 +167,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
     if (!clusteringEngine) {
       return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Not available' });
     }
-    clusteringEngine.splitHub(req.params.id);
+    await clusteringEngine.splitHub(req.params.id);
     return reply.status(HTTP_STATUS.ACCEPTED).send({ status: 'splitting' });
   });
 
@@ -176,7 +185,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
     if (!result.success) {
       return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: result.error.message });
     }
-    const link = clusteringEngine.createLink({
+    const link = await clusteringEngine.createLink({
       sourceBubbleId: result.data.sourceBubbleId,
       targetBubbleId: result.data.targetBubbleId,
       relationshipType: result.data.relationshipType,
@@ -193,7 +202,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
     if (!result.success) {
       return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: result.error.message });
     }
-    const resolved = clusteringEngine.resolveLink(req.params.id, result.data.action);
+    const resolved = await clusteringEngine.resolveLink(req.params.id, result.data.action);
     if (!resolved) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
     return { success: true };
   });
@@ -205,14 +214,13 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
     if (!parsed.success) {
       return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Invalid permanence level' });
     }
-    const bubble = knowledgeStore.getById(req.params.id);
+    const bubble = await knowledgeStore.getById(req.params.id);
     if (!bubble) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
-    if (deps.db) {
-      deps.db.run(
-        'UPDATE knowledge_index SET permanence = ? WHERE id = ?',
-        parsed.data,
-        req.params.id,
-      );
+    if (deps.neo4j) {
+      await deps.neo4j.run('MATCH (b:Bubble {id: $id}) SET b.permanence = $permanence', {
+        id: req.params.id,
+        permanence: parsed.data,
+      });
     }
     return { id: req.params.id, permanence: parsed.data };
   });
@@ -227,7 +235,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
   });
 
   app.get<{ Params: { id: string } }>('/api/knowledge/:id', async (req, reply) => {
-    const bubble = knowledgeStore.getById(req.params.id);
+    const bubble = await knowledgeStore.getById(req.params.id);
     if (!bubble) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
     return bubble;
   });
@@ -237,7 +245,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
     if (!result.success) {
       return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: result.error.message });
     }
-    const bubble = knowledgeStore.insert(result.data);
+    const bubble = await knowledgeStore.insert(result.data);
     emitKnowledgeEvent(eventBus, 'knowledge:bubble:created', {
       bubbleId: bubble.id,
       title: bubble.title,
@@ -251,7 +259,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
     if (!result.success) {
       return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: result.error.message });
     }
-    const bubble = knowledgeStore.update(req.params.id, result.data);
+    const bubble = await knowledgeStore.update(req.params.id, result.data);
     if (!bubble) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
     emitKnowledgeEvent(eventBus, 'knowledge:bubble:updated', {
       bubbleId: bubble.id,
@@ -262,9 +270,9 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
   });
 
   app.delete<{ Params: { id: string } }>('/api/knowledge/:id', async (req, reply) => {
-    const existing = knowledgeStore.getById(req.params.id);
+    const existing = await knowledgeStore.getById(req.params.id);
     if (!existing) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
-    knowledgeStore.remove(req.params.id);
+    await knowledgeStore.remove(req.params.id);
     emitKnowledgeEvent(eventBus, 'knowledge:bubble:deleted', {
       bubbleId: existing.id,
       title: existing.title,

@@ -29,6 +29,11 @@ const envSchema = z.object({
   SESSION_PATH: z.string().default('./data/sessions'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 
+  // Neo4j (knowledge engine graph store)
+  NEO4J_URI: z.string().default('bolt://localhost:7687'),
+  NEO4J_USER: z.string().default('neo4j'),
+  NEO4J_PASSWORD: z.string().default('ravenpassword'),
+
   // Optional skill-specific (loaded from .env, injected into skill configs)
   TICKTICK_CLIENT_ID: z.string().optional(),
   TICKTICK_CLIENT_SECRET: z.string().optional(),

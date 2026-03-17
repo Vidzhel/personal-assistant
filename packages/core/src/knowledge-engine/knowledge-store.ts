@@ -1,8 +1,8 @@
 import { join } from 'node:path';
+import { Integer as neo4jInteger } from 'neo4j-driver';
 import {
   generateId,
   createLogger,
-  type DatabaseInterface,
   type KnowledgeBubble,
   type KnowledgeBubbleSummary,
   type CreateKnowledgeBubble,
@@ -19,61 +19,27 @@ import {
   listMarkdownFiles,
   type BubbleFrontmatter,
 } from './knowledge-file.ts';
+import type { Neo4jClient } from './neo4j-client.ts';
 
 const log = createLogger('knowledge-store');
 
 const PREVIEW_LENGTH = 200;
 const DEFAULT_LIMIT = 50;
-const FTS_SPECIAL_CHARS = /["*{}:^()]/g;
-const FTS_BOOLEAN_OPERATORS = /\b(AND|OR|NOT|NEAR)\b/gi;
 
 export interface KnowledgeStore {
-  insert: (input: CreateKnowledgeBubble) => KnowledgeBubble;
-  update: (id: string, input: UpdateKnowledgeBubble) => KnowledgeBubble | undefined;
-  remove: (id: string) => boolean;
-  getById: (id: string) => KnowledgeBubble | undefined;
-  list: (query: KnowledgeQuery) => KnowledgeBubbleSummary[];
-  search: (query: string, limit: number, offset: number) => KnowledgeBubbleSummary[];
-  getAllTags: () => Array<{ tag: string; count: number }>;
-  reindexAll: () => { indexed: number; errors: string[] };
-}
-
-interface IndexRow {
-  id: string;
-  title: string;
-  file_path: string;
-  content_preview: string | null;
-  source: string | null;
-  source_file: string | null;
-  source_url: string | null;
-  permanence: string;
-  created_at: string;
-  updated_at: string;
-}
-
-interface DomainRow {
-  domain: string;
-}
-
-interface TagRow {
-  tag: string;
-}
-
-interface TagCountRow {
-  tag: string;
-  count: number;
-}
-
-interface FtsRow {
-  bubble_id: string;
+  insert: (input: CreateKnowledgeBubble) => Promise<KnowledgeBubble>;
+  update: (id: string, input: UpdateKnowledgeBubble) => Promise<KnowledgeBubble | undefined>;
+  remove: (id: string) => Promise<boolean>;
+  getById: (id: string) => Promise<KnowledgeBubble | undefined>;
+  getContentPreview: (bubbleId: string) => Promise<string | undefined>;
+  list: (query: KnowledgeQuery) => Promise<KnowledgeBubbleSummary[]>;
+  search: (query: string, limit: number, offset: number) => Promise<KnowledgeBubbleSummary[]>;
+  getAllTags: () => Promise<Array<{ tag: string; count: number }>>;
+  reindexAll: () => Promise<{ indexed: number; errors: string[] }>;
 }
 
 function contentPreview(content: string): string {
   return content.slice(0, PREVIEW_LENGTH);
-}
-
-function sanitizeFtsQuery(query: string): string {
-  return query.replace(FTS_SPECIAL_CHARS, ' ').replace(FTS_BOOLEAN_OPERATORS, ' ').trim();
 }
 
 interface FrontmatterInput {
@@ -100,116 +66,54 @@ function buildFrontmatter(input: FrontmatterInput): BubbleFrontmatter {
   };
 }
 
-function getDomainsForBubble(db: DatabaseInterface, bubbleId: string): string[] {
-  return db
-    .all<DomainRow>('SELECT domain FROM knowledge_bubble_domains WHERE bubble_id = ?', bubbleId)
-    .map((r) => r.domain);
-}
-
-function rowToSummary(row: IndexRow, tags: string[], domains: string[]): KnowledgeBubbleSummary {
-  return {
-    id: row.id,
-    title: row.title,
-    contentPreview: row.content_preview ?? '',
-    filePath: row.file_path,
-    source: row.source,
-    sourceFile: row.source_file ?? null,
-    sourceUrl: row.source_url ?? null,
-    tags,
-    domains,
-    permanence: (row.permanence ?? 'normal') as Permanence,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-function insertIndexRow(db: DatabaseInterface, row: IndexRow): void {
-  db.run(
-    `INSERT INTO knowledge_index (id, title, file_path, content_preview, source, source_file, source_url, permanence, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    row.id,
-    row.title,
-    row.file_path,
-    row.content_preview,
-    row.source,
-    row.source_file,
-    row.source_url,
-    row.permanence,
-    row.created_at,
-    row.updated_at,
-  );
-}
-
-function insertTags(db: DatabaseInterface, bubbleId: string, tags: string[]): void {
-  for (const tag of tags) {
-    db.run('INSERT INTO knowledge_tags (bubble_id, tag) VALUES (?, ?)', bubbleId, tag);
-  }
-}
-
-interface FtsEntry {
-  bubbleId: string;
-  title: string;
-  content: string;
-}
-
-function insertFts(db: DatabaseInterface, entry: FtsEntry): void {
-  db.run(
-    'INSERT INTO knowledge_fts (bubble_id, title, content) VALUES (?, ?, ?)',
-    entry.bubbleId,
-    entry.title,
-    entry.content,
-  );
-}
-
-function removeFts(db: DatabaseInterface, bubbleId: string): void {
-  db.run('DELETE FROM knowledge_fts WHERE bubble_id = ?', bubbleId);
-}
-
-function getTagsForBubble(db: DatabaseInterface, bubbleId: string): string[] {
-  return db
-    .all<TagRow>('SELECT tag FROM knowledge_tags WHERE bubble_id = ?', bubbleId)
-    .map((r) => r.tag);
-}
-
-interface UpdateIndexInput {
+interface BubbleNode {
   id: string;
   title: string;
-  fileName: string;
-  content: string;
+  filePath: string;
+  contentPreview: string | null;
   source: string | null;
   sourceFile: string | null;
   sourceUrl: string | null;
+  permanence: string;
+  createdAt: string;
   updatedAt: string;
-  tags: string[];
 }
 
-function updateIndex(db: DatabaseInterface, input: UpdateIndexInput): void {
-  db.run(
-    `UPDATE knowledge_index SET title = ?, file_path = ?, content_preview = ?, source = ?, source_file = ?, source_url = ?, updated_at = ? WHERE id = ?`,
-    input.title,
-    input.fileName,
-    contentPreview(input.content),
-    input.source,
-    input.sourceFile,
-    input.sourceUrl,
-    input.updatedAt,
-    input.id,
-  );
-  db.run('DELETE FROM knowledge_tags WHERE bubble_id = ?', input.id);
-  insertTags(db, input.id, input.tags);
-  removeFts(db, input.id);
-  insertFts(db, { bubbleId: input.id, title: input.title, content: input.content });
+interface TagResult {
+  tag: string;
+  count: number;
+}
+
+function nodeToBubbleSummary(
+  node: BubbleNode,
+  tags: string[],
+  domains: string[],
+): KnowledgeBubbleSummary {
+  return {
+    id: node.id,
+    title: node.title,
+    contentPreview: node.contentPreview ?? '',
+    filePath: node.filePath,
+    source: node.source,
+    sourceFile: node.sourceFile ?? null,
+    sourceUrl: node.sourceUrl ?? null,
+    tags,
+    domains,
+    permanence: (node.permanence ?? 'normal') as Permanence,
+    createdAt: node.createdAt,
+    updatedAt: node.updatedAt,
+  };
 }
 
 // eslint-disable-next-line max-lines-per-function -- factory function that initializes all knowledge store methods
 export function createKnowledgeStore(deps: {
-  db: DatabaseInterface;
+  neo4j: Neo4jClient;
   knowledgeDir: string;
 }): KnowledgeStore {
-  const { db, knowledgeDir } = deps;
+  const { neo4j, knowledgeDir } = deps;
 
   // eslint-disable-next-line max-lines-per-function -- CRUD with source file/URL field mapping
-  function insertBubble(input: CreateKnowledgeBubble): KnowledgeBubble {
+  async function insertBubble(input: CreateKnowledgeBubble): Promise<KnowledgeBubble> {
     const id = generateId();
     const now = new Date().toISOString();
     const slug = slugify(input.title);
@@ -218,10 +122,11 @@ export function createKnowledgeStore(deps: {
     const sourceFile = input.sourceFile ?? null;
     const sourceUrl = input.sourceUrl ?? null;
     const permanence = input.permanence ?? 'normal';
+    const tags = input.tags;
     const meta = buildFrontmatter({
       id,
       title: input.title,
-      tags: input.tags,
+      tags,
       source,
       sourceFile,
       sourceUrl,
@@ -231,26 +136,42 @@ export function createKnowledgeStore(deps: {
 
     writeBubbleFile(join(knowledgeDir, fileName), meta, input.content);
 
-    const row: IndexRow = {
-      id,
-      title: input.title,
-      file_path: fileName,
-      content_preview: contentPreview(input.content),
-      source,
-      source_file: sourceFile,
-      source_url: sourceUrl,
-      permanence,
-      created_at: now,
-      updated_at: now,
-    };
-    db.run('BEGIN');
     try {
-      insertIndexRow(db, row);
-      insertTags(db, id, input.tags);
-      insertFts(db, { bubbleId: id, title: input.title, content: input.content });
-      db.run('COMMIT');
+      await neo4j.withTransaction(async (tx) => {
+        // Create Bubble node
+        await tx.run(
+          `CREATE (b:Bubble {
+            id: $id, title: $title, filePath: $filePath,
+            contentPreview: $contentPreview, source: $source,
+            sourceFile: $sourceFile, sourceUrl: $sourceUrl,
+            permanence: $permanence, createdAt: $createdAt, updatedAt: $updatedAt
+          })`,
+          {
+            id,
+            title: input.title,
+            filePath: fileName,
+            contentPreview: contentPreview(input.content),
+            source,
+            sourceFile,
+            sourceUrl,
+            permanence,
+            createdAt: now,
+            updatedAt: now,
+          },
+        );
+
+        // Create tags and link
+        for (const tag of tags) {
+          await tx.run(
+            `MERGE (t:Tag {name: $tag})
+             WITH t
+             MATCH (b:Bubble {id: $bubbleId})
+             CREATE (b)-[:HAS_TAG]->(t)`,
+            { tag, bubbleId: id },
+          );
+        }
+      });
     } catch (err) {
-      db.run('ROLLBACK');
       deleteBubbleFile(join(knowledgeDir, fileName));
       throw err;
     }
@@ -264,7 +185,7 @@ export function createKnowledgeStore(deps: {
       source,
       sourceFile,
       sourceUrl,
-      tags: input.tags,
+      tags,
       domains: [],
       permanence,
       createdAt: now,
@@ -273,24 +194,37 @@ export function createKnowledgeStore(deps: {
   }
 
   // eslint-disable-next-line max-lines-per-function, complexity -- CRUD update with source file/URL field mapping
-  function updateBubble(id: string, input: UpdateKnowledgeBubble): KnowledgeBubble | undefined {
-    const existing = db.get<IndexRow>('SELECT * FROM knowledge_index WHERE id = ?', id);
+  async function updateBubble(
+    id: string,
+    input: UpdateKnowledgeBubble,
+  ): Promise<KnowledgeBubble | undefined> {
+    const existing = await neo4j.queryOne<BubbleNode>(
+      `MATCH (b:Bubble {id: $id}) RETURN b {.*} AS node`,
+      { id },
+    );
     if (!existing) return undefined;
+    const node = (existing as unknown as { node: BubbleNode }).node;
 
-    const file = readBubbleFile(join(knowledgeDir, existing.file_path));
-    const title = input.title ?? existing.title;
+    const file = readBubbleFile(join(knowledgeDir, node.filePath));
+    const title = input.title ?? node.title;
     const content = input.content ?? file.content;
-    const source = input.source !== undefined ? input.source : existing.source;
+    const source = input.source !== undefined ? input.source : node.source;
     const sourceFile =
-      input.sourceFile !== undefined ? input.sourceFile : (existing.source_file ?? null);
-    const sourceUrl =
-      input.sourceUrl !== undefined ? input.sourceUrl : (existing.source_url ?? null);
-    const tags = input.tags ?? getTagsForBubble(db, id);
+      input.sourceFile !== undefined ? input.sourceFile : (node.sourceFile ?? null);
+    const sourceUrl = input.sourceUrl !== undefined ? input.sourceUrl : (node.sourceUrl ?? null);
     const now = new Date().toISOString();
 
-    let fileName = existing.file_path;
-    if (input.title && input.title !== existing.title) {
-      deleteBubbleFile(join(knowledgeDir, existing.file_path));
+    // Get current tags from Neo4j
+    const tagRows = await neo4j.query<{ name: string }>(
+      `MATCH (b:Bubble {id: $id})-[:HAS_TAG]->(t:Tag) RETURN t.name AS name`,
+      { id },
+    );
+    const currentTags = tagRows.map((r) => r.name);
+    const tags = input.tags ?? currentTags;
+
+    let fileName = node.filePath;
+    if (input.title && input.title !== node.title) {
+      deleteBubbleFile(join(knowledgeDir, node.filePath));
       const slug = slugify(input.title);
       fileName = resolveFilename(knowledgeDir, slug, id);
     }
@@ -302,29 +236,49 @@ export function createKnowledgeStore(deps: {
       source,
       sourceFile,
       sourceUrl,
-      createdAt: existing.created_at,
+      createdAt: node.createdAt,
       updatedAt: now,
     });
     writeBubbleFile(join(knowledgeDir, fileName), meta, content);
 
-    db.run('BEGIN');
-    try {
-      updateIndex(db, {
-        id,
-        title,
-        fileName,
-        content,
-        source,
-        sourceFile,
-        sourceUrl,
-        updatedAt: now,
-        tags,
-      });
-      db.run('COMMIT');
-    } catch (err) {
-      db.run('ROLLBACK');
-      throw err;
-    }
+    await neo4j.withTransaction(async (tx) => {
+      // Update Bubble node
+      await tx.run(
+        `MATCH (b:Bubble {id: $id})
+         SET b.title = $title, b.filePath = $filePath,
+             b.contentPreview = $contentPreview, b.source = $source,
+             b.sourceFile = $sourceFile, b.sourceUrl = $sourceUrl,
+             b.updatedAt = $updatedAt`,
+        {
+          id,
+          title,
+          filePath: fileName,
+          contentPreview: contentPreview(content),
+          source,
+          sourceFile,
+          sourceUrl,
+          updatedAt: now,
+        },
+      );
+
+      // Replace tags
+      await tx.run(`MATCH (b:Bubble {id: $id})-[r:HAS_TAG]->() DELETE r`, { id });
+      for (const tag of tags) {
+        await tx.run(
+          `MERGE (t:Tag {name: $tag})
+           WITH t
+           MATCH (b:Bubble {id: $bubbleId})
+           CREATE (b)-[:HAS_TAG]->(t)`,
+          { tag, bubbleId: id },
+        );
+      }
+    });
+
+    // Get domains
+    const domainRows = await neo4j.query<{ name: string }>(
+      `MATCH (b:Bubble {id: $id})-[:IN_DOMAIN]->(d:Domain) RETURN d.name AS name`,
+      { id },
+    );
 
     log.info(`Knowledge bubble updated: ${id} (${fileName})`);
     return {
@@ -336,125 +290,186 @@ export function createKnowledgeStore(deps: {
       sourceFile,
       sourceUrl,
       tags,
-      domains: getDomainsForBubble(db, id),
-      permanence: (existing.permanence ?? 'normal') as Permanence,
-      createdAt: existing.created_at,
+      domains: domainRows.map((r) => r.name),
+      permanence: (node.permanence ?? 'normal') as Permanence,
+      createdAt: node.createdAt,
       updatedAt: now,
     };
   }
 
-  function removeBubble(id: string): boolean {
-    const existing = db.get<IndexRow>('SELECT * FROM knowledge_index WHERE id = ?', id);
+  async function removeBubble(id: string): Promise<boolean> {
+    const existing = await neo4j.queryOne<{ filePath: string }>(
+      `MATCH (b:Bubble {id: $id}) RETURN b.filePath AS filePath`,
+      { id },
+    );
     if (!existing) return false;
 
-    db.run('BEGIN');
-    try {
-      db.run('DELETE FROM knowledge_tags WHERE bubble_id = ?', id);
-      removeFts(db, id);
-      db.run('DELETE FROM knowledge_index WHERE id = ?', id);
-      db.run('COMMIT');
-    } catch (err) {
-      db.run('ROLLBACK');
-      throw err;
-    }
-    deleteBubbleFile(join(knowledgeDir, existing.file_path));
+    await neo4j.run(`MATCH (b:Bubble {id: $id}) DETACH DELETE b`, { id });
+    deleteBubbleFile(join(knowledgeDir, existing.filePath));
 
-    log.info(`Knowledge bubble deleted: ${id} (${existing.file_path})`);
+    log.info(`Knowledge bubble deleted: ${id} (${existing.filePath})`);
     return true;
   }
 
-  function getById(id: string): KnowledgeBubble | undefined {
-    const row = db.get<IndexRow>('SELECT * FROM knowledge_index WHERE id = ?', id);
+  async function getById(id: string): Promise<KnowledgeBubble | undefined> {
+    const row = await neo4j.queryOne<{ filePath: string; node: BubbleNode }>(
+      `MATCH (b:Bubble {id: $id}) RETURN b {.*} AS node, b.filePath AS filePath`,
+      { id },
+    );
     if (!row) return undefined;
+    const node = row.node;
 
-    const file = readBubbleFile(join(knowledgeDir, row.file_path));
-    const tags = getTagsForBubble(db, id);
+    const file = readBubbleFile(join(knowledgeDir, node.filePath));
+    const tagRows = await neo4j.query<{ name: string }>(
+      `MATCH (b:Bubble {id: $id})-[:HAS_TAG]->(t:Tag) RETURN t.name AS name`,
+      { id },
+    );
+    const domainRows = await neo4j.query<{ name: string }>(
+      `MATCH (b:Bubble {id: $id})-[:IN_DOMAIN]->(d:Domain) RETURN d.name AS name`,
+      { id },
+    );
+
     return {
-      id: row.id,
-      title: row.title,
+      id: node.id,
+      title: node.title,
       content: file.content,
-      filePath: row.file_path,
-      source: row.source,
-      sourceFile: row.source_file ?? null,
-      sourceUrl: row.source_url ?? null,
-      tags,
-      domains: getDomainsForBubble(db, id),
-      permanence: (row.permanence ?? 'normal') as Permanence,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
+      filePath: node.filePath,
+      source: node.source,
+      sourceFile: node.sourceFile ?? null,
+      sourceUrl: node.sourceUrl ?? null,
+      tags: tagRows.map((r) => r.name),
+      domains: domainRows.map((r) => r.name),
+      permanence: (node.permanence ?? 'normal') as Permanence,
+      createdAt: node.createdAt,
+      updatedAt: node.updatedAt,
     };
   }
 
-  // eslint-disable-next-line complexity -- query building with multiple optional filters
-  function listBubbles(query: KnowledgeQuery): KnowledgeBubbleSummary[] {
+  async function getContentPreview(bubbleId: string): Promise<string | undefined> {
+    const row = await neo4j.queryOne<{ contentPreview: string | null }>(
+      `MATCH (b:Bubble {id: $id}) RETURN b.contentPreview AS contentPreview`,
+      { id: bubbleId },
+    );
+    return row?.contentPreview ?? undefined;
+  }
+
+  // eslint-disable-next-line max-lines-per-function, complexity -- query building with multiple optional filters
+  async function listBubbles(query: KnowledgeQuery): Promise<KnowledgeBubbleSummary[]> {
     if (query.q) {
       return searchBubbles(query.q, query.limit ?? DEFAULT_LIMIT, query.offset ?? 0);
     }
 
     const conditions: string[] = [];
-    const params: unknown[] = [];
+    const params: Record<string, unknown> = {};
+    let matchClause = 'MATCH (b:Bubble)';
 
     if (query.tag) {
-      conditions.push('ki.id IN (SELECT bubble_id FROM knowledge_tags WHERE tag = ?)');
-      params.push(query.tag);
-    }
-    if (query.source) {
-      conditions.push('ki.source = ?');
-      params.push(query.source);
+      matchClause = 'MATCH (b:Bubble)-[:HAS_TAG]->(t:Tag {name: $tag})';
+      params.tag = query.tag;
     }
     if (query.domain) {
-      conditions.push('ki.id IN (SELECT bubble_id FROM knowledge_bubble_domains WHERE domain = ?)');
-      params.push(query.domain);
+      matchClause += query.tag
+        ? '\nMATCH (b)-[:IN_DOMAIN]->(d:Domain {name: $domain})'
+        : '\nMATCH (b:Bubble)-[:IN_DOMAIN]->(d:Domain {name: $domain})';
+      if (!query.tag) matchClause = matchClause.replace('MATCH (b:Bubble)\n', '');
+      params.domain = query.domain;
+    }
+    if (query.source) {
+      conditions.push('b.source = $source');
+      params.source = query.source;
+    }
+    if (query.sourceFile) {
+      conditions.push('b.sourceFile = $sourceFile');
+      params.sourceFile = query.sourceFile;
+    }
+    if (query.sourceUrl) {
+      conditions.push('b.sourceUrl = $sourceUrl');
+      params.sourceUrl = query.sourceUrl;
     }
     if (query.permanence) {
-      conditions.push('ki.permanence = ?');
-      params.push(query.permanence);
+      conditions.push('b.permanence = $permanence');
+      params.permanence = query.permanence;
+    }
+    if (query.createdAfter) {
+      conditions.push('b.createdAt >= $createdAfter');
+      params.createdAfter = query.createdAfter;
+    }
+    if (query.createdBefore) {
+      conditions.push('b.createdAt <= $createdBefore');
+      params.createdBefore = query.createdBefore;
+    }
+    if (query.updatedAfter) {
+      conditions.push('b.updatedAt >= $updatedAfter');
+      params.updatedAfter = query.updatedAfter;
+    }
+    if (query.updatedBefore) {
+      conditions.push('b.updatedAt <= $updatedBefore');
+      params.updatedBefore = query.updatedBefore;
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    const sql = `SELECT ki.* FROM knowledge_index ki ${whereClause} ORDER BY ki.updated_at DESC LIMIT ? OFFSET ?`;
-    params.push(query.limit ?? DEFAULT_LIMIT, query.offset ?? 0);
+    const limit = query.limit ?? DEFAULT_LIMIT;
+    const offset = query.offset ?? 0;
+    params.limit = neo4jInt(limit);
+    params.offset = neo4jInt(offset);
 
-    const rows = db.all<IndexRow>(sql, ...params);
-    return rows.map((row) =>
-      rowToSummary(row, getTagsForBubble(db, row.id), getDomainsForBubble(db, row.id)),
+    const cypher = `${matchClause}
+      ${whereClause}
+      WITH b ORDER BY b.updatedAt DESC SKIP $offset LIMIT $limit
+      OPTIONAL MATCH (b)-[:HAS_TAG]->(tag:Tag)
+      OPTIONAL MATCH (b)-[:IN_DOMAIN]->(dom:Domain)
+      RETURN b {.*} AS node,
+             collect(DISTINCT tag.name) AS tags,
+             collect(DISTINCT dom.name) AS domains`;
+
+    const rows = await neo4j.query<{ node: BubbleNode; tags: string[]; domains: string[] }>(
+      cypher,
+      params,
+    );
+    return rows.map((r) => nodeToBubbleSummary(r.node, r.tags, r.domains));
+  }
+
+  async function searchBubbles(
+    query: string,
+    limit: number,
+    offset: number,
+  ): Promise<KnowledgeBubbleSummary[]> {
+    if (!query.trim()) return [];
+
+    // Escape lucene special characters for full-text search
+    const escaped = query.replace(/[+\-&|!(){}[\]^"~*?:\\/]/g, '\\$&');
+
+    const cypher = `CALL db.index.fulltext.queryNodes('bubble_fulltext', $query)
+      YIELD node AS b, score
+      SKIP $offset LIMIT $limit
+      OPTIONAL MATCH (b)-[:HAS_TAG]->(tag:Tag)
+      OPTIONAL MATCH (b)-[:IN_DOMAIN]->(dom:Domain)
+      RETURN b {.*} AS node,
+             collect(DISTINCT tag.name) AS tags,
+             collect(DISTINCT dom.name) AS domains`;
+
+    const rows = await neo4j.query<{ node: BubbleNode; tags: string[]; domains: string[] }>(
+      cypher,
+      { query: escaped, limit: neo4jInt(limit), offset: neo4jInt(offset) },
+    );
+    return rows.map((r) => nodeToBubbleSummary(r.node, r.tags, r.domains));
+  }
+
+  async function getAllTags(): Promise<Array<{ tag: string; count: number }>> {
+    return neo4j.query<TagResult>(
+      `MATCH (t:Tag)<-[:HAS_TAG]-(b:Bubble)
+       RETURN t.name AS tag, count(b) AS count
+       ORDER BY count DESC`,
     );
   }
 
-  function searchBubbles(query: string, limit: number, offset: number): KnowledgeBubbleSummary[] {
-    const sanitized = sanitizeFtsQuery(query);
-    if (!sanitized) return [];
-
-    const ftsRows = db.all<FtsRow>(
-      `SELECT bubble_id FROM knowledge_fts WHERE knowledge_fts MATCH '{title content}: ' || ? ORDER BY rank LIMIT ? OFFSET ?`,
-      sanitized,
-      limit,
-      offset,
-    );
-
-    return ftsRows
-      .map((fts) => {
-        const row = db.get<IndexRow>('SELECT * FROM knowledge_index WHERE id = ?', fts.bubble_id);
-        if (!row) return undefined;
-        return rowToSummary(row, getTagsForBubble(db, row.id), getDomainsForBubble(db, row.id));
-      })
-      .filter((r): r is KnowledgeBubbleSummary => r !== undefined);
-  }
-
-  function getAllTags(): Array<{ tag: string; count: number }> {
-    return db.all<TagCountRow>(
-      'SELECT tag, COUNT(*) as count FROM knowledge_tags GROUP BY tag ORDER BY count DESC',
-    );
-  }
-
-  // eslint-disable-next-line complexity -- reindex iterates files with multiple fallback paths
-  function reindexAll(): { indexed: number; errors: string[] } {
+  // eslint-disable-next-line max-lines-per-function -- reindex iterates files with multiple fallback paths
+  async function reindexAll(): Promise<{ indexed: number; errors: string[] }> {
     const files = listMarkdownFiles(knowledgeDir);
     const errors: string[] = [];
 
-    db.run('DELETE FROM knowledge_fts');
-    db.run('DELETE FROM knowledge_tags');
-    db.run('DELETE FROM knowledge_index');
+    // Clear all Bubble nodes (preserves Tag/Domain/Cluster nodes)
+    await neo4j.run('MATCH (b:Bubble) DETACH DELETE b');
 
     let indexed = 0;
     for (const fileName of files) {
@@ -468,21 +483,43 @@ export function createKnowledgeStore(deps: {
           writeBubbleFile(filePath, meta, parsed.content);
         }
 
-        const row: IndexRow = {
-          id: meta.id,
-          title: meta.title ?? fileName.replace('.md', ''),
-          file_path: fileName,
-          content_preview: contentPreview(parsed.content),
-          source: meta.source ?? null,
-          source_file: meta.source_file ?? null,
-          source_url: meta.source_url ?? null,
-          permanence: 'normal',
-          created_at: meta.created_at ?? new Date().toISOString(),
-          updated_at: meta.updated_at ?? new Date().toISOString(),
-        };
-        insertIndexRow(db, row);
-        insertTags(db, meta.id, meta.tags ?? []);
-        insertFts(db, { bubbleId: meta.id, title: row.title, content: parsed.content });
+        const id = meta.id;
+        const title = meta.title ?? fileName.replace('.md', '');
+        const now = new Date().toISOString();
+
+        await neo4j.withTransaction(async (tx) => {
+          await tx.run(
+            `CREATE (b:Bubble {
+              id: $id, title: $title, filePath: $filePath,
+              contentPreview: $contentPreview, source: $source,
+              sourceFile: $sourceFile, sourceUrl: $sourceUrl,
+              permanence: $permanence, createdAt: $createdAt, updatedAt: $updatedAt
+            })`,
+            {
+              id,
+              title,
+              filePath: fileName,
+              contentPreview: contentPreview(parsed.content),
+              source: meta.source ?? null,
+              sourceFile: meta.source_file ?? null,
+              sourceUrl: meta.source_url ?? null,
+              permanence: 'normal',
+              createdAt: meta.created_at ?? now,
+              updatedAt: meta.updated_at ?? now,
+            },
+          );
+
+          for (const tag of meta.tags ?? []) {
+            await tx.run(
+              `MERGE (t:Tag {name: $tag})
+               WITH t
+               MATCH (b:Bubble {id: $bubbleId})
+               CREATE (b)-[:HAS_TAG]->(t)`,
+              { tag, bubbleId: id },
+            );
+          }
+        });
+
         indexed++;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -500,9 +537,15 @@ export function createKnowledgeStore(deps: {
     update: updateBubble,
     remove: removeBubble,
     getById,
+    getContentPreview,
     list: listBubbles,
     search: searchBubbles,
     getAllTags,
     reindexAll,
   };
+}
+
+/** Helper to convert JS number to Neo4j Integer for SKIP/LIMIT */
+function neo4jInt(n: number): neo4jInteger {
+  return neo4jInteger.fromNumber(n);
 }

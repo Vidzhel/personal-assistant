@@ -27,6 +27,7 @@ import { createIngestionProcessor } from './knowledge-engine/ingestion.ts';
 import { createEmbeddingEngine } from './knowledge-engine/embeddings.ts';
 import { createClusteringEngine } from './knowledge-engine/clustering.ts';
 import { loadKnowledgeDomainConfig } from './knowledge-engine/domain-config.ts';
+import { createNeo4jClient } from './knowledge-engine/neo4j-client.ts';
 
 const log = createLogger('raven');
 
@@ -192,12 +193,21 @@ async function main(): Promise<void> {
     .filter((p) => p.config.enabled && p.config.trigger.type === 'event').length;
   log.info(`Pipeline scheduler: ${cronCount} cron jobs, ${eventCount} event triggers`);
 
-  // 12d. Init knowledge store and reindex
-  const knowledgeStore = createKnowledgeStore({ db: dbInterface, knowledgeDir });
-  const reindexResult = knowledgeStore.reindexAll();
+  // 12d. Init Neo4j client for knowledge engine
+  const neo4jClient = createNeo4jClient({
+    uri: config.NEO4J_URI,
+    user: config.NEO4J_USER,
+    password: config.NEO4J_PASSWORD,
+  });
+  await neo4jClient.ensureSchema();
+  log.info(`Neo4j connected (${config.NEO4J_URI})`);
+
+  // 12e. Init knowledge store and reindex
+  const knowledgeStore = createKnowledgeStore({ neo4j: neo4jClient, knowledgeDir });
+  const reindexResult = await knowledgeStore.reindexAll();
   log.info(`Knowledge store: ${reindexResult.indexed} bubbles indexed`);
 
-  // 12e. Init knowledge ingestion processor
+  // 12f. Init knowledge ingestion processor
   const mediaDir = resolve(projectRoot, 'data/media');
   if (!existsSync(mediaDir)) mkdirSync(mediaDir, { recursive: true });
   const ingestionProcessor = createIngestionProcessor({
@@ -208,19 +218,20 @@ async function main(): Promise<void> {
   });
   ingestionProcessor.start();
 
-  // 12f. Init embedding engine (lazy model init — loads on first use)
-  const embeddingEngine = createEmbeddingEngine({ db: dbInterface, eventBus });
+  // 12g. Init embedding engine (lazy model init — loads on first use)
+  const embeddingEngine = createEmbeddingEngine({ neo4j: neo4jClient, eventBus, knowledgeStore });
   embeddingEngine.start();
 
-  // 12g. Init clustering engine
+  // 12h. Init clustering engine
   const domainConfig = loadKnowledgeDomainConfig(configDir);
   const clusteringEngine = createClusteringEngine({
-    db: dbInterface,
+    neo4j: neo4jClient,
     eventBus,
     embeddingEngine,
+    knowledgeStore,
     domainConfig,
   });
-  clusteringEngine.start();
+  await clusteringEngine.start();
   log.info('Knowledge intelligence engine initialized (embeddings + clustering)');
 
   // 13. Start API server
@@ -242,7 +253,7 @@ async function main(): Promise<void> {
       ingestionProcessor,
       embeddingEngine,
       clusteringEngine,
-      dbInterface,
+      neo4jClient,
       configuredSuiteCount,
     },
     config.RAVEN_PORT,
@@ -259,6 +270,7 @@ async function main(): Promise<void> {
     permissionEngine.shutdown();
     scheduler.shutdown();
     await serviceRunner.stopAll();
+    await neo4jClient.close();
     await server.close();
     log.info('Goodbye!');
     process.exit(0);

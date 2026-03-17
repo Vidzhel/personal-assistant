@@ -14,11 +14,11 @@ import type { MessageStore } from '../session-manager/message-store.ts';
 import type { PipelineEngine } from '../pipeline-engine/pipeline-engine.ts';
 import type { PipelineStore } from '../pipeline-engine/pipeline-store.ts';
 import type { PipelineScheduler } from '../pipeline-engine/pipeline-scheduler.ts';
-import type { DatabaseInterface } from '@raven/shared';
 import type { KnowledgeStore } from '../knowledge-engine/knowledge-store.ts';
 import type { IngestionProcessor } from '../knowledge-engine/ingestion.ts';
 import type { EmbeddingEngine } from '../knowledge-engine/embeddings.ts';
 import type { ClusteringEngine } from '../knowledge-engine/clustering.ts';
+import type { Neo4jClient } from '../knowledge-engine/neo4j-client.ts';
 import { registerHealthRoute } from './routes/health.ts';
 import { registerProjectRoutes } from './routes/projects.ts';
 import { registerSessionRoutes } from './routes/sessions.ts';
@@ -54,7 +54,7 @@ export interface ApiDeps {
   ingestionProcessor?: IngestionProcessor;
   embeddingEngine?: EmbeddingEngine;
   clusteringEngine?: ClusteringEngine;
-  dbInterface?: DatabaseInterface;
+  neo4jClient?: Neo4jClient;
   configuredSuiteCount: number;
 }
 
@@ -103,7 +103,7 @@ export async function createApiServer(
       knowledgeStore: deps.knowledgeStore,
       ingestionProcessor: deps.ingestionProcessor,
       executionLogger: deps.executionLogger,
-      db: deps.dbInterface,
+      neo4j: deps.neo4jClient,
       embeddingEngine: deps.embeddingEngine,
       clusteringEngine: deps.clusteringEngine,
     });

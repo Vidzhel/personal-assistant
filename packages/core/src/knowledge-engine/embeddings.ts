@@ -1,11 +1,7 @@
-import {
-  generateId,
-  createLogger,
-  type DatabaseInterface,
-  type RavenEvent,
-  type SimilarBubble,
-} from '@raven/shared';
+import { generateId, createLogger, type RavenEvent, type SimilarBubble } from '@raven/shared';
 import type { EventBus } from '../event-bus/event-bus.ts';
+import type { Neo4jClient } from './neo4j-client.ts';
+import type { KnowledgeStore } from './knowledge-store.ts';
 
 const log = createLogger('embeddings');
 
@@ -33,16 +29,6 @@ export async function getPipeline(): Promise<PipelineFunction> {
 
 export function resetPipeline(): void {
   pipelineInstance = null;
-}
-
-export function serializeEmbedding(embedding: Float32Array): Buffer {
-  return Buffer.from(embedding.buffer, embedding.byteOffset, embedding.byteLength);
-}
-
-const FLOAT32_BYTES = 4;
-
-export function deserializeEmbedding(blob: Buffer): Float32Array {
-  return new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / FLOAT32_BYTES);
 }
 
 export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
@@ -81,24 +67,20 @@ export function buildQueryEmbeddingInput(query: string): string {
 export interface EmbeddingEngine {
   generateEmbedding: (text: string) => Promise<Float32Array>;
   generateAndStore: (bubbleId: string, text: string) => Promise<void>;
-  getEmbedding: (bubbleId: string) => Float32Array | undefined;
-  getAllEmbeddings: () => Array<{ bubbleId: string; embedding: Float32Array }>;
+  getEmbedding: (bubbleId: string) => Promise<Float32Array | undefined>;
+  getAllEmbeddings: () => Promise<Array<{ bubbleId: string; embedding: Float32Array }>>;
   findSimilar: (
     targetEmbedding: Float32Array,
     options: { limit?: number; threshold?: number; excludeIds?: string[] },
-  ) => SimilarBubble[];
-  removeEmbedding: (bubbleId: string) => void;
+  ) => Promise<SimilarBubble[]>;
+  removeEmbedding: (bubbleId: string) => Promise<void>;
   start: () => void;
 }
 
-interface EmbeddingRow {
-  bubble_id: string;
-  embedding: Buffer;
-}
-
 interface EmbeddingDeps {
-  db: DatabaseInterface;
+  neo4j: Neo4jClient;
   eventBus: EventBus;
+  knowledgeStore: KnowledgeStore;
 }
 
 const DEFAULT_SIMILAR_LIMIT = 10;
@@ -106,7 +88,7 @@ const DEFAULT_SIMILAR_THRESHOLD = 0.5;
 
 // eslint-disable-next-line max-lines-per-function -- factory function for embedding engine
 export function createEmbeddingEngine(deps: EmbeddingDeps): EmbeddingEngine {
-  const { db, eventBus } = deps;
+  const { neo4j, eventBus, knowledgeStore } = deps;
 
   async function generateEmbedding(text: string): Promise<Float32Array> {
     const pipe = await getPipeline();
@@ -116,66 +98,75 @@ export function createEmbeddingEngine(deps: EmbeddingDeps): EmbeddingEngine {
 
   async function generateAndStore(bubbleId: string, text: string): Promise<void> {
     const embedding = await generateEmbedding(text);
-    const blob = serializeEmbedding(embedding);
-    db.run(
-      `INSERT OR REPLACE INTO knowledge_embeddings (bubble_id, embedding, model, created_at) VALUES (?, ?, ?, datetime('now'))`,
-      bubbleId,
-      blob,
-      'bge-small-en-v1.5',
+    const embeddingArray = Array.from(embedding);
+    await neo4j.run(
+      `MATCH (b:Bubble {id: $bubbleId})
+       SET b.embedding = $embedding`,
+      { bubbleId, embedding: embeddingArray },
     );
     log.info(`Embedding stored for bubble ${bubbleId}`);
   }
 
-  function getEmbedding(bubbleId: string): Float32Array | undefined {
-    const row = db.get<EmbeddingRow>(
-      'SELECT embedding FROM knowledge_embeddings WHERE bubble_id = ?',
-      bubbleId,
+  async function getEmbedding(bubbleId: string): Promise<Float32Array | undefined> {
+    const row = await neo4j.queryOne<{ embedding: number[] | null }>(
+      'MATCH (b:Bubble {id: $bubbleId}) RETURN b.embedding AS embedding',
+      { bubbleId },
     );
-    if (!row) return undefined;
-    return deserializeEmbedding(row.embedding);
+    if (!row?.embedding) return undefined;
+    return new Float32Array(row.embedding);
   }
 
-  function getAllEmbeddings(): Array<{ bubbleId: string; embedding: Float32Array }> {
-    const rows = db.all<EmbeddingRow>('SELECT bubble_id, embedding FROM knowledge_embeddings');
+  async function getAllEmbeddings(): Promise<Array<{ bubbleId: string; embedding: Float32Array }>> {
+    const rows = await neo4j.query<{ bubbleId: string; embedding: number[] }>(
+      `MATCH (b:Bubble) WHERE b.embedding IS NOT NULL
+       RETURN b.id AS bubbleId, b.embedding AS embedding`,
+    );
     return rows.map((row) => ({
-      bubbleId: row.bubble_id,
-      embedding: deserializeEmbedding(row.embedding),
+      bubbleId: row.bubbleId,
+      embedding: new Float32Array(row.embedding),
     }));
   }
 
-  function findSimilar(
+  async function findSimilar(
     targetEmbedding: Float32Array,
     options: { limit?: number; threshold?: number; excludeIds?: string[] } = {},
-  ): SimilarBubble[] {
+  ): Promise<SimilarBubble[]> {
     const limit = options.limit ?? DEFAULT_SIMILAR_LIMIT;
     const threshold = options.threshold ?? DEFAULT_SIMILAR_THRESHOLD;
-    const excludeSet = new Set(options.excludeIds ?? []);
+    const excludeIds = options.excludeIds ?? [];
+    const embeddingArray = Array.from(targetEmbedding);
 
-    const all = getAllEmbeddings();
-    const results: SimilarBubble[] = [];
+    // Use Neo4j vector index for approximate nearest neighbor search
+    const rows = await neo4j.query<{ bubbleId: string; score: number }>(
+      `CALL db.index.vector.queryNodes('bubble_embedding', $topK, $embedding)
+       YIELD node, score
+       WHERE score >= $threshold AND NOT node.id IN $excludeIds
+       RETURN node.id AS bubbleId, score
+       LIMIT $limit`,
+      {
+        topK: limit + excludeIds.length,
+        embedding: embeddingArray,
+        threshold,
+        excludeIds,
+        limit: limit,
+      },
+    );
 
-    for (const entry of all) {
-      if (excludeSet.has(entry.bubbleId)) continue;
-      const sim = cosineSimilarity(targetEmbedding, entry.embedding);
-      if (sim >= threshold) {
-        results.push({ bubbleId: entry.bubbleId, similarity: sim });
-      }
-    }
-
-    results.sort((a, b) => b.similarity - a.similarity);
-    return results.slice(0, limit);
+    return rows.map((r) => ({ bubbleId: r.bubbleId, similarity: r.score }));
   }
 
-  function removeEmbedding(bubbleId: string): void {
-    db.run('DELETE FROM knowledge_embeddings WHERE bubble_id = ?', bubbleId);
+  async function removeEmbedding(bubbleId: string): Promise<void> {
+    await neo4j.run(`MATCH (b:Bubble {id: $bubbleId}) REMOVE b.embedding`, { bubbleId });
   }
 
+  // H1 FIX: Use knowledgeStore.getContentPreview() instead of filePath for embedding input
   async function handleBubbleEvent(event: RavenEvent): Promise<void> {
     if (event.type !== 'knowledge:bubble:created' && event.type !== 'knowledge:bubble:updated')
       return;
-    const { bubbleId, title, filePath } = event.payload;
+    const { bubbleId, title } = event.payload;
     try {
-      const text = buildBubbleEmbeddingInput({ title, contentPreview: filePath });
+      const preview = await knowledgeStore.getContentPreview(bubbleId);
+      const text = buildBubbleEmbeddingInput({ title, contentPreview: preview ?? '' });
       await generateAndStore(bubbleId, text);
       eventBus.emit({
         id: generateId(),

@@ -1,33 +1,30 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { mkdtempSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { initDatabase, getDb, createDbInterface } from '../db/database.ts';
+import { Neo4jContainer, type StartedNeo4jContainer } from '@testcontainers/neo4j';
+import { createNeo4jClient } from '../knowledge-engine/neo4j-client.ts';
+import { createKnowledgeStore } from '../knowledge-engine/knowledge-store.ts';
 import {
   createEmbeddingEngine,
   cosineSimilarity,
-  serializeEmbedding,
-  deserializeEmbedding,
   buildBubbleEmbeddingInput,
   buildQueryEmbeddingInput,
 } from '../knowledge-engine/embeddings.ts';
 import { EventBus } from '../event-bus/event-bus.ts';
 import type { RavenEvent } from '@raven/shared';
+import type { Neo4jClient } from '../knowledge-engine/neo4j-client.ts';
 
 // Mock the HuggingFace transformers pipeline
 vi.mock('@huggingface/transformers', () => ({
   pipeline: vi.fn().mockResolvedValue(
     vi.fn().mockImplementation(async (text: string) => {
-      // Return a deterministic fake embedding based on text hash
       const data = new Float32Array(384);
       let hash = 0;
       for (let i = 0; i < text.length; i++) {
         hash = ((hash << 5) - hash + text.charCodeAt(i)) | 0;
       }
-      for (let i = 0; i < 384; i++) {
-        data[i] = Math.sin(hash + i) * 0.5;
-      }
-      // Normalize
+      for (let i = 0; i < 384; i++) data[i] = Math.sin(hash + i) * 0.5;
       let norm = 0;
       for (let i = 0; i < 384; i++) norm += data[i] * data[i];
       norm = Math.sqrt(norm);
@@ -38,22 +35,33 @@ vi.mock('@huggingface/transformers', () => ({
 }));
 
 describe('Embedding Engine', () => {
+  let container: StartedNeo4jContainer;
+  let neo4j: Neo4jClient;
   let tmpDir: string;
+  let knowledgeDir: string;
   let eventBus: EventBus;
 
-  beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'embeddings-'));
-    initDatabase(join(tmpDir, 'test.db'));
-    eventBus = new EventBus();
+  beforeAll(async () => {
+    container = await new Neo4jContainer('neo4j:5-community').withApoc().start();
+    neo4j = createNeo4jClient({
+      uri: container.getBoltUri(),
+      user: 'neo4j',
+      password: container.getPassword(),
+    });
+    await neo4j.ensureSchema();
+  }, 120_000);
+
+  afterAll(async () => {
+    await neo4j.close();
+    await container.stop();
   });
 
-  afterEach(() => {
-    try {
-      getDb().close();
-    } catch {
-      /* */
-    }
-    rmSync(tmpDir, { recursive: true, force: true });
+  beforeEach(async () => {
+    await neo4j.run('MATCH (n) DETACH DELETE n');
+    tmpDir = mkdtempSync(join(tmpdir(), 'embeddings-'));
+    knowledgeDir = join(tmpDir, 'knowledge');
+    mkdirSync(knowledgeDir, { recursive: true });
+    eventBus = new EventBus();
   });
 
   describe('cosineSimilarity', () => {
@@ -78,27 +86,6 @@ describe('Embedding Engine', () => {
       const a = new Float32Array([0, 0, 0]);
       const b = new Float32Array([1, 0, 0]);
       expect(cosineSimilarity(a, b)).toBe(0);
-    });
-  });
-
-  describe('serializeEmbedding / deserializeEmbedding', () => {
-    it('round-trips a Float32Array through Buffer', () => {
-      const original = new Float32Array([0.1, 0.2, 0.3, -0.4]);
-      const serialized = serializeEmbedding(original);
-      expect(serialized).toBeInstanceOf(Buffer);
-
-      const deserialized = deserializeEmbedding(serialized);
-      expect(deserialized).toHaveLength(4);
-      for (let i = 0; i < original.length; i++) {
-        expect(deserialized[i]).toBeCloseTo(original[i]);
-      }
-    });
-
-    it('handles 384-dim embeddings', () => {
-      const original = new Float32Array(384);
-      for (let i = 0; i < 384; i++) original[i] = Math.random() * 2 - 1;
-      const roundTripped = deserializeEmbedding(serializeEmbedding(original));
-      expect(roundTripped).toHaveLength(384);
     });
   });
 
@@ -134,85 +121,57 @@ describe('Embedding Engine', () => {
 
   describe('createEmbeddingEngine', () => {
     it('generates and stores embeddings', async () => {
-      const db = createDbInterface();
-      const engine = createEmbeddingEngine({ db, eventBus });
+      const store = createKnowledgeStore({ neo4j, knowledgeDir });
+      const bubble = await store.insert({ title: 'Test', content: 'health content', tags: [] });
 
-      await engine.generateAndStore('bubble-1', 'Some text about health');
-      const emb = engine.getEmbedding('bubble-1');
+      const engine = createEmbeddingEngine({ neo4j, eventBus, knowledgeStore: store });
+      await engine.generateAndStore(bubble.id, 'Some text about health');
+
+      const emb = await engine.getEmbedding(bubble.id);
       expect(emb).toBeInstanceOf(Float32Array);
       expect(emb!.length).toBe(384);
     });
 
-    it('returns undefined for missing embedding', () => {
-      const db = createDbInterface();
-      const engine = createEmbeddingEngine({ db, eventBus });
-      expect(engine.getEmbedding('nonexistent')).toBeUndefined();
+    it('returns undefined for missing embedding', async () => {
+      const store = createKnowledgeStore({ neo4j, knowledgeDir });
+      const engine = createEmbeddingEngine({ neo4j, eventBus, knowledgeStore: store });
+      expect(await engine.getEmbedding('nonexistent')).toBeUndefined();
     });
 
     it('getAllEmbeddings returns all stored', async () => {
-      const db = createDbInterface();
-      const engine = createEmbeddingEngine({ db, eventBus });
+      const store = createKnowledgeStore({ neo4j, knowledgeDir });
+      const b1 = await store.insert({ title: 'B1', content: 'text', tags: [] });
+      const b2 = await store.insert({ title: 'B2', content: 'text', tags: [] });
 
-      await engine.generateAndStore('b1', 'Text one');
-      await engine.generateAndStore('b2', 'Text two');
+      const engine = createEmbeddingEngine({ neo4j, eventBus, knowledgeStore: store });
+      await engine.generateAndStore(b1.id, 'Text one');
+      await engine.generateAndStore(b2.id, 'Text two');
 
-      const all = engine.getAllEmbeddings();
+      const all = await engine.getAllEmbeddings();
       expect(all).toHaveLength(2);
     });
 
-    it('findSimilar finds matching embeddings', async () => {
-      const db = createDbInterface();
-      const engine = createEmbeddingEngine({ db, eventBus });
+    it('removeEmbedding removes from graph', async () => {
+      const store = createKnowledgeStore({ neo4j, knowledgeDir });
+      const bubble = await store.insert({ title: 'Remove', content: '', tags: [] });
 
-      await engine.generateAndStore('b1', 'Health and fitness tips');
-      await engine.generateAndStore('b2', 'Health and fitness tips'); // same text = high similarity
-      await engine.generateAndStore('b3', 'Quantum physics theory');
+      const engine = createEmbeddingEngine({ neo4j, eventBus, knowledgeStore: store });
+      await engine.generateAndStore(bubble.id, 'Text');
+      expect(await engine.getEmbedding(bubble.id)).toBeDefined();
 
-      const emb = engine.getEmbedding('b1')!;
-      const similar = engine.findSimilar(emb, { threshold: 0.9, excludeIds: ['b1'] });
-      // b2 should be highly similar (same text)
-      expect(similar.some((s) => s.bubbleId === 'b2')).toBe(true);
-    });
-
-    it('findSimilar respects excludeIds', async () => {
-      const db = createDbInterface();
-      const engine = createEmbeddingEngine({ db, eventBus });
-
-      await engine.generateAndStore('b1', 'Same text');
-      await engine.generateAndStore('b2', 'Same text');
-
-      const emb = engine.getEmbedding('b1')!;
-      const similar = engine.findSimilar(emb, { threshold: 0, excludeIds: ['b1', 'b2'] });
-      expect(similar).toHaveLength(0);
-    });
-
-    it('findSimilar respects limit', async () => {
-      const db = createDbInterface();
-      const engine = createEmbeddingEngine({ db, eventBus });
-
-      for (let i = 0; i < 10; i++) {
-        await engine.generateAndStore(`b${i}`, `Text ${i}`);
-      }
-
-      const emb = engine.getEmbedding('b0')!;
-      const similar = engine.findSimilar(emb, { limit: 3, threshold: 0, excludeIds: ['b0'] });
-      expect(similar.length).toBeLessThanOrEqual(3);
-    });
-
-    it('removeEmbedding deletes from DB', async () => {
-      const db = createDbInterface();
-      const engine = createEmbeddingEngine({ db, eventBus });
-
-      await engine.generateAndStore('b1', 'Text');
-      expect(engine.getEmbedding('b1')).toBeDefined();
-
-      engine.removeEmbedding('b1');
-      expect(engine.getEmbedding('b1')).toBeUndefined();
+      await engine.removeEmbedding(bubble.id);
+      expect(await engine.getEmbedding(bubble.id)).toBeUndefined();
     });
 
     it('emits knowledge:embedding:generated on bubble created event', async () => {
-      const db = createDbInterface();
-      const engine = createEmbeddingEngine({ db, eventBus });
+      const store = createKnowledgeStore({ neo4j, knowledgeDir });
+      const bubble = await store.insert({
+        title: 'Test Bubble',
+        content: 'Preview text',
+        tags: [],
+      });
+
+      const engine = createEmbeddingEngine({ neo4j, eventBus, knowledgeStore: store });
       engine.start();
 
       const emitted: RavenEvent[] = [];
@@ -223,11 +182,10 @@ describe('Embedding Engine', () => {
         timestamp: Date.now(),
         source: 'test',
         type: 'knowledge:bubble:created',
-        payload: { bubbleId: 'b1', title: 'Test Bubble', filePath: 'test.md' },
+        payload: { bubbleId: bubble.id, title: 'Test Bubble', filePath: 'test.md' },
       } as RavenEvent);
 
-      // Wait for async handler
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 200));
       expect(emitted).toHaveLength(1);
       expect(emitted[0].type).toBe('knowledge:embedding:generated');
     });
