@@ -101,6 +101,7 @@ export class AgentManager {
       agentDefinitions: payload.agentDefinitions ?? {},
       createdAt: Date.now(),
       actionName: payload.actionName,
+      knowledgeContext: payload.knowledgeContext,
     };
 
     // Insert by priority
@@ -158,6 +159,15 @@ export class AgentManager {
       this.messageStore.appendMessage(task.sessionId, {
         role: 'thinking',
         content: thinkingContent,
+        taskId: task.id,
+      });
+    }
+
+    // Store context references in session transcript for frontend visibility
+    if (task.knowledgeContext && task.sessionId && this.messageStore) {
+      this.messageStore.appendMessage(task.sessionId, {
+        role: 'context',
+        content: task.knowledgeContext,
         taskId: task.id,
       });
     }

@@ -1,6 +1,10 @@
 import { SKILL_ORCHESTRATOR, type AgentTask, type Project } from '@raven/shared';
 
-export function buildSystemPrompt(task: AgentTask, project?: Project): string {
+export function buildSystemPrompt(
+  task: AgentTask,
+  project?: Project,
+  knowledgeContext?: string,
+): string {
   const parts: string[] = [
     'You are Raven, a personal assistant agent. You help the user manage tasks, emails, schedules, and daily planning.',
     '',
@@ -21,6 +25,16 @@ export function buildSystemPrompt(task: AgentTask, project?: Project): string {
     );
   } else {
     parts.push('- When using tools from MCP servers, prefer structured data over free-form text');
+  }
+
+  if (knowledgeContext) {
+    parts.push(
+      '',
+      '## Relevant Knowledge',
+      'The following information from your knowledge base may be relevant:',
+      '',
+      knowledgeContext,
+    );
   }
 
   if (project?.systemPrompt) {

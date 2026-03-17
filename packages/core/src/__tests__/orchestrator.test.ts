@@ -82,6 +82,7 @@ describe('Orchestrator', () => {
       suiteRegistry,
       sessionManager: new SessionManager(),
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
+      port: 4000,
     });
 
     // Create a project in DB
@@ -126,6 +127,7 @@ describe('Orchestrator', () => {
       suiteRegistry,
       sessionManager: new SessionManager(),
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
+      port: 4000,
     });
 
     const taskRequestPromise = new Promise<RavenEvent>((resolve) => {
@@ -173,6 +175,7 @@ describe('Orchestrator', () => {
       suiteRegistry,
       sessionManager: new SessionManager(),
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
+      port: 4000,
     });
 
     const taskRequestPromise = new Promise<RavenEvent>((resolve) => {
@@ -204,6 +207,7 @@ describe('Orchestrator', () => {
       suiteRegistry,
       sessionManager: new SessionManager(),
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
+      port: 4000,
     });
 
     const handler = vi.fn();

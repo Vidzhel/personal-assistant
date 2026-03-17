@@ -273,6 +273,28 @@ export interface IndexStatus {
   lastIndexed: string | null;
 }
 
+// --- Story 6.5: Context Injection Types ---
+
+export interface KnowledgeReference {
+  bubbleId: string;
+  title: string;
+  snippet: string;
+  score: number;
+  tierName: string;
+  tags: string[];
+}
+
+export interface KnowledgeContext {
+  references: KnowledgeReference[];
+  tokenBudgetUsed: number;
+  query: string;
+}
+
+export interface ContextInjectionOptions {
+  tokenBudget?: number;
+  minScore?: number;
+}
+
 const SEARCH_MIN_BUDGET = 100;
 const SEARCH_MAX_BUDGET = 100_000;
 const SEARCH_DEFAULT_BUDGET = 4000;

@@ -28,6 +28,7 @@ import { createEmbeddingEngine } from './knowledge-engine/embeddings.ts';
 import { createClusteringEngine } from './knowledge-engine/clustering.ts';
 import { createChunkingEngine } from './knowledge-engine/chunking.ts';
 import { createRetrievalEngine } from './knowledge-engine/retrieval.ts';
+import { createContextInjector } from './knowledge-engine/context-injector.ts';
 import { loadKnowledgeDomainConfig } from './knowledge-engine/domain-config.ts';
 import { createNeo4jClient } from './knowledge-engine/neo4j-client.ts';
 
@@ -149,13 +150,7 @@ async function main(): Promise<void> {
   // 10b. Inject agentManager into service context for callback handler
   Object.assign(baseContext.config, { agentManager });
 
-  // 11. Init orchestrator
-  const _orchestrator = new Orchestrator({
-    eventBus,
-    suiteRegistry,
-    sessionManager,
-    messageStore,
-  });
+  // 11. Orchestrator — initialized after knowledge engine (step 12j) for context injection
 
   // 12. Init scheduler
   const schedulesConfig = loadSchedulesConfig(configDir);
@@ -253,7 +248,20 @@ async function main(): Promise<void> {
   });
   log.info('Knowledge retrieval engine initialized (chunking + multi-tier search)');
 
-  // 12k. Backfill chunk embeddings for any un-chunked bubbles (non-blocking)
+  // 12k. Init context injector for pervasive knowledge injection
+  const contextInjector = createContextInjector({ retrievalEngine });
+
+  // 11. Init orchestrator (after knowledge engine for context injection)
+  const _orchestrator = new Orchestrator({
+    eventBus,
+    suiteRegistry,
+    sessionManager,
+    messageStore,
+    contextInjector,
+    port: config.RAVEN_PORT,
+  });
+
+  // 12l. Backfill chunk embeddings for any un-chunked bubbles (non-blocking)
   chunkingEngine.backfillChunks().catch((err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err);
     log.error(`Chunk backfill failed: ${msg}`);

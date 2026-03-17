@@ -12,6 +12,8 @@ import type { EventBus } from '../event-bus/event-bus.ts';
 import type { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 import type { SessionManager } from '../session-manager/session-manager.ts';
 import type { MessageStore } from '../session-manager/message-store.ts';
+import type { ContextInjector } from '../knowledge-engine/context-injector.ts';
+import { createKnowledgeAgentDefinition } from '../knowledge-engine/knowledge-agent.ts';
 
 const log = createLogger('orchestrator');
 
@@ -22,6 +24,8 @@ export interface OrchestratorDeps {
   suiteRegistry: SuiteRegistry;
   sessionManager: SessionManager;
   messageStore: MessageStore;
+  contextInjector?: ContextInjector;
+  port: number;
 }
 
 /**
@@ -35,20 +39,30 @@ export class Orchestrator {
   private suiteRegistry: SuiteRegistry;
   private sessionManager: SessionManager;
   private messageStore: MessageStore;
+  private contextInjector?: ContextInjector;
+  private port: number;
 
   constructor(deps: OrchestratorDeps) {
     this.eventBus = deps.eventBus;
     this.suiteRegistry = deps.suiteRegistry;
     this.sessionManager = deps.sessionManager;
     this.messageStore = deps.messageStore;
-    this.eventBus.on<NewEmailEvent>('email:new', (e) => this.handleNewEmail(e));
-    this.eventBus.on<ScheduleTriggeredEvent>('schedule:triggered', (e) => this.handleSchedule(e));
-    this.eventBus.on<UserChatMessageEvent>('user:chat:message', (e) => this.handleUserChat(e));
+    this.contextInjector = deps.contextInjector;
+    this.port = deps.port;
+    this.eventBus.on<NewEmailEvent>('email:new', (e) => {
+      this.handleNewEmail(e).catch((err: unknown) => log.error(`handleNewEmail failed: ${err}`));
+    });
+    this.eventBus.on<ScheduleTriggeredEvent>('schedule:triggered', (e) => {
+      this.handleSchedule(e).catch((err: unknown) => log.error(`handleSchedule failed: ${err}`));
+    });
+    this.eventBus.on<UserChatMessageEvent>('user:chat:message', (e) => {
+      this.handleUserChat(e).catch((err: unknown) => log.error(`handleUserChat failed: ${err}`));
+    });
 
     log.info('Orchestrator initialized');
   }
 
-  private handleNewEmail(event: NewEmailEvent): void {
+  private async handleNewEmail(event: NewEmailEvent): Promise<void> {
     const { from, subject, snippet } = event.payload;
     log.info(`New email from ${from}: ${subject}`);
 
@@ -56,6 +70,20 @@ export class Orchestrator {
     if (!emailSuite) {
       log.warn('Email suite not available, ignoring email event');
       return;
+    }
+
+    // Pervasive context injection: query from email subject + sender + snippet
+    let knowledgeContext: string | undefined;
+    if (this.contextInjector) {
+      try {
+        const query = `${subject} ${from} ${snippet}`;
+        const ctx = await this.contextInjector.retrieveContext(query);
+        if (ctx) {
+          knowledgeContext = this.contextInjector.formatContext(ctx);
+        }
+      } catch (err) {
+        log.warn(`Knowledge context retrieval failed for email: ${err}`);
+      }
     }
 
     const mcpServers = emailSuite.mcpServers;
@@ -80,13 +108,14 @@ export class Orchestrator {
         ].join('\n'),
         skillName: SUITE_EMAIL,
         mcpServers,
+        knowledgeContext,
         priority: 'normal',
         projectId: event.projectId,
       },
     });
   }
 
-  private handleSchedule(event: ScheduleTriggeredEvent): void {
+  private async handleSchedule(event: ScheduleTriggeredEvent): Promise<void> {
     const { taskType, scheduleName } = event.payload;
     log.info(`Schedule triggered: ${scheduleName} (${taskType})`);
 
@@ -94,6 +123,20 @@ export class Orchestrator {
     if (!suite) {
       log.warn(`No suite found for task type: ${taskType}`);
       return;
+    }
+
+    // Pervasive context injection: query from schedule name + task type
+    let knowledgeContext: string | undefined;
+    if (this.contextInjector) {
+      try {
+        const query = `${scheduleName} ${taskType}`;
+        const ctx = await this.contextInjector.retrieveContext(query);
+        if (ctx) {
+          knowledgeContext = this.contextInjector.formatContext(ctx);
+        }
+      } catch (err) {
+        log.warn(`Knowledge context retrieval failed for schedule: ${err}`);
+      }
     }
 
     // Collect agent definitions and MCPs from all enabled suites
@@ -114,12 +157,14 @@ export class Orchestrator {
         skillName: suite.manifest.name,
         mcpServers,
         agentDefinitions,
+        knowledgeContext,
         priority: 'normal',
       },
     });
   }
 
-  private handleUserChat(event: UserChatMessageEvent): void {
+  // eslint-disable-next-line max-lines-per-function -- async handler with context injection and knowledge agent merging
+  private async handleUserChat(event: UserChatMessageEvent): Promise<void> {
     const { projectId, sessionId, message, topicId, topicName } = event.payload;
     log.info(`User chat in project ${projectId}: ${message.slice(0, LOG_MESSAGE_PREVIEW_LENGTH)}`);
 
@@ -135,9 +180,25 @@ export class Orchestrator {
       content: message,
     });
 
+    // Pervasive context injection: query from user message text
+    let knowledgeContext: string | undefined;
+    if (this.contextInjector) {
+      try {
+        const ctx = await this.contextInjector.retrieveContext(message);
+        if (ctx) {
+          knowledgeContext = this.contextInjector.formatContext(ctx);
+        }
+      } catch (err) {
+        log.warn(`Knowledge context retrieval failed, proceeding without: ${err}`);
+      }
+    }
+
     // Collect sub-agent definitions from all enabled suites.
     // The orchestrator agent itself has NO MCPs - it delegates via Agent tool to sub-agents.
     const agentDefinitions = this.suiteRegistry.collectAgentDefinitions();
+
+    // Merge knowledge agent into agent definitions
+    agentDefinitions['knowledge-agent'] = createKnowledgeAgentDefinition(this.port);
 
     // Build prompt with topic context and media context if available
     let prompt = message;
@@ -162,7 +223,8 @@ export class Orchestrator {
         prompt,
         skillName: SKILL_ORCHESTRATOR,
         mcpServers: this.suiteRegistry.collectMcpServers(), // Declared for SDK to spawn; only sub-agents use them
-        agentDefinitions, // Sub-agents carry the MCPs
+        agentDefinitions, // Sub-agents carry the MCPs + knowledge agent
+        knowledgeContext,
         priority: 'high',
         sessionId: session.id,
         projectId,

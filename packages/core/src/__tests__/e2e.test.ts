@@ -96,6 +96,7 @@ describe('E2E: Full boot → chat → events flow', () => {
       suiteRegistry,
       sessionManager,
       messageStore,
+      port: 4000,
     });
     scheduler = new Scheduler(eventBus, 'UTC');
     await scheduler.initialize([]);

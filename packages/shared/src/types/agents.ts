@@ -22,6 +22,7 @@ export interface AgentTask {
   priority: Priority;
   mcpServers: Record<string, McpServerConfig>;
   agentDefinitions: Record<string, SubAgentDefinition>;
+  knowledgeContext?: string;
   result?: string;
   durationMs?: number;
   errors?: string[];

@@ -6,7 +6,7 @@ const log = createLogger('message-store');
 
 export interface StoredMessage {
   id: string;
-  role: 'user' | 'assistant' | 'action' | 'thinking' | 'tool-result';
+  role: 'user' | 'assistant' | 'action' | 'thinking' | 'tool-result' | 'context';
   content: string;
   timestamp: number;
   taskId?: string;

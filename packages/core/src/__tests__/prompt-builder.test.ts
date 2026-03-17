@@ -57,6 +57,40 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt(makeTask(), project);
     expect(prompt).not.toContain('Project Context');
   });
+
+  it('includes knowledge context section when knowledgeContext is provided', () => {
+    const prompt = buildSystemPrompt(makeTask(), undefined, 'Some knowledge content');
+    expect(prompt).toContain('## Relevant Knowledge');
+    expect(prompt).toContain('Some knowledge content');
+  });
+
+  it('does not include knowledge section when knowledgeContext is undefined', () => {
+    const prompt = buildSystemPrompt(makeTask());
+    expect(prompt).not.toContain('Relevant Knowledge');
+  });
+
+  it('does not include knowledge section when knowledgeContext is empty string', () => {
+    const prompt = buildSystemPrompt(makeTask(), undefined, '');
+    expect(prompt).not.toContain('Relevant Knowledge');
+  });
+
+  it('places knowledge section before project context section', () => {
+    const project: Project = {
+      id: 'p1',
+      name: 'Test',
+      skills: [],
+      systemPrompt: 'Project info',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    const prompt = buildSystemPrompt(makeTask(), project, 'Knowledge info');
+    const knowledgeIdx = prompt.indexOf('## Relevant Knowledge');
+    const projectIdx = prompt.indexOf('## Project Context');
+    expect(knowledgeIdx).toBeGreaterThan(-1);
+    expect(projectIdx).toBeGreaterThan(-1);
+    expect(knowledgeIdx).toBeLessThan(projectIdx);
+  });
 });
 
 describe('buildSubAgentPrompt', () => {
