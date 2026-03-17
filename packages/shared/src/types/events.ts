@@ -476,6 +476,33 @@ export const TaskManagementManageRequestPayloadSchema = z.object({
   requestId: z.string().optional(),
 });
 
+export interface KnowledgeBubbleCreatedEvent extends BaseEvent {
+  type: 'knowledge:bubble:created';
+  payload: {
+    bubbleId: string;
+    title: string;
+    filePath: string;
+  };
+}
+
+export interface KnowledgeBubbleUpdatedEvent extends BaseEvent {
+  type: 'knowledge:bubble:updated';
+  payload: {
+    bubbleId: string;
+    title: string;
+    filePath: string;
+  };
+}
+
+export interface KnowledgeBubbleDeletedEvent extends BaseEvent {
+  type: 'knowledge:bubble:deleted';
+  payload: {
+    bubbleId: string;
+    title: string;
+    filePath: string;
+  };
+}
+
 export interface SystemHealthAlertEvent extends BaseEvent {
   type: 'system:health:alert';
   payload: {
@@ -526,7 +553,10 @@ export type RavenEvent =
   | EmailActionExtractFailedEvent
   | TaskManagementAutonomousCompletedEvent
   | TaskManagementAutonomousFailedEvent
-  | TaskManagementManageRequestEvent;
+  | TaskManagementManageRequestEvent
+  | KnowledgeBubbleCreatedEvent
+  | KnowledgeBubbleUpdatedEvent
+  | KnowledgeBubbleDeletedEvent;
 
 export type RavenEventType = RavenEvent['type'];
 

@@ -14,6 +14,7 @@ import type { MessageStore } from '../session-manager/message-store.ts';
 import type { PipelineEngine } from '../pipeline-engine/pipeline-engine.ts';
 import type { PipelineStore } from '../pipeline-engine/pipeline-store.ts';
 import type { PipelineScheduler } from '../pipeline-engine/pipeline-scheduler.ts';
+import type { KnowledgeStore } from '../knowledge-engine/knowledge-store.ts';
 import { registerHealthRoute } from './routes/health.ts';
 import { registerProjectRoutes } from './routes/projects.ts';
 import { registerSessionRoutes } from './routes/sessions.ts';
@@ -26,6 +27,7 @@ import { registerApprovalRoutes } from './routes/approvals.ts';
 import { registerAgentTaskRoutes } from './routes/agent-tasks.ts';
 import { registerPipelineRoutes } from './routes/pipelines.ts';
 import { registerMetricsRoute } from './routes/metrics.ts';
+import { registerKnowledgeRoutes } from './routes/knowledge.ts';
 import { registerSSERoutes } from './sse/stream.ts';
 import { registerWebSocketHandler } from './ws/handler.ts';
 
@@ -44,6 +46,7 @@ export interface ApiDeps {
   pipelineEngine: PipelineEngine;
   pipelineStore?: PipelineStore;
   pipelineScheduler?: PipelineScheduler;
+  knowledgeStore?: KnowledgeStore;
   configuredSuiteCount: number;
 }
 
@@ -85,6 +88,12 @@ export async function createApiServer(
     executionLogger: deps.executionLogger,
     pipelineStore: deps.pipelineStore,
   });
+  if (deps.knowledgeStore) {
+    registerKnowledgeRoutes(app, {
+      eventBus: deps.eventBus,
+      knowledgeStore: deps.knowledgeStore,
+    });
+  }
 
   // SSE streaming
   registerSSERoutes(app, {

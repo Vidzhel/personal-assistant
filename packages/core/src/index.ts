@@ -22,6 +22,7 @@ import { createPipelineEngine } from './pipeline-engine/pipeline-engine.ts';
 import { createPipelineStore } from './pipeline-engine/pipeline-store.ts';
 import { createPipelineScheduler } from './pipeline-engine/pipeline-scheduler.ts';
 import { createPipelineEventTrigger } from './pipeline-engine/pipeline-event-trigger.ts';
+import { createKnowledgeStore } from './knowledge-engine/knowledge-store.ts';
 
 const log = createLogger('raven');
 
@@ -42,6 +43,8 @@ async function main(): Promise<void> {
   const dbDir = dirname(dbPath);
   if (!existsSync(dbDir)) mkdirSync(dbDir, { recursive: true });
   if (!existsSync(sessionPath)) mkdirSync(sessionPath, { recursive: true });
+  const knowledgeDir = resolve(projectRoot, 'data/knowledge');
+  if (!existsSync(knowledgeDir)) mkdirSync(knowledgeDir, { recursive: true });
 
   // 3. Init database
   initDatabase(dbPath);
@@ -185,6 +188,11 @@ async function main(): Promise<void> {
     .filter((p) => p.config.enabled && p.config.trigger.type === 'event').length;
   log.info(`Pipeline scheduler: ${cronCount} cron jobs, ${eventCount} event triggers`);
 
+  // 12d. Init knowledge store and reindex
+  const knowledgeStore = createKnowledgeStore({ db: dbInterface, knowledgeDir });
+  const reindexResult = knowledgeStore.reindexAll();
+  log.info(`Knowledge store: ${reindexResult.indexed} bubbles indexed`);
+
   // 13. Start API server
   const server = await createApiServer(
     {
@@ -200,6 +208,7 @@ async function main(): Promise<void> {
       pipelineEngine,
       pipelineStore,
       pipelineScheduler,
+      knowledgeStore,
       configuredSuiteCount,
     },
     config.RAVEN_PORT,

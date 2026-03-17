@@ -89,8 +89,8 @@ development_status:
   epic-5-retrospective: optional
 
   # Epic 6: Knowledge System (Growth)
-  epic-6: backlog
-  6-1-knowledge-bubble-storage-and-crud: backlog
+  epic-6: in-progress
+  6-1-knowledge-bubble-storage-and-crud: done
   6-2-knowledge-ingestion-pipeline: backlog
   6-3-knowledge-auto-clustering-and-tag-management: backlog
   6-4-knowledge-context-injection-for-sub-agents: backlog
