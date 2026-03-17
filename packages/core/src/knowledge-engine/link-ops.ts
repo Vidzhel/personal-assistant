@@ -4,6 +4,10 @@ import type { EmbeddingEngine } from './embeddings.ts';
 
 const LINK_SIMILARITY_THRESHOLD = 0.7;
 const TOP_K_LINK_SUGGESTIONS = 5;
+// For the link-vs-tag decision, only count neighbors with strong similarity (> 0.85).
+// This avoids suppressing link suggestions when marginally similar bubbles inflate the count.
+const LINK_VS_TAG_SIMILARITY_THRESHOLD = 0.85;
+const LINK_VS_TAG_COUNT_THRESHOLD = 2; // 2+ strongly similar neighbors = 3+ bubbles sharing concept → tag territory
 
 export interface LinkEngine {
   suggestLinks: (bubbleId: string) => Promise<KnowledgeLink[]>;
@@ -105,6 +109,15 @@ export function createLinkEngine(deps: LinkDeps): LinkEngine {
       threshold: LINK_SIMILARITY_THRESHOLD,
       excludeIds: [bubbleId],
     });
+
+    // Link vs tag heuristic: count only strongly similar neighbors (> 0.85).
+    // If 3+ bubbles share a concept (2+ strongly similar neighbors), skip link suggestions —
+    // the tag suggestion pipeline handles shared concepts. Links are for specific
+    // relationships between exactly 2 bubbles.
+    const strongNeighborCount = similar.filter(
+      (s) => s.similarity >= LINK_VS_TAG_SIMILARITY_THRESHOLD,
+    ).length;
+    if (strongNeighborCount >= LINK_VS_TAG_COUNT_THRESHOLD) return [];
 
     const links: KnowledgeLink[] = [];
     for (const s of similar) {

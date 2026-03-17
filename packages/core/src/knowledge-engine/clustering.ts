@@ -187,97 +187,126 @@ export function createClusteringEngine(deps: ClusteringDeps): ClusteringEngine {
     return suggestions.slice(0, TOP_K_SIMILAR);
   }
 
-  // --- Event-driven processing chain ---
-  // eslint-disable-next-line max-lines-per-function -- event chain processing runs multiple operations sequentially
+  // --- Event-driven processing chain (per-operation error isolation) ---
+
+  async function chainClassifyDomains(
+    bubbleId: string,
+    bubble: { tags: string[]; title: string; content: string },
+  ): Promise<void> {
+    const domains = classifyDomains({ id: bubbleId, ...bubble });
+    await assignDomains(bubbleId, domains);
+  }
+
+  async function chainPlaceTags(tags: string[], bubbleId: string): Promise<void> {
+    for (const tag of tags) {
+      await tagTree.placeTagInTree(tag, bubbleId);
+    }
+  }
+
+  async function chainSuggestLinks(bubbleId: string): Promise<void> {
+    const linkSuggestions = await linkEngine.suggestLinks(bubbleId);
+    if (linkSuggestions.length > 0) {
+      eventBus.emit({
+        id: generateId(),
+        timestamp: Date.now(),
+        source: 'clustering',
+        type: 'knowledge:links:suggested',
+        payload: {
+          bubbleId,
+          links: linkSuggestions.map((l) => ({
+            targetBubbleId: l.sourceBubbleId === bubbleId ? l.targetBubbleId : l.sourceBubbleId,
+            confidence: l.confidence ?? 0,
+            relationshipType: l.relationshipType,
+          })),
+        },
+      } as RavenEvent);
+    }
+  }
+
+  async function chainSuggestTags(bubbleId: string): Promise<void> {
+    const tagSuggestions = await suggestTags(bubbleId);
+    if (tagSuggestions.length > 0) {
+      eventBus.emit({
+        id: generateId(),
+        timestamp: Date.now(),
+        source: 'clustering',
+        type: 'knowledge:tags:suggested',
+        payload: { bubbleId, suggestedTags: tagSuggestions },
+      } as RavenEvent);
+    }
+  }
+
+  async function chainCheckHub(bubbleId: string): Promise<void> {
+    const hubLinks = await linkEngine.getLinksForBubble(bubbleId);
+    const acceptedLinks = hubLinks.filter((l) => l.status === 'accepted');
+    if (acceptedLinks.length >= HUB_LINK_THRESHOLD) {
+      eventBus.emit({
+        id: generateId(),
+        timestamp: Date.now(),
+        source: 'clustering',
+        type: 'knowledge:hub:detected',
+        payload: { bubbleId, linkCount: acceptedLinks.length },
+      } as RavenEvent);
+    }
+  }
+
+  /** Run a chain step with isolated error handling so one failure doesn't skip the rest. */
+  async function safeChainStep(
+    label: string,
+    bubbleId: string,
+    fn: () => Promise<void>,
+  ): Promise<void> {
+    try {
+      await fn();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log.error(`${label} failed for bubble ${bubbleId}: ${msg}`);
+    }
+  }
+
   async function handleEmbeddingGenerated(event: RavenEvent): Promise<void> {
     if (event.type !== 'knowledge:embedding:generated') return;
     const { bubbleId } = event.payload;
 
-    try {
-      // Get bubble info for domain classification
-      const bubbleInfo = await neo4j.queryOne<{
-        title: string;
-        contentPreview: string | null;
-      }>(
-        `MATCH (b:Bubble {id: $bubbleId})
-         RETURN b.title AS title, b.contentPreview AS contentPreview`,
-        { bubbleId },
-      );
-      if (!bubbleInfo) return;
+    const bubbleInfo = await neo4j.queryOne<{
+      title: string;
+      contentPreview: string | null;
+    }>(
+      `MATCH (b:Bubble {id: $bubbleId})
+       RETURN b.title AS title, b.contentPreview AS contentPreview`,
+      { bubbleId },
+    );
+    if (!bubbleInfo) return;
 
-      const tagRows = await neo4j.query<{ name: string }>(
-        `MATCH (b:Bubble {id: $bubbleId})-[:HAS_TAG]->(t:Tag) RETURN t.name AS name`,
-        { bubbleId },
-      );
-      const tags = tagRows.map((r) => r.name);
+    const tagRows = await neo4j.query<{ name: string }>(
+      `MATCH (b:Bubble {id: $bubbleId})-[:HAS_TAG]->(t:Tag) RETURN t.name AS name`,
+      { bubbleId },
+    );
+    const tags = tagRows.map((r) => r.name);
 
-      // Classify domains
-      const domains = classifyDomains({
-        id: bubbleId,
+    await safeChainStep('Domain classification', bubbleId, () =>
+      chainClassifyDomains(bubbleId, {
         tags,
         title: bubbleInfo.title,
         content: bubbleInfo.contentPreview ?? '',
-      });
-      await assignDomains(bubbleId, domains);
-
-      // Place tags in tree
-      for (const tag of tags) {
-        await tagTree.placeTagInTree(tag, bubbleId);
-      }
-
-      // Suggest links
-      const linkSuggestions = await linkEngine.suggestLinks(bubbleId);
-      if (linkSuggestions.length > 0) {
-        eventBus.emit({
-          id: generateId(),
-          timestamp: Date.now(),
-          source: 'clustering',
-          type: 'knowledge:links:suggested',
-          payload: {
-            bubbleId,
-            links: linkSuggestions.map((l) => ({
-              targetBubbleId: l.sourceBubbleId === bubbleId ? l.targetBubbleId : l.sourceBubbleId,
-              confidence: l.confidence ?? 0,
-              relationshipType: l.relationshipType,
-            })),
-          },
-        } as RavenEvent);
-      }
-
-      // Suggest tags
-      const tagSuggestions = await suggestTags(bubbleId);
-      if (tagSuggestions.length > 0) {
-        eventBus.emit({
-          id: generateId(),
-          timestamp: Date.now(),
-          source: 'clustering',
-          type: 'knowledge:tags:suggested',
-          payload: { bubbleId, suggestedTags: tagSuggestions },
-        } as RavenEvent);
-      }
-
-      // Check hub status
-      const hubLinks = await linkEngine.getLinksForBubble(bubbleId);
-      const acceptedLinks = hubLinks.filter((l) => l.status === 'accepted');
-      if (acceptedLinks.length >= HUB_LINK_THRESHOLD) {
-        eventBus.emit({
-          id: generateId(),
-          timestamp: Date.now(),
-          source: 'clustering',
-          type: 'knowledge:hub:detected',
-          payload: { bubbleId, linkCount: acceptedLinks.length },
-        } as RavenEvent);
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      log.error(`Error processing embedding for bubble ${bubbleId}: ${msg}`);
-    }
+      }),
+    );
+    await safeChainStep('Tag placement', bubbleId, () => chainPlaceTags(tags, bubbleId));
+    await safeChainStep('Link suggestion', bubbleId, () => chainSuggestLinks(bubbleId));
+    await safeChainStep('Tag suggestion', bubbleId, () => chainSuggestTags(bubbleId));
+    await safeChainStep('Hub check', bubbleId, () => chainCheckHub(bubbleId));
   }
 
   async function start(): Promise<void> {
     eventBus.on('knowledge:embedding:generated', (event: RavenEvent) => {
-      handleEmbeddingGenerated(event);
+      handleEmbeddingGenerated(event).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        log.error(`Unhandled error in embedding chain: ${msg}`);
+      });
     });
+    // Start sub-engines (LLM response handlers)
+    clusteringOps.start();
+    hubEngine.start();
     // Ensure domain tags are level-0 entries
     await tagTree.ensureDomainRoots();
     // Ensure domain nodes exist

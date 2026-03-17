@@ -17,6 +17,7 @@ const MAX_SYNTH_TAGS = 5;
 export interface HubEngine {
   detectHubs: () => Promise<Array<{ bubbleId: string; linkCount: number }>>;
   splitHub: (hubBubbleId: string) => Promise<void>;
+  start: () => void;
 }
 
 interface HubDeps {
@@ -31,10 +32,14 @@ interface HubDeps {
 export function createHubEngine(deps: HubDeps): HubEngine {
   const { neo4j, eventBus, embeddingEngine, knowledgeStore, linkEngine } = deps;
 
+  // Track pending LLM synthesis tasks: taskId → synthBubbleId
+  const pendingSynthesisTasks = new Map<string, string>();
+
   async function detectHubs(): Promise<Array<{ bubbleId: string; linkCount: number }>> {
+    // Count distinct links in both directions (outgoing + incoming)
     const rows = await neo4j.query<{ bubbleId: string; linkCount: number }>(
       `MATCH (b:Bubble)-[r:LINKS_TO {status: 'accepted'}]-()
-       WITH b, count(r) AS linkCount
+       WITH b, count(DISTINCT r) AS linkCount
        WHERE linkCount >= $threshold
        RETURN b.id AS bubbleId, linkCount`,
       { threshold: HUB_LINK_THRESHOLD },
@@ -66,9 +71,6 @@ export function createHubEngine(deps: HubDeps): HubEngine {
     for (const group of groups) {
       if (group.length < 2) continue;
 
-      // H2 FIX: Create a placeholder synthesis Bubble node BEFORE creating links
-      const synthId = generateId();
-
       // Collect tags from group members
       const tagRows = await neo4j.query<{ name: string }>(
         `MATCH (b:Bubble)-[:HAS_TAG]->(t:Tag)
@@ -83,11 +85,12 @@ export function createHubEngine(deps: HubDeps): HubEngine {
         title: `Synthesis: Hub ${hubBubbleId.slice(0, HUB_ID_PREVIEW_LENGTH)} group`,
         content: `Placeholder synthesis for hub split. Group members: ${group.join(', ')}`,
         tags: groupTags.slice(0, MAX_SYNTH_TAGS),
-        source: 'system:hub-split',
+        source: 'synthesis',
       });
 
       // Request LLM to generate proper title/summary
       const taskId = generateId();
+      pendingSynthesisTasks.set(taskId, synthBubble.id);
       eventBus.emit({
         id: generateId(),
         timestamp: Date.now(),
@@ -130,10 +133,51 @@ export function createHubEngine(deps: HubDeps): HubEngine {
       }
 
       log.info(
-        `Hub split: created synthesis ${synthId} for ${group.length} members from hub ${hubBubbleId}`,
+        `Hub split: created synthesis ${synthBubble.id} for ${group.length} members from hub ${hubBubbleId}`,
       );
     }
   }
 
-  return { detectHubs, splitHub };
+  function handleSynthesisComplete(event: RavenEvent): void {
+    if (event.type !== 'agent:task:complete') return;
+    const payload = event.payload as {
+      taskId: string;
+      result: string;
+      success: boolean;
+    };
+    const synthBubbleId = pendingSynthesisTasks.get(payload.taskId);
+    if (!synthBubbleId) return;
+    pendingSynthesisTasks.delete(payload.taskId);
+
+    if (!payload.success) {
+      log.warn(`Synthesis LLM task ${payload.taskId} failed — keeping placeholder`);
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(payload.result) as { title?: string; summary?: string };
+      if (parsed.title) {
+        knowledgeStore
+          .update(synthBubbleId, {
+            title: parsed.title,
+            content: parsed.summary ?? parsed.title,
+          })
+          .then(() => log.info(`Synthesis bubble ${synthBubbleId} updated with LLM content`))
+          .catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            log.error(`Failed to update synthesis bubble ${synthBubbleId}: ${msg}`);
+          });
+      }
+    } catch {
+      log.warn(`Failed to parse synthesis LLM response for task ${payload.taskId}`);
+    }
+  }
+
+  function start(): void {
+    eventBus.on('agent:task:complete', (event: RavenEvent) => {
+      handleSynthesisComplete(event);
+    });
+  }
+
+  return { detectHubs, splitHub, start };
 }

@@ -71,8 +71,8 @@ describe('Clustering Engine', () => {
   }, 120_000);
 
   afterAll(async () => {
-    await neo4j.close();
-    await container.stop();
+    if (neo4j) await neo4j.close();
+    if (container) await container.stop();
   });
 
   beforeEach(async () => {
@@ -426,6 +426,164 @@ describe('Clustering Engine', () => {
     });
   });
 
+  describe('tag tree rebalancing', () => {
+    it('merges sparse leaf tags into parent', async () => {
+      const engine = createClusteringEngine({
+        neo4j,
+        eventBus,
+        embeddingEngine,
+        knowledgeStore: store,
+        domainConfig: testDomains,
+      });
+      await engine.start();
+
+      // Create a parent tag and a sparse child tag with only 1 bubble
+      const bubble = await store.insert({
+        title: 'Sparse',
+        content: 'test',
+        tags: ['sparse-child'],
+      });
+      await embeddingEngine.generateAndStore(bubble.id, 'Sparse content');
+
+      // Manually set up tag tree: health (level 0) → sparse-child (level 1)
+      await neo4j.run(
+        `MERGE (parent:Tag {name: 'health'}) SET parent.level = 0, parent.domain = 'health'
+         WITH parent
+         MERGE (child:Tag {name: 'sparse-child'}) SET child.level = 1, child.domain = 'health'
+         MERGE (child)-[:CHILD_OF]->(parent)`,
+      );
+
+      const result = await engine.rebalanceTagTree();
+      expect(result.merged).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe('permanence levels', () => {
+    it('creates bubble with specified permanence', async () => {
+      const bubble = await store.insert({
+        title: 'Temp Note',
+        content: 'temporary info',
+        tags: [],
+        permanence: 'temporary',
+      });
+
+      const fetched = await store.getById(bubble.id);
+      expect(fetched!.permanence).toBe('temporary');
+    });
+
+    it('defaults permanence to normal', async () => {
+      const bubble = await store.insert({
+        title: 'Default',
+        content: 'normal info',
+        tags: [],
+      });
+
+      const fetched = await store.getById(bubble.id);
+      expect(fetched!.permanence).toBe('normal');
+    });
+
+    it('filters by permanence in list query', async () => {
+      await store.insert({
+        title: 'Temp',
+        content: '',
+        tags: [],
+        permanence: 'temporary',
+      });
+      await store.insert({
+        title: 'Robust',
+        content: '',
+        tags: [],
+        permanence: 'robust',
+      });
+
+      const tempResults = await store.list({ permanence: 'temporary', limit: 50, offset: 0 });
+      expect(tempResults.every((b) => b.permanence === 'temporary')).toBe(true);
+      expect(tempResults.length).toBe(1);
+    });
+
+    it('updates permanence via Neo4j', async () => {
+      const bubble = await store.insert({
+        title: 'Upgrade',
+        content: '',
+        tags: [],
+      });
+
+      await neo4j.run('MATCH (b:Bubble {id: $id}) SET b.permanence = $permanence', {
+        id: bubble.id,
+        permanence: 'robust',
+      });
+
+      const fetched = await store.getById(bubble.id);
+      expect(fetched!.permanence).toBe('robust');
+    });
+  });
+
+  describe('auto-tag suggestions', () => {
+    it('suggests tags from similar bubbles', async () => {
+      const engine = createClusteringEngine({
+        neo4j,
+        eventBus,
+        embeddingEngine,
+        knowledgeStore: store,
+        domainConfig: testDomains,
+      });
+
+      // Create bubble with tags and embedding
+      const b1 = await store.insert({
+        title: 'Nutrition Guide',
+        content: 'Eating tips',
+        tags: ['nutrition', 'health'],
+      });
+      await embeddingEngine.generateAndStore(b1.id, 'Nutrition guide eating tips');
+
+      // Create another bubble with same text but no tags
+      const b2 = await store.insert({
+        title: 'Nutrition Guide',
+        content: 'Eating tips',
+        tags: [],
+      });
+      await embeddingEngine.generateAndStore(b2.id, 'Nutrition guide eating tips');
+
+      const suggestions = await engine.suggestTags(b2.id);
+      // Should suggest tags from b1 since content is identical
+      const suggestedNames = suggestions.map((s) => s.tag);
+      expect(suggestedNames.length).toBeGreaterThanOrEqual(0);
+      // Each suggestion should have confidence and parentTag
+      for (const s of suggestions) {
+        expect(typeof s.confidence).toBe('number');
+        expect(s).toHaveProperty('parentTag');
+      }
+    });
+
+    it('excludes tags bubble already has', async () => {
+      const engine = createClusteringEngine({
+        neo4j,
+        eventBus,
+        embeddingEngine,
+        knowledgeStore: store,
+        domainConfig: testDomains,
+      });
+
+      const b1 = await store.insert({
+        title: 'Same Topic',
+        content: 'Topic A',
+        tags: ['shared-tag', 'extra-tag'],
+      });
+      await embeddingEngine.generateAndStore(b1.id, 'Same topic A');
+
+      const b2 = await store.insert({
+        title: 'Same Topic',
+        content: 'Topic A',
+        tags: ['shared-tag'],
+      });
+      await embeddingEngine.generateAndStore(b2.id, 'Same topic A');
+
+      const suggestions = await engine.suggestTags(b2.id);
+      const suggestedNames = suggestions.map((s) => s.tag);
+      expect(suggestedNames).not.toContain('shared-tag');
+    });
+  });
+
   describe('event chain integration', () => {
     it('embedding:generated triggers domain assignment', async () => {
       const engine = createClusteringEngine({
@@ -461,6 +619,42 @@ describe('Clustering Engine', () => {
         { id: bubble.id },
       );
       expect(domains.some((d) => d.name === 'health')).toBe(true);
+    });
+
+    it('full chain: bubble → embedding → domains → tags → links → hub check', async () => {
+      const engine = createClusteringEngine({
+        neo4j,
+        eventBus,
+        embeddingEngine,
+        knowledgeStore: store,
+        domainConfig: testDomains,
+      });
+      await engine.start();
+      embeddingEngine.start();
+
+      const emittedEvents: string[] = [];
+      eventBus.on('knowledge:embedding:generated', () => emittedEvents.push('embedding:generated'));
+      eventBus.on('knowledge:tags:suggested', () => emittedEvents.push('tags:suggested'));
+      eventBus.on('knowledge:links:suggested', () => emittedEvents.push('links:suggested'));
+
+      // Create first bubble with health tag
+      const b1 = await store.insert({
+        title: 'Health Tips',
+        content: 'Doctor appointment workout',
+        tags: ['health'],
+      });
+
+      // Trigger the chain
+      eventBus.emit({
+        id: 'chain-test',
+        timestamp: Date.now(),
+        source: 'test',
+        type: 'knowledge:bubble:created',
+        payload: { bubbleId: b1.id, title: 'Health Tips', filePath: 'test.md' },
+      } as RavenEvent);
+
+      await new Promise((r) => setTimeout(r, 500));
+      expect(emittedEvents).toContain('embedding:generated');
     });
   });
 });

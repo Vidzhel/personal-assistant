@@ -361,19 +361,17 @@ export function createKnowledgeStore(deps: {
 
     const conditions: string[] = [];
     const params: Record<string, unknown> = {};
-    let matchClause = 'MATCH (b:Bubble)';
+    const matchClauses: string[] = ['MATCH (b:Bubble)'];
 
     if (query.tag) {
-      matchClause = 'MATCH (b:Bubble)-[:HAS_TAG]->(t:Tag {name: $tag})';
+      matchClauses[0] = 'MATCH (b:Bubble)-[:HAS_TAG]->(t:Tag {name: $tag})';
       params.tag = query.tag;
     }
     if (query.domain) {
-      matchClause += query.tag
-        ? '\nMATCH (b)-[:IN_DOMAIN]->(d:Domain {name: $domain})'
-        : '\nMATCH (b:Bubble)-[:IN_DOMAIN]->(d:Domain {name: $domain})';
-      if (!query.tag) matchClause = matchClause.replace('MATCH (b:Bubble)\n', '');
+      matchClauses.push('MATCH (b)-[:IN_DOMAIN]->(d:Domain {name: $domain})');
       params.domain = query.domain;
     }
+    const matchClause = matchClauses.join('\n');
     if (query.source) {
       conditions.push('b.source = $source');
       params.source = query.source;

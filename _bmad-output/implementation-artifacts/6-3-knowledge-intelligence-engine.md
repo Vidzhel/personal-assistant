@@ -1,6 +1,6 @@
 # Story 6.3: Knowledge Intelligence Engine
 
-Status: review
+Status: done
 
 ## Story
 
@@ -529,7 +529,7 @@ packages/core/src/knowledge-engine/
 
 - **Mock `@huggingface/transformers`** — return deterministic fake embeddings (known Float32Arrays)
 - **Mock `@anthropic-ai/claude-code`** — for cluster labels and hub synthesis
-- Temp SQLite DBs with migration runner
+- Neo4j testcontainers (`@testcontainers/neo4j`) for integration tests
 - Test cosine similarity with known vectors
 - Test tag tree: insertion, hierarchy, rebalancing with sparse subtrees
 - Test multi-domain classification
@@ -596,20 +596,33 @@ Claude Opus 4.6 (1M context)
 
 ### Change Log
 - 2026-03-17: Implemented all 10 tasks for story 6.3 Knowledge Intelligence Engine
+- 2026-03-17: Code review fixes — H1: added LLM response handlers for cluster labels (clustering-ops.ts) and hub synthesis content (hub-ops.ts); H2: updated File List with all Neo4j migration files; M1: fixed dead synthId variable in hub-ops log; M2: made split-hub endpoint truly async; M3: fixed synthesis source to 'synthesis'; M4: implemented link-vs-tag heuristic in link-ops.ts; M5: added tests for rebalancing, permanence, auto-tag suggestions, full event chain
+- 2026-03-17: Code review #2 fixes — H1: added .catch() to fire-and-forget async event handlers in clustering.ts and embeddings.ts; M1: improved link-vs-tag heuristic to use strong similarity threshold (0.85) for counting instead of raw neighbor count; M2: replaced O(n²) brute-force merge detection with Neo4j vector index ANN search; M3: guarded afterAll in all Neo4j test files against undefined variables
+- 2026-03-17: Code review #3 fixes — H1: guarded tmpDir in knowledge-api.test.ts afterAll; H2: added 18 new API route tests for all 6.3 endpoints (tags tree, domains, rebalance, clustering, merges, hubs, links, permanence, domain filter); H3: fixed hub detection double-counting links with count(DISTINCT r); M1: refactored fragile string-replace query building in listBubbles to use matchClauses array
+- 2026-03-17: Code review #4 fixes — H1: added serializeEmbedding()/deserializeEmbedding() exports to embeddings.ts for story 6.4 reuse (task 1.9 contract); M1: added vector index eventual consistency comment in findSimilar; M3: refactored handleEmbeddingGenerated into per-operation isolated error handling via safeChainStep() + extracted chain helpers
 
 ### File List
-- `migrations/007-knowledge-intelligence.sql` — NEW: all new tables (embeddings, domains, tag tree, links, clusters, merges)
+- `migrations/007-knowledge-intelligence.sql` — PLACEHOLDER: tables moved to Neo4j graph (constraints/indexes via neo4j-client.ts)
 - `config/knowledge-domains.json` — NEW: domain classification rules
 - `packages/shared/src/types/knowledge.ts` — MODIFIED: added Permanence, TagTreeNode, KnowledgeLink, KnowledgeDomain, KnowledgeCluster, KnowledgeMergeSuggestion types + Zod schemas; updated KnowledgeBubble/Summary with domains/permanence
 - `packages/shared/src/types/events.ts` — MODIFIED: added 6 new event types (embedding:generated, tags:suggested, links:suggested, clustering:complete, merge:detected, hub:detected)
-- `packages/core/src/knowledge-engine/embeddings.ts` — NEW: embedding generation, cosine similarity, findSimilar, event-driven auto-embedding
-- `packages/core/src/knowledge-engine/clustering.ts` — NEW: domain classification, tag tree, inter-bubble linking, hub detection/splitting, agglomerative clustering, merge detection, auto-tag suggestions
+- `packages/core/src/knowledge-engine/neo4j-client.ts` — NEW: Neo4j driver wrapper with schema constraints, vector index, and type-safe query helpers
+- `packages/core/src/knowledge-engine/embeddings.ts` — NEW: embedding generation, cosine similarity, findSimilar (via Neo4j vector index), event-driven auto-embedding
+- `packages/core/src/knowledge-engine/clustering.ts` — NEW: facade composing sub-engines for domain classification, event chain handler, auto-tag suggestions
+- `packages/core/src/knowledge-engine/clustering-ops.ts` — NEW: agglomerative clustering, cluster CRUD, LLM label response handler
+- `packages/core/src/knowledge-engine/clustering-utils.ts` — NEW: agglomerative clustering algorithm with centroid-linkage
+- `packages/core/src/knowledge-engine/tag-tree.ts` — NEW: hierarchical tag tree with placement, rebalancing, domain root management
+- `packages/core/src/knowledge-engine/link-ops.ts` — NEW: inter-bubble links with link-vs-tag heuristic, suggest/create/resolve
+- `packages/core/src/knowledge-engine/hub-ops.ts` — NEW: hub detection (10+ links), hub splitting with synthesis bubbles, LLM response handler
+- `packages/core/src/knowledge-engine/merge-ops.ts` — NEW: merge detection (cosine > 0.9), merge suggestion CRUD
 - `packages/core/src/knowledge-engine/domain-config.ts` — NEW: knowledge domain config loader with Zod validation
-- `packages/core/src/knowledge-engine/knowledge-store.ts` — MODIFIED: added permanence/domains fields, domain/permanence list filters
+- `packages/core/src/knowledge-engine/knowledge-store.ts` — MODIFIED: migrated from SQLite to Neo4j, added permanence/domains fields, domain/permanence list filters
 - `packages/core/src/knowledge-engine/ingestion.ts` — MODIFIED: source-based permanence defaults (voice-memo → temporary)
 - `packages/core/src/api/routes/knowledge.ts` — MODIFIED: 15+ new endpoints for tags, domains, links, clusters, merges, hubs, permanence
-- `packages/core/src/api/server.ts` — MODIFIED: wired embedding/clustering engines + DB interface to API deps
-- `packages/core/src/index.ts` — MODIFIED: boot sequence for embedding engine, clustering engine, domain config
-- `packages/core/package.json` — MODIFIED: added `@huggingface/transformers` dependency
-- `packages/core/src/__tests__/knowledge-embeddings.test.ts` — NEW: 14 tests for embedding engine
-- `packages/core/src/__tests__/knowledge-clustering.test.ts` — NEW: 32 tests for clustering engine
+- `packages/core/src/api/server.ts` — MODIFIED: wired embedding/clustering engines + Neo4j client to API deps
+- `packages/core/src/index.ts` — MODIFIED: boot sequence for Neo4j client, embedding engine, clustering engine, domain config, graceful shutdown
+- `packages/core/src/config.ts` — MODIFIED: added NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD env vars
+- `packages/core/package.json` — MODIFIED: added `@huggingface/transformers` and `neo4j-driver` dependencies
+- `docker-compose.yml` — MODIFIED: added Neo4j service with healthcheck, updated raven-core depends_on
+- `packages/core/src/__tests__/knowledge-embeddings.test.ts` — NEW: 14 tests for embedding engine (Neo4j testcontainers)
+- `packages/core/src/__tests__/knowledge-clustering.test.ts` — NEW: tests for clustering engine (domains, tags, links, clustering, merges, hubs, permanence, auto-tag suggestions, event chain)

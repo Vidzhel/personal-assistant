@@ -7,12 +7,13 @@ import {
 import type { Neo4jClient } from './neo4j-client.ts';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { EmbeddingEngine } from './embeddings.ts';
-import { cosineSimilarity } from './embeddings.ts';
 
 const log = createLogger('merge-ops');
 
 const MERGE_SIMILARITY_THRESHOLD = 0.9;
 const COSINE_PRECISION = 3;
+// Max candidates to check per bubble via vector index — keeps merge detection O(n) not O(n^2)
+const MERGE_CANDIDATES_PER_BUBBLE = 5;
 
 export interface MergeEngine {
   detectMerges: () => Promise<{ mergeCount: number }>;
@@ -30,42 +31,59 @@ interface MergeDeps {
 export function createMergeEngine(deps: MergeDeps): MergeEngine {
   const { neo4j, eventBus, embeddingEngine } = deps;
 
+  // eslint-disable-next-line max-lines-per-function -- merge detection with vector index queries
   async function detectMerges(): Promise<{ mergeCount: number }> {
-    const allEmbeddings = await embeddingEngine.getAllEmbeddings();
+    // Use vector index for approximate nearest neighbor search per bubble — O(n) not O(n^2).
+    // For each bubble with an embedding, find its closest neighbors above the merge threshold.
+    const allBubbleIds = await neo4j.query<{ bubbleId: string }>(
+      `MATCH (b:Bubble) WHERE b.embedding IS NOT NULL RETURN b.id AS bubbleId`,
+    );
     let mergeCount = 0;
+    const seen = new Set<string>();
 
-    for (let i = 0; i < allEmbeddings.length; i++) {
-      for (let j = i + 1; j < allEmbeddings.length; j++) {
-        const sim = cosineSimilarity(allEmbeddings[i].embedding, allEmbeddings[j].embedding);
-        if (sim > MERGE_SIMILARITY_THRESHOLD) {
-          // Check if already suggested
-          const existing = await neo4j.queryOne<{ id: string }>(
-            `MATCH (a:Bubble {id: $a})-[r:MERGE_CANDIDATE]-(b:Bubble {id: $b})
-             RETURN r.id AS id LIMIT 1`,
-            { a: allEmbeddings[i].bubbleId, b: allEmbeddings[j].bubbleId },
-          );
-          if (existing) continue;
+    for (const { bubbleId } of allBubbleIds) {
+      const embedding = await embeddingEngine.getEmbedding(bubbleId);
+      if (!embedding) continue;
 
-          const id = generateId();
-          const now = new Date().toISOString();
-          await neo4j.run(
-            `MATCH (a:Bubble {id: $aId}), (b:Bubble {id: $bId})
-             CREATE (a)-[:MERGE_CANDIDATE {
-               id: $id, overlapReason: $reason,
-               confidence: $confidence, status: 'pending',
-               createdAt: $now, resolvedAt: null
-             }]->(b)`,
-            {
-              aId: allEmbeddings[i].bubbleId,
-              bId: allEmbeddings[j].bubbleId,
-              id,
-              reason: `Cosine similarity: ${sim.toFixed(COSINE_PRECISION)}`,
-              confidence: sim,
-              now,
-            },
-          );
-          mergeCount++;
-        }
+      const similar = await embeddingEngine.findSimilar(embedding, {
+        limit: MERGE_CANDIDATES_PER_BUBBLE,
+        threshold: MERGE_SIMILARITY_THRESHOLD,
+        excludeIds: [bubbleId],
+      });
+
+      for (const s of similar) {
+        // Deduplicate pairs (A,B) vs (B,A)
+        const pairKey = [bubbleId, s.bubbleId].sort().join(':');
+        if (seen.has(pairKey)) continue;
+        seen.add(pairKey);
+
+        // Check if already suggested
+        const existing = await neo4j.queryOne<{ id: string }>(
+          `MATCH (a:Bubble {id: $a})-[r:MERGE_CANDIDATE]-(b:Bubble {id: $b})
+           RETURN r.id AS id LIMIT 1`,
+          { a: bubbleId, b: s.bubbleId },
+        );
+        if (existing) continue;
+
+        const id = generateId();
+        const now = new Date().toISOString();
+        await neo4j.run(
+          `MATCH (a:Bubble {id: $aId}), (b:Bubble {id: $bId})
+           CREATE (a)-[:MERGE_CANDIDATE {
+             id: $id, overlapReason: $reason,
+             confidence: $confidence, status: 'pending',
+             createdAt: $now, resolvedAt: null
+           }]->(b)`,
+          {
+            aId: bubbleId,
+            bId: s.bubbleId,
+            id,
+            reason: `Cosine similarity: ${s.similarity.toFixed(COSINE_PRECISION)}`,
+            confidence: s.similarity,
+            now,
+          },
+        );
+        mergeCount++;
       }
     }
 

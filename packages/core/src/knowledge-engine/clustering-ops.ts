@@ -13,6 +13,7 @@ export interface ClusteringOps {
   getClusters: () => Promise<KnowledgeCluster[]>;
   getClusterMembers: (clusterId: string) => Promise<string[]>;
   deleteCluster: (clusterId: string) => Promise<boolean>;
+  start: () => void;
 }
 
 interface ClusteringOpsDeps {
@@ -24,6 +25,9 @@ interface ClusteringOpsDeps {
 // eslint-disable-next-line max-lines-per-function -- factory function for clustering ops
 export function createClusteringOps(deps: ClusteringOpsDeps): ClusteringOps {
   const { neo4j, eventBus, embeddingEngine } = deps;
+
+  // Track pending LLM label tasks: taskId → clusterId
+  const pendingLabelTasks = new Map<string, string>();
 
   async function runClustering(): Promise<{
     clusterCount: number;
@@ -65,6 +69,7 @@ export function createClusteringOps(deps: ClusteringOpsDeps): ClusteringOps {
 
       // Request LLM for cluster label
       const taskId = generateId();
+      pendingLabelTasks.set(taskId, clusterId);
       eventBus.emit({
         id: generateId(),
         timestamp: Date.now(),
@@ -120,5 +125,52 @@ export function createClusteringOps(deps: ClusteringOpsDeps): ClusteringOps {
     return result.records.length > 0 && result.records[0].get('deleted').toNumber() > 0;
   }
 
-  return { runClustering, getClusters, getClusterMembers, deleteCluster };
+  function handleLabelComplete(event: RavenEvent): void {
+    if (event.type !== 'agent:task:complete') return;
+    const payload = event.payload as {
+      taskId: string;
+      result: string;
+      success: boolean;
+    };
+    const clusterId = pendingLabelTasks.get(payload.taskId);
+    if (!clusterId) return;
+    pendingLabelTasks.delete(payload.taskId);
+
+    if (!payload.success) {
+      log.warn(`Cluster label LLM task ${payload.taskId} failed — keeping placeholder`);
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(payload.result) as { label?: string; description?: string };
+      if (parsed.label) {
+        neo4j
+          .run(
+            `MATCH (c:Cluster {id: $clusterId})
+             SET c.label = $label, c.description = $description, c.updatedAt = $now`,
+            {
+              clusterId,
+              label: parsed.label,
+              description: parsed.description ?? null,
+              now: new Date().toISOString(),
+            },
+          )
+          .then(() => log.info(`Cluster ${clusterId} label updated from LLM`))
+          .catch((err: unknown) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            log.error(`Failed to update cluster ${clusterId} label: ${msg}`);
+          });
+      }
+    } catch {
+      log.warn(`Failed to parse cluster label LLM response for task ${payload.taskId}`);
+    }
+  }
+
+  function start(): void {
+    eventBus.on('agent:task:complete', (event: RavenEvent) => {
+      handleLabelComplete(event);
+    });
+  }
+
+  return { runClustering, getClusters, getClusterMembers, deleteCluster, start };
 }

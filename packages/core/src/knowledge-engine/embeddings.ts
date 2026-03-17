@@ -31,6 +31,16 @@ export function resetPipeline(): void {
   pipelineInstance = null;
 }
 
+/** Serialize a Float32Array embedding to a Buffer for storage/transport (story 6.4 reuse). */
+export function serializeEmbedding(embedding: Float32Array): Buffer {
+  return Buffer.from(embedding.buffer, embedding.byteOffset, embedding.byteLength);
+}
+
+/** Deserialize a Buffer back to a Float32Array embedding (story 6.4 reuse). */
+export function deserializeEmbedding(blob: Buffer): Float32Array {
+  return new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / FLOAT32_BYTES);
+}
+
 export function cosineSimilarity(a: Float32Array, b: Float32Array): number {
   let dot = 0;
   let normA = 0;
@@ -85,6 +95,7 @@ interface EmbeddingDeps {
 
 const DEFAULT_SIMILAR_LIMIT = 10;
 const DEFAULT_SIMILAR_THRESHOLD = 0.5;
+const FLOAT32_BYTES = 4;
 
 // eslint-disable-next-line max-lines-per-function -- factory function for embedding engine
 export function createEmbeddingEngine(deps: EmbeddingDeps): EmbeddingEngine {
@@ -136,7 +147,9 @@ export function createEmbeddingEngine(deps: EmbeddingDeps): EmbeddingEngine {
     const excludeIds = options.excludeIds ?? [];
     const embeddingArray = Array.from(targetEmbedding);
 
-    // Use Neo4j vector index for approximate nearest neighbor search
+    // Use Neo4j vector index for approximate nearest neighbor search.
+    // Note: Neo4j vector indexes are eventually consistent — results may be stale
+    // immediately after generateAndStore(). Acceptable at current scale.
     const rows = await neo4j.query<{ bubbleId: string; score: number }>(
       `CALL db.index.vector.queryNodes('bubble_embedding', $topK, $embedding)
        YIELD node, score
@@ -183,10 +196,16 @@ export function createEmbeddingEngine(deps: EmbeddingDeps): EmbeddingEngine {
 
   function start(): void {
     eventBus.on('knowledge:bubble:created', (event: RavenEvent) => {
-      handleBubbleEvent(event);
+      handleBubbleEvent(event).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        log.error(`Unhandled error in bubble:created handler: ${msg}`);
+      });
     });
     eventBus.on('knowledge:bubble:updated', (event: RavenEvent) => {
-      handleBubbleEvent(event);
+      handleBubbleEvent(event).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        log.error(`Unhandled error in bubble:updated handler: ${msg}`);
+      });
     });
     log.info(
       'Embedding engine started — listening for knowledge:bubble:created/updated events (lazy model init)',

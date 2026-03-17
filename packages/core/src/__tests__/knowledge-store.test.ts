@@ -26,8 +26,8 @@ describe('KnowledgeStore', () => {
   }, 120_000);
 
   afterAll(async () => {
-    await neo4j.close();
-    await container.stop();
+    if (neo4j) await neo4j.close();
+    if (container) await container.stop();
   });
 
   beforeEach(async () => {
