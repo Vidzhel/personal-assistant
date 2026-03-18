@@ -17,7 +17,7 @@ import { matchRules, type EmailPayload, type MatchResult } from './rule-matcher.
 
 const log = createLogger('email-triage');
 
-const CONFIG_PATH = resolve('config/email-rules.json');
+let configPath = resolve('config/email-rules.json');
 
 let eventBus: EventBusInterface;
 let serviceConfig: Record<string, unknown>;
@@ -43,7 +43,7 @@ function getAgentManager(): AgentManagerLike | null {
 
 async function loadRules(): Promise<EmailTriageConfig | null> {
   try {
-    const raw = await readFile(CONFIG_PATH, 'utf-8');
+    const raw = await readFile(configPath, 'utf-8');
     const parsed = JSON.parse(raw);
     const validated = EmailTriageConfigSchema.safeParse(parsed);
     if (!validated.success) {
@@ -218,6 +218,7 @@ const service: SuiteService = {
   async start(context: ServiceContext): Promise<void> {
     eventBus = context.eventBus;
     serviceConfig = context.config;
+    configPath = resolve(context.projectRoot, 'config/email-rules.json');
 
     triageConfig = await loadRules();
     if (triageConfig) {

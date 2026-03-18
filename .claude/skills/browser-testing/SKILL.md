@@ -166,6 +166,10 @@ Group related tests (e.g., all project CRUD tests together). Order tests so earl
 
 ## Running Tests
 
+### Headless Mode (MANDATORY)
+
+**Never pass `--headed` to `playwright-cli open` or any other command. All testing runs headless — no exceptions.**
+
 ### Single Test or Quick Verification
 
 Use `playwright-cli` commands directly in conversation:

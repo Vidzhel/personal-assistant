@@ -3,7 +3,8 @@
 import dynamic from 'next/dynamic';
 import { useGraphBehaviors } from './graph-hooks';
 
-const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), { ssr: false });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic import loses generic type params
+const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), { ssr: false }) as any;
 
 export function KnowledgeGraph() {
   const {
@@ -21,7 +22,7 @@ export function KnowledgeGraph() {
   return (
     <div className="relative w-full h-full">
       <ForceGraph2D
-        ref={graphRef as React.Ref<never>}
+        ref={graphRef}
         graphData={graphData}
         nodeId="id"
         nodeCanvasObject={nodeCanvasObject}

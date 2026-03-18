@@ -28,6 +28,10 @@ playwright-cli open http://localhost:4000playwright-cli snapshot
 
 If no session name is specified in your prompt, use the default (no `-s=` flag).
 
+## Headless Mode (MANDATORY)
+
+**Never use the `--headed` flag. All browser testing MUST run headless.** Do not pass `--headed` to any `playwright-cli` command under any circumstances.
+
 ## Environment
 
 - **Frontend**: Next.js 15 + Tailwind CSS at `http://localhost:4000`
@@ -282,7 +286,7 @@ X/Y tests passed. Overall: PASS/FAIL
 
 ## Best Practices
 
-- Run headless (no `--headed` flag) for faster, non-visual test execution
+- **NEVER use `--headed`** — all browser testing must run headless, no exceptions
 - Always snapshot before interacting — refs change after page updates
 - Use `ref` values from the most recent snapshot only
 - Wait 1-2s after navigation/interaction before asserting

@@ -33,7 +33,9 @@ const SuiteCapability = z.enum([
 ]);
 
 const SuiteManifestSchema = z.object({
-  name: z.string().regex(/^[a-z][a-z0-9-]*$/, 'Suite name must be lowercase kebab-case'),
+  name: z
+    .string()
+    .regex(/^_?[a-z][a-z0-9-]*$/, 'Suite name must be lowercase kebab-case (optional _ prefix)'),
   displayName: z.string().min(1),
   version: z.string().default('0.1.0'),
   description: z.string().min(1),

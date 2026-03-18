@@ -103,6 +103,7 @@ async function main(): Promise<void> {
     db: dbInterface,
     logger: log,
     config: {},
+    projectRoot,
   };
 
   await serviceRunner.startServices(suiteRegistry.getAllSuites(), baseContext);

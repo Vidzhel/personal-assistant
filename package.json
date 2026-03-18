@@ -46,6 +46,8 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.24.1"
+    "@google/generative-ai": "^0.24.1",
+    "grammy": "^1.41.1",
+    "imapflow": "^1.2.15"
   }
 }

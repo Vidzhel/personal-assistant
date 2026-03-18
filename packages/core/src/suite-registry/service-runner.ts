@@ -15,6 +15,7 @@ export interface ServiceContext {
   db: DatabaseInterface;
   logger: LoggerInterface;
   config: Record<string, unknown>;
+  projectRoot: string;
 }
 
 export interface SuiteService {
