@@ -3,5 +3,14 @@
   "email": { "enabled": true, "config": { "watchFolders": ["INBOX"] } },
   "notifications": { "enabled": true },
   "daily-briefing": { "enabled": true },
-  "gemini-transcription": { "enabled": true }
+  "gemini-transcription": { "enabled": true },
+  "proactive-intelligence": {
+    "enabled": true,
+    "config": {
+      "confidenceThreshold": 0.6,
+      "analysisIntervalCron": "0 */6 * * *",
+      "suppressionWindowDays": 7,
+      "maxInsightsPerRun": 5
+    }
+  }
 }

@@ -1,0 +1,9 @@
+[
+  {
+    "id": "pattern-analysis",
+    "name": "Pattern Analysis",
+    "cron": "0 */6 * * *",
+    "taskType": "pattern-analysis",
+    "enabled": true
+  }
+]

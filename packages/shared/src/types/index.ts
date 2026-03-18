@@ -7,3 +7,4 @@ export * from './permissions.ts';
 export * from './pipelines.ts';
 export * from './email-rules.ts';
 export * from './knowledge.ts';
+export * from './insights.ts';

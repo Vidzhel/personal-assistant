@@ -1,0 +1,4 @@
+[
+  { "name": "intelligence:generate-insight", "description": "Generate insights from pattern analysis", "defaultTier": "green", "reversible": true },
+  { "name": "intelligence:deliver-insight", "description": "Deliver an insight notification to the user", "defaultTier": "yellow", "reversible": true }
+]

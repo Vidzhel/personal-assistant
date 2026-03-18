@@ -636,6 +636,34 @@ export interface KnowledgeStaleBubblesDetectedEvent extends BaseEvent {
   };
 }
 
+export interface InsightGeneratedEvent extends BaseEvent {
+  type: 'insight:generated';
+  payload: {
+    insightId: string;
+    patternKey: string;
+    title: string;
+    confidence: number;
+    serviceSources: string[];
+  };
+}
+
+export interface InsightQueuedEvent extends BaseEvent {
+  type: 'insight:queued';
+  payload: {
+    insightId: string;
+    patternKey: string;
+  };
+}
+
+export interface InsightSuppressedEvent extends BaseEvent {
+  type: 'insight:suppressed';
+  payload: {
+    insightId: string;
+    patternKey: string;
+    reason: 'duplicate' | 'low-confidence';
+  };
+}
+
 export interface SystemHealthAlertEvent extends BaseEvent {
   type: 'system:health:alert';
   payload: {
@@ -703,7 +731,10 @@ export type RavenEvent =
   | KnowledgeReindexProgressEvent
   | KnowledgeReindexCompleteEvent
   | KnowledgeRetrospectiveCompleteEvent
-  | KnowledgeStaleBubblesDetectedEvent;
+  | KnowledgeStaleBubblesDetectedEvent
+  | InsightGeneratedEvent
+  | InsightQueuedEvent
+  | InsightSuppressedEvent;
 
 export type RavenEventType = RavenEvent['type'];
 
