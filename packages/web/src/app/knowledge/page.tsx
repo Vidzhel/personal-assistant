@@ -10,14 +10,7 @@ import { GraphChatPanel } from '@/components/knowledge/GraphChatPanel';
 import { api } from '@/lib/api-client';
 import { useWebSocket } from '@/hooks/useWebSocket';
 
-const WS_CHANNELS = [
-  'knowledge:bubble:created',
-  'knowledge:bubble:updated',
-  'knowledge:bubble:deleted',
-  'knowledge:clustering:complete',
-  'knowledge:link:created',
-  'knowledge:retrospective:complete',
-];
+const WS_CHANNELS = ['global'];
 
 function useFirstProjectId(): string | null {
   const [projectId, setProjectId] = useState<string | null>(null);

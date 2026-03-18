@@ -84,6 +84,7 @@ function makeBubble(overrides: Partial<KnowledgeBubble> = {}): KnowledgeBubble {
     permanence: 'normal',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
+    lastAccessedAt: '2026-01-01T00:00:00.000Z',
     ...overrides,
   };
 }

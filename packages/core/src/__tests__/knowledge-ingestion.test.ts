@@ -218,6 +218,7 @@ function createMockKnowledgeStore(): KnowledgeStore & { bubbles: KnowledgeBubble
         permanence: input.permanence ?? 'normal',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
+        lastAccessedAt: new Date().toISOString(),
       };
       bubbles.push(bubble);
       return bubble;

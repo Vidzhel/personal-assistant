@@ -22,6 +22,7 @@ export interface KnowledgeBubble {
   permanence: Permanence;
   createdAt: string;
   updatedAt: string;
+  lastAccessedAt: string | null;
 }
 
 /** List response — content omitted, replaced with preview */

@@ -77,6 +77,7 @@ interface BubbleNode {
   permanence: string;
   createdAt: string;
   updatedAt: string;
+  lastAccessedAt: string | null;
 }
 
 interface TagResult {
@@ -192,6 +193,7 @@ export function createKnowledgeStore(deps: {
       permanence,
       createdAt: now,
       updatedAt: now,
+      lastAccessedAt: now,
     };
   }
 
@@ -296,6 +298,7 @@ export function createKnowledgeStore(deps: {
       permanence: (node.permanence ?? 'normal') as Permanence,
       createdAt: node.createdAt,
       updatedAt: now,
+      lastAccessedAt: node.lastAccessedAt ?? now,
     };
   }
 
@@ -348,6 +351,7 @@ export function createKnowledgeStore(deps: {
       permanence: (node.permanence ?? 'normal') as Permanence,
       createdAt: node.createdAt,
       updatedAt: node.updatedAt,
+      lastAccessedAt: now,
     };
   }
 
