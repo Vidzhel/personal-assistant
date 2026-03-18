@@ -212,7 +212,7 @@ export function createKnowledgeStore(deps: {
     const file = readBubbleFile(join(knowledgeDir, node.filePath));
     const title = input.title ?? node.title;
     const content = input.content ?? file.content;
-    const source = input.source !== undefined ? input.source : node.source;
+    const source = input.source !== undefined ? input.source : (node.source ?? null);
     const sourceFile =
       input.sourceFile !== undefined ? input.sourceFile : (node.sourceFile ?? null);
     const sourceUrl = input.sourceUrl !== undefined ? input.sourceUrl : (node.sourceUrl ?? null);

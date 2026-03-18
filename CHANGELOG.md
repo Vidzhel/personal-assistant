@@ -62,6 +62,12 @@ Re-running tests 02/18/19/20/21 after round 1 fixes revealed 4 additional pre-ex
 #### 10. Tag add/remove 500 error (KGRAPH-27/28) (test file: 20)
 - **Status:** Confirmed fixed by round 1 PUT serialization fix (#3 above). No additional code change needed.
 
+#### 11. PUT update crashes on bubbles with undefined `source` (KGRAPH-27/28)
+- **File:** `packages/core/src/knowledge-engine/knowledge-store.ts`
+- **Bug:** `node.source` from Neo4j is `undefined` (not `null`) for bubbles created by merge (which doesn't set `source`). The YAML frontmatter serializer (`writeBubbleFile`) can't serialize `undefined`. `sourceFile` and `sourceUrl` had `?? null` fallbacks but `source` didn't.
+- **Fix:** Added `?? null` fallback: `input.source !== undefined ? input.source : (node.source ?? null)`.
+- **Note:** This is separate from the round 1 PUT fix (#3 — reply.send). That fix addressed Fastify response serialization; this fix addresses YAML file writing.
+
 #### NOT a bug: KGRAPH-25 (linked nodes in detail panel)
 - **Status:** UI correctly renders linked nodes when edges exist. Test node simply had no links.
 
