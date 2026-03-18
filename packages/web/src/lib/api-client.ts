@@ -119,6 +119,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ bubbleIds }),
     }),
+  getSessionReferences: (sessionId: string) =>
+    request<SessionReferences>(`/sessions/${sessionId}/references`),
+  updateProject: (
+    id: string,
+    data: { name?: string; description?: string; skills?: string[]; systemPrompt?: string | null },
+  ) => request<Project>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 };
 
 export interface Project {
@@ -311,6 +317,20 @@ export interface KnowledgeBubble {
   permanence: 'temporary' | 'normal' | 'robust';
   createdAt: string;
   updatedAt: string;
+}
+
+export interface SessionReferenceItem {
+  bubbleId: string;
+  title: string;
+  snippet: string;
+  score: number;
+  tags: string[];
+  domains: string[];
+  permanence: string;
+}
+
+export interface SessionReferences {
+  references: Record<string, SessionReferenceItem[]>;
 }
 
 export interface KnowledgeSearchResult {

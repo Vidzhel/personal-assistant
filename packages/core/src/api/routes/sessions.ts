@@ -9,17 +9,42 @@ interface ParsedReference {
   bubbleId: string;
   title: string;
   snippet: string;
+  score: number;
+  tags: string[];
 }
 
-function classifyLine(
-  line: string,
-  state: { title: string; snippet: string },
-): { title: string; snippet: string } {
+interface EnrichedReference extends ParsedReference {
+  domains: string[];
+  permanence: string;
+}
+
+interface ParseState {
+  title: string;
+  snippet: string;
+  score: number;
+  tags: string[];
+}
+
+function classifyLine(line: string, state: ParseState): ParseState {
   if (line.startsWith('### ')) {
-    return { title: line.slice(HEADING_PREFIX_LENGTH), snippet: '' };
+    return { title: line.slice(HEADING_PREFIX_LENGTH), snippet: '', score: 0, tags: [] };
   }
-  if (!line.startsWith('Tags:') && !line.startsWith('[ref:') && line.trim()) {
-    return { title: state.title, snippet: line };
+  if (line.startsWith('Tags:')) {
+    const tagsMatch = /^Tags:\s*(.+?)\s*\|/.exec(line);
+    const scoreMatch = /Score:\s*([\d.]+)/.exec(line);
+    const rawTags = tagsMatch ? tagsMatch[1] : '';
+    const tags =
+      rawTags === 'none'
+        ? []
+        : rawTags
+            .split(',')
+            .map((t) => t.trim())
+            .filter(Boolean);
+    const score = scoreMatch ? parseFloat(scoreMatch[1]) : 0;
+    return { ...state, score, tags };
+  }
+  if (!line.startsWith('[ref:') && line.trim()) {
+    return { ...state, snippet: line };
   }
   return state;
 }
@@ -28,7 +53,7 @@ function parseContextMessage(msg: StoredMessage): { taskId: string; refs: Parsed
   const taskId = msg.taskId ?? 'unknown';
   const refs: ParsedReference[] = [];
   const lines = msg.content.split('\n');
-  let state = { title: '', snippet: '' };
+  let state: ParseState = { title: '', snippet: '', score: 0, tags: [] };
 
   for (const line of lines) {
     state = classifyLine(line, state);
@@ -36,7 +61,13 @@ function parseContextMessage(msg: StoredMessage): { taskId: string; refs: Parsed
     if (refMatch) {
       const bubbleId = refMatch[1].trim();
       if (!refs.some((r) => r.bubbleId === bubbleId)) {
-        refs.push({ bubbleId, title: state.title, snippet: state.snippet });
+        refs.push({
+          bubbleId,
+          title: state.title,
+          snippet: state.snippet,
+          score: state.score,
+          tags: state.tags,
+        });
       }
     }
   }
@@ -55,6 +86,45 @@ function parseReferencesFromContextMessages(
   }
 
   return grouped;
+}
+
+async function enrichReferences(
+  grouped: Record<string, ParsedReference[]>,
+  deps: ApiDeps,
+): Promise<Record<string, EnrichedReference[]>> {
+  if (!deps.knowledgeStore) {
+    const result: Record<string, EnrichedReference[]> = {};
+    for (const [taskId, refs] of Object.entries(grouped)) {
+      result[taskId] = refs.map((r) => ({ ...r, domains: [], permanence: 'normal' }));
+    }
+    return result;
+  }
+
+  const allBubbleIds = new Set<string>();
+  for (const refs of Object.values(grouped)) {
+    for (const r of refs) allBubbleIds.add(r.bubbleId);
+  }
+
+  const bubbleMetadata = new Map<string, { domains: string[]; permanence: string }>();
+  for (const bubbleId of allBubbleIds) {
+    const bubble = await deps.knowledgeStore.getById(bubbleId);
+    if (bubble) {
+      bubbleMetadata.set(bubbleId, { domains: bubble.domains, permanence: bubble.permanence });
+    }
+  }
+
+  const result: Record<string, EnrichedReference[]> = {};
+  for (const [taskId, refs] of Object.entries(grouped)) {
+    result[taskId] = refs.map((r) => {
+      const meta = bubbleMetadata.get(r.bubbleId);
+      return {
+        ...r,
+        domains: meta?.domains ?? [],
+        permanence: meta?.permanence ?? 'normal',
+      };
+    });
+  }
+  return result;
 }
 
 export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void {
@@ -91,7 +161,7 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
     return { session, messages, tasks, auditEntries, rawMessages };
   });
 
-  // Get knowledge references injected during a session, grouped by task
+  // Get knowledge references injected during a session, grouped by task (enriched with metadata)
   app.get<{ Params: { id: string } }>('/api/sessions/:id/references', async (req, reply) => {
     const session = deps.sessionManager.getSession(req.params.id);
     if (!session) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Session not found' });
@@ -99,8 +169,9 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
     const messages = deps.messageStore.getMessages(req.params.id);
     const contextMessages = messages.filter((m) => m.role === 'context');
     const grouped = parseReferencesFromContextMessages(contextMessages);
+    const enriched = await enrichReferences(grouped, deps);
 
-    return { references: grouped };
+    return { references: enriched };
   });
 
   // Get messages for a session

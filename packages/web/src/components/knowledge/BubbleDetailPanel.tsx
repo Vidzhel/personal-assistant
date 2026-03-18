@@ -25,7 +25,7 @@ function DetailContent({
   const [editPermanence, setEditPermanence] = useState(bubble.permanence);
   const [tagInput, setTagInput] = useState('');
 
-  async function handlePermanenceChange(perm: string) {
+  async function handlePermanenceChange(perm: 'temporary' | 'normal' | 'robust') {
     setEditPermanence(perm);
     await api.patchPermanence(selectedId, perm);
     onRefetch();
@@ -103,7 +103,9 @@ function DetailContent({
         </span>
         <select
           value={editPermanence}
-          onChange={(e) => handlePermanenceChange(e.target.value)}
+          onChange={(e) =>
+            handlePermanenceChange(e.target.value as 'temporary' | 'normal' | 'robust')
+          }
           className="text-xs px-1.5 py-0.5 rounded"
           style={{ background: 'var(--bg-card)', color: 'var(--text)', border: 'none' }}
         >

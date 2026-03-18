@@ -5,11 +5,14 @@ import { useParams } from 'next/navigation';
 import { api, type Project, type Session } from '@/lib/api-client';
 import { ChatPanel } from '@/components/chat/ChatPanel';
 import { SessionDebugPanel } from '@/components/session/SessionDebugPanel';
+import { ReferencesPanel } from '@/components/session/ReferencesPanel';
+import { useReferences } from '@/hooks/useReferences';
+import { ProjectMemory } from '@/components/project/ProjectMemory';
 
 const COPY_FEEDBACK_DURATION_MS = 1500;
 const ID_DISPLAY_LENGTH = 8;
 
-// eslint-disable-next-line max-lines-per-function -- page component with session management and layout
+// eslint-disable-next-line max-lines-per-function, complexity -- page component with session management and layout
 export default function ProjectPage() {
   const params = useParams();
   const id = params.id as string;
@@ -19,7 +22,9 @@ export default function ProjectPage() {
   const [showSessions, setShowSessions] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
+  const [showRefs, setShowRefs] = useState(false);
   const [error, setError] = useState(false);
+  const { references, externalRefs } = useReferences(activeSessionId);
 
   useEffect(() => {
     api
@@ -87,6 +92,11 @@ export default function ProjectPage() {
             </span>
           ))}
         </div>
+        <ProjectMemory
+          systemPrompt={project.systemPrompt}
+          projectId={project.id}
+          onSaved={(prompt) => setProject((p) => (p ? { ...p, systemPrompt: prompt } : p))}
+        />
       </div>
 
       {/* Session selector bar */}
@@ -186,6 +196,28 @@ export default function ProjectPage() {
         </div>
 
         <button
+          onClick={() => activeSessionId && setShowRefs(true)}
+          className="px-2 py-1 rounded text-sm hover:opacity-80 transition-opacity shrink-0"
+          style={{ color: 'var(--text-muted)' }}
+          title="Knowledge references"
+          disabled={!activeSessionId}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+          </svg>
+        </button>
+
+        <button
           onClick={() => activeSessionId && setShowDebug(true)}
           className="px-2 py-1 rounded text-sm hover:opacity-80 transition-opacity shrink-0"
           style={{ color: 'var(--text-muted)' }}
@@ -223,6 +255,14 @@ export default function ProjectPage() {
 
       {showDebug && activeSessionId && (
         <SessionDebugPanel sessionId={activeSessionId} onClose={() => setShowDebug(false)} />
+      )}
+
+      {showRefs && activeSessionId && (
+        <ReferencesPanel
+          references={references}
+          externalRefs={externalRefs}
+          onClose={() => setShowRefs(false)}
+        />
       )}
     </div>
   );
