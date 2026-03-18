@@ -160,7 +160,7 @@ export function createRetrievalEngine(deps: RetrievalDeps): RetrievalEngine {
       domains: string[];
     }>(
       `MATCH (b:Bubble) ${whereClause}
-       WITH b ORDER BY b.createdAt DESC LIMIT $limit
+       WITH b ORDER BY b.createdAt DESC LIMIT toInteger($limit)
        OPTIONAL MATCH (b)-[:HAS_TAG]->(t:Tag)
        OPTIONAL MATCH (b)-[:IN_DOMAIN]->(d:Domain)
        RETURN b.id AS id, b.title AS title, b.contentPreview AS contentPreview,
@@ -342,7 +342,7 @@ export function createRetrievalEngine(deps: RetrievalDeps): RetrievalEngine {
          RETURN DISTINCT related.id AS bubbleId, related.title AS title,
                 related.contentPreview AS contentPreview, related.permanence AS permanence,
                 related.sourceFile AS sourceFile
-         LIMIT $tagLimit`,
+         LIMIT toInteger($tagLimit)`,
         {
           bubbleIds: topBubbleIds,
           existingIds: [...resultMap.keys()],
@@ -401,17 +401,17 @@ export function createRetrievalEngine(deps: RetrievalDeps): RetrievalEngine {
       case 'date':
         cypher = cursor
           ? `MATCH (b:Bubble) WHERE b.createdAt ${op} $cursor
-             WITH b ORDER BY b.createdAt ${dir} LIMIT $limit`
-          : `MATCH (b:Bubble) WITH b ORDER BY b.createdAt ${dir} LIMIT $limit`;
+             WITH b ORDER BY b.createdAt ${dir} LIMIT toInteger($limit)`
+          : `MATCH (b:Bubble) WITH b ORDER BY b.createdAt ${dir} LIMIT toInteger($limit)`;
         if (cursor) params.cursor = cursor;
         break;
       case 'domain':
         cypher = cursor
           ? `MATCH (b:Bubble)-[:IN_DOMAIN]->(d:Domain {name: $filter})
              WHERE b.createdAt ${op} $cursor
-             WITH b ORDER BY b.createdAt ${dir} LIMIT $limit`
+             WITH b ORDER BY b.createdAt ${dir} LIMIT toInteger($limit)`
           : `MATCH (b:Bubble)-[:IN_DOMAIN]->(d:Domain {name: $filter})
-             WITH b ORDER BY b.createdAt ${dir} LIMIT $limit`;
+             WITH b ORDER BY b.createdAt ${dir} LIMIT toInteger($limit)`;
         params.filter = options.filter?.domain ?? '';
         if (cursor) params.cursor = cursor;
         countCypher =
@@ -420,9 +420,9 @@ export function createRetrievalEngine(deps: RetrievalDeps): RetrievalEngine {
       case 'source':
         cypher = cursor
           ? `MATCH (b:Bubble) WHERE b.source = $filter AND b.createdAt ${op} $cursor
-             WITH b ORDER BY b.createdAt ${dir} LIMIT $limit`
+             WITH b ORDER BY b.createdAt ${dir} LIMIT toInteger($limit)`
           : `MATCH (b:Bubble) WHERE b.source = $filter
-             WITH b ORDER BY b.createdAt ${dir} LIMIT $limit`;
+             WITH b ORDER BY b.createdAt ${dir} LIMIT toInteger($limit)`;
         params.filter = options.filter?.source ?? '';
         if (cursor) params.cursor = cursor;
         countCypher = 'MATCH (b:Bubble) WHERE b.source = $filter RETURN count(b) AS total';
@@ -430,9 +430,9 @@ export function createRetrievalEngine(deps: RetrievalDeps): RetrievalEngine {
       case 'permanence':
         cypher = cursor
           ? `MATCH (b:Bubble) WHERE b.permanence = $filter AND b.createdAt ${op} $cursor
-             WITH b ORDER BY b.createdAt ${dir} LIMIT $limit`
+             WITH b ORDER BY b.createdAt ${dir} LIMIT toInteger($limit)`
           : `MATCH (b:Bubble) WHERE b.permanence = $filter
-             WITH b ORDER BY b.createdAt ${dir} LIMIT $limit`;
+             WITH b ORDER BY b.createdAt ${dir} LIMIT toInteger($limit)`;
         params.filter = options.filter?.permanence ?? '';
         if (cursor) params.cursor = cursor;
         countCypher = 'MATCH (b:Bubble) WHERE b.permanence = $filter RETURN count(b) AS total';
@@ -441,9 +441,9 @@ export function createRetrievalEngine(deps: RetrievalDeps): RetrievalEngine {
         cypher = cursor
           ? `MATCH (b:Bubble)-[:IN_CLUSTER]->(c:Cluster {id: $filter})
              WHERE b.createdAt ${op} $cursor
-             WITH b ORDER BY b.createdAt ${dir} LIMIT $limit`
+             WITH b ORDER BY b.createdAt ${dir} LIMIT toInteger($limit)`
           : `MATCH (b:Bubble)-[:IN_CLUSTER]->(c:Cluster {id: $filter})
-             WITH b ORDER BY b.createdAt ${dir} LIMIT $limit`;
+             WITH b ORDER BY b.createdAt ${dir} LIMIT toInteger($limit)`;
         params.filter = options.filter?.clusterId ?? cursor ?? '';
         if (cursor) params.cursor = cursor;
         countCypher =
@@ -452,18 +452,18 @@ export function createRetrievalEngine(deps: RetrievalDeps): RetrievalEngine {
       case 'connection_degree':
         cypher = `MATCH (b:Bubble)
                   WITH b, size([(b)-[:LINKS_TO]-() | 1]) AS degree
-                  ORDER BY degree ${dir} LIMIT $limit`;
+                  ORDER BY degree ${dir} LIMIT toInteger($limit)`;
         break;
       case 'recency':
         cypher = cursor
           ? `MATCH (b:Bubble) WHERE b.updatedAt ${op} $cursor
-             WITH b ORDER BY b.updatedAt ${dir} LIMIT $limit`
-          : `MATCH (b:Bubble) WITH b ORDER BY b.updatedAt ${dir} LIMIT $limit`;
+             WITH b ORDER BY b.updatedAt ${dir} LIMIT toInteger($limit)`
+          : `MATCH (b:Bubble) WITH b ORDER BY b.updatedAt ${dir} LIMIT toInteger($limit)`;
         if (cursor) params.cursor = cursor;
         break;
       // M3: confidence dimension requires embedding similarity to cursor bubble — deferred to 6.5
       default:
-        cypher = `MATCH (b:Bubble) WITH b ORDER BY b.createdAt ${dir} LIMIT $limit`;
+        cypher = `MATCH (b:Bubble) WITH b ORDER BY b.createdAt ${dir} LIMIT toInteger($limit)`;
     }
 
     const fullCypher = `${cypher}
