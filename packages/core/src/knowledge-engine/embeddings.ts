@@ -155,9 +155,9 @@ export function createEmbeddingEngine(deps: EmbeddingDeps): EmbeddingEngine {
        YIELD node, score
        WHERE score >= $threshold AND NOT node.id IN $excludeIds
        RETURN node.id AS bubbleId, score
-       LIMIT $limit`,
+       LIMIT toInteger($limit)`,
       {
-        topK: limit + excludeIds.length,
+        topK: Math.round(limit + excludeIds.length),
         embedding: embeddingArray,
         threshold,
         excludeIds,

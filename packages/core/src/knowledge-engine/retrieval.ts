@@ -225,7 +225,7 @@ export function createRetrievalEngine(deps: RetrievalDeps): RetrievalEngine {
        YIELD node AS chunk, score
        MATCH (b:Bubble)-[:HAS_CHUNK]->(chunk)
        WITH b, chunk.text AS chunkText, max(score) AS chunkScore
-       ORDER BY chunkScore DESC LIMIT $limit
+       ORDER BY chunkScore DESC LIMIT toInteger($limit)
        OPTIONAL MATCH (b)-[:HAS_TAG]->(t:Tag)
        OPTIONAL MATCH (b)-[:IN_DOMAIN]->(d:Domain)
        OPTIONAL MATCH (b)-[link:LINKS_TO]-(linked:Bubble)
@@ -245,7 +245,7 @@ export function createRetrievalEngine(deps: RetrievalDeps): RetrievalEngine {
               collect(DISTINCT sibling.contentPreview) AS siblingPreviews,
               collect(DISTINCT sibling.permanence) AS siblingPermanences,
               collect(DISTINCT sibling.sourceFile) AS siblingSourceFiles`,
-      { topK, limit, queryEmbedding },
+      { topK: Math.round(topK), limit, queryEmbedding },
     );
 
     const resultMap = new Map<string, RetrievalResultItem>();

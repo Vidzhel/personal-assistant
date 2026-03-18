@@ -468,7 +468,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
     }
     const query = req.query as Record<string, string>;
     const days = query.days ? parseInt(query.days, 10) : undefined;
-    const overrideDays = days && !isNaN(days) ? days : undefined;
+    const overrideDays = days !== undefined && !isNaN(days) ? days : undefined;
     return knowledgeLifecycle.detectStaleBubbles(overrideDays);
   });
 
@@ -590,7 +590,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
       title: bubble.title,
       filePath: bubble.filePath,
     });
-    return bubble;
+    return reply.status(HTTP_STATUS.OK).send(bubble);
   });
 
   app.delete<{ Params: { id: string } }>('/api/knowledge/:id', async (req, reply) => {

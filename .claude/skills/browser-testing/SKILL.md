@@ -208,7 +208,9 @@ The sub-agent uses `playwright-cli` commands and knows the testing methodology. 
 
 ### Parallel Execution with Named Sessions
 
-**CRITICAL**: When dispatching multiple `browser-tester` agents in parallel, each agent MUST use a unique named session (`-s=<name>`). Without named sessions, all agents share the same default browser and will interfere with each other.
+**CRITICAL**: Maximum **5 parallel `browser-tester` agents** at any time. If you have more test files, dispatch in batches of 5 and wait for each batch to complete before starting the next.
+
+Each agent MUST use a unique named session (`-s=<name>`). Without named sessions, all agents share the same default browser and will interfere with each other.
 
 Each agent gets its own isolated browser instance via named sessions:
 
@@ -239,6 +241,8 @@ Rules:
 
 ### Dispatching Parallel Agents — Template
 
+**Maximum 5 parallel `browser-tester` agents at a time.** If you have more than 5 test files, dispatch them in batches — wait for a batch to complete before starting the next one.
+
 When running multiple test files, dispatch agents like this:
 
 ```
@@ -248,7 +252,7 @@ Agent(subagent_type="browser-tester", prompt="
   Run manual-tests/01-smoke-test.md ...
 ")
 
-# Agents 2-N: feature tests (run in parallel after smoke passes, background)
+# Batch 1: up to 5 feature tests in parallel (background)
 Agent(subagent_type="browser-tester", run_in_background=true, prompt="
   IMPORTANT: Use named session `-s=dash` for ALL playwright commands.
   Run manual-tests/03-dashboard.md ...
@@ -257,11 +261,27 @@ Agent(subagent_type="browser-tester", run_in_background=true, prompt="
   IMPORTANT: Use named session `-s=proj` for ALL playwright commands.
   Run manual-tests/04-projects-and-chat.md ...
 ")
+Agent(subagent_type="browser-tester", run_in_background=true, prompt="
+  IMPORTANT: Use named session `-s=nav` for ALL playwright commands.
+  Run manual-tests/05-navigation.md ...
+")
+Agent(subagent_type="browser-tester", run_in_background=true, prompt="
+  IMPORTANT: Use named session `-s=activity` for ALL playwright commands.
+  Run manual-tests/06-activity.md ...
+")
+Agent(subagent_type="browser-tester", run_in_background=true, prompt="
+  IMPORTANT: Use named session `-s=sched` for ALL playwright commands.
+  Run manual-tests/07-schedules.md ...
+")
+
+# Wait for Batch 1 to complete before dispatching Batch 2
+# Batch 2: next set of up to 5 agents...
 ```
 
 ### Batch Execution Tips
 
 When running multiple test files:
+- **Never exceed 5 concurrent `browser-tester` agents** — dispatch in batches of 5, waiting for each batch to finish before starting the next
 - Run prerequisite tests first (smoke tests before feature tests)
 - Dispatch independent test files as parallel agents with unique session names
 - Take screenshots only on failures (saves time and context)

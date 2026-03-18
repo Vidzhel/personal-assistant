@@ -29,20 +29,23 @@ export function ActivityFeed() {
           payload?: { content?: string; title?: string; subject?: string };
           timestamp: number;
         };
-        setItems((prev) => [
-          {
-            id: event.id,
-            type: event.type,
-            source: event.source,
-            content:
-              event.payload?.content ||
-              event.payload?.title ||
-              event.payload?.subject ||
-              event.type,
-            timestamp: event.timestamp,
-          },
-          ...prev.slice(0, MAX_ACTIVITY_ITEMS),
-        ]);
+        setItems((prev) => {
+          if (prev.some((p) => p.id === event.id)) return prev;
+          return [
+            {
+              id: event.id,
+              type: event.type,
+              source: event.source,
+              content:
+                event.payload?.content ||
+                event.payload?.title ||
+                event.payload?.subject ||
+                event.type,
+              timestamp: event.timestamp,
+            },
+            ...prev.slice(0, MAX_ACTIVITY_ITEMS),
+          ];
+        });
       }
     }
   }, [messages]);

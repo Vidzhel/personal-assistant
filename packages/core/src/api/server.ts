@@ -74,7 +74,10 @@ export async function createApiServer(
 ): Promise<ReturnType<typeof Fastify>> {
   const app = Fastify({ logger: false });
 
-  await app.register(cors, { origin: true });
+  await app.register(cors, {
+    origin: true,
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE'],
+  });
   await app.register(websocket);
 
   // REST routes
