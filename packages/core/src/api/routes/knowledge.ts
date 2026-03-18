@@ -15,7 +15,9 @@ import {
   TimelineQuerySchema,
   SnoozeSchema,
   MergeBubblesSchema,
+  GraphQuerySchema,
 } from '@raven/shared';
+import type { GraphNode, GraphEdge, GraphData } from '@raven/shared';
 import type { EventBus } from '../../event-bus/event-bus.ts';
 import type { KnowledgeStore } from '../../knowledge-engine/knowledge-store.ts';
 import type { IngestionProcessor } from '../../knowledge-engine/ingestion.ts';
@@ -56,6 +58,171 @@ function emitKnowledgeEvent(
     type,
     payload,
   });
+}
+
+function buildTagEdges(nodes: GraphNode[], nodeIds: Set<string>): GraphEdge[] {
+  const tagMap = new Map<string, string[]>();
+  for (const node of nodes) {
+    for (const t of node.tags) {
+      const list = tagMap.get(t);
+      if (list) list.push(node.id);
+      else tagMap.set(t, [node.id]);
+    }
+  }
+  const edges: GraphEdge[] = [];
+  const seen = new Set<string>();
+  for (const [, ids] of tagMap) {
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const key = `${ids[i]}:${ids[j]}`;
+        if (!seen.has(key) && nodeIds.has(ids[i]) && nodeIds.has(ids[j])) {
+          seen.add(key);
+          edges.push({
+            source: ids[i],
+            target: ids[j],
+            relationshipType: 'shared-tag',
+            confidence: null,
+          });
+        }
+      }
+    }
+  }
+  return edges;
+}
+
+function buildClusterEdges(nodes: GraphNode[], nodeIds: Set<string>): GraphEdge[] {
+  const clusterMap = new Map<string, string[]>();
+  for (const node of nodes) {
+    if (!node.clusterLabel) continue;
+    const list = clusterMap.get(node.clusterLabel);
+    if (list) list.push(node.id);
+    else clusterMap.set(node.clusterLabel, [node.id]);
+  }
+  const edges: GraphEdge[] = [];
+  for (const [, ids] of clusterMap) {
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        if (nodeIds.has(ids[i]) && nodeIds.has(ids[j])) {
+          edges.push({
+            source: ids[i],
+            target: ids[j],
+            relationshipType: 'cluster-member',
+            confidence: null,
+          });
+        }
+      }
+    }
+  }
+  return edges;
+}
+
+function buildDomainEdges(nodes: GraphNode[], nodeIds: Set<string>): GraphEdge[] {
+  const domainMap = new Map<string, string[]>();
+  for (const node of nodes) {
+    if (!node.domain) continue;
+    const list = domainMap.get(node.domain);
+    if (list) list.push(node.id);
+    else domainMap.set(node.domain, [node.id]);
+  }
+  const edges: GraphEdge[] = [];
+  for (const [, ids] of domainMap) {
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        if (nodeIds.has(ids[i]) && nodeIds.has(ids[j])) {
+          edges.push({
+            source: ids[i],
+            target: ids[j],
+            relationshipType: 'same-domain',
+            confidence: null,
+          });
+        }
+      }
+    }
+  }
+  return edges;
+}
+
+// eslint-disable-next-line max-lines-per-function -- composite graph query
+async function buildGraphData(
+  neo: Neo4jClient,
+  params: { view: GraphData['view']; tag?: string; domain?: string; permanence?: string },
+): Promise<GraphData> {
+  const { view, tag, domain, permanence } = params;
+
+  const filterClauses: string[] = [];
+  const filterParams: Record<string, unknown> = {};
+  if (tag) {
+    filterClauses.push('$tag IN b.tags');
+    filterParams.tag = tag;
+  }
+  if (domain) {
+    filterClauses.push('$domain IN b.domains');
+    filterParams.domain = domain;
+  }
+  if (permanence) {
+    filterClauses.push('b.permanence = $permanence');
+    filterParams.permanence = permanence;
+  }
+  const whereClause = filterClauses.length > 0 ? `WHERE ${filterClauses.join(' AND ')}` : '';
+
+  const nodeRows = await neo.query<{
+    id: string;
+    title: string;
+    permanence: string;
+    tags: string[];
+    domains: string[];
+    clusterLabel: string | null;
+    createdAt: string;
+    updatedAt: string;
+    lastAccessedAt: string | null;
+    degree: number;
+  }>(
+    `MATCH (b:Bubble) ${whereClause}
+     OPTIONAL MATCH (b)-[r:LINKED_TO]-()
+     RETURN b.id as id, b.title as title, b.permanence as permanence,
+            b.tags as tags, b.domains as domains, b.clusterLabel as clusterLabel,
+            b.createdAt as createdAt, b.updatedAt as updatedAt,
+            b.lastAccessedAt as lastAccessedAt, count(r) as degree`,
+    filterParams,
+  );
+
+  const nodes: GraphNode[] = nodeRows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    domain: r.domains?.[0] ?? null,
+    permanence: (r.permanence as GraphNode['permanence']) ?? 'normal',
+    tags: r.tags ?? [],
+    clusterLabel: r.clusterLabel ?? null,
+    connectionDegree: r.degree,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+    lastAccessedAt: r.lastAccessedAt ?? null,
+  }));
+
+  const nodeIds = new Set(nodes.map((n) => n.id));
+  let edges: GraphEdge[] = [];
+
+  if (view === 'links') {
+    const edgeRows = await neo.query<{
+      source: string;
+      target: string;
+      relationshipType: string;
+      confidence: number | null;
+    }>(
+      `MATCH (b1:Bubble)-[r:LINKED_TO]->(b2:Bubble)
+       RETURN b1.id as source, b2.id as target,
+              r.type as relationshipType, r.confidence as confidence`,
+    );
+    edges = edgeRows.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
+  } else if (view === 'tags') {
+    edges = buildTagEdges(nodes, nodeIds);
+  } else if (view === 'clusters') {
+    edges = buildClusterEdges(nodes, nodeIds);
+  } else if (view === 'domains') {
+    edges = buildDomainEdges(nodes, nodeIds);
+  }
+
+  return { nodes, edges, view };
 }
 
 // eslint-disable-next-line max-lines-per-function -- route registration for all knowledge endpoints
@@ -350,6 +517,18 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
     }
     const summary = await retrospective.runFullRetrospective();
     return { triggered: true, summary };
+  });
+
+  // --- Story 6.7: Knowledge Graph Visualization ---
+  app.get('/api/knowledge/graph', async (req, reply) => {
+    const parsed = GraphQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: parsed.error.message });
+    }
+    if (!deps.neo4j) {
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Neo4j not available' });
+    }
+    return buildGraphData(deps.neo4j, parsed.data);
   });
 
   // --- New routes: permanence ---

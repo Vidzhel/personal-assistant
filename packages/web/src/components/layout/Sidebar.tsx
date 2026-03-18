@@ -12,6 +12,7 @@ const nav = [
   { href: '/metrics', label: 'Metrics', icon: '%' },
   { href: '/schedules', label: 'Schedules', icon: '@' },
   { href: '/skills', label: 'Skills', icon: '*' },
+  { href: '/knowledge', label: 'Knowledge', icon: '?' },
   { href: '/settings', label: 'Settings', icon: '&' },
 ];
 

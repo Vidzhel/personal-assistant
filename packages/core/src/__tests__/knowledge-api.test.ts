@@ -478,4 +478,96 @@ describe('Knowledge API routes', () => {
     const body = res.json();
     expect(body.length).toBeGreaterThanOrEqual(1);
   });
+
+  // --- Story 6.7: Graph Visualization API ---
+
+  it('GET /api/knowledge/graph returns nodes and edges with default links view', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/knowledge/graph' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.view).toBe('links');
+    expect(Array.isArray(body.nodes)).toBe(true);
+    expect(Array.isArray(body.edges)).toBe(true);
+    expect(body.nodes.length).toBeGreaterThanOrEqual(1);
+    // Each node has required fields
+    const node = body.nodes[0];
+    expect(node).toHaveProperty('id');
+    expect(node).toHaveProperty('title');
+    expect(node).toHaveProperty('permanence');
+    expect(node).toHaveProperty('tags');
+    expect(node).toHaveProperty('connectionDegree');
+    expect(node).toHaveProperty('createdAt');
+    expect(node).toHaveProperty('updatedAt');
+  });
+
+  it('GET /api/knowledge/graph?view=tags returns tag-based edges', async () => {
+    // Create two bubbles with shared tag
+    await app.inject({
+      method: 'POST',
+      url: '/api/knowledge',
+      payload: { title: 'Graph Tag A', content: '', tags: ['graph-test-tag'] },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/knowledge',
+      payload: { title: 'Graph Tag B', content: '', tags: ['graph-test-tag'] },
+    });
+
+    const res = await app.inject({ method: 'GET', url: '/api/knowledge/graph?view=tags' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.view).toBe('tags');
+    // Should have at least one shared-tag edge between our two bubbles
+    const sharedTagEdges = body.edges.filter((e: any) => e.relationshipType === 'shared-tag');
+    expect(sharedTagEdges.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('GET /api/knowledge/graph?view=timeline returns no edges', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/knowledge/graph?view=timeline' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.view).toBe('timeline');
+    expect(body.edges).toEqual([]);
+  });
+
+  it('GET /api/knowledge/graph?view=clusters returns cluster edges', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/knowledge/graph?view=clusters' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.view).toBe('clusters');
+    expect(Array.isArray(body.edges)).toBe(true);
+  });
+
+  it('GET /api/knowledge/graph?view=domains returns domain edges', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/knowledge/graph?view=domains' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.view).toBe('domains');
+    expect(Array.isArray(body.edges)).toBe(true);
+  });
+
+  it('GET /api/knowledge/graph with filters narrows results', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/knowledge/graph?tag=graph-test-tag',
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.nodes.every((n: any) => n.tags.includes('graph-test-tag'))).toBe(true);
+  });
+
+  it('GET /api/knowledge/graph with invalid view returns 400', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/knowledge/graph?view=invalid' });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('GET /api/knowledge/graph edges reference valid node IDs', async () => {
+    const res = await app.inject({ method: 'GET', url: '/api/knowledge/graph' });
+    const body = res.json();
+    const nodeIds = new Set(body.nodes.map((n: any) => n.id));
+    for (const edge of body.edges) {
+      expect(nodeIds.has(edge.source)).toBe(true);
+      expect(nodeIds.has(edge.target)).toBe(true);
+    }
+  });
 });

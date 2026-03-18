@@ -358,3 +358,42 @@ export const TimelineQuerySchema = z.object({
   direction: z.enum(['forward', 'backward']).default('forward'),
   limit: z.coerce.number().int().min(1).max(TIMELINE_MAX_LIMIT).default(TIMELINE_DEFAULT_LIMIT),
 });
+
+// --- Story 6.7: Knowledge Graph Visualization Types ---
+
+export type GraphViewMode = 'links' | 'tags' | 'timeline' | 'clusters' | 'domains';
+
+export const GraphViewModeSchema = z.enum(['links', 'tags', 'timeline', 'clusters', 'domains']);
+
+export const GraphQuerySchema = z.object({
+  view: GraphViewModeSchema.default('links'),
+  tag: z.string().optional(),
+  domain: z.string().optional(),
+  permanence: PermanenceSchema.optional(),
+});
+
+export interface GraphNode {
+  id: string;
+  title: string;
+  domain: string | null;
+  permanence: Permanence;
+  tags: string[];
+  clusterLabel: string | null;
+  connectionDegree: number;
+  createdAt: string;
+  updatedAt: string;
+  lastAccessedAt: string | null;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  relationshipType: string;
+  confidence: number | null;
+}
+
+export interface GraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  view: GraphViewMode;
+}

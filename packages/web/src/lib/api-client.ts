@@ -87,6 +87,38 @@ export const api = {
     return res.json() as Promise<{ config: PipelineConfig }>;
   },
   getMetrics: (period = '24h') => request<MetricsResponse>(`/metrics?period=${period}`),
+  getKnowledgeGraph: (params?: {
+    view?: string;
+    tag?: string;
+    domain?: string;
+    permanence?: string;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.view) qs.set('view', params.view);
+    if (params?.tag) qs.set('tag', params.tag);
+    if (params?.domain) qs.set('domain', params.domain);
+    if (params?.permanence) qs.set('permanence', params.permanence);
+    return request<KnowledgeGraphData>(`/knowledge/graph?${qs}`);
+  },
+  getKnowledgeBubble: (id: string) => request<KnowledgeBubble>(`/knowledge/${id}`),
+  updateKnowledgeBubble: (id: string, data: Record<string, unknown>) =>
+    request<KnowledgeBubble>(`/knowledge/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  patchPermanence: (id: string, permanence: string) =>
+    request(`/knowledge/${id}/permanence`, {
+      method: 'PATCH',
+      body: JSON.stringify({ permanence }),
+    }),
+  deleteKnowledgeBubble: (id: string) => request(`/knowledge/${id}`, { method: 'DELETE' }),
+  searchKnowledge: (query: string) =>
+    request<KnowledgeSearchResult>('/knowledge/search', {
+      method: 'POST',
+      body: JSON.stringify({ query }),
+    }),
+  mergeKnowledgeBubbles: (bubbleIds: string[]) =>
+    request<{ mergedBubbleId: string }>('/knowledge/merge', {
+      method: 'POST',
+      body: JSON.stringify({ bubbleIds }),
+    }),
 };
 
 export interface Project {
@@ -238,4 +270,60 @@ export interface MetricsResponse {
   pipelines: StatsBlock;
   perSkill: Array<StatsBlock & { skillName: string }>;
   perPipeline: Array<StatsBlock & { pipelineName: string }>;
+}
+
+export interface KnowledgeGraphNode {
+  id: string;
+  title: string;
+  domain: string | null;
+  permanence: 'temporary' | 'normal' | 'robust';
+  tags: string[];
+  clusterLabel: string | null;
+  connectionDegree: number;
+  createdAt: string;
+  updatedAt: string;
+  lastAccessedAt: string | null;
+}
+
+export interface KnowledgeGraphEdge {
+  source: string;
+  target: string;
+  relationshipType: string;
+  confidence: number | null;
+}
+
+export interface KnowledgeGraphData {
+  nodes: KnowledgeGraphNode[];
+  edges: KnowledgeGraphEdge[];
+  view: string;
+}
+
+export interface KnowledgeBubble {
+  id: string;
+  title: string;
+  content: string;
+  filePath: string;
+  source: string | null;
+  sourceFile: string | null;
+  sourceUrl: string | null;
+  tags: string[];
+  domains: string[];
+  permanence: 'temporary' | 'normal' | 'robust';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KnowledgeSearchResult {
+  results: Array<{
+    bubbleId: string;
+    title: string;
+    score: number;
+    contentPreview: string;
+    tags: string[];
+    domains: string[];
+    permanence: string;
+  }>;
+  query: string;
+  queryType: string;
+  totalCandidates: number;
 }
