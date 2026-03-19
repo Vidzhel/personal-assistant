@@ -125,6 +125,7 @@ Claude Opus 4.6 (1M context)
 - 2026-03-19: Story 8.1 implemented — initial MCP server approach with 42 typed tools
 - 2026-03-19: Code review — found 5 CLI flag mismatches, missing flags, duplicate tools
 - 2026-03-19: Refactored to direct CLI execution — deleted MCP package, rewrote agent to use Bash+Read+Grep
+- 2026-03-19: Code review (adversarial) — fixed stale MCP references in GOOGLE_WORKSPACE_SETUP.md, removed false vitest.config.ts/eslint.config.ts from File List
 
 ### File List
 - packages/shared/src/suites/constants.ts (modified)
@@ -142,6 +143,4 @@ Claude Opus 4.6 (1M context)
 - docs/GOOGLE_WORKSPACE_SETUP.md (new)
 - README.md (modified)
 - package.json (modified)
-- vitest.config.ts (modified)
-- eslint.config.ts (modified)
 - _bmad-output/implementation-artifacts/sprint-status.yaml (modified)

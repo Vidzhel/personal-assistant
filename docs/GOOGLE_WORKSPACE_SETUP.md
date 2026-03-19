@@ -43,11 +43,14 @@ GWS_MEET_CREDENTIALS_FILE=/path/to/meet-creds.json
 
 ## Multi-Account Support
 
-The MCP server supports two simultaneous accounts:
-- **gws-primary**: Main account for Gmail, Calendar, Drive, Tasks, Docs, People
-- **gws-meet**: Separate account for Meet recordings, transcripts, and smart notes
+The gws-agent supports two simultaneous accounts via credential file switching:
+- **Primary**: Default account for Gmail, Calendar, Drive, Tasks, Docs, People (uses `GWS_PRIMARY_CREDENTIALS_FILE`)
+- **Meet**: Separate account for Meet recordings, transcripts, and smart notes (uses `GWS_MEET_CREDENTIALS_FILE`)
 
-Both run the same MCP server binary but with different credential files.
+To use the meet account, prefix any gws command with the credentials env var:
+```bash
+GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=$GWS_MEET_CREDENTIALS_FILE gws meet ...
+```
 
 ## Gmail Pub/Sub (Email Watching)
 

@@ -36,7 +36,7 @@ export function ChatPanel({
   projectId: string;
   sessionId?: string | null;
 }) {
-  const { messages, sendMessage, loading, activeTaskId, stopTask } = useChat({
+  const { messages, sendMessage, loading, activeTaskId, stopTask, statusLine } = useChat({
     projectId,
     sessionId,
   });
@@ -78,6 +78,7 @@ export function ChatPanel({
         ))}
         <div ref={bottomRef} />
       </div>
+      {statusLine && <StatusLine text={statusLine} />}
       <ChatInput
         input={input}
         setInput={setInput}
@@ -220,7 +221,7 @@ function MessageBubble({
   dismissed: boolean;
   onDismissYaml: () => void;
 }) {
-  if (message.role === 'action') return <ActionBubble message={message} />;
+  if (message.role === 'action') return null;
   if (message.role === 'thinking') return <ThinkingBubble content={message.content} />;
 
   const isUser = message.role === 'user';
@@ -230,26 +231,14 @@ function MessageBubble({
   return <ContentBubble message={message} />;
 }
 
-function ActionBubble({ message }: { message: ChatMessage }) {
-  const toolName = message.toolName ?? 'Tool';
+function StatusLine({ text }: { text: string }) {
   return (
-    <div className="flex justify-start">
-      <div
-        className="max-w-[80%] px-3 py-1.5 rounded-md text-xs flex items-center gap-1.5"
-        style={{
-          background: 'var(--bg-hover)',
-          color: 'var(--text-muted)',
-          border: '1px solid var(--border)',
-        }}
-      >
-        <span style={{ fontSize: '0.7rem' }}>&#9881;</span>
-        <span className="font-medium">{toolName}</span>
-        {message.toolSummary && (
-          <span className="truncate" style={{ maxWidth: '300px' }}>
-            {message.toolSummary}
-          </span>
-        )}
-      </div>
+    <div
+      className="flex items-center gap-2 px-4 py-1.5 text-xs truncate"
+      style={{ color: 'var(--text-muted)' }}
+    >
+      <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+      <span className="truncate">{text}</span>
     </div>
   );
 }

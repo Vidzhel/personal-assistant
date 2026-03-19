@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { resolve } from 'node:path';
 import { generateId, SOURCE_GWS_GMAIL, type EventBusInterface, type LoggerInterface } from '@raven/shared';
 import type { ServiceContext, SuiteService } from '@raven/core/suite-registry/service-runner.ts';
 
@@ -96,7 +97,8 @@ const service: SuiteService = {
     eventBus = context.eventBus;
     logger = context.logger;
 
-    credFile = process.env.GWS_PRIMARY_CREDENTIALS_FILE ?? '';
+    const rawCred = process.env.GWS_PRIMARY_CREDENTIALS_FILE ?? '';
+    credFile = rawCred ? resolve(rawCred) : '';
     gcpProjectId = process.env.GWS_GCP_PROJECT_ID ?? '';
 
     if (!credFile) {

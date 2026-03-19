@@ -53,7 +53,11 @@
       "Bash(/home/user/projects/personal-assistant/.claude/skills/browser-testing/scripts/check-devserver.sh)",
       "Bash(eslint:*)",
       "Bash(playwright-cli close-all:*)",
-      "Bash(npm ls:*)"
+      "Bash(npm ls:*)",
+      "Bash(ps:*)",
+      "Bash(sqlite3:*)",
+      "Bash(gws meet:*)",
+      "Bash(gws gmail:*)"
     ]
   }
 }

@@ -61,6 +61,8 @@ export function GraphChatPanel({
     }
   }
 
+  const detailOpen = selectedNodeIds.length === 1;
+
   if (!open) {
     return (
       <button
@@ -75,8 +77,8 @@ export function GraphChatPanel({
 
   return (
     <div
-      className="w-80 h-full border-l flex flex-col"
-      style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}
+      className={`absolute top-0 z-20 w-80 h-full flex flex-col shadow-xl ${detailOpen ? 'right-80' : 'right-0'}`}
+      style={{ background: 'var(--bg)' }}
     >
       <div
         className="flex items-center justify-between p-3 border-b"

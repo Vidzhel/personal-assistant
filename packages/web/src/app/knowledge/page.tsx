@@ -70,11 +70,9 @@ export default function KnowledgePage() {
   return (
     <div className="flex flex-col h-full">
       <GraphControls onRefetch={fetchGraph} />
-      <div className="flex flex-1 min-h-0 relative">
-        <div className="flex-1 relative">
-          <KnowledgeGraph />
-          {showBulk && <BulkActionBar onRefetch={fetchGraph} />}
-        </div>
+      <div className="flex-1 min-h-0 relative">
+        <KnowledgeGraph />
+        {showBulk && <BulkActionBar onRefetch={fetchGraph} />}
         {showDetail && <BubbleDetailPanel onRefetch={fetchGraph} />}
         <GraphChatPanel projectId={projectId} onRefetch={fetchGraph} />
       </div>

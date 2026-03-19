@@ -24,6 +24,7 @@ export default function ProjectPage() {
   const [showDebug, setShowDebug] = useState(false);
   const [showRefs, setShowRefs] = useState(false);
   const [error, setError] = useState(false);
+  const [sessionsError, setSessionsError] = useState(false);
   const { references, externalRefs } = useReferences(activeSessionId);
 
   useEffect(() => {
@@ -37,7 +38,7 @@ export default function ProjectPage() {
         setSessions(s);
         if (s.length > 0) setActiveSessionId(s[0].id);
       })
-      .catch(() => {});
+      .catch(() => setSessionsError(true));
   }, [id]);
 
   const handleNewSession = useCallback(async () => {
@@ -194,6 +195,15 @@ export default function ProjectPage() {
             </div>
           )}
         </div>
+
+        {sessionsError && (
+          <span
+            className="text-xs px-2 py-1 rounded"
+            style={{ color: '#ef4444', background: 'rgba(239,68,68,0.1)' }}
+          >
+            Failed to load sessions — is Raven core running?
+          </span>
+        )}
 
         <button
           onClick={() => activeSessionId && setShowRefs(true)}

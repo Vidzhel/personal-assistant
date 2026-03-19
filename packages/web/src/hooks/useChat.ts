@@ -28,12 +28,14 @@ export function useChat(opts: UseChatOptions): {
   loading: boolean;
   activeTaskId: string | null;
   stopTask: () => void;
+  statusLine: string | null;
 } {
   const { projectId, sessionId: externalSessionId } = opts;
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(externalSessionId ?? null);
   const [loading, setLoading] = useState(true);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [statusLine, setStatusLine] = useState<string | null>(null);
   const initializedRef = useRef(false);
   const processedWsRef = useRef(0);
   const channels = useMemo(() => [`project:${projectId}`], [projectId]);
@@ -43,6 +45,7 @@ export function useChat(opts: UseChatOptions): {
   useEffect(() => {
     if (externalSessionId !== undefined && externalSessionId !== sessionId) {
       setSessionId(externalSessionId);
+      setStatusLine(null);
       initializedRef.current = false;
       processedWsRef.current = 0;
     }
@@ -67,10 +70,11 @@ export function useChat(opts: UseChatOptions): {
           setSessionId(sid);
         }
 
+        const displayRoles = new Set(['user', 'assistant', 'thinking']);
         const msgRes = await fetch(`${API_URL}/sessions/${sid}/messages`);
         if (msgRes.ok) {
           const history = (await msgRes.json()) as ChatMessage[];
-          setChatMessages(history);
+          setChatMessages(history.filter((m) => displayRoles.has(m.role)));
         } else {
           setChatMessages([]);
         }
@@ -109,29 +113,16 @@ export function useChat(opts: UseChatOptions): {
 
         if (event.type === 'agent:task:complete') {
           setActiveTaskId(null);
+          setStatusLine(null);
         }
 
         if (event.type === 'agent:message' && content) {
           if (taskId) setActiveTaskId(taskId);
           if (messageType === 'tool_use') {
             const colonIdx = content.indexOf(':');
-            const toolName = colonIdx > 0 ? content.slice(0, colonIdx).trim() : undefined;
+            const toolName = colonIdx > 0 ? content.slice(0, colonIdx).trim() : 'Tool';
             const toolSummary = colonIdx > 0 ? content.slice(colonIdx + 1).trim() : content;
-            setChatMessages((prev) => {
-              if (messageId && prev.some((m) => m.id === messageId)) return prev;
-              return [
-                ...prev,
-                {
-                  id: messageId ?? crypto.randomUUID(),
-                  role: 'action' as const,
-                  content,
-                  timestamp: Date.now(),
-                  taskId,
-                  toolName,
-                  toolSummary,
-                },
-              ];
-            });
+            setStatusLine(`${toolName}: ${toolSummary}`);
           } else if (messageType === 'thinking') {
             setChatMessages((prev) => {
               if (messageId && prev.some((m) => m.id === messageId)) return prev;
@@ -187,7 +178,16 @@ export function useChat(opts: UseChatOptions): {
     if (!activeTaskId) return;
     fetch(`${API_URL}/agent-tasks/${activeTaskId}/cancel`, { method: 'POST' }).catch(() => {});
     setActiveTaskId(null);
+    setStatusLine(null);
   }, [activeTaskId]);
 
-  return { messages: chatMessages, sendMessage, sessionId, loading, activeTaskId, stopTask };
+  return {
+    messages: chatMessages,
+    sendMessage,
+    sessionId,
+    loading,
+    activeTaskId,
+    stopTask,
+    statusLine,
+  };
 }

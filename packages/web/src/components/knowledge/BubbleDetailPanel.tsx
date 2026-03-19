@@ -189,8 +189,8 @@ export function BubbleDetailPanel({ onRefetch }: { onRefetch: () => void }) {
 
   return (
     <div
-      className="w-80 h-full overflow-y-auto border-l p-4 flex flex-col gap-3"
-      style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}
+      className="absolute top-0 right-0 z-20 w-80 h-full overflow-y-auto p-4 flex flex-col gap-3 shadow-xl"
+      style={{ background: 'var(--bg)' }}
     >
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-bold" style={{ color: 'var(--text)' }}>
