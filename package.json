@@ -7,8 +7,7 @@
     "packages/shared",
     "packages/core",
     "packages/web",
-    "packages/mcp-ticktick",
-    "packages/mcp-google-workspace"
+    "packages/mcp-ticktick"
   ],
   "scripts": {
     "build": "npm run build -w packages/shared && npm run build -w packages/core && npm run build -ws --if-present",

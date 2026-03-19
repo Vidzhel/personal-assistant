@@ -6,7 +6,6 @@ export default defineConfig({
       'packages/shared/vitest.config.ts',
       'packages/core/vitest.config.ts',
       'packages/mcp-ticktick/vitest.config.ts',
-      'packages/mcp-google-workspace/vitest.config.ts',
       'packages/web/vitest.config.ts',
       'suites/vitest.config.ts',
     ],

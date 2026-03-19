@@ -29,8 +29,6 @@ export const EVENT_INSIGHT_SUPPRESSED = 'insight:suppressed' as const;
 
 // Suite: google-workspace
 export const SUITE_GOOGLE_WORKSPACE = 'google-workspace';
-export const MCP_GWS_PRIMARY = 'gws-primary';
-export const MCP_GWS_MEET = 'gws-meet';
 export const AGENT_GWS = 'gws-agent';
 export const SOURCE_GWS_GMAIL = 'gws-gmail';
 

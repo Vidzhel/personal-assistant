@@ -28,7 +28,7 @@ export default tseslint.config(
 
   // Shared/core/skills: Node globals
   {
-    files: ['packages/shared/src/**/*.ts', 'packages/core/src/**/*.ts', 'packages/skills/*/src/**/*.ts', 'packages/mcp-ticktick/src/**/*.ts', 'packages/mcp-google-workspace/src/**/*.ts'],
+    files: ['packages/shared/src/**/*.ts', 'packages/core/src/**/*.ts', 'packages/skills/*/src/**/*.ts', 'packages/mcp-ticktick/src/**/*.ts'],
     languageOptions: {
       globals: globals.node,
     },
@@ -157,7 +157,7 @@ export default tseslint.config(
 
   // Disable no-deprecated for packages without type-checked linting (requires type info)
   {
-    files: ['packages/web/**/*.{ts,tsx}', 'packages/mcp-ticktick/src/**/*.ts', 'packages/mcp-google-workspace/src/**/*.ts'],
+    files: ['packages/web/**/*.{ts,tsx}', 'packages/mcp-ticktick/src/**/*.ts'],
     rules: {
       '@typescript-eslint/no-deprecated': 'off',
     },

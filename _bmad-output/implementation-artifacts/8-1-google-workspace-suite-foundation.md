@@ -1,6 +1,6 @@
 # Story 8.1: Google Workspace Suite Foundation — MCP Server, Agent & Email Watcher
 
-Status: review
+Status: done
 
 ## Story
 
