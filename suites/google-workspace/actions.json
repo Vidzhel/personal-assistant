@@ -1,0 +1,18 @@
+[
+  { "name": "google-workspace:read-email", "description": "Read and triage emails", "defaultTier": "green", "reversible": true },
+  { "name": "google-workspace:read-calendar", "description": "View calendar events and agenda", "defaultTier": "green", "reversible": true },
+  { "name": "google-workspace:read-drive", "description": "List and view Drive files", "defaultTier": "green", "reversible": true },
+  { "name": "google-workspace:read-contacts", "description": "Search and list contacts", "defaultTier": "green", "reversible": true },
+  { "name": "google-workspace:read-tasks", "description": "List and view Google Tasks", "defaultTier": "green", "reversible": true },
+  { "name": "google-workspace:read-docs", "description": "Read Google Docs content", "defaultTier": "green", "reversible": true },
+  { "name": "google-workspace:read-meet", "description": "View Meet recordings, transcripts, and notes", "defaultTier": "green", "reversible": true },
+  { "name": "google-workspace:send-email", "description": "Send, reply, or forward an email", "defaultTier": "yellow", "reversible": false },
+  { "name": "google-workspace:modify-email", "description": "Add or remove labels from emails", "defaultTier": "yellow", "reversible": true },
+  { "name": "google-workspace:create-event", "description": "Create a calendar event", "defaultTier": "yellow", "reversible": true },
+  { "name": "google-workspace:modify-event", "description": "Update or delete a calendar event", "defaultTier": "yellow", "reversible": true },
+  { "name": "google-workspace:create-task", "description": "Create a Google Task", "defaultTier": "yellow", "reversible": true },
+  { "name": "google-workspace:modify-task", "description": "Update, complete, or delete a Google Task", "defaultTier": "yellow", "reversible": true },
+  { "name": "google-workspace:create-doc", "description": "Create a Google Doc", "defaultTier": "yellow", "reversible": true },
+  { "name": "google-workspace:create-drive-file", "description": "Create or upload a file to Drive", "defaultTier": "yellow", "reversible": true },
+  { "name": "google-workspace:delete-drive-file", "description": "Delete a file from Google Drive", "defaultTier": "red", "reversible": false }
+]

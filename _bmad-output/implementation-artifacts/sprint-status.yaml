@@ -34,7 +34,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-12
-last_updated: 2026-03-19 # story 7.4 review
+last_updated: 2026-03-19 # story 8.1 context created
 project: personal-assistant
 project_key: NOKEY
 tracking_system: file-system
@@ -101,18 +101,19 @@ development_status:
   epic-6-retrospective: optional
 
   # Epic 7: Proactive Intelligence & Friend Protocol (Growth)
-  epic-7: in-progress
+  epic-7: done
   7-1-background-pattern-analysis-engine: done
-  7-2-urgency-tier-classification-and-delivery-timing: review
-  7-3-engagement-based-throttling: review
+  7-2-urgency-tier-classification-and-delivery-timing: done
+  7-3-engagement-based-throttling: done
   7-4-category-snooze-and-notification-preferences: done
   epic-7-retrospective: optional
 
-  # Epic 8: Expanding Integrations (Growth-Vision)
-  epic-8: backlog
-  8-1-google-drive-file-monitoring-and-processing: backlog
-  8-2-financial-transaction-tracking-and-categorization: backlog
-  8-3-financial-anomaly-detection-calendar-defense-and-meeting-prep: backlog
+  # Epic 8: Google Workspace Integration & Expanding Integrations (Growth-Vision)
+  epic-8: in-progress
+  8-1-google-workspace-suite-foundation: review
+  8-2-google-drive-file-monitoring-and-processing: backlog
+  8-3-financial-transaction-tracking-and-categorization: backlog
+  8-4-financial-anomaly-detection-calendar-defense-and-meeting-prep: backlog
   epic-8-retrospective: optional
 
   # Epic 9: Deep Knowledge & Intelligence (Vision)

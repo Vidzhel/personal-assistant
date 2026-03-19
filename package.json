@@ -7,7 +7,8 @@
     "packages/shared",
     "packages/core",
     "packages/web",
-    "packages/mcp-ticktick"
+    "packages/mcp-ticktick",
+    "packages/mcp-google-workspace"
   ],
   "scripts": {
     "build": "npm run build -w packages/shared && npm run build -w packages/core && npm run build -ws --if-present",
@@ -29,7 +30,8 @@
     "test:skill": "node --experimental-strip-types scripts/test-skill.ts",
     "test:ticktick": "node --experimental-strip-types scripts/test-ticktick-manual.ts",
     "test:suite": "node --experimental-strip-types scripts/test-suite.ts",
-    "test:suite:list": "node --experimental-strip-types scripts/test-suite.ts --list"
+    "test:suite:list": "node --experimental-strip-types scripts/test-suite.ts --list",
+    "update:gws": "bash scripts/update-gws-skills.sh"
   },
   "engines": {
     "node": ">=22.0.0"

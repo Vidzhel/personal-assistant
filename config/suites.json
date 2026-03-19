@@ -22,6 +22,7 @@
   },
   "daily-briefing": { "enabled": true },
   "gemini-transcription": { "enabled": true },
+  "google-workspace": { "enabled": true },
   "proactive-intelligence": {
     "enabled": true,
     "config": {

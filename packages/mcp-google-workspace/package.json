@@ -1,0 +1,13 @@
+{
+  "name": "@raven/mcp-google-workspace",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "build": "echo 'No build needed — runs via --experimental-strip-types'"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "zod": "^3.25.67"
+  }
+}

@@ -9,6 +9,7 @@ An AI-powered personal assistant that manages your tasks, monitors your email, d
 - **Morning Digest** - Daily briefing at 8am with tasks, emails, and suggestions
 - **Telegram Notifications** - Push alerts and quick replies via Telegram bot
 - **Web Dashboard** - Full-featured UI with parallel project sessions and real-time chat
+- **Google Workspace** - Calendar, Drive, Meet, Tasks, Docs, People via gws CLI with multi-account support
 - **Extensible Skills** - Plugin system for adding new integrations
 
 ## Quick Start
@@ -67,6 +68,9 @@ docker compose up --build
 | `TELEGRAM_TOPIC_GENERAL` | General topic thread ID (optional, group mode) |
 | `TELEGRAM_TOPIC_SYSTEM` | System alerts topic thread ID (optional, group mode) |
 | `TELEGRAM_TOPIC_MAP` | JSON mapping topic names to thread IDs, e.g. `{"Work":5}` (optional) |
+| `GWS_PRIMARY_CREDENTIALS_FILE` | Path to primary gws CLI credentials JSON |
+| `GWS_MEET_CREDENTIALS_FILE` | Path to Meet account credentials JSON (optional) |
+| `GWS_GCP_PROJECT_ID` | GCP project ID for Gmail Pub/Sub watch (optional) |
 | `GOOGLE_API_KEY` | Google AI API key for Gemini voice transcription (optional) |
 | `RAVEN_TIMEZONE` | Timezone for schedules (e.g., `Europe/London`) |
 | `RAVEN_DIGEST_TIME` | Morning digest time (default: `08:00`) |
@@ -84,6 +88,8 @@ docker compose up --build
 See `ARCHITECTURE.md` for the full skill plugin contract and MCP isolation model.
 
 ## Architecture
+
+See [Google Workspace Setup](./docs/GOOGLE_WORKSPACE_SETUP.md) for detailed gws CLI setup.
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full system architecture, including:
 - MCP isolation model (sub-agent delegation)
