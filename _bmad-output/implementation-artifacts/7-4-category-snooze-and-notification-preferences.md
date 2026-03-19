@@ -1,6 +1,6 @@
 # Story 7.4: Category Snooze & Notification Preferences
 
-Status: review
+Status: done
 
 ## Story
 
@@ -305,6 +305,12 @@ Claude Opus 4.6 (1M context)
 
 ### Change Log
 - 2026-03-19: Implemented story 7.4 — category snooze & notification preferences (all 9 tasks)
+- 2026-03-19: Code review fixes — 2 HIGH, 2 MEDIUM, 1 LOW issues resolved:
+  - H1: Fixed snooze-suggester ignored category detection to actually check per-notification engagement
+  - H2: Created missing snooze-suggester tests (12 tests)
+  - M1: Fixed unsnooze callback to look up category before deleting snooze record
+  - M2: Replaced fragile suggestion-placeholder hack with dedicated `snooze_suggestions` table
+  - L1: Fixed inconsistent return type in DELETE /api/notifications/snooze/:id
 
 ### File List
 - `migrations/011-notification-preferences.sql` (new)
@@ -325,4 +331,5 @@ Claude Opus 4.6 (1M context)
 - `suites/notifications/__tests__/delivery-scheduler.test.ts` (modified — 5 new snooze integration tests)
 - `suites/notifications/__tests__/callback-handler.test.ts` (modified — 8 new snooze tests)
 - `config/suites.json` (modified — added snooze config)
+- `suites/notifications/__tests__/snooze-suggester.test.ts` (new — 12 tests, code review fix H2)
 - `_bmad-output/implementation-artifacts/sprint-status.yaml` (modified — 7.4 status update)

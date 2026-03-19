@@ -44,9 +44,10 @@ function hasRecentSuggestion(category: string): boolean {
     Date.now() - suggestionCooldownDays * 86_400_000,
   ).toISOString();
 
+  // Check snooze_suggestions tracking table
   const row = db.get<{ count: number }>(
-    `SELECT COUNT(*) as count FROM notification_snooze
-     WHERE category = ? AND last_suggested_at IS NOT NULL AND last_suggested_at > ?`,
+    `SELECT COUNT(*) as count FROM snooze_suggestions
+     WHERE category = ? AND suggested_at > ?`,
     category,
     cooldownCutoff,
   );
@@ -72,14 +73,7 @@ function getIgnoredCategories(): CategoryStats[] {
     // Skip unsnoozable sources
     if (isUnsnoozableSource(stat.source)) continue;
 
-    // Count responses for this source's notifications
-    const responseCount = db.get<{ count: number }>(
-      `SELECT COUNT(*) as count FROM engagement_metrics
-       WHERE event_type = 'user_response'
-         AND created_at > datetime('now', '-7 days')`,
-    );
-
-    // Check if the last N notifications for this source had no engagement
+    // Get the last N notification IDs for this source
     const lastN = db.all<{ id: string }>(
       `SELECT id FROM notification_queue
        WHERE source = ?
@@ -92,10 +86,25 @@ function getIgnoredCategories(): CategoryStats[] {
 
     if (lastN.length < ignoreThreshold) continue;
 
+    // Count engagement responses that match these specific notification IDs
+    const ids = lastN.map((n) => n.id);
+    const placeholders = ids.map(() => '?').join(',');
+    const responseCount = db.get<{ count: number }>(
+      `SELECT COUNT(*) as count FROM engagement_metrics
+       WHERE event_type = 'user_response'
+         AND notification_id IN (${placeholders})`,
+      ...ids,
+    );
+
+    const respondedCount = responseCount?.count ?? 0;
+
+    // Only consider ignored if zero responses for the last N notifications
+    if (respondedCount > 0) continue;
+
     categories.push({
       sourcePrefix: prefix,
       deliveredCount: stat.cnt,
-      respondedCount: responseCount?.count ?? 0,
+      respondedCount,
     });
   }
 
@@ -146,14 +155,11 @@ function checkForIgnoredCategories(): void {
       const shortcode = SHORTCODE_FROM_CATEGORY[category] ?? cat.sourcePrefix;
       const displayName = getCategoryDisplayName(category);
 
-      // Record suggestion time
-      const suggestionId = generateId();
+      // Record suggestion time in dedicated tracking table
       db.run(
-        `INSERT INTO notification_snooze (id, category, snoozed_until, held_count, last_suggested_at, created_at)
-         VALUES (?, ?, 'suggestion-placeholder', 0, ?, ?)`,
-        suggestionId,
+        `INSERT OR REPLACE INTO snooze_suggestions (category, suggested_at)
+         VALUES (?, ?)`,
         category,
-        new Date().toISOString(),
         new Date().toISOString(),
       );
 
@@ -176,9 +182,6 @@ function checkForIgnoredCategories(): void {
           ],
         },
       });
-
-      // Remove the placeholder (it was just for tracking the suggestion)
-      db.run(`DELETE FROM notification_snooze WHERE id = ?`, suggestionId);
 
       eventBus.emit({
         id: generateId(),

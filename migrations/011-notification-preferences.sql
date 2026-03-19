@@ -11,3 +11,9 @@ CREATE TABLE IF NOT EXISTS notification_snooze (
 );
 
 CREATE INDEX IF NOT EXISTS idx_snooze_category ON notification_snooze(category);
+
+-- Separate table for tracking snooze suggestion cooldowns
+CREATE TABLE IF NOT EXISTS snooze_suggestions (
+  category TEXT PRIMARY KEY,
+  suggested_at TEXT NOT NULL
+);

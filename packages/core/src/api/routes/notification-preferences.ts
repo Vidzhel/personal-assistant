@@ -47,7 +47,7 @@ function handleDeleteSnooze(
   id: string,
   db: DatabaseInterface,
   reply: FastifyReply,
-): ReturnType<FastifyReply['send']> | { success: boolean; releasedCount: number } {
+): ReturnType<FastifyReply['send']> {
   const snoozes = getActiveSnoozes(db);
   const snooze = snoozes.find((s) => s.id === id);
 
@@ -66,7 +66,7 @@ function handleDeleteSnooze(
     }
   }
 
-  return { success: true, releasedCount: snooze ? snooze.heldCount : 0 };
+  return reply.send({ success: true, releasedCount: snooze ? snooze.heldCount : 0 });
 }
 
 export function registerNotificationPreferencesRoutes(

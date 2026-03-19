@@ -22,7 +22,7 @@
 
 import type { InlineKeyboardButton } from 'grammy/types';
 import { generateId, CATEGORY_SHORTCODES, type EventBusInterface, type LoggerInterface, type DatabaseInterface } from '@raven/shared';
-import { createSnooze, removeSnooze, updateLastSuggested } from '@raven/core/notification-engine/snooze-store.ts';
+import { createSnooze, removeSnooze, updateLastSuggested, getActiveSnoozes } from '@raven/core/notification-engine/snooze-store.ts';
 import { getSnoozedByCategory, releaseSnoozed } from '@raven/core/notification-engine/notification-queue.ts';
 
 export interface CallbackAction {
@@ -460,19 +460,24 @@ function handleSnoozeAction(
   }
 
   if (action.action === 'unsnooze') {
-    // target is the snooze ID for unsnooze
+    // target is the snooze ID — look up category before deleting
+    const snoozes = getActiveSnoozes(deps.db);
+    const snoozeRecord = snoozes.find((s) => s.id === action.target);
+
     const removed = removeSnooze(deps.db, action.target);
     if (!removed) {
       return { success: false, message: 'Snooze not found' };
     }
 
-    // Release held notifications
-    const snoozed = getSnoozedByCategory(deps.db, category);
-    if (snoozed.length > 0) {
-      releaseSnoozed(
-        deps.db,
-        snoozed.map((n) => n.id),
-      );
+    // Release held notifications using the actual category from the snooze record
+    if (snoozeRecord) {
+      const snoozed = getSnoozedByCategory(deps.db, snoozeRecord.category);
+      if (snoozed.length > 0) {
+        releaseSnoozed(
+          deps.db,
+          snoozed.map((n) => n.id),
+        );
+      }
     }
 
     return {
