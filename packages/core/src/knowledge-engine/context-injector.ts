@@ -2,7 +2,7 @@ import type { KnowledgeContext, ContextInjectionOptions } from '@raven/shared';
 import type { RetrievalEngine } from './retrieval.ts';
 
 const DEFAULT_CONTEXT_BUDGET = 2000;
-const DEFAULT_MIN_SCORE = 0.3;
+const DEFAULT_MIN_SCORE = 0.6;
 
 interface ContextInjectorDeps {
   retrievalEngine: RetrievalEngine;

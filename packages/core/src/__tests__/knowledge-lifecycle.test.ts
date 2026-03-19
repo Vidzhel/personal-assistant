@@ -197,20 +197,20 @@ describe('Knowledge Lifecycle', () => {
       const lifecycle = createLifecycle();
       const result = await lifecycle.snoozeBubble('bubble-1', 14);
 
-      expect(result).toBe(true);
+      expect(result).toBeTruthy();
       expect(neo4j.run).toHaveBeenCalledWith(
         expect.stringContaining('snoozedUntil'),
         expect.objectContaining({ id: 'bubble-1' }),
       );
     });
 
-    it('returns false when bubble not found', async () => {
+    it('returns null when bubble not found', async () => {
       (neo4j.run as any).mockResolvedValue({ records: [] });
 
       const lifecycle = createLifecycle();
       const result = await lifecycle.snoozeBubble('nonexistent', 7);
 
-      expect(result).toBe(false);
+      expect(result).toBeNull();
     });
   });
 

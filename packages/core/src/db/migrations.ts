@@ -5,6 +5,7 @@ import { createLogger } from '@raven/shared';
 
 const log = createLogger('migrations');
 
+// eslint-disable-next-line max-lines-per-function -- sequential migration runner
 export function runFileMigrations(db: Database.Database, migrationsDir: string): void {
   if (!existsSync(migrationsDir)) {
     throw new Error(`Migrations directory not found: ${migrationsDir}`);
@@ -57,8 +58,18 @@ export function runFileMigrations(db: Database.Database, migrationsDir: string):
     try {
       migrate();
     } catch (err) {
-      log.error(`Migration failed: ${name} — ${err instanceof Error ? err.message : String(err)}`);
-      throw err;
+      const msg = err instanceof Error ? err.message : String(err);
+      // Tolerate "duplicate column" errors from idempotent ALTER TABLE migrations
+      if (msg.includes('duplicate column name')) {
+        log.info(`Migration ${name} skipped (column already exists)`);
+        db.prepare('INSERT OR IGNORE INTO _migrations (name, applied_at) VALUES (?, ?)').run(
+          name,
+          Date.now(),
+        );
+      } else {
+        log.error(`Migration failed: ${name} — ${msg}`);
+        throw err;
+      }
     }
   }
 }

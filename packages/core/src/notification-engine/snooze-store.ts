@@ -26,7 +26,7 @@ interface CreateSnoozeParams {
   duration: SnoozeDuration;
 }
 
-export function createSnooze(db: DatabaseInterface, params: CreateSnoozeParams): string {
+export function createSnooze(db: DatabaseInterface, params: CreateSnoozeParams): SnoozeRecord {
   const id = generateId();
   const now = new Date();
   const createdAt = now.toISOString();
@@ -47,7 +47,14 @@ export function createSnooze(db: DatabaseInterface, params: CreateSnoozeParams):
   );
 
   log.info(`Created snooze ${id} for "${params.category}" until ${snoozedUntil ?? 'muted'}`);
-  return id;
+  return {
+    id,
+    category: params.category,
+    snoozedUntil,
+    heldCount: 0,
+    lastSuggestedAt: null,
+    createdAt,
+  };
 }
 
 export function getActiveSnoozes(db: DatabaseInterface): SnoozeRecord[] {

@@ -9,9 +9,11 @@ import {
   getSnoozedByCategory,
   releaseSnoozed,
 } from '../../notification-engine/notification-queue.ts';
+import { matchesPattern } from '../../notification-engine/urgency-classifier.ts';
 
 export interface NotificationPreferencesDeps {
   db: DatabaseInterface;
+  unsnoozableCategories?: string[];
 }
 
 const HTTP_BAD_REQUEST = 400;
@@ -24,9 +26,9 @@ type SnoozeDuration = (typeof VALID_DURATIONS)[number];
 
 function handleCreateSnooze(
   body: { category: string; duration: string },
-  db: DatabaseInterface,
-  reply: FastifyReply,
+  deps: { db: DatabaseInterface; reply: FastifyReply; unsnoozableCategories: string[] },
 ): ReturnType<FastifyReply['send']> {
+  const { db, reply, unsnoozableCategories } = deps;
   const { category, duration } = body;
 
   if (!category || !duration) {
@@ -39,8 +41,21 @@ function handleCreateSnooze(
       .send({ error: `duration must be one of: ${VALID_DURATIONS.join(', ')}` });
   }
 
-  const id = createSnooze(db, { category, duration: duration as SnoozeDuration });
-  return reply.status(HTTP_CREATED).send({ id, category, duration });
+  const isUnsnoozable = unsnoozableCategories.some(
+    (pattern) => matchesPattern(category, pattern) || matchesPattern(pattern, category),
+  );
+  if (isUnsnoozable) {
+    return reply.status(HTTP_BAD_REQUEST).send({ error: 'Category is unsnoozable' });
+  }
+
+  const record = createSnooze(db, { category, duration: duration as SnoozeDuration });
+  return reply.status(HTTP_CREATED).send({
+    id: record.id,
+    category: record.category,
+    duration,
+    snoozedUntil: record.snoozedUntil,
+    heldCount: record.heldCount,
+  });
 }
 
 function handleDeleteSnooze(
@@ -89,7 +104,11 @@ export function registerNotificationPreferencesRoutes(
   app.post<{
     Body: { category: string; duration: string };
   }>('/api/notifications/snooze', async (request, reply) => {
-    return handleCreateSnooze(request.body, deps.db, reply);
+    return handleCreateSnooze(request.body, {
+      db: deps.db,
+      reply,
+      unsnoozableCategories: deps.unsnoozableCategories ?? [],
+    });
   });
 
   app.delete<{

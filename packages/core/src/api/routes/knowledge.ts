@@ -480,9 +480,9 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
     if (!result.success) {
       return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: result.error.message });
     }
-    const success = await knowledgeLifecycle.snoozeBubble(req.params.id, result.data.days);
-    if (!success) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
-    return { success: true, snoozedDays: result.data.days };
+    const snoozedUntil = await knowledgeLifecycle.snoozeBubble(req.params.id, result.data.days);
+    if (!snoozedUntil) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
+    return { success: true, snoozedUntil };
   });
 
   app.post('/api/knowledge/merge', async (req, reply) => {

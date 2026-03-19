@@ -257,12 +257,12 @@ describe('delivery-scheduler service', () => {
 
     it('increments held_count on snooze record', async () => {
       await startService();
-      const snoozeId = createSnooze(db, { category: 'pipeline:*', duration: '1d' });
+      const snoozeRecord = createSnooze(db, { category: 'pipeline:*', duration: '1d' });
 
       triggerNotification(makeNotifEvent('pipeline:complete'));
       triggerNotification(makeNotifEvent('pipeline:failed'));
 
-      const row = db.get<any>('SELECT held_count FROM notification_snooze WHERE id = ?', snoozeId);
+      const row = db.get<any>('SELECT held_count FROM notification_snooze WHERE id = ?', snoozeRecord.id);
       expect(row.held_count).toBe(2);
     });
 

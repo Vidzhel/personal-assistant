@@ -35,10 +35,10 @@ describe('snooze-store', () => {
 
   describe('createSnooze', () => {
     it('creates a timed snooze with snoozed_until', () => {
-      const id = createSnooze(db, { category: 'pipeline:*', duration: '1d' });
-      expect(id).toBeTruthy();
+      const record = createSnooze(db, { category: 'pipeline:*', duration: '1d' });
+      expect(record.id).toBeTruthy();
 
-      const row = db.get<any>('SELECT * FROM notification_snooze WHERE id = ?', id);
+      const row = db.get<any>('SELECT * FROM notification_snooze WHERE id = ?', record.id);
       expect(row).toBeTruthy();
       expect(row.category).toBe('pipeline:*');
       expect(row.snoozed_until).toBeTruthy();
@@ -46,20 +46,29 @@ describe('snooze-store', () => {
     });
 
     it('creates a mute with null snoozed_until', () => {
-      const id = createSnooze(db, { category: 'email:triage:*', duration: 'mute' });
+      const record = createSnooze(db, { category: 'email:triage:*', duration: 'mute' });
 
-      const row = db.get<any>('SELECT * FROM notification_snooze WHERE id = ?', id);
+      const row = db.get<any>('SELECT * FROM notification_snooze WHERE id = ?', record.id);
       expect(row.snoozed_until).toBeNull();
     });
 
     it('supports 1h, 1d, 1w durations', () => {
-      const id1h = createSnooze(db, { category: 'cat1', duration: '1h' });
-      const id1d = createSnooze(db, { category: 'cat2', duration: '1d' });
-      const id1w = createSnooze(db, { category: 'cat3', duration: '1w' });
+      const rec1h = createSnooze(db, { category: 'cat1', duration: '1h' });
+      const rec1d = createSnooze(db, { category: 'cat2', duration: '1d' });
+      const rec1w = createSnooze(db, { category: 'cat3', duration: '1w' });
 
-      const r1 = db.get<any>('SELECT snoozed_until FROM notification_snooze WHERE id = ?', id1h);
-      const r2 = db.get<any>('SELECT snoozed_until FROM notification_snooze WHERE id = ?', id1d);
-      const r3 = db.get<any>('SELECT snoozed_until FROM notification_snooze WHERE id = ?', id1w);
+      const r1 = db.get<any>(
+        'SELECT snoozed_until FROM notification_snooze WHERE id = ?',
+        rec1h.id,
+      );
+      const r2 = db.get<any>(
+        'SELECT snoozed_until FROM notification_snooze WHERE id = ?',
+        rec1d.id,
+      );
+      const r3 = db.get<any>(
+        'SELECT snoozed_until FROM notification_snooze WHERE id = ?',
+        rec1w.id,
+      );
 
       // All should have snoozed_until set (not null)
       expect(r1.snoozed_until).toBeTruthy();
@@ -86,11 +95,11 @@ describe('snooze-store', () => {
     });
 
     it('excludes expired snoozes', () => {
-      const id = createSnooze(db, { category: 'pipeline:*', duration: '1h' });
+      const record = createSnooze(db, { category: 'pipeline:*', duration: '1h' });
       // Manually set snoozed_until to the past
       db.run(
         `UPDATE notification_snooze SET snoozed_until = '2020-01-01T00:00:00Z' WHERE id = ?`,
-        id,
+        record.id,
       );
 
       const active = getActiveSnoozes(db);
@@ -130,7 +139,7 @@ describe('snooze-store', () => {
     });
 
     it('returns null for expired snooze', () => {
-      const id = createSnooze(db, { category: 'pipeline:*', duration: '1h' });
+      const { id } = createSnooze(db, { category: 'pipeline:*', duration: '1h' });
       db.run(
         `UPDATE notification_snooze SET snoozed_until = '2020-01-01T00:00:00Z' WHERE id = ?`,
         id,
@@ -143,7 +152,7 @@ describe('snooze-store', () => {
 
   describe('removeSnooze', () => {
     it('deletes existing snooze and returns true', () => {
-      const id = createSnooze(db, { category: 'pipeline:*', duration: '1d' });
+      const { id } = createSnooze(db, { category: 'pipeline:*', duration: '1d' });
 
       const result = removeSnooze(db, id);
       expect(result).toBe(true);
@@ -160,7 +169,7 @@ describe('snooze-store', () => {
 
   describe('incrementHeldCount', () => {
     it('increments the held count', () => {
-      const id = createSnooze(db, { category: 'pipeline:*', duration: '1d' });
+      const { id } = createSnooze(db, { category: 'pipeline:*', duration: '1d' });
 
       incrementHeldCount(db, id);
       incrementHeldCount(db, id);
@@ -172,7 +181,7 @@ describe('snooze-store', () => {
 
   describe('expireSnoozes', () => {
     it('deletes expired snoozes and returns them', () => {
-      const id = createSnooze(db, { category: 'pipeline:*', duration: '1h' });
+      const { id } = createSnooze(db, { category: 'pipeline:*', duration: '1h' });
       // Set to past
       db.run(
         `UPDATE notification_snooze SET snoozed_until = '2020-01-01T00:00:00Z' WHERE id = ?`,

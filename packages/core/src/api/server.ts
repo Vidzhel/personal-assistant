@@ -67,6 +67,7 @@ export interface ApiDeps {
   retrospective?: Retrospective;
   db?: DatabaseInterface;
   configuredSuiteCount: number;
+  unsnoozableCategories?: string[];
 }
 
 // eslint-disable-next-line max-lines-per-function -- server setup registers all route groups
@@ -129,7 +130,10 @@ export async function createApiServer(
 
   // Notification preferences (snooze)
   if (deps.db) {
-    registerNotificationPreferencesRoutes(app, { db: deps.db });
+    registerNotificationPreferencesRoutes(app, {
+      db: deps.db,
+      unsnoozableCategories: deps.unsnoozableCategories,
+    });
   }
 
   // SSE streaming

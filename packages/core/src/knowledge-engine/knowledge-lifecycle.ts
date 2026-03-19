@@ -33,7 +33,7 @@ export interface StaleBubble {
 
 export interface KnowledgeLifecycle {
   detectStaleBubbles: (overrideDays?: number) => Promise<StaleBubble[]>;
-  snoozeBubble: (id: string, days: number) => Promise<boolean>;
+  snoozeBubble: (id: string, days: number) => Promise<string | null>;
   removeBubbleWithMedia: (id: string) => Promise<boolean>;
   mergeBubbles: (bubbleIds: string[]) => Promise<string | undefined>;
   upgradePermanence: (id: string, newLevel: Permanence) => Promise<boolean>;
@@ -111,17 +111,18 @@ export function createKnowledgeLifecycle(deps: LifecycleDeps): KnowledgeLifecycl
     });
   }
 
-  async function snoozeBubble(id: string, days: number): Promise<boolean> {
+  async function snoozeBubble(id: string, days: number): Promise<string | null> {
     const snoozedUntil = new Date(Date.now() + days * MS_PER_DAY).toISOString();
     const result = await neo4j.run(
       `MATCH (b:Bubble {id: $id}) SET b.snoozedUntil = $snoozedUntil RETURN b.id AS id`,
       { id, snoozedUntil },
     );
-    const success = result.records.length > 0;
-    if (success) {
+    const found = result.records.length > 0;
+    if (found) {
       log.info(`Snoozed bubble ${id} for ${days} days (until ${snoozedUntil})`);
+      return snoozedUntil;
     }
-    return success;
+    return null;
   }
 
   async function removeBubbleWithMedia(id: string): Promise<boolean> {
