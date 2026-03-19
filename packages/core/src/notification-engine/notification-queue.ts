@@ -14,7 +14,7 @@ export interface QueuedNotification {
   channel: string | null;
   urgencyTier: UrgencyTier;
   deliveryMode: DeliveryMode;
-  status: 'pending' | 'delivered' | 'batched' | 'expired';
+  status: 'pending' | 'delivered' | 'batched' | 'expired' | 'escalated';
   createdAt: string;
   scheduledFor: string | null;
   deliveredAt: string | null;
@@ -86,6 +86,31 @@ export function markDelivered(db: DatabaseInterface, id: string): void {
   db.run(
     `UPDATE notification_queue SET status = 'delivered', delivered_at = ? WHERE id = ?`,
     now,
+    id,
+  );
+}
+
+export function getEscalationCandidates(
+  db: DatabaseInterface,
+  cutoffIso: string,
+): QueuedNotification[] {
+  return db.all<QueuedNotification>(
+    `SELECT id, source, title, body, topic_name AS topicName, actions_json AS actionsJson,
+            channel, urgency_tier AS urgencyTier, delivery_mode AS deliveryMode, status,
+            created_at AS createdAt, scheduled_for AS scheduledFor, delivered_at AS deliveredAt
+     FROM notification_queue
+     WHERE delivery_mode = 'tell-when-active'
+       AND status = 'pending'
+       AND created_at < ?
+       AND urgency_tier IN ('red', 'yellow')
+     ORDER BY created_at ASC`,
+    cutoffIso,
+  );
+}
+
+export function markEscalated(db: DatabaseInterface, id: string): void {
+  db.run(
+    `UPDATE notification_queue SET status = 'escalated' WHERE id = ?`,
     id,
   );
 }

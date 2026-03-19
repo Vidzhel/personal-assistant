@@ -775,9 +775,31 @@ export type RavenEvent =
   | InsightSuppressedEvent
   | NotificationDeliverEvent
   | NotificationQueuedEvent
-  | NotificationBatchedEvent;
+  | NotificationBatchedEvent
+  | EngagementStateChangedEvent
+  | NotificationEscalatedEvent;
 
 export type RavenEventType = RavenEvent['type'];
+
+export type EngagementState = 'normal' | 'throttled';
+
+export interface EngagementStateChangedEvent extends BaseEvent {
+  type: 'engagement:state-changed';
+  payload: {
+    previousState: EngagementState;
+    newState: EngagementState;
+    responseRatio: number;
+  };
+}
+
+export interface NotificationEscalatedEvent extends BaseEvent {
+  type: 'notification:escalated';
+  payload: {
+    queueId: string;
+    originalTitle: string;
+    urgencyTier: UrgencyTier;
+  };
+}
 
 export type Priority = 'low' | 'normal' | 'high' | 'urgent';
 

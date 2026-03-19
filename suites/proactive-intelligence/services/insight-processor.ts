@@ -2,6 +2,7 @@ import {
   createLogger,
   generateId,
   SUITE_PROACTIVE_INTELLIGENCE,
+  DEFAULT_INSIGHT_AUTO_DISMISS_HOURS,
   type EventBusInterface,
   type DatabaseInterface,
   AgentInsightResultSchema,
@@ -11,6 +12,8 @@ import {
   computeSuppressionHash,
   insertInsight,
   findRecentByHash,
+  getInsightsByStatus,
+  updateInsightStatus,
 } from '@raven/core/insight-engine/insight-store.ts';
 
 const log = createLogger('insight-processor');
@@ -24,6 +27,26 @@ let db: DatabaseInterface;
 let confidenceThreshold = DEFAULT_CONFIDENCE_THRESHOLD;
 let suppressionWindowDays = DEFAULT_SUPPRESSION_WINDOW_DAYS;
 let maxInsightsPerRun = DEFAULT_MAX_INSIGHTS_PER_RUN;
+let insightAutoDismissHours = DEFAULT_INSIGHT_AUTO_DISMISS_HOURS;
+
+const MS_PER_HOUR = 3_600_000;
+
+function autoDismissStaleInsights(): void {
+  const cutoff = new Date(Date.now() - insightAutoDismissHours * MS_PER_HOUR).toISOString();
+  const queued = getInsightsByStatus(db, 'queued');
+
+  let dismissed = 0;
+  for (const insight of queued) {
+    if (insight.created_at < cutoff) {
+      updateInsightStatus(db, insight.id, 'dismissed');
+      dismissed++;
+    }
+  }
+
+  if (dismissed > 0) {
+    log.info(`Auto-dismissed ${dismissed} unacknowledged insight(s) older than ${insightAutoDismissHours}h`);
+  }
+}
 
 function handleTaskComplete(event: unknown): void {
   try {
@@ -35,6 +58,9 @@ function handleTaskComplete(event: unknown): void {
       log.warn('Pattern analysis task failed — no insights to process');
       return;
     }
+
+    // Auto-dismiss stale insights before processing new ones
+    autoDismissStaleInsights();
 
     const resultStr = payload.result as string;
     if (!resultStr) return;
@@ -212,6 +238,9 @@ const service: SuiteService = {
     }
     if (typeof config.maxInsightsPerRun === 'number') {
       maxInsightsPerRun = config.maxInsightsPerRun;
+    }
+    if (typeof config.insightAutoDismissHours === 'number') {
+      insightAutoDismissHours = config.insightAutoDismissHours;
     }
 
     eventBus.on('agent:task:complete', handleTaskComplete);

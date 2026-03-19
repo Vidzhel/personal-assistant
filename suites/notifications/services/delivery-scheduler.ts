@@ -9,17 +9,15 @@ import {
   type EventBusInterface,
   type DatabaseInterface,
   type NotificationEvent,
-  type DeliveryMode,
-  type UrgencyTier,
 } from '@raven/shared';
 import type { ServiceContext, SuiteService } from '@raven/core/suite-registry/service-runner.ts';
 import { classifyNotification, loadClassificationRules } from '@raven/core/notification-engine/urgency-classifier.ts';
 import {
   enqueueNotification,
   getReadyNotifications,
-  markDelivered,
 } from '@raven/core/notification-engine/notification-queue.ts';
 import type { ClassificationRule } from '@raven/core/notification-engine/urgency-classifier.ts';
+import { getEngagementState } from './engagement-tracker.ts';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -96,7 +94,15 @@ function handleNotification(event: unknown): void {
   try {
     const notifEvent = event as NotificationEvent;
     const classification = classifyNotification(notifEvent, classificationRules);
-    const { urgencyTier, deliveryMode } = classification;
+    const { urgencyTier } = classification;
+    let { deliveryMode } = classification;
+
+    // Throttle non-tell-now when engagement is low
+    const engagementState = getEngagementState();
+    if (engagementState === 'throttled' && deliveryMode !== 'tell-now') {
+      deliveryMode = 'save-for-later';
+      log.info(`Throttled: batching "${notifEvent.payload.title}" [${urgencyTier}/${classification.deliveryMode} → save-for-later]`);
+    }
 
     if (deliveryMode === 'tell-now') {
       // Immediate passthrough — re-emit as notification:deliver

@@ -19,11 +19,15 @@ vi.mock('@raven/core/suite-registry/service-runner.ts', () => ({}));
 const mockInsertInsight = vi.fn(() => 'insight-id-1');
 const mockFindRecentByHash = vi.fn();
 const mockComputeSuppressionHash = vi.fn(() => 'hash-abc');
+const mockGetInsightsByStatus = vi.fn(() => []);
+const mockUpdateInsightStatus = vi.fn();
 
 vi.mock('@raven/core/insight-engine/insight-store.ts', () => ({
   insertInsight: (...args: any[]) => mockInsertInsight(...args),
   findRecentByHash: (...args: any[]) => mockFindRecentByHash(...args),
   computeSuppressionHash: (...args: any[]) => mockComputeSuppressionHash(...args),
+  getInsightsByStatus: (...args: any[]) => mockGetInsightsByStatus(...args),
+  updateInsightStatus: (...args: any[]) => mockUpdateInsightStatus(...args),
 }));
 
 import service from '../services/insight-processor.ts';
@@ -204,5 +208,55 @@ describe('insight-processor', () => {
     handleTaskComplete(makeEvent(insights));
 
     expect(mockInsertInsight).toHaveBeenCalledTimes(5);
+  });
+
+  describe('auto-dismiss stale insights', () => {
+    it('auto-dismisses queued insights older than 24h before processing new ones', () => {
+      const oldTime = new Date(Date.now() - 25 * 3600 * 1000).toISOString();
+      mockGetInsightsByStatus.mockReturnValue([
+        { id: 'stale-1', created_at: oldTime, status: 'queued' },
+        { id: 'stale-2', created_at: oldTime, status: 'queued' },
+      ]);
+      mockFindRecentByHash.mockReturnValue(undefined);
+
+      handleTaskComplete(makeEvent([{
+        patternKey: 'new-pattern',
+        title: 'New',
+        body: 'Fresh.',
+        confidence: 0.9,
+        serviceSources: ['s'],
+        keyFacts: ['k:1'],
+      }]));
+
+      // Should dismiss both stale insights
+      expect(mockUpdateInsightStatus).toHaveBeenCalledWith(mockDb, 'stale-1', 'dismissed');
+      expect(mockUpdateInsightStatus).toHaveBeenCalledWith(mockDb, 'stale-2', 'dismissed');
+
+      // Should still process the new insight
+      expect(mockInsertInsight).toHaveBeenCalledWith(
+        mockDb,
+        expect.objectContaining({ patternKey: 'new-pattern', status: 'queued' }),
+      );
+    });
+
+    it('does not dismiss recent queued insights', () => {
+      const recentTime = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
+      mockGetInsightsByStatus.mockReturnValue([
+        { id: 'recent-1', created_at: recentTime, status: 'queued' },
+      ]);
+      mockFindRecentByHash.mockReturnValue(undefined);
+
+      handleTaskComplete(makeEvent([{
+        patternKey: 'another',
+        title: 'Another',
+        body: 'Test.',
+        confidence: 0.9,
+        serviceSources: ['s'],
+        keyFacts: ['k:2'],
+      }]));
+
+      // Should NOT dismiss the recent insight
+      expect(mockUpdateInsightStatus).not.toHaveBeenCalled();
+    });
   });
 });

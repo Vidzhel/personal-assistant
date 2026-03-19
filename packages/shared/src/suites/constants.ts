@@ -69,3 +69,12 @@ export const SERVICE_DELIVERY_SCHEDULER = 'delivery-scheduler';
 export const EVENT_NOTIFICATION_DELIVER = 'notification:deliver' as const;
 export const EVENT_NOTIFICATION_QUEUED = 'notification:queued' as const;
 export const EVENT_NOTIFICATION_BATCHED = 'notification:batched' as const;
+export const EVENT_NOTIFICATION_ESCALATED = 'notification:escalated' as const;
+
+// Engagement tracking
+export const EVENT_ENGAGEMENT_STATE_CHANGED = 'engagement:state-changed' as const;
+export const SERVICE_ENGAGEMENT_TRACKER = 'engagement-tracker';
+export const DEFAULT_LOW_ENGAGEMENT_THRESHOLD = 5;
+export const DEFAULT_RESUME_THRESHOLD = 3;
+export const DEFAULT_ESCALATION_HOURS = 4;
+export const DEFAULT_INSIGHT_AUTO_DISMISS_HOURS = 24;

@@ -3,16 +3,13 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-// Mock croner before any imports — must be a class for `new Cron()` to work
-let cronCallback: (() => void) | null = null;
+// Mock croner before any imports
 vi.mock('croner', () => {
-  class MockCron {
-    stop = vi.fn();
-    constructor(_pattern: string, _opts: unknown, callback: () => void) {
-      cronCallback = callback;
-    }
-  }
-  return { Cron: MockCron };
+  return {
+    Cron: class MockCron {
+      stop = vi.fn();
+    },
+  };
 });
 
 vi.mock('@raven/shared', async () => {
@@ -28,6 +25,11 @@ vi.mock('@raven/shared', async () => {
   };
 });
 
+let mockEngagementState = 'normal';
+vi.mock('../services/engagement-tracker.ts', () => ({
+  getEngagementState: () => mockEngagementState,
+}));
+
 import { initDatabase, getDb, createDbInterface } from '@raven/core/db/database.ts';
 import type { DatabaseInterface, NotificationEvent } from '@raven/shared';
 
@@ -40,6 +42,7 @@ describe('delivery-scheduler service', () => {
   let emittedEvents: any[];
 
   beforeEach(async () => {
+    mockEngagementState = 'normal';
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-delivery-test-'));
     const dbPath = join(tmpDir, 'test.db');
     initDatabase(dbPath);
@@ -169,6 +172,46 @@ describe('delivery-scheduler service', () => {
       expect(rows).toHaveLength(1);
       expect(rows[0].status).toBe('batched');
       expect(rows[0].delivery_mode).toBe('save-for-later');
+    });
+  });
+
+  describe('throttling behavior', () => {
+    it('batches tell-when-active notifications when engagement is throttled', async () => {
+      mockEngagementState = 'throttled';
+      await startService();
+
+      triggerNotification(makeNotifEvent('agent:task:complete'));
+
+      // Should be batched instead of queued as tell-when-active
+      expect(emittedEvents.length).toBe(1);
+      expect(emittedEvents[0].type).toBe('notification:batched');
+
+      const rows = db.all<any>('SELECT * FROM notification_queue');
+      expect(rows).toHaveLength(1);
+      expect(rows[0].status).toBe('batched');
+      expect(rows[0].delivery_mode).toBe('save-for-later');
+    });
+
+    it('always passes tell-now through regardless of engagement state', async () => {
+      mockEngagementState = 'throttled';
+      await startService();
+
+      triggerNotification(makeNotifEvent('permission:blocked'));
+
+      expect(emittedEvents.length).toBe(1);
+      expect(emittedEvents[0].type).toBe('notification:deliver');
+      expect(emittedEvents[0].payload.title).toBe('Test Notification');
+    });
+
+    it('delivers normally when engagement is normal', async () => {
+      mockEngagementState = 'normal';
+      await startService();
+
+      triggerNotification(makeNotifEvent('agent:task:complete'));
+
+      // tell-when-active → queued (not batched)
+      expect(emittedEvents.length).toBe(1);
+      expect(emittedEvents[0].type).toBe('notification:queued');
     });
   });
 

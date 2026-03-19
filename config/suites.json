@@ -9,7 +9,11 @@
         "end": "23:00",
         "timezone": "America/New_York"
       },
-      "flushIntervalMinutes": 5
+      "flushIntervalMinutes": 5,
+      "lowEngagementThreshold": 5,
+      "resumeThreshold": 3,
+      "escalationHours": 4,
+      "escalationIntervalMinutes": 15
     }
   },
   "daily-briefing": { "enabled": true },
@@ -20,7 +24,8 @@
       "confidenceThreshold": 0.6,
       "analysisIntervalCron": "0 */6 * * *",
       "suppressionWindowDays": 7,
-      "maxInsightsPerRun": 5
+      "maxInsightsPerRun": 5,
+      "insightAutoDismissHours": 24
     }
   }
 }
