@@ -81,21 +81,29 @@ export function escapeMarkdown(text: string): string {
 
 const MAX_TELEGRAM_LENGTH = 4000;
 
+// Unicode Private Use Area placeholders — Telegram preserves these but never displays them
+const PUA_BOLD_START = '\uE000';
+const PUA_BOLD_END = '\uE001';
+const PUA_ITALIC_START = '\uE002';
+const PUA_ITALIC_END = '\uE003';
+const PUA_CODE_START = '\uE010';
+const PUA_CODE_END = '\uE011';
+
 export function convertToMarkdownV2(text: string): string {
-  // Preserve inline code spans by replacing them with placeholders
+  // Preserve inline code spans by replacing them with PUA-delimited placeholders
   const codeSpans: string[] = [];
   let processed = text.replace(/`([^`]+)`/g, (_match, code: string) => {
     codeSpans.push(code);
-    return `\x00CODE${codeSpans.length - 1}\x00`;
+    return `${PUA_CODE_START}${codeSpans.length - 1}${PUA_CODE_END}`;
   });
 
   // Convert markdown constructs before escaping
   // Headings → bold
   processed = processed.replace(/^#{1,6}\s+(.+)$/gm, '**$1**');
   // Bold **text** → *text* (MarkdownV2 bold)
-  processed = processed.replace(/\*\*(.+?)\*\*/g, '\x00BOLD_START\x00$1\x00BOLD_END\x00');
+  processed = processed.replace(/\*\*(.+?)\*\*/g, `${PUA_BOLD_START}$1${PUA_BOLD_END}`);
   // Blockquotes > text → italic
-  processed = processed.replace(/^>\s+(.+)$/gm, '\x00ITALIC_START\x00$1\x00ITALIC_END\x00');
+  processed = processed.replace(/^>\s+(.+)$/gm, `${PUA_ITALIC_START}$1${PUA_ITALIC_END}`);
   // Bullet lists
   processed = processed.replace(/^[-*]\s+/gm, '• ');
 
@@ -103,13 +111,13 @@ export function convertToMarkdownV2(text: string): string {
   processed = escapeMarkdown(processed);
 
   // Restore bold markers
-  processed = processed.replace(/\x00BOLD_START\x00/g, '*');
-  processed = processed.replace(/\x00BOLD_END\x00/g, '*');
+  processed = processed.replace(new RegExp(PUA_BOLD_START, 'g'), '*');
+  processed = processed.replace(new RegExp(PUA_BOLD_END, 'g'), '*');
   // Restore italic markers
-  processed = processed.replace(/\x00ITALIC_START\x00/g, '_');
-  processed = processed.replace(/\x00ITALIC_END\x00/g, '_');
+  processed = processed.replace(new RegExp(PUA_ITALIC_START, 'g'), '_');
+  processed = processed.replace(new RegExp(PUA_ITALIC_END, 'g'), '_');
   // Restore code spans
-  processed = processed.replace(/\x00CODE(\d+)\x00/g, (_match, idx: string) => {
+  processed = processed.replace(new RegExp(`${PUA_CODE_START}(\\d+)${PUA_CODE_END}`, 'g'), (_match, idx: string) => {
     return '`' + escapeMarkdown(codeSpans[Number(idx)]) + '`';
   });
 
@@ -299,7 +307,7 @@ const service: SuiteService = {
         const replyThreadId = topicId;
         const replyOpts: Record<string, unknown> = { disable_notification: true };
         if (replyThreadId) replyOpts.message_thread_id = replyThreadId;
-        const statusMsg = await ctx.reply('Processing\\.\\.\\.', replyOpts);
+        const statusMsg = await ctx.reply('Processing...', replyOpts);
         statusMessages.set(projectId, {
           messageId: statusMsg.message_id,
           chatId: groupId,
@@ -743,7 +751,7 @@ const service: SuiteService = {
         // Extract tool name from content (first colon-delimited segment)
         const colonIdx = e.payload.content.indexOf(':');
         const toolName = colonIdx > 0 ? e.payload.content.slice(0, colonIdx).trim() : 'Tool';
-        const statusText = escapeMarkdown(`Using ${toolName}...`);
+        const statusText = `Using ${toolName}...`;
 
         status.lastEditAt = now;
         bot.api.editMessageText(status.chatId, status.messageId, statusText).catch((err) => {

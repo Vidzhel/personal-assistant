@@ -57,7 +57,8 @@
       "Bash(ps:*)",
       "Bash(sqlite3:*)",
       "Bash(gws meet:*)",
-      "Bash(gws gmail:*)"
+      "Bash(gws gmail:*)",
+      "Skill(commit-commands:commit)"
     ]
   }
 }
