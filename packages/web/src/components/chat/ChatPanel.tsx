@@ -237,8 +237,16 @@ function StatusLine({ text }: { text: string }) {
       className="flex items-center gap-2 px-4 py-1.5 text-xs truncate"
       style={{ color: 'var(--text-muted)' }}
     >
-      <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+      <span
+        className="inline-block w-8 h-1 rounded-full"
+        style={{
+          background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.06), transparent)',
+          backgroundSize: '200% 100%',
+          animation: 'shimmer 2s ease-in-out infinite',
+        }}
+      />
       <span className="truncate">{text}</span>
+      <style>{`@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }`}</style>
     </div>
   );
 }

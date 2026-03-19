@@ -98,7 +98,7 @@ const service: SuiteService = {
     logger = context.logger;
 
     const rawCred = process.env.GWS_PRIMARY_CREDENTIALS_FILE ?? '';
-    credFile = rawCred ? resolve(rawCred) : '';
+    credFile = rawCred ? resolve(context.projectRoot, rawCred) : '';
     gcpProjectId = process.env.GWS_GCP_PROJECT_ID ?? '';
 
     if (!credFile) {

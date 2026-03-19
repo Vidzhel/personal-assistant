@@ -121,8 +121,7 @@ export function useChat(opts: UseChatOptions): {
           if (messageType === 'tool_use') {
             const colonIdx = content.indexOf(':');
             const toolName = colonIdx > 0 ? content.slice(0, colonIdx).trim() : 'Tool';
-            const toolSummary = colonIdx > 0 ? content.slice(colonIdx + 1).trim() : content;
-            setStatusLine(`${toolName}: ${toolSummary}`);
+            setStatusLine(`Using ${toolName}...`);
           } else if (messageType === 'thinking') {
             setChatMessages((prev) => {
               if (messageId && prev.some((m) => m.id === messageId)) return prev;

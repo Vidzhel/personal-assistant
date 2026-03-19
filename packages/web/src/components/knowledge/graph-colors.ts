@@ -86,7 +86,7 @@ export function getNodeColor(ctx: ColorContext): string {
 }
 
 const DEFAULT_CONFIDENCE = 0.5;
-const LINK_BASE_OPACITY = 0.4;
+const LINK_BASE_OPACITY = 0.6;
 const LINK_OPACITY_RANGE = 0.4;
 
 export function getLinkOpacity(confidence: number | null): string {
@@ -98,5 +98,5 @@ export const LINK_DIMMED = 'rgba(148,163,184,0.05)';
 
 export function getLinkWidth(confidence: number | null): number {
   const conf = confidence ?? DEFAULT_CONFIDENCE;
-  return conf * 2 + 1;
+  return conf * 2 + 2;
 }

@@ -11,6 +11,7 @@ import {
   type NotificationDeliverEvent,
   type SystemHealthAlertEvent,
   type AgentTaskCompleteEvent,
+  type AgentMessageEvent,
   type PermissionBlockedEvent,
   type VoiceReceivedEvent,
   type MediaReceivedEvent,
@@ -45,6 +46,16 @@ let dbRef: import('@raven/shared').DatabaseInterface | null = null;
 // Track topicId per projectId so responses can route back to source topic
 const projectTopicMap = new Map<string, number>();
 
+// Track status messages for edit-in-place during agent processing
+interface StatusMessage {
+  messageId: number;
+  chatId: string;
+  threadId: number | undefined;
+  lastEditAt: number;
+}
+const statusMessages = new Map<string, StatusMessage>();
+const STATUS_EDIT_THROTTLE_MS = 2000;
+
 // Callback handler deps (injected lazily via config after boot)
 let callbackDeps: CallbackDeps | null = null;
 
@@ -66,6 +77,43 @@ export function buildInlineKeyboard(
 
 export function escapeMarkdown(text: string): string {
   return text.replace(/([_*[\]()~`>#+\-=|{}.!])/g, '\\$1');
+}
+
+const MAX_TELEGRAM_LENGTH = 4000;
+
+export function convertToMarkdownV2(text: string): string {
+  // Preserve inline code spans by replacing them with placeholders
+  const codeSpans: string[] = [];
+  let processed = text.replace(/`([^`]+)`/g, (_match, code: string) => {
+    codeSpans.push(code);
+    return `\x00CODE${codeSpans.length - 1}\x00`;
+  });
+
+  // Convert markdown constructs before escaping
+  // Headings → bold
+  processed = processed.replace(/^#{1,6}\s+(.+)$/gm, '**$1**');
+  // Bold **text** → *text* (MarkdownV2 bold)
+  processed = processed.replace(/\*\*(.+?)\*\*/g, '\x00BOLD_START\x00$1\x00BOLD_END\x00');
+  // Blockquotes > text → italic
+  processed = processed.replace(/^>\s+(.+)$/gm, '\x00ITALIC_START\x00$1\x00ITALIC_END\x00');
+  // Bullet lists
+  processed = processed.replace(/^[-*]\s+/gm, '• ');
+
+  // Escape remaining special chars
+  processed = escapeMarkdown(processed);
+
+  // Restore bold markers
+  processed = processed.replace(/\x00BOLD_START\x00/g, '*');
+  processed = processed.replace(/\x00BOLD_END\x00/g, '*');
+  // Restore italic markers
+  processed = processed.replace(/\x00ITALIC_START\x00/g, '_');
+  processed = processed.replace(/\x00ITALIC_END\x00/g, '_');
+  // Restore code spans
+  processed = processed.replace(/\x00CODE(\d+)\x00/g, (_match, idx: string) => {
+    return '`' + escapeMarkdown(codeSpans[Number(idx)]) + '`';
+  });
+
+  return processed.slice(0, MAX_TELEGRAM_LENGTH);
 }
 
 export function parseTopicConfig(): TopicConfig {
@@ -249,7 +297,15 @@ const service: SuiteService = {
         });
 
         const replyThreadId = topicId;
-        await ctx.reply('Got it, processing...', replyThreadId ? { message_thread_id: replyThreadId } : {});
+        const replyOpts: Record<string, unknown> = { disable_notification: true };
+        if (replyThreadId) replyOpts.message_thread_id = replyThreadId;
+        const statusMsg = await ctx.reply('Processing\\.\\.\\.', replyOpts);
+        statusMessages.set(projectId, {
+          messageId: statusMsg.message_id,
+          chatId: groupId,
+          threadId: topicId,
+          lastEditAt: 0,
+        });
       } else {
         // Direct mode: legacy behavior
         const senderId = String(ctx.from?.id);
@@ -272,7 +328,13 @@ const service: SuiteService = {
           },
         });
 
-        await ctx.reply('Got it, processing...');
+        const statusMsg = await ctx.reply('Processing\\.\\.\\.', { disable_notification: true });
+        statusMessages.set(PROJECT_TELEGRAM_DEFAULT, {
+          messageId: statusMsg.message_id,
+          chatId,
+          threadId: undefined,
+          lastEditAt: 0,
+        });
       }
     });
 
@@ -667,21 +729,55 @@ const service: SuiteService = {
       });
     });
 
+    // Subscribe to agent:message for live status updates (tool_use only)
+    context.eventBus.on('agent:message', (event: unknown) => {
+      const e = event as AgentMessageEvent;
+      if (e.payload.messageType !== 'tool_use') return;
+      if (!bot) return;
+
+      // Find which project this task belongs to by checking all status messages
+      for (const [projectId, status] of statusMessages) {
+        const now = Date.now();
+        if (now - status.lastEditAt < STATUS_EDIT_THROTTLE_MS) continue;
+
+        // Extract tool name from content (first colon-delimited segment)
+        const colonIdx = e.payload.content.indexOf(':');
+        const toolName = colonIdx > 0 ? e.payload.content.slice(0, colonIdx).trim() : 'Tool';
+        const statusText = escapeMarkdown(`Using ${toolName}...`);
+
+        status.lastEditAt = now;
+        bot.api.editMessageText(status.chatId, status.messageId, statusText).catch((err) => {
+          logger.warn(`Failed to edit status message for ${projectId}: ${err}`);
+        });
+        break;
+      }
+    });
+
     // Subscribe to agent:task:complete to send results back to Telegram
     context.eventBus.on('agent:task:complete', (event: unknown) => {
       const e = event as AgentTaskCompleteEvent;
       if (e.source === 'telegram' || e.source === 'orchestrator' || e.source === 'agent-manager') {
+        // Delete status message if one exists
+        const projectId = e.projectId;
+        const status = projectId ? statusMessages.get(projectId) : undefined;
+        if (status && bot) {
+          bot.api.deleteMessage(status.chatId, status.messageId).catch((err) => {
+            logger.warn(`Failed to delete status message: ${err}`);
+          });
+          statusMessages.delete(projectId!);
+        }
+
         const text = e.payload.success
-          ? e.payload.result.slice(0, 4000)
-          : 'Task failed. Check the dashboard for details.';
+          ? convertToMarkdownV2(e.payload.result)
+          : escapeMarkdown('Task failed. Check the dashboard for details.');
 
         // Route response back to source topic
         let threadId: number | undefined;
-        if (operatingMode === 'group' && e.projectId) {
-          threadId = projectTopicMap.get(e.projectId);
+        if (operatingMode === 'group' && projectId) {
+          threadId = projectTopicMap.get(projectId);
         }
 
-        sendMessageWithFallback(text, undefined, threadId).catch(() => {
+        sendMessageWithFallback(text, 'MarkdownV2', threadId).catch(() => {
           // already logged
         });
       }
