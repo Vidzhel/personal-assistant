@@ -74,31 +74,27 @@ interface EngagementConfig {
 }
 
 function computeEngagementState(database: DatabaseInterface): EngagementState {
-  const recentDeliveries = database.all<{ notification_id: string }>(
-    `SELECT notification_id FROM engagement_metrics
+  const deliveryCount = database.get<{ count: number }>(
+    `SELECT COUNT(*) as count FROM engagement_metrics
      WHERE event_type = 'notification_delivered'
-     ORDER BY created_at DESC
-     LIMIT ?`,
-    lowEngagementThreshold,
+       AND created_at > datetime('now', '-2 hours')`,
   );
 
-  if (recentDeliveries.length < lowEngagementThreshold) {
+  const deliveries = deliveryCount?.count ?? 0;
+  if (deliveries < lowEngagementThreshold) {
     return 'normal';
   }
 
-  const deliveryIds = recentDeliveries.map((d) => d.notification_id);
-  const placeholders = deliveryIds.map(() => '?').join(', ');
-  const responded = database.get<{ count: number }>(
-    `SELECT COUNT(DISTINCT notification_id) as count FROM engagement_metrics
+  const responseCount = database.get<{ count: number }>(
+    `SELECT COUNT(*) as count FROM engagement_metrics
      WHERE event_type = 'user_response'
-       AND notification_id IN (${placeholders})`,
-    ...deliveryIds,
+       AND created_at > datetime('now', '-2 hours')`,
   );
 
-  const respondedCount = responded?.count ?? 0;
-  const unrespondedCount = recentDeliveries.length - respondedCount;
+  const responses = responseCount?.count ?? 0;
+  const unresponded = deliveries - responses;
 
-  if (unrespondedCount >= lowEngagementThreshold) {
+  if (unresponded >= lowEngagementThreshold) {
     return 'throttled';
   }
 
@@ -131,14 +127,12 @@ function updateEngagementState(database: DatabaseInterface): void {
     const recentDeliveries = database.get<{ total: number }>(
       `SELECT COUNT(*) as total FROM engagement_metrics
        WHERE event_type = 'notification_delivered'
-       ORDER BY created_at DESC
-       LIMIT ?`,
-      lowEngagementThreshold,
+         AND created_at > datetime('now', '-2 hours')`,
     );
     const recentResponses = database.get<{ total: number }>(
       `SELECT COUNT(*) as total FROM engagement_metrics
        WHERE event_type = 'user_response'
-         AND created_at > datetime('now', '-1 hour')`,
+         AND created_at > datetime('now', '-2 hours')`,
     );
 
     const delivered = recentDeliveries?.total ?? 0;
@@ -165,6 +159,11 @@ function handleNotificationDeliver(event: unknown): void {
   try {
     const e = event as Record<string, unknown>;
     const payload = e.payload as Record<string, unknown>;
+    const title = payload.title as string | undefined;
+
+    // Skip recording escalation re-deliveries to avoid inflating delivery count
+    if (title?.startsWith('Reminder: ')) return;
+
     const queueId = payload.queueId as string | undefined;
 
     if (queueId) {
@@ -172,6 +171,8 @@ function handleNotificationDeliver(event: unknown): void {
     } else {
       recordDelivery(db, e.id as string);
     }
+
+    updateEngagementState(db);
   } catch (err) {
     log.error(`Failed to record delivery: ${err instanceof Error ? err.message : String(err)}`);
   }

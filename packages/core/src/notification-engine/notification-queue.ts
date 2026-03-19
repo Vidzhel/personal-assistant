@@ -109,10 +109,7 @@ export function getEscalationCandidates(
 }
 
 export function markEscalated(db: DatabaseInterface, id: string): void {
-  db.run(
-    `UPDATE notification_queue SET status = 'escalated' WHERE id = ?`,
-    id,
-  );
+  db.run(`UPDATE notification_queue SET status = 'escalated' WHERE id = ?`, id);
 }
 
 export function markBatched(db: DatabaseInterface, ids: string[]): void {

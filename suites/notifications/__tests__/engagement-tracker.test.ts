@@ -129,19 +129,37 @@ describe('engagement-tracker service', () => {
     it('transitions to throttled after threshold unresponded deliveries', async () => {
       await startService({ lowEngagementThreshold: 3 });
 
-      // Record 3 deliveries with no responses
+      // Record 3 deliveries with no responses — state updates on each delivery
       triggerDelivery('q1');
       triggerDelivery('q2');
       triggerDelivery('q3');
 
-      // Trigger a user response to update the state
-      // (state is computed on user response)
+      const mod = await import('../services/engagement-tracker.ts');
+      expect(mod.getEngagementState()).toBe('throttled');
+
+      // Verify metrics recorded correctly
+      const deliveries = db.all<any>(
+        `SELECT * FROM engagement_metrics WHERE event_type = 'notification_delivered'`,
+      );
+      expect(deliveries).toHaveLength(3);
+    });
+
+    it('resumes normal state after enough responses', async () => {
+      await startService({ lowEngagementThreshold: 3, resumeThreshold: 2 });
+
+      // Enter throttled state
+      triggerDelivery('q1');
+      triggerDelivery('q2');
+      triggerDelivery('q3');
+
+      const mod = await import('../services/engagement-tracker.ts');
+      expect(mod.getEngagementState()).toBe('throttled');
+
+      // Respond enough times to resume
+      triggerUserResponse();
       triggerUserResponse();
 
-      // State should still compute based on response ratio
-      // Since we have 3 deliveries and only 1 response, let's check
-      const metrics = db.all<any>('SELECT * FROM engagement_metrics ORDER BY created_at');
-      expect(metrics.length).toBe(4); // 3 deliveries + 1 response
+      expect(mod.getEngagementState()).toBe('normal');
     });
 
     it('records delivery and response events in database', async () => {
@@ -218,6 +236,37 @@ describe('engagement-tracker service', () => {
       // Original should be marked as escalated
       const row = db.get<any>(`SELECT status FROM notification_queue WHERE id = 'old-notif-1'`);
       expect(row.status).toBe('escalated');
+    });
+
+    it('does not record escalation re-deliveries as new deliveries', async () => {
+      await startService({ lowEngagementThreshold: 3 });
+
+      // Enter throttled state
+      triggerDelivery('q1');
+      triggerDelivery('q2');
+      triggerDelivery('q3');
+
+      const deliveriesBefore = db.all<any>(
+        `SELECT * FROM engagement_metrics WHERE event_type = 'notification_delivered'`,
+      );
+      expect(deliveriesBefore).toHaveLength(3);
+
+      // Simulate escalation re-delivery (title starts with "Reminder: ")
+      const handlers = eventHandlers['notification:deliver'] ?? [];
+      for (const handler of handlers) {
+        handler({
+          id: 'evt-escalation',
+          timestamp: Date.now(),
+          source: 'notifications',
+          type: 'notification:deliver',
+          payload: { queueId: 'q1', title: 'Reminder: Original', body: 'body', channel: 'telegram' },
+        });
+      }
+
+      const deliveriesAfter = db.all<any>(
+        `SELECT * FROM engagement_metrics WHERE event_type = 'notification_delivered'`,
+      );
+      expect(deliveriesAfter).toHaveLength(3); // unchanged
     });
 
     it('does not escalate when engagement state is normal', async () => {

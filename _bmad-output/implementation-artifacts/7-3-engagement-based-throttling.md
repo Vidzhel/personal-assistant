@@ -1,6 +1,6 @@
 # Story 7.3: Engagement-Based Throttling
 
-Status: review
+Status: done
 
 ## Story
 
@@ -235,9 +235,9 @@ Claude Opus 4.6 (1M context)
 
 ### Debug Log References
 
-- All 26 tests pass across 3 test files (engagement-tracker, delivery-scheduler, insight-processor)
+- All 28 tests pass across 3 test files (10 engagement-tracker, 9 delivery-scheduler, 9 insight-processor)
 - Build clean (shared + core + web + skills)
-- ESLint clean on all changed files
+- ESLint + Prettier clean on all changed files
 - Pre-existing failures in email-triage and knowledge-* tests unrelated to this story
 
 ### Completion Notes List
@@ -249,12 +249,19 @@ Claude Opus 4.6 (1M context)
 - **Task 5:** Added `autoDismissStaleInsights()` to insight-processor — runs before processing new insights, dismisses queued insights older than `insightAutoDismissHours`
 - **Task 6:** Added `EngagementState` type, `EngagementStateChangedEvent`, `NotificationEscalatedEvent` to events.ts; added constants to constants.ts and re-exported from index.ts; added `'escalated'` status + `getEscalationCandidates()`/`markEscalated()` to notification-queue.ts
 - **Task 7:** Added engagement config (`lowEngagementThreshold`, `resumeThreshold`, `escalationHours`, `escalationIntervalMinutes`) to `notifications` in suites.json; added `insightAutoDismissHours` to `proactive-intelligence` config
-- **Task 8:** 26 tests: 8 engagement-tracker tests (state computation, delivery/response tracking, escalation timer, lifecycle), 9 delivery-scheduler tests (3 new throttling tests), 9 insight-processor tests (2 new auto-dismiss tests)
+- **Task 8:** 28 tests: 10 engagement-tracker tests (state computation, resume, escalation timer, re-delivery filtering, lifecycle), 9 delivery-scheduler tests (3 throttling tests), 9 insight-processor tests (2 auto-dismiss tests)
 - **Design decision:** Task 6 (shared types) was implemented before Task 2 as it was a hard dependency. Escalation timer was co-located in engagement-tracker service rather than a separate service, keeping the concern centralized.
+- **Code review fixes (2026-03-19):** Fixed 3 bugs found during adversarial code review:
+  - H1: Rewrote `computeEngagementState` to use 2-hour time-window ratio instead of broken per-notification-id matching (responses were always stored with null notification_id, making ratio always 0%)
+  - M1: Added `updateEngagementState()` call after recording deliveries so state transitions without waiting for user interaction
+  - M2: Skip recording escalation re-deliveries (title starts with "Reminder:") to prevent inflating delivery count
+  - L1: Fixed ratio computation in state-changed event to use consistent 2-hour window
+  - L2: Strengthened tests — added state assertion for throttled transition, resume test, and escalation re-delivery filtering test
 
 ### Change Log
 
 - 2026-03-19: Story 7.3 implementation complete — engagement-based throttling with escalation and auto-dismiss
+- 2026-03-19: Code review fixes — 3 bugs fixed (broken engagement ratio, missing state update on delivery, escalation delivery inflation)
 
 ### File List
 
