@@ -91,12 +91,17 @@ This document provides the complete epic and story breakdown for personal-assist
 - FR57: System can scaffold new skill boilerplate from a conversation description [Vision]
 - FR58: User can configure per-skill permission tiers through a configuration file [MVP]
 
-**Expanding Integrations (Growth–Vision)**
-- FR59: System monitors Google Drive folders for new files and processes them automatically [Growth]
+**Expanding Integrations — Google Workspace (Growth–Vision)**
+- FR59: System integrates Google Workspace via `gws` CLI with direct Bash execution (agent runs CLI commands directly) [Growth]
+- FR59a: System supports multi-account Google credentials for separate service access (e.g. Meet on secondary account) [Growth]
+- FR59b: System monitors Gmail for new emails via Pub/Sub streaming (`gws gmail +watch`) [Growth]
+- FR59c: System manages Google Calendar events, agenda views, and scheduling [Growth]
+- FR59d: System monitors Google Drive folders for new files and processes them automatically [Growth]
 - FR60: System tracks financial transactions from bank APIs and categorizes spending [Vision]
 - FR61: System detects financial anomalies and alerts the user [Vision]
 - FR62: System manages calendar blocks to protect deep work time [Vision]
 - FR63: System provides meeting prep briefings from knowledge and relationship context [Vision]
+- FR63a: System accesses Google Meet conference recordings, transcripts, and smart notes [Growth]
 
 **System Observability (MVP–Growth)**
 - FR64: System logs all agent task executions with status, duration, and outcomes [MVP]
@@ -211,7 +216,7 @@ This document provides the complete epic and story breakdown for personal-assist
 | FR54-56 | Epic 1 | Skill enable/disable, RavenSkill interface, MCP isolation |
 | FR57 | Epic 10 | Skill scaffolding from conversation |
 | FR58 | Epic 1 | Per-skill permission config |
-| FR59-63 | Epic 8 | Google Drive, finance, calendar integrations |
+| FR59-63, FR59a-d, FR63a | Epic 8 | Google Workspace CLI integration (direct Bash execution), multi-account, Gmail Pub/Sub, Calendar, Drive, Meet, finance, calendar defense |
 | FR64-66 | Epic 1 | Agent execution logging, self-monitoring, health dashboard |
 | FR67 | Epic 5 | Execution metrics and usage statistics |
 
@@ -252,9 +257,9 @@ Raven proactively surfaces insights, manages notification urgency tiers, throttl
 **FRs covered:** FR25-26, FR49-53
 **Phase:** Growth
 
-### Epic 8: Expanding Integrations
-Google Drive file monitoring, financial transaction tracking, spending categorization, anomaly alerts, calendar defense, meeting prep — more of digital life automated.
-**FRs covered:** FR59-63
+### Epic 8: Google Workspace Integration & Expanding Integrations
+Full Google Workspace integration via `gws` CLI — direct CLI execution through Bash tool (no MCP wrapper), multi-account support, bundled skill reference docs, Gmail Pub/Sub watcher, Calendar, Drive, Meet (recordings/transcripts), Docs, Tasks, People. Plus financial tracking, calendar defense, and meeting prep.
+**FRs covered:** FR59-63, FR59a-d, FR63a
 **Phase:** Growth–Vision
 
 ### Epic 9: Deep Knowledge & Intelligence
@@ -1268,11 +1273,51 @@ So that I control what reaches me without per-notification management.
 **When** `/api/notifications/snooze` GET is called
 **Then** all active snoozes are returned with category, expiry time, and notification count held
 
-## Epic 8: Expanding Integrations
+## Epic 8: Google Workspace Integration & Expanding Integrations
 
-Google Drive file monitoring, financial transaction tracking, spending categorization, anomaly alerts, calendar defense, meeting prep — more of digital life automated.
+Full Google Workspace integration via `gws` CLI — direct CLI execution through Bash tool (no MCP wrapper), multi-account credential support, Gmail Pub/Sub email watcher, Calendar, Drive, Meet (recordings/transcripts), Docs, Tasks, People, workflow helpers, bundled skill reference docs, and an update script. Plus financial tracking, calendar defense, and meeting prep in later stories.
 
-### Story 8.1: Google Drive File Monitoring & Processing
+### Story 8.1: Google Workspace Suite Foundation — Direct CLI Agent & Email Watcher ✅
+
+As the system operator,
+I want Raven to integrate the full Google Workspace via the `gws` CLI with direct Bash execution, multi-account support, and Pub/Sub email monitoring,
+So that Calendar, Drive, Meet, Gmail, Docs, Tasks, People, and workflow helpers are all accessible through the orchestrator.
+
+**Acceptance Criteria:**
+
+**Given** the `gws` CLI (v0.18.1+) is installed and authenticated
+**When** the google-workspace suite loads
+**Then** the gws-agent can execute any `gws` command directly via Bash with `--format json` for structured output
+
+**Given** the agent has Bash, Read, and Grep tools
+**When** any Google Workspace operation is requested
+**Then** it constructs the correct `gws` CLI command from its prompt reference and skill docs, executes it, and parses the JSON result
+
+**Given** two credential files exist (primary + meet account)
+**When** the agent needs to use the meet account
+**Then** it prefixes the command with `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=$GWS_MEET_CREDENTIALS_FILE` to switch contexts
+
+**Given** `GWS_GCP_PROJECT_ID` is configured
+**When** the email watcher service starts
+**Then** it spawns `gws gmail +watch` as a child process, parses NDJSON stdout, and emits `email:new` events on the event bus
+
+**Given** the email watcher's child process exits unexpectedly
+**When** 30 seconds elapse
+**Then** the service reconnects automatically (same pattern as IMAP watcher)
+
+**Given** the gws-agent is wired into the productivity-coordinator
+**When** a user asks "What's on my calendar today?"
+**Then** the orchestrator delegates to gws-agent which runs `gws calendar +agenda --today --format json` and returns the result
+
+**Given** the `scripts/update-gws-skills.sh` script is run
+**When** it fetches skill docs from the `gws` CLI GitHub repo
+**Then** all SKILL.md files are downloaded into `suites/google-workspace/skills-reference/` organized by type (services/, helpers/, recipes/)
+
+**Given** the gws-agent prompt references bundled skill docs
+**When** it encounters an unfamiliar operation
+**Then** it can `Read` the skill reference files for exact command syntax, flags, and examples
+
+### Story 8.2: Google Drive File Monitoring & Processing
 
 As the system operator,
 I want Raven to monitor Google Drive folders and process new files automatically,
@@ -1296,7 +1341,7 @@ So that documents are ingested without manual uploads.
 **When** the config reloads
 **Then** the watcher adjusts to monitor the new folder set without restart
 
-### Story 8.2: Financial Transaction Tracking & Categorization
+### Story 8.3: Financial Transaction Tracking & Categorization
 
 As the system operator,
 I want Raven to track bank transactions and categorize spending automatically,
@@ -1320,7 +1365,7 @@ So that I have financial visibility without manual bookkeeping.
 **When** the sync fails
 **Then** the skill logs the error, retries on next cycle, and does not lose previously synced data
 
-### Story 8.3: Financial Anomaly Detection, Calendar Defense & Meeting Prep
+### Story 8.4: Financial Anomaly Detection, Calendar Defense & Meeting Prep
 
 As the system operator,
 I want Raven to alert on spending anomalies, protect deep work time, and prepare meeting briefings,
