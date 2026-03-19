@@ -31,6 +31,7 @@ vi.mock('../services/engagement-tracker.ts', () => ({
 }));
 
 import { initDatabase, getDb, createDbInterface } from '@raven/core/db/database.ts';
+import { createSnooze } from '@raven/core/notification-engine/snooze-store.ts';
 import type { DatabaseInterface, NotificationEvent } from '@raven/shared';
 
 describe('delivery-scheduler service', () => {
@@ -212,6 +213,68 @@ describe('delivery-scheduler service', () => {
       // tell-when-active → queued (not batched)
       expect(emittedEvents.length).toBe(1);
       expect(emittedEvents[0].type).toBe('notification:queued');
+    });
+  });
+
+  describe('snooze integration', () => {
+    it('snoozed category notifications are held and not delivered', async () => {
+      await startService();
+      createSnooze(db, { category: 'pipeline:*', duration: '1d' });
+
+      triggerNotification(makeNotifEvent('pipeline:complete'));
+
+      // Should emit notification:snoozed, not deliver/queued/batched
+      expect(emittedEvents.length).toBe(1);
+      expect(emittedEvents[0].type).toBe('notification:snoozed');
+      expect(emittedEvents[0].payload.category).toBe('pipeline:*');
+
+      const rows = db.all<any>('SELECT * FROM notification_queue');
+      expect(rows).toHaveLength(1);
+      expect(rows[0].status).toBe('snoozed');
+    });
+
+    it('permission:blocked ALWAYS bypasses snooze (safety override)', async () => {
+      await startService();
+      // Even if someone creates a snooze for permission:blocked (shouldn't happen, but safety)
+      createSnooze(db, { category: 'permission:blocked', duration: '1d' });
+
+      triggerNotification(makeNotifEvent('permission:blocked'));
+
+      // Should deliver immediately, NOT be snoozed
+      expect(emittedEvents.length).toBe(1);
+      expect(emittedEvents[0].type).toBe('notification:deliver');
+    });
+
+    it('system:health:alert ALWAYS bypasses snooze', async () => {
+      await startService();
+      createSnooze(db, { category: 'system:health:alert', duration: '1d' });
+
+      triggerNotification(makeNotifEvent('system:health:alert'));
+
+      expect(emittedEvents.length).toBe(1);
+      expect(emittedEvents[0].type).toBe('notification:deliver');
+    });
+
+    it('increments held_count on snooze record', async () => {
+      await startService();
+      const snoozeId = createSnooze(db, { category: 'pipeline:*', duration: '1d' });
+
+      triggerNotification(makeNotifEvent('pipeline:complete'));
+      triggerNotification(makeNotifEvent('pipeline:failed'));
+
+      const row = db.get<any>('SELECT held_count FROM notification_snooze WHERE id = ?', snoozeId);
+      expect(row.held_count).toBe(2);
+    });
+
+    it('non-snoozed categories proceed through normal flow', async () => {
+      await startService();
+      createSnooze(db, { category: 'pipeline:*', duration: '1d' });
+
+      // email:triage is NOT snoozed
+      triggerNotification(makeNotifEvent('email:triage:summary'));
+
+      expect(emittedEvents.length).toBe(1);
+      expect(emittedEvents[0].type).toBe('notification:batched');
     });
   });
 

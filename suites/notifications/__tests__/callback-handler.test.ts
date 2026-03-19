@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import {
   parseCallbackData,
   handleCallback,
@@ -8,6 +11,9 @@ import type {
   CallbackDeps,
   PendingApprovalInfo,
 } from '../services/callback-handler.ts';
+import { initDatabase, getDb, createDbInterface } from '@raven/core/db/database.ts';
+import { createSnooze, getActiveSnoozes } from '@raven/core/notification-engine/snooze-store.ts';
+import type { DatabaseInterface } from '@raven/shared';
 
 describe('parseCallbackData', () => {
   describe('valid task actions', () => {
@@ -119,6 +125,48 @@ describe('parseCallbackData', () => {
         domain: 'approval',
         action: 'details',
         target: 'approvalId456',
+        args: [],
+      });
+    });
+  });
+
+  describe('valid snooze actions', () => {
+    it('parses snooze week', () => {
+      const result = parseCallbackData('s:w:pipe');
+      expect(result).toEqual<CallbackAction>({
+        domain: 'snooze',
+        action: 'snooze-week',
+        target: 'pipe',
+        args: [],
+      });
+    });
+
+    it('parses snooze keep', () => {
+      const result = parseCallbackData('s:k:email');
+      expect(result).toEqual<CallbackAction>({
+        domain: 'snooze',
+        action: 'keep',
+        target: 'email',
+        args: [],
+      });
+    });
+
+    it('parses snooze mute', () => {
+      const result = parseCallbackData('s:m:task');
+      expect(result).toEqual<CallbackAction>({
+        domain: 'snooze',
+        action: 'mute',
+        target: 'task',
+        args: [],
+      });
+    });
+
+    it('parses unsnooze', () => {
+      const result = parseCallbackData('s:u:abc123');
+      expect(result).toEqual<CallbackAction>({
+        domain: 'snooze',
+        action: 'unsnooze',
+        target: 'abc123',
         args: [],
       });
     });
@@ -561,6 +609,71 @@ describe('handleCallback', () => {
 
       expect(result.success).toBe(false);
       expect(result.message).toBe('Approval not found');
+    });
+  });
+
+  describe('snooze actions (with real DB)', () => {
+    let tmpDir: string;
+    let dbInstance: DatabaseInterface;
+
+    beforeEach(() => {
+      tmpDir = mkdtempSync(join(tmpdir(), 'raven-cb-snooze-test-'));
+      const dbPath = join(tmpDir, 'test.db');
+      initDatabase(dbPath);
+      dbInstance = createDbInterface();
+      deps.db = dbInstance;
+    });
+
+    afterEach(() => {
+      try {
+        getDb().close();
+      } catch {
+        // ignore
+      }
+      rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('snooze-week creates a snooze for the resolved category', () => {
+      const action: CallbackAction = { domain: 'snooze', action: 'snooze-week', target: 'pipe', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain('Snoozed');
+      expect(result.message).toContain('pipeline:*');
+
+      const snoozes = getActiveSnoozes(dbInstance);
+      expect(snoozes).toHaveLength(1);
+      expect(snoozes[0].category).toBe('pipeline:*');
+      expect(snoozes[0].snoozedUntil).toBeTruthy();
+    });
+
+    it('mute creates a snooze with null snoozed_until', () => {
+      const action: CallbackAction = { domain: 'snooze', action: 'mute', target: 'email', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain('Muted');
+
+      const snoozes = getActiveSnoozes(dbInstance);
+      expect(snoozes).toHaveLength(1);
+      expect(snoozes[0].snoozedUntil).toBeNull();
+    });
+
+    it('keep records suggestion dismissal', () => {
+      const action: CallbackAction = { domain: 'snooze', action: 'keep', target: 'insight', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain('Kept');
+    });
+
+    it('returns error when db is not available', () => {
+      deps.db = undefined;
+      const action: CallbackAction = { domain: 'snooze', action: 'snooze-week', target: 'pipe', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('Database not available');
     });
   });
 });

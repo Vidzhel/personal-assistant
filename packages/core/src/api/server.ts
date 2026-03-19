@@ -23,6 +23,7 @@ import type { RetrievalEngine } from '../knowledge-engine/retrieval.ts';
 import type { Neo4jClient } from '../knowledge-engine/neo4j-client.ts';
 import type { KnowledgeLifecycle } from '../knowledge-engine/knowledge-lifecycle.ts';
 import type { Retrospective } from '../knowledge-engine/retrospective.ts';
+import type { DatabaseInterface } from '@raven/shared';
 import { registerHealthRoute } from './routes/health.ts';
 import { registerProjectRoutes } from './routes/projects.ts';
 import { registerSessionRoutes } from './routes/sessions.ts';
@@ -36,6 +37,7 @@ import { registerAgentTaskRoutes } from './routes/agent-tasks.ts';
 import { registerPipelineRoutes } from './routes/pipelines.ts';
 import { registerMetricsRoute } from './routes/metrics.ts';
 import { registerKnowledgeRoutes } from './routes/knowledge.ts';
+import { registerNotificationPreferencesRoutes } from './routes/notification-preferences.ts';
 import { registerSSERoutes } from './sse/stream.ts';
 import { registerWebSocketHandler } from './ws/handler.ts';
 
@@ -63,6 +65,7 @@ export interface ApiDeps {
   neo4jClient?: Neo4jClient;
   knowledgeLifecycle?: KnowledgeLifecycle;
   retrospective?: Retrospective;
+  db?: DatabaseInterface;
   configuredSuiteCount: number;
 }
 
@@ -122,6 +125,11 @@ export async function createApiServer(
       knowledgeLifecycle: deps.knowledgeLifecycle,
       retrospective: deps.retrospective,
     });
+  }
+
+  // Notification preferences (snooze)
+  if (deps.db) {
+    registerNotificationPreferencesRoutes(app, { db: deps.db });
   }
 
   // SSE streaming

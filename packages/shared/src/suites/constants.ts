@@ -71,6 +71,29 @@ export const EVENT_NOTIFICATION_QUEUED = 'notification:queued' as const;
 export const EVENT_NOTIFICATION_BATCHED = 'notification:batched' as const;
 export const EVENT_NOTIFICATION_ESCALATED = 'notification:escalated' as const;
 
+// Snooze
+export const EVENT_NOTIFICATION_SNOOZED = 'notification:snoozed' as const;
+export const EVENT_SNOOZE_PROPOSAL = 'notification:snooze-proposal' as const;
+export const SERVICE_SNOOZE_SUGGESTER = 'snooze-suggester';
+export const UNSNOOZABLE_CATEGORIES = ['permission:blocked', 'system:health:alert'] as const;
+
+// Category shortcode mapping for Telegram callback data (64-byte limit)
+export const CATEGORY_SHORTCODES: Record<string, string> = {
+  pipe: 'pipeline:*',
+  email: 'email:triage:*',
+  task: 'agent:task:complete',
+  insight: 'insight:*',
+  sched: 'schedule:triggered',
+};
+
+export const SHORTCODE_FROM_CATEGORY: Record<string, string> = {
+  'pipeline:*': 'pipe',
+  'email:triage:*': 'email',
+  'agent:task:complete': 'task',
+  'insight:*': 'insight',
+  'schedule:triggered': 'sched',
+};
+
 // Engagement tracking
 export const EVENT_ENGAGEMENT_STATE_CHANGED = 'engagement:state-changed' as const;
 export const SERVICE_ENGAGEMENT_TRACKER = 'engagement-tracker';

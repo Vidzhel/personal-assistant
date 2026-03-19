@@ -116,4 +116,4 @@ export function loadClassificationRules(rulesJson: unknown): ClassificationRule[
   return validated.length > 0 ? validated : DEFAULT_RULES;
 }
 
-export { DEFAULT_RULES };
+export { DEFAULT_RULES, matchesPattern };

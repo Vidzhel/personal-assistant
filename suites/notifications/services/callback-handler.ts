@@ -13,14 +13,20 @@
  *   er:s:{id}      → email reply send
  *   er:e:{id}      → email reply edit
  *   er:c:{id}      → email reply cancel
+ *   s:w:{cat}      → snooze category for 1 week
+ *   s:k:{cat}      → keep (dismiss snooze suggestion)
+ *   s:m:{cat}      → mute category indefinitely
+ *   s:u:{id}       → unsnooze (remove snooze)
  *   noop           → disabled button (no action)
  */
 
 import type { InlineKeyboardButton } from 'grammy/types';
-import { generateId, type EventBusInterface, type LoggerInterface } from '@raven/shared';
+import { generateId, CATEGORY_SHORTCODES, type EventBusInterface, type LoggerInterface, type DatabaseInterface } from '@raven/shared';
+import { createSnooze, removeSnooze, updateLastSuggested } from '@raven/core/notification-engine/snooze-store.ts';
+import { getSnoozedByCategory, releaseSnoozed } from '@raven/core/notification-engine/notification-queue.ts';
 
 export interface CallbackAction {
-  domain: 'task' | 'approval' | 'email' | 'email-reply';
+  domain: 'task' | 'approval' | 'email' | 'email-reply' | 'snooze';
   action: string;
   target: string;
   args: string[];
@@ -44,6 +50,7 @@ export interface PendingApprovalInfo {
 export interface CallbackDeps {
   eventBus: EventBusInterface;
   logger: LoggerInterface;
+  db?: DatabaseInterface;
   pendingApprovals: {
     resolve(id: string, resolution: 'approved' | 'denied'): PendingApprovalInfo;
     query(): PendingApprovalInfo[];
@@ -69,11 +76,19 @@ export interface CallbackDeps {
   };
 }
 
-const DOMAIN_MAP: Record<string, 'task' | 'approval' | 'email' | 'email-reply'> = {
+const DOMAIN_MAP: Record<string, 'task' | 'approval' | 'email' | 'email-reply' | 'snooze'> = {
   t: 'task',
   a: 'approval',
   e: 'email',
   er: 'email-reply',
+  s: 'snooze',
+};
+
+const SNOOZE_ACTIONS: Record<string, string> = {
+  w: 'snooze-week',
+  k: 'keep',
+  m: 'mute',
+  u: 'unsnooze',
 };
 
 const TASK_ACTIONS: Record<string, string> = {
@@ -122,6 +137,7 @@ export function parseCallbackData(data: string): CallbackAction | null {
     approval: APPROVAL_ACTIONS,
     email: EMAIL_ACTIONS,
     'email-reply': EMAIL_REPLY_ACTIONS,
+    snooze: SNOOZE_ACTIONS,
   };
   const actionMap = actionMaps[domain];
   const action = actionMap[actionPrefix];
@@ -400,6 +416,75 @@ function handleEmailReplyAction(
   };
 }
 
+function resolveShortcode(shortcode: string): string {
+  return CATEGORY_SHORTCODES[shortcode] ?? `${shortcode}:*`;
+}
+
+function handleSnoozeAction(
+  action: CallbackAction,
+  deps: CallbackDeps,
+): CallbackResult {
+  if (!deps.db) {
+    return { success: false, message: 'Database not available for snooze actions' };
+  }
+
+  const shortcode = action.target;
+  const category = resolveShortcode(shortcode);
+
+  if (action.action === 'snooze-week') {
+    createSnooze(deps.db, { category, duration: '1w' });
+    return {
+      success: true,
+      message: `Snoozed ${category} for 1 week`,
+      updatedKeyboard: [[{ text: 'Snoozed 1w \u2713', callback_data: 'noop' }]],
+    };
+  }
+
+  if (action.action === 'keep') {
+    // Record that this category was kept (prevent re-suggesting for cooldown period)
+    updateLastSuggested(deps.db, category);
+    return {
+      success: true,
+      message: 'Kept — won\'t suggest again for 7 days',
+      updatedKeyboard: [[{ text: 'Kept \u2713', callback_data: 'noop' }]],
+    };
+  }
+
+  if (action.action === 'mute') {
+    createSnooze(deps.db, { category, duration: 'mute' });
+    return {
+      success: true,
+      message: `Muted ${category} indefinitely`,
+      updatedKeyboard: [[{ text: 'Muted \u2713', callback_data: 'noop' }]],
+    };
+  }
+
+  if (action.action === 'unsnooze') {
+    // target is the snooze ID for unsnooze
+    const removed = removeSnooze(deps.db, action.target);
+    if (!removed) {
+      return { success: false, message: 'Snooze not found' };
+    }
+
+    // Release held notifications
+    const snoozed = getSnoozedByCategory(deps.db, category);
+    if (snoozed.length > 0) {
+      releaseSnoozed(
+        deps.db,
+        snoozed.map((n) => n.id),
+      );
+    }
+
+    return {
+      success: true,
+      message: 'Unsnoozed — held notifications released',
+      updatedKeyboard: [[{ text: 'Unsnoozed \u2713', callback_data: 'noop' }]],
+    };
+  }
+
+  return { success: false, message: `Unknown snooze action: ${action.action}` };
+}
+
 export function handleCallback(
   action: CallbackAction,
   deps: CallbackDeps,
@@ -412,6 +497,9 @@ export function handleCallback(
   }
   if (action.domain === 'email-reply') {
     return handleEmailReplyAction(action, deps);
+  }
+  if (action.domain === 'snooze') {
+    return handleSnoozeAction(action, deps);
   }
   return handleApprovalAction(action, deps);
 }

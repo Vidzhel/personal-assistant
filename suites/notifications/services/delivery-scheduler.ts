@@ -6,17 +6,26 @@ import {
   EVENT_NOTIFICATION_DELIVER,
   EVENT_NOTIFICATION_QUEUED,
   EVENT_NOTIFICATION_BATCHED,
+  EVENT_NOTIFICATION_SNOOZED,
+  UNSNOOZABLE_CATEGORIES,
   type EventBusInterface,
   type DatabaseInterface,
   type NotificationEvent,
 } from '@raven/shared';
 import type { ServiceContext, SuiteService } from '@raven/core/suite-registry/service-runner.ts';
-import { classifyNotification, loadClassificationRules } from '@raven/core/notification-engine/urgency-classifier.ts';
+import { classifyNotification, loadClassificationRules, matchesPattern } from '@raven/core/notification-engine/urgency-classifier.ts';
 import {
   enqueueNotification,
   getReadyNotifications,
+  getSnoozedByCategory,
+  releaseSnoozed,
 } from '@raven/core/notification-engine/notification-queue.ts';
 import type { ClassificationRule } from '@raven/core/notification-engine/urgency-classifier.ts';
+import {
+  getSnoozeForCategory,
+  incrementHeldCount,
+  expireSnoozes,
+} from '@raven/core/notification-engine/snooze-store.ts';
 import { getEngagementState } from './engagement-tracker.ts';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -90,9 +99,53 @@ function getNextActiveWindowStart(now: Date, config: ActiveHoursConfig): string 
   return `${tmYear}-${tmMonth}-${tmDay}T${config.start}:00`;
 }
 
+function isUnsnoozable(source: string): boolean {
+  return UNSNOOZABLE_CATEGORIES.some((pattern) => matchesPattern(source, pattern));
+}
+
+// eslint-disable-next-line max-lines-per-function -- notification routing has multiple delivery paths
 function handleNotification(event: unknown): void {
   try {
     const notifEvent = event as NotificationEvent;
+    const source = notifEvent.source;
+
+    // SNOOZE CHECK — must happen before classification
+    if (!isUnsnoozable(source)) {
+      const snooze = getSnoozeForCategory(db, source);
+      if (snooze) {
+        const queueId = enqueueNotification(db, {
+          source,
+          title: notifEvent.payload.title,
+          body: notifEvent.payload.body,
+          topicName: notifEvent.payload.topicName,
+          actionsJson: notifEvent.payload.actions
+            ? JSON.stringify(notifEvent.payload.actions)
+            : undefined,
+          channel: notifEvent.payload.channel,
+          urgencyTier: notifEvent.payload.urgencyTier ?? 'green',
+          deliveryMode: notifEvent.payload.deliveryMode ?? 'save-for-later',
+          status: 'snoozed',
+        });
+
+        incrementHeldCount(db, snooze.id);
+
+        eventBus.emit({
+          id: generateId(),
+          timestamp: Date.now(),
+          source: SUITE_NOTIFICATIONS,
+          type: EVENT_NOTIFICATION_SNOOZED,
+          payload: {
+            category: snooze.category,
+            snoozedUntil: snooze.snoozedUntil,
+            notificationSource: source,
+          },
+        } as unknown as import('@raven/shared').NotificationSnoozedEvent);
+
+        log.info(`Snoozed: "${notifEvent.payload.title}" [${source}] → held (snooze ${snooze.id}, queue ${queueId})`);
+        return;
+      }
+    }
+
     const classification = classifyNotification(notifEvent, classificationRules);
     const { urgencyTier } = classification;
     let { deliveryMode } = classification;
@@ -183,6 +236,10 @@ function handleNotification(event: unknown): void {
 function flushReadyNotifications(): void {
   try {
     const now = new Date().toISOString();
+
+    // Check for expired snoozes and release held notifications
+    checkSnoozeExpiry(now);
+
     const ready = getReadyNotifications(db, now);
 
     if (ready.length === 0) return;
@@ -211,6 +268,25 @@ function flushReadyNotifications(): void {
     }
   } catch (err) {
     log.error(`Flush failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function checkSnoozeExpiry(now: string): void {
+  try {
+    const expired = expireSnoozes(db, now);
+
+    for (const snooze of expired) {
+      const snoozed = getSnoozedByCategory(db, snooze.category);
+      if (snoozed.length > 0) {
+        releaseSnoozed(
+          db,
+          snoozed.map((n) => n.id),
+        );
+        log.info(`Released ${snoozed.length} held notification(s) for expired snooze "${snooze.category}"`);
+      }
+    }
+  } catch (err) {
+    log.error(`Snooze expiry check failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -248,7 +324,7 @@ const service: SuiteService = {
     // Subscribe to notification events
     eventBus.on('notification', handleNotification);
 
-    // Periodic flush of tell-when-active items
+    // Periodic flush of tell-when-active items + snooze expiry check
     flushJob = new Cron(`*/${String(flushInterval)} * * * *`, { timezone: activeHours.timezone }, () => {
       flushReadyNotifications();
     });
@@ -269,4 +345,4 @@ const service: SuiteService = {
 export default service;
 
 // Export for testing
-export { isWithinActiveHours, getNextActiveWindowStart, handleNotification, flushReadyNotifications };
+export { isWithinActiveHours, getNextActiveWindowStart, handleNotification, flushReadyNotifications, checkSnoozeExpiry, isUnsnoozable };

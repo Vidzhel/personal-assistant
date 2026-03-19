@@ -14,7 +14,7 @@ export interface QueuedNotification {
   channel: string | null;
   urgencyTier: UrgencyTier;
   deliveryMode: DeliveryMode;
-  status: 'pending' | 'delivered' | 'batched' | 'expired' | 'escalated';
+  status: 'pending' | 'delivered' | 'batched' | 'expired' | 'escalated' | 'snoozed';
   createdAt: string;
   scheduledFor: string | null;
   deliveredAt: string | null;
@@ -29,7 +29,7 @@ interface EnqueueParams {
   channel?: string;
   urgencyTier: UrgencyTier;
   deliveryMode: DeliveryMode;
-  status: 'pending' | 'batched';
+  status: 'pending' | 'batched' | 'snoozed';
   scheduledFor?: string;
 }
 
@@ -110,6 +110,31 @@ export function getEscalationCandidates(
 
 export function markEscalated(db: DatabaseInterface, id: string): void {
   db.run(`UPDATE notification_queue SET status = 'escalated' WHERE id = ?`, id);
+}
+
+export function getSnoozedByCategory(
+  db: DatabaseInterface,
+  category: string,
+): QueuedNotification[] {
+  return db.all<QueuedNotification>(
+    `SELECT id, source, title, body, topic_name AS topicName, actions_json AS actionsJson,
+            channel, urgency_tier AS urgencyTier, delivery_mode AS deliveryMode, status,
+            created_at AS createdAt, scheduled_for AS scheduledFor, delivered_at AS deliveredAt
+     FROM notification_queue
+     WHERE status = 'snoozed' AND source LIKE ?
+     ORDER BY created_at ASC`,
+    category.endsWith(':*') ? `${category.slice(0, -1)}%` : category,
+  );
+}
+
+export function releaseSnoozed(db: DatabaseInterface, ids: string[]): void {
+  for (const id of ids) {
+    db.run(
+      `UPDATE notification_queue SET status = 'pending', scheduled_for = ? WHERE id = ? AND status = 'snoozed'`,
+      new Date().toISOString(),
+      id,
+    );
+  }
 }
 
 export function markBatched(db: DatabaseInterface, ids: string[]): void {

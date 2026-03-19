@@ -13,7 +13,11 @@
       "lowEngagementThreshold": 5,
       "resumeThreshold": 3,
       "escalationHours": 4,
-      "escalationIntervalMinutes": 15
+      "escalationIntervalMinutes": 15,
+      "snoozeIgnoreThreshold": 10,
+      "snoozeSuggestionCooldownDays": 7,
+      "snoozeCheckIntervalMinutes": 30,
+      "unsnoozableCategories": ["permission:blocked", "system:health:alert"]
     }
   },
   "daily-briefing": { "enabled": true },

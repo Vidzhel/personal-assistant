@@ -777,7 +777,9 @@ export type RavenEvent =
   | NotificationQueuedEvent
   | NotificationBatchedEvent
   | EngagementStateChangedEvent
-  | NotificationEscalatedEvent;
+  | NotificationEscalatedEvent
+  | NotificationSnoozedEvent
+  | SnoozeProposalEvent;
 
 export type RavenEventType = RavenEvent['type'];
 
@@ -789,6 +791,23 @@ export interface EngagementStateChangedEvent extends BaseEvent {
     previousState: EngagementState;
     newState: EngagementState;
     responseRatio: number;
+  };
+}
+
+export interface NotificationSnoozedEvent extends BaseEvent {
+  type: 'notification:snoozed';
+  payload: {
+    category: string;
+    snoozedUntil: string | null;
+    notificationSource: string;
+  };
+}
+
+export interface SnoozeProposalEvent extends BaseEvent {
+  type: 'notification:snooze-proposal';
+  payload: {
+    category: string;
+    ignoredCount: number;
   };
 }
 

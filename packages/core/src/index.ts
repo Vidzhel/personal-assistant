@@ -313,6 +313,7 @@ async function main(): Promise<void> {
       neo4jClient,
       knowledgeLifecycle,
       retrospective,
+      db: dbInterface,
       configuredSuiteCount,
     },
     config.RAVEN_PORT,
