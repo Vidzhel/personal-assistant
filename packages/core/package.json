@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./*": "./src/*"
+  },
   "scripts": {
     "build": "tsc",
     "predev": "docker compose up -d neo4j",
