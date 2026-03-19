@@ -15,6 +15,7 @@ import type { MessageStore } from '../session-manager/message-store.ts';
 import type { ContextInjector } from '../knowledge-engine/context-injector.ts';
 import type { Retrospective } from '../knowledge-engine/retrospective.ts';
 import { createKnowledgeAgentDefinition } from '../knowledge-engine/knowledge-agent.ts';
+import { getDb } from '../db/database.ts';
 
 const log = createLogger('orchestrator');
 
@@ -177,10 +178,26 @@ export class Orchestrator {
     });
   }
 
+  /** Ensure a project row exists for auto-created project IDs (e.g. Telegram topics). */
+  private ensureProject(projectId: string): void {
+    const db = getDb();
+    const exists = db.prepare('SELECT 1 FROM projects WHERE id = ?').get(projectId);
+    if (!exists) {
+      const now = Date.now();
+      db.prepare(
+        'INSERT INTO projects (id, name, description, skills, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+      ).run(projectId, projectId, 'Auto-created from Telegram', '[]', now, now);
+      log.info(`Auto-created project "${projectId}"`);
+    }
+  }
+
   // eslint-disable-next-line max-lines-per-function -- async handler with context injection and knowledge agent merging
   private async handleUserChat(event: UserChatMessageEvent): Promise<void> {
     const { projectId, sessionId, message, topicId, topicName } = event.payload;
     log.info(`User chat in project ${projectId}: ${message.slice(0, LOG_MESSAGE_PREVIEW_LENGTH)}`);
+
+    // Ensure the project exists (Telegram messages may reference auto-generated project IDs)
+    this.ensureProject(projectId);
 
     // Use the specific session if provided, otherwise fall back to getOrCreateSession
     const session =
