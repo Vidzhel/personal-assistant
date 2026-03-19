@@ -69,7 +69,7 @@ docker compose up --build
 | `TELEGRAM_TOPIC_SYSTEM` | System alerts topic thread ID (optional, group mode) |
 | `TELEGRAM_TOPIC_MAP` | JSON mapping topic names to thread IDs, e.g. `{"Work":5}` (optional) |
 | `GWS_PRIMARY_CREDENTIALS_FILE` | Path to primary gws CLI credentials JSON |
-| `GWS_MEET_CREDENTIALS_FILE` | Path to Meet account credentials JSON (optional) |
+| `GWS_SECONDARY_CREDENTIALS_FILE` | Path to second account credentials JSON (optional) |
 | `GWS_GCP_PROJECT_ID` | GCP project ID for Gmail Pub/Sub watch (optional) |
 | `GOOGLE_API_KEY` | Google AI API key for Gemini voice transcription (optional) |
 | `RAVEN_TIMEZONE` | Timezone for schedules (e.g., `Europe/London`) |

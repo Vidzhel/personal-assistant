@@ -70,6 +70,15 @@ docker-compose up --build    # full stack
 - Always commit meaningful changes with descriptive messages
 - Push to remote to persist work across sessions
 
+## Debugging
+
+Structured logs are written to `data/logs/raven` (NDJSON, daily rotation, 7-day retention).
+- Read logs: `cat data/logs/raven.1.log | python3 -c "import sys,json; [print(json.loads(l).get('msg','')) for l in sys.stdin if l.strip()]"`
+- Filter by component: grep for `"component":"telegram-bot"` (or any subsystem name)
+- API: `GET /api/logs?level=error&component=service-runner&lines=100`
+- Frontend: `/logs` page with level/component/search filtering
+- Always check logs first when a service silently fails to start
+
 ## Testing
 
 Run core without skills to verify infrastructure:

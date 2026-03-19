@@ -43,10 +43,10 @@ Run commands with \`--format json\` for structured output.
 ## Multi-Account Support
 
 **Primary account** (default): No env var needed.
-**Meet account**: Prefix commands with the credentials env var:
-  GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=/path/to/meet-creds.json gws meet ...
+**Secondary account**: Prefix commands with the credentials env var:
+  GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=$GWS_SECONDARY_CREDENTIALS_FILE gws ...
 
-The meet credentials path is in env var \`GWS_MEET_CREDENTIALS_FILE\`.
+The secondary credentials path is in env var \`GWS_SECONDARY_CREDENTIALS_FILE\`.
 
 ## Common Patterns
 

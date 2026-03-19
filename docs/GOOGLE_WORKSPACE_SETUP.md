@@ -3,8 +3,8 @@
 ## Prerequisites
 
 1. **gws CLI** (v0.18.1+) — the Google Workspace CLI tool
-2. **Google Cloud project** with Gmail Pub/Sub enabled (for email watching)
-3. **OAuth2 credentials** for at least one Google account
+2. **Google Cloud project** with OAuth consent screen configured
+3. **OAuth2 credentials** for each Google account you want to use
 
 ## Install gws CLI
 
@@ -15,41 +15,51 @@ gws --version  # should show 0.18.1+
 
 ## Authentication
 
-### Primary Account
+### How credentials work
+
+- `gws auth login` stores encrypted credentials in `~/.config/gws/` (override with `GOOGLE_WORKSPACE_CLI_CONFIG_DIR`)
+- `gws auth export --unmasked` exports them as a plaintext JSON file (the format Raven needs)
+- At runtime, `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE` tells gws which credential file to use
+
+### Setup (two accounts sharing one GCP project)
+
+Both accounts must be added as **test users** in your GCP OAuth consent screen
+(Google Cloud Console → APIs & Services → OAuth consent screen → Test users).
 
 ```bash
+# 1. Login as personal account
 gws auth login
+# Sign in with your personal Google account in the browser
+gws auth export --unmasked > data/gws-credentials-personal.json
+
+# 2. Login as student account (overwrites default config — that's fine)
+gws auth login
+# Sign in with your student Google account in the browser
+gws auth export --unmasked > data/gws-credentials-student.json
+
+# 3. Verify both work
+GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=./data/gws-credentials-personal.json gws gmail +triage
+GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=./data/gws-credentials-student.json gws gmail +triage
 ```
 
-This creates a credentials file (check `gws auth status` for the path).
+### Environment variables
 
-Set the env var:
+Set in `.env`:
 ```bash
-GWS_PRIMARY_CREDENTIALS_FILE=/path/to/credentials.json
-```
-
-### Meet Account (Optional)
-
-If you use a separate account for Google Meet:
-
-```bash
-GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=/path/to/meet-creds.json gws auth login
-```
-
-Set the env var:
-```bash
-GWS_MEET_CREDENTIALS_FILE=/path/to/meet-creds.json
+GWS_PRIMARY_CREDENTIALS_FILE=./data/gws-credentials-personal.json
+GWS_SECONDARY_CREDENTIALS_FILE=./data/gws-credentials-student.json
+GWS_GCP_PROJECT_ID=your-gcp-project-id
 ```
 
 ## Multi-Account Support
 
 The gws-agent supports two simultaneous accounts via credential file switching:
 - **Primary**: Default account for Gmail, Calendar, Drive, Tasks, Docs, People (uses `GWS_PRIMARY_CREDENTIALS_FILE`)
-- **Meet**: Separate account for Meet recordings, transcripts, and smart notes (uses `GWS_MEET_CREDENTIALS_FILE`)
+- **Secondary**: Second account with access to the same APIs (uses `GWS_SECONDARY_CREDENTIALS_FILE`)
 
-To use the meet account, prefix any gws command with the credentials env var:
+To use the secondary account, prefix any gws command with the credentials env var:
 ```bash
-GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=$GWS_MEET_CREDENTIALS_FILE gws meet ...
+GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=$GWS_SECONDARY_CREDENTIALS_FILE gws gmail +triage
 ```
 
 ## Gmail Pub/Sub (Email Watching)
@@ -70,12 +80,22 @@ GWS_GCP_PROJECT_ID=your-gcp-project-id
 
 The watcher auto-reconnects if the process exits (30-second delay).
 
+## Credential file locations
+
+| File | Purpose |
+|------|---------|
+| `~/.config/gws/client_secret.json` | OAuth client config (from GCP console download) |
+| `~/.config/gws/credentials.enc` | Encrypted credentials (written by `gws auth login`) |
+| `~/.config/gws/.encryption_key` | Encryption key (keyring fallback on WSL2) |
+| `~/.config/gws/token_cache.json` | Cached access token (auto-refreshed) |
+| `data/gws-credentials-*.json` | Exported plaintext credentials for Raven services |
+
 ## Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `GWS_PRIMARY_CREDENTIALS_FILE` | Yes | Path to primary gws credentials JSON |
-| `GWS_MEET_CREDENTIALS_FILE` | No | Path to Meet account credentials JSON |
+| `GWS_SECONDARY_CREDENTIALS_FILE` | No | Path to secondary account credentials JSON |
 | `GWS_GCP_PROJECT_ID` | No* | GCP project ID for Gmail Pub/Sub watch |
 
 *Required only if email watching is desired.
@@ -90,7 +110,7 @@ gws auth status
 gws calendar +agenda --today --format json
 
 # Test with specific credentials
-GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=/path/to/creds.json gws calendar +agenda --today --format json
+GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=./data/gws-credentials-personal.json gws calendar +agenda --today --format json
 ```
 
 ## Skill Reference Docs
@@ -108,11 +128,17 @@ This fetches SKILL.md files from the gws CLI GitHub repo into `suites/google-wor
 ### "gws: command not found"
 Install globally: `npm install -g @googleworkspace/cli`
 
-### Auth token expired
-Re-authenticate: `gws auth login`
+### Auth token expired / "Failed to get token"
+Re-authenticate and re-export:
+```bash
+gws auth login
+gws auth export --unmasked > data/gws-credentials-personal.json
+```
 
 ### Email watcher not starting
-Check that both `GWS_PRIMARY_CREDENTIALS_FILE` and `GWS_GCP_PROJECT_ID` are set.
+1. Check logs: `grep -i 'email-watcher\|gws' data/logs/raven.1.log`
+2. Verify both `GWS_PRIMARY_CREDENTIALS_FILE` and `GWS_GCP_PROJECT_ID` are set
+3. Test credentials: `GOOGLE_WORKSPACE_CLI_CREDENTIALS_FILE=$GWS_PRIMARY_CREDENTIALS_FILE gws gmail +triage`
 
-### Meet tools not working
-Ensure `GWS_MEET_CREDENTIALS_FILE` is set and the account has access to Meet recordings.
+### Secondary account tools not working
+Ensure `GWS_SECONDARY_CREDENTIALS_FILE` is set and the account is a test user in the GCP OAuth consent screen.
