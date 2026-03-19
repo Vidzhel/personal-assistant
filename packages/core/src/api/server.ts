@@ -38,6 +38,7 @@ import { registerPipelineRoutes } from './routes/pipelines.ts';
 import { registerMetricsRoute } from './routes/metrics.ts';
 import { registerKnowledgeRoutes } from './routes/knowledge.ts';
 import { registerNotificationPreferencesRoutes } from './routes/notification-preferences.ts';
+import { registerLogRoutes } from './routes/logs.ts';
 import { registerSSERoutes } from './sse/stream.ts';
 import { registerWebSocketHandler } from './ws/handler.ts';
 
@@ -127,6 +128,9 @@ export async function createApiServer(
       retrospective: deps.retrospective,
     });
   }
+
+  // Log viewer
+  registerLogRoutes(app);
 
   // Notification preferences (snooze)
   if (deps.db) {

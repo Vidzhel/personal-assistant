@@ -723,10 +723,16 @@ const service: SuiteService = {
       }
     }
 
+    bot.catch((err) => {
+      logger.error(`Grammy unhandled error: ${err.error ?? err.message ?? err}`);
+    });
+
     bot.start({
       onStart: () => {
         logger.info('Telegram bot started');
       },
+    }).catch((err: unknown) => {
+      logger.error(`Telegram bot polling failed: ${err}`);
     });
   },
 

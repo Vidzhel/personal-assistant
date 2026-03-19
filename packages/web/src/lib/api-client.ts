@@ -121,6 +121,26 @@ export const api = {
     }),
   getSessionReferences: (sessionId: string) =>
     request<SessionReferences>(`/sessions/${sessionId}/references`),
+  getLogs: (params?: { lines?: number; level?: string; component?: string; search?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.lines) qs.set('lines', String(params.lines));
+    if (params?.level) qs.set('level', params.level);
+    if (params?.component) qs.set('component', params.component);
+    if (params?.search) qs.set('search', params.search);
+    return request<LogsResponse>(`/logs?${qs}`);
+  },
+  getLogFiles: () => request<LogFile[]>('/logs/files'),
+  getLogFile: (
+    filename: string,
+    params?: { lines?: number; level?: string; component?: string; search?: string },
+  ) => {
+    const qs = new URLSearchParams();
+    if (params?.lines) qs.set('lines', String(params.lines));
+    if (params?.level) qs.set('level', params.level);
+    if (params?.component) qs.set('component', params.component);
+    if (params?.search) qs.set('search', params.search);
+    return request<LogsResponse>(`/logs/${filename}?${qs}`);
+  },
   updateProject: (
     id: string,
     data: { name?: string; description?: string; skills?: string[]; systemPrompt?: string | null },
@@ -346,4 +366,25 @@ export interface KnowledgeSearchResult {
   query: string;
   queryType: string;
   totalCandidates: number;
+}
+
+export interface LogEntry {
+  level: number;
+  levelLabel: string;
+  time: number;
+  component?: string;
+  msg: string;
+  [key: string]: unknown;
+}
+
+export interface LogsResponse {
+  lines: LogEntry[];
+  total: number;
+  error?: string;
+}
+
+export interface LogFile {
+  name: string;
+  size: number;
+  modified: number;
 }

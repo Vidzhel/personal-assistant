@@ -1,6 +1,6 @@
 import { resolve, dirname } from 'node:path';
 import { mkdirSync, existsSync } from 'node:fs';
-import { createLogger, type RavenEvent, type RavenEventType } from '@raven/shared';
+import { createLogger, initFileLogging, type RavenEvent, type RavenEventType } from '@raven/shared';
 import { loadConfig, loadSuitesConfig, loadSchedulesConfig, projectRoot } from './config.ts';
 import { initDatabase, createDbInterface, getDb } from './db/database.ts';
 import { EventBus } from './event-bus/event-bus.ts';
@@ -42,6 +42,11 @@ async function main(): Promise<void> {
 
   // 1. Load config
   const config = loadConfig();
+
+  // 1b. Initialize file logging (must be before any substantive logging)
+  const logDir = resolve(projectRoot, 'data/logs');
+  initFileLogging({ logDir, maxDays: 7, pretty: process.env.NODE_ENV !== 'production' });
+
   log.info(`Config loaded (model: ${config.CLAUDE_MODEL}, port: ${config.RAVEN_PORT})`);
 
   // Initialize agent backend: SDK mode (API key) or CLI mode (claude binary)

@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 const mockSendMessage = vi.fn().mockResolvedValue({});
 const mockGetChat = vi.fn().mockResolvedValue({});
 const mockEditMessageReplyMarkup = vi.fn().mockResolvedValue({});
-const mockStart = vi.fn();
+const mockStart = vi.fn().mockReturnValue(new Promise(() => {}));
 const mockStop = vi.fn().mockResolvedValue(undefined);
 const messageHandlers: Array<(ctx: any) => Promise<void>> = [];
 const callbackHandlers: Array<(ctx: any) => Promise<void>> = [];
@@ -22,6 +22,7 @@ class MockBot {
     if (filter === 'message:document') documentHandlers.push(handler);
   }
   api = { sendMessage: mockSendMessage, getChat: mockGetChat, editMessageReplyMarkup: mockEditMessageReplyMarkup };
+  catch = vi.fn();
   start = mockStart;
   stop = mockStop;
 }
