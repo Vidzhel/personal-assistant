@@ -95,6 +95,10 @@ export interface UserChatMessageEvent extends BaseEvent {
   };
 }
 
+export type DeliveryMode = 'tell-now' | 'tell-when-active' | 'save-for-later';
+
+export type UrgencyTier = 'red' | 'yellow' | 'green';
+
 export interface NotificationEvent extends BaseEvent {
   type: 'notification';
   payload: {
@@ -103,6 +107,40 @@ export interface NotificationEvent extends BaseEvent {
     body: string;
     topicName?: string;
     actions?: Array<{ label: string; action: string; data?: unknown }>;
+    urgencyTier?: UrgencyTier;
+    deliveryMode?: DeliveryMode;
+  };
+}
+
+export interface NotificationDeliverEvent extends BaseEvent {
+  type: 'notification:deliver';
+  payload: {
+    channel: 'telegram' | 'web' | 'all';
+    title: string;
+    body: string;
+    topicName?: string;
+    actions?: Array<{ label: string; action: string; data?: unknown }>;
+    urgencyTier?: UrgencyTier;
+    deliveryMode?: DeliveryMode;
+    queueId?: string;
+  };
+}
+
+export interface NotificationQueuedEvent extends BaseEvent {
+  type: 'notification:queued';
+  payload: {
+    queueId: string;
+    urgencyTier: UrgencyTier;
+    deliveryMode: DeliveryMode;
+    scheduledFor?: string;
+  };
+}
+
+export interface NotificationBatchedEvent extends BaseEvent {
+  type: 'notification:batched';
+  payload: {
+    queueId: string;
+    urgencyTier: UrgencyTier;
   };
 }
 
@@ -734,7 +772,10 @@ export type RavenEvent =
   | KnowledgeStaleBubblesDetectedEvent
   | InsightGeneratedEvent
   | InsightQueuedEvent
-  | InsightSuppressedEvent;
+  | InsightSuppressedEvent
+  | NotificationDeliverEvent
+  | NotificationQueuedEvent
+  | NotificationBatchedEvent;
 
 export type RavenEventType = RavenEvent['type'];
 

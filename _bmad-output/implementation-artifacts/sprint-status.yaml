@@ -34,7 +34,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-12
-last_updated: 2026-03-18 # story 7.1 done
+last_updated: 2026-03-19 # story 7.2 review
 project: personal-assistant
 project_key: NOKEY
 tracking_system: file-system
@@ -103,7 +103,7 @@ development_status:
   # Epic 7: Proactive Intelligence & Friend Protocol (Growth)
   epic-7: in-progress
   7-1-background-pattern-analysis-engine: done
-  7-2-urgency-tier-classification-and-delivery-timing: backlog
+  7-2-urgency-tier-classification-and-delivery-timing: review
   7-3-engagement-based-throttling: backlog
   7-4-category-snooze-and-notification-preferences: backlog
   epic-7-retrospective: optional

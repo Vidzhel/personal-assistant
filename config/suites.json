@@ -1,7 +1,17 @@
 {
   "task-management": { "enabled": true },
   "email": { "enabled": true, "config": { "watchFolders": ["INBOX"] } },
-  "notifications": { "enabled": true },
+  "notifications": {
+    "enabled": true,
+    "config": {
+      "activeHours": {
+        "start": "07:00",
+        "end": "23:00",
+        "timezone": "America/New_York"
+      },
+      "flushIntervalMinutes": 5
+    }
+  },
   "daily-briefing": { "enabled": true },
   "gemini-transcription": { "enabled": true },
   "proactive-intelligence": {

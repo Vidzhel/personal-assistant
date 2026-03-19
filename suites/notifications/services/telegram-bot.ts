@@ -8,7 +8,7 @@ import {
   PROJECT_TELEGRAM_DEFAULT,
   type EventBusInterface,
   type LoggerInterface,
-  type NotificationEvent,
+  type NotificationDeliverEvent,
   type SystemHealthAlertEvent,
   type AgentTaskCompleteEvent,
   type PermissionBlockedEvent,
@@ -16,6 +16,7 @@ import {
   type MediaReceivedEvent,
 } from '@raven/shared';
 import type { ServiceContext, SuiteService } from '@raven/core/suite-registry/service-runner.ts';
+import { markDelivered } from '@raven/core/notification-engine/notification-queue.ts';
 import {
   parseCallbackData,
   handleCallback,
@@ -39,6 +40,7 @@ let operatingMode: OperatingMode = 'direct';
 let topicConfig: TopicConfig = { topicMap: {}, reverseMap: {}, topicToProject: {} };
 let eventBus: EventBusInterface;
 let logger: LoggerInterface;
+let dbRef: import('@raven/shared').DatabaseInterface | null = null;
 
 // Track topicId per projectId so responses can route back to source topic
 const projectTopicMap = new Map<string, number>();
@@ -182,6 +184,7 @@ const service: SuiteService = {
   async start(context: ServiceContext): Promise<void> {
     eventBus = context.eventBus;
     logger = context.logger;
+    dbRef = context.db;
 
     const token = process.env.TELEGRAM_BOT_TOKEN;
     const configChatId = process.env.TELEGRAM_CHAT_ID;
@@ -616,9 +619,9 @@ const service: SuiteService = {
       }
     });
 
-    // Subscribe to notification events
-    context.eventBus.on('notification', (event: unknown) => {
-      const notifEvent = event as NotificationEvent;
+    // Subscribe to notification:deliver events (delivery-scheduler intercepts raw 'notification' first)
+    context.eventBus.on('notification:deliver', (event: unknown) => {
+      const notifEvent = event as NotificationDeliverEvent;
       const { channel, title, body, topicName, actions } = notifEvent.payload;
       if (channel === 'telegram' || channel === 'all') {
         const text = `*${escapeMarkdown(title)}*\n\n${escapeMarkdown(body)}`;
@@ -639,9 +642,17 @@ const service: SuiteService = {
           keyboard = buildInlineKeyboard(actions);
         }
 
-        sendMessageWithFallback(text, 'MarkdownV2', threadId, keyboard).catch(() => {
-          // already logged in sendMessageWithFallback
-        });
+        sendMessageWithFallback(text, 'MarkdownV2', threadId, keyboard)
+          .then(() => {
+            // Mark queued notification as delivered if it came from the queue
+            const queueId = (notifEvent.payload as Record<string, unknown>).queueId as string | undefined;
+            if (queueId && dbRef) {
+              markDelivered(dbRef, queueId);
+            }
+          })
+          .catch(() => {
+            // already logged in sendMessageWithFallback
+          });
       }
     });
 
@@ -691,6 +702,8 @@ const service: SuiteService = {
           title: 'Approval Required',
           body: `Action "${actionName}" from skill "${skillName}" requires approval.`,
           topicName: 'System',
+          urgencyTier: 'red' as const,
+          deliveryMode: 'tell-now' as const,
           actions: [
             { label: 'Approve', action: `a:y:${approvalId}` },
             { label: 'Deny', action: `a:n:${approvalId}` },

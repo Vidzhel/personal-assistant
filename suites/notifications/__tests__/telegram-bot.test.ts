@@ -44,6 +44,12 @@ vi.mock('@raven/shared', () => ({
   generateId: vi.fn(() => 'test-id'),
   SOURCE_TELEGRAM: 'telegram',
   PROJECT_TELEGRAM_DEFAULT: 'telegram-default',
+  createLogger: () => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  }),
 }));
 
 vi.mock('@raven/core/suite-registry/service-runner.ts', () => ({}));
@@ -178,7 +184,7 @@ describe('telegram-bot service', () => {
       await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
 
       // Trigger a notification event
-      const handler = eventHandlers['notification']?.[0];
+      const handler = eventHandlers['notification:deliver']?.[0];
       expect(handler).toBeDefined();
       handler({
         type: 'notification',
@@ -286,7 +292,7 @@ describe('telegram-bot service', () => {
       await loadService();
       await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
 
-      const handler = eventHandlers['notification']?.[0];
+      const handler = eventHandlers['notification:deliver']?.[0];
       handler({
         type: 'notification',
         payload: { channel: 'telegram', title: 'Alert', body: 'Content', topicName: 'Work' },
@@ -305,7 +311,7 @@ describe('telegram-bot service', () => {
       await loadService();
       await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
 
-      const handler = eventHandlers['notification']?.[0];
+      const handler = eventHandlers['notification:deliver']?.[0];
       handler({
         type: 'notification',
         payload: { channel: 'telegram', title: 'Alert', body: 'Content' },
@@ -378,7 +384,7 @@ describe('telegram-bot service', () => {
         .mockRejectedValueOnce(new Error('Thread not found'))
         .mockResolvedValueOnce({});
 
-      const handler = eventHandlers['notification']?.[0];
+      const handler = eventHandlers['notification:deliver']?.[0];
       handler({
         type: 'notification',
         payload: { channel: 'telegram', title: 'Test', body: 'Body', topicName: 'Work' },
@@ -615,7 +621,7 @@ describe('telegram-bot service', () => {
       await loadService();
       await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
 
-      const handler = eventHandlers['notification']?.[0];
+      const handler = eventHandlers['notification:deliver']?.[0];
       handler({
         type: 'notification',
         payload: {
@@ -644,7 +650,7 @@ describe('telegram-bot service', () => {
       await loadService();
       await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
 
-      const handler = eventHandlers['notification']?.[0];
+      const handler = eventHandlers['notification:deliver']?.[0];
       handler({
         type: 'notification',
         payload: { channel: 'telegram', title: 'Plain', body: 'No actions' },

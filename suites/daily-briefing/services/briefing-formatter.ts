@@ -4,8 +4,10 @@ import {
   createLogger,
   SUITE_DAILY_BRIEFING,
   type EventBusInterface,
+  type DatabaseInterface,
 } from '@raven/shared';
 import type { ServiceContext, SuiteService } from '@raven/core/suite-registry/service-runner.ts';
+import { getPendingBatched, markBatched } from '@raven/core/notification-engine/notification-queue.ts';
 
 const log = createLogger('briefing-formatter');
 
@@ -40,6 +42,7 @@ type BriefingEmail = z.infer<typeof BriefingEmailSchema>;
 type BriefingResponse = z.infer<typeof BriefingResponseSchema>;
 
 let eventBus: EventBusInterface;
+let db: DatabaseInterface;
 
 function buildTaskActions(taskId: string): Array<{ label: string; action: string }> {
   return [
@@ -111,6 +114,33 @@ function buildEmailSections(emails: BriefingEmail[]): BriefingSection[] {
   return sections;
 }
 
+function getBatchedNotificationSections(): BriefingSection[] {
+  try {
+    const batched = getPendingBatched(db);
+    if (batched.length === 0) return [];
+
+    const sections: BriefingSection[] = [];
+    for (const item of batched) {
+      sections.push({
+        text: `\u2022 ${item.title}: ${item.body}`,
+        actions: [],
+      });
+    }
+
+    // Mark all as delivered
+    markBatched(
+      db,
+      batched.map((b) => b.id),
+    );
+
+    log.info(`Included ${batched.length} batched notification(s) in morning briefing`);
+    return sections;
+  } catch (err) {
+    log.error(`Failed to load batched notifications: ${err}`);
+    return [];
+  }
+}
+
 function buildBriefingMessages(briefing: BriefingResponse): Array<{
   title: string;
   body: string;
@@ -156,6 +186,12 @@ function buildBriefingMessages(briefing: BriefingResponse): Array<{
   const emailSections = buildEmailSections(briefing.emails);
   if (emailSections.length > 0) {
     addSection('\ud83d\udce7 Emails', emailSections);
+  }
+
+  // Queued updates (batched notifications from notification queue)
+  const batchedItems = getBatchedNotificationSections();
+  if (batchedItems.length > 0) {
+    addSection('\ud83d\udce6 Queued Updates', batchedItems);
   }
 
   // System status
@@ -284,6 +320,7 @@ function handleTaskComplete(event: unknown): void {
 const service: SuiteService = {
   async start(context: ServiceContext): Promise<void> {
     eventBus = context.eventBus;
+    db = context.db;
     eventBus.on('agent:task:complete', handleTaskComplete);
     log.info('Briefing formatter service started');
   },

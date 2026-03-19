@@ -1,0 +1,21 @@
+[
+  { "sourcePattern": "permission:blocked", "urgencyTier": "red", "deliveryMode": "tell-now" },
+  { "sourcePattern": "system:health:alert", "urgencyTier": "red", "deliveryMode": "tell-now" },
+  {
+    "sourcePattern": "insight:*",
+    "urgencyTier": "yellow",
+    "deliveryMode": "tell-when-active",
+    "condition": { "field": "confidence", "op": "gte", "value": 0.8 }
+  },
+  {
+    "sourcePattern": "insight:*",
+    "urgencyTier": "green",
+    "deliveryMode": "save-for-later",
+    "condition": { "field": "confidence", "op": "lt", "value": 0.8 }
+  },
+  { "sourcePattern": "agent:task:complete", "urgencyTier": "yellow", "deliveryMode": "tell-when-active" },
+  { "sourcePattern": "pipeline:complete", "urgencyTier": "green", "deliveryMode": "save-for-later" },
+  { "sourcePattern": "pipeline:failed", "urgencyTier": "yellow", "deliveryMode": "tell-when-active" },
+  { "sourcePattern": "email:triage:*", "urgencyTier": "green", "deliveryMode": "save-for-later" },
+  { "sourcePattern": "schedule:triggered", "urgencyTier": "green", "deliveryMode": "save-for-later" }
+]

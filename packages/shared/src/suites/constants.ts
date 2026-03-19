@@ -61,3 +61,11 @@ export const PROJECT_TELEGRAM_DEFAULT = 'telegram-default';
 
 // Skill name used for orchestrator tasks
 export const SKILL_ORCHESTRATOR = 'orchestrator';
+
+// Suite: notifications — delivery scheduler
+export const SERVICE_DELIVERY_SCHEDULER = 'delivery-scheduler';
+
+// Notification delivery event types
+export const EVENT_NOTIFICATION_DELIVER = 'notification:deliver' as const;
+export const EVENT_NOTIFICATION_QUEUED = 'notification:queued' as const;
+export const EVENT_NOTIFICATION_BATCHED = 'notification:batched' as const;
