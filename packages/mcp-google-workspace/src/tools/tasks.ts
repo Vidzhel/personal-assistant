@@ -2,6 +2,10 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { gwsExec } from '../gws-exec.ts';
 
+function formatResult(data: unknown): { content: [{ type: 'text'; text: string }] } {
+  return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+}
+
 // eslint-disable-next-line max-lines-per-function -- registers 6 Tasks MCP tools
 export function registerTasksTools(server: McpServer, credFile: string): void {
   server.registerTool(
@@ -13,7 +17,7 @@ export function registerTasksTools(server: McpServer, credFile: string): void {
     async () => {
       const args = ['tasks', 'tasklists', 'list', '--format', 'json'];
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
@@ -39,7 +43,7 @@ export function registerTasksTools(server: McpServer, credFile: string): void {
         'json',
       ];
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
@@ -70,7 +74,7 @@ export function registerTasksTools(server: McpServer, credFile: string): void {
         'json',
       ];
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
@@ -105,7 +109,7 @@ export function registerTasksTools(server: McpServer, credFile: string): void {
         'json',
       ];
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
@@ -129,7 +133,7 @@ export function registerTasksTools(server: McpServer, credFile: string): void {
         'json',
       ];
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
@@ -156,7 +160,7 @@ export function registerTasksTools(server: McpServer, credFile: string): void {
         'json',
       ];
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 }

@@ -2,12 +2,16 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { gwsExec } from '../gws-exec.ts';
 
+function formatResult(data: unknown): { content: [{ type: 'text'; text: string }] } {
+  return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+}
+
 // eslint-disable-next-line max-lines-per-function -- registers 5 Drive MCP tools
 export function registerDriveTools(server: McpServer, credFile: string): void {
   server.registerTool(
     'drive_list',
     {
-      description: 'List files in Google Drive',
+      description: 'List files in Google Drive with optional search query',
       inputSchema: {
         query: z
           .string()
@@ -15,6 +19,7 @@ export function registerDriveTools(server: McpServer, credFile: string): void {
           .describe('Drive search query (e.g. "name contains \'report\'")'),
         maxResults: z.number().optional().describe('Max files to return'),
         orderBy: z.string().optional().describe('Sort order (e.g. "modifiedTime desc")'),
+        pageAll: z.boolean().optional().describe('Auto-paginate through all results'),
       },
     },
     async (input) => {
@@ -24,8 +29,9 @@ export function registerDriveTools(server: McpServer, credFile: string): void {
       if (input.orderBy) params.orderBy = input.orderBy;
       const args = ['drive', 'files', 'list', '--format', 'json'];
       if (Object.keys(params).length > 0) args.push('--params', JSON.stringify(params));
+      if (input.pageAll) args.push('--page-all');
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
@@ -48,7 +54,7 @@ export function registerDriveTools(server: McpServer, credFile: string): void {
         'json',
       ];
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
@@ -71,7 +77,7 @@ export function registerDriveTools(server: McpServer, credFile: string): void {
       if (input.parents) body.parents = input.parents;
       const args = ['drive', 'files', 'create', '--json', JSON.stringify(body), '--format', 'json'];
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
@@ -94,7 +100,7 @@ export function registerDriveTools(server: McpServer, credFile: string): void {
         'json',
       ];
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
@@ -105,15 +111,15 @@ export function registerDriveTools(server: McpServer, credFile: string): void {
       inputSchema: {
         filePath: z.string().describe('Local file path to upload'),
         name: z.string().optional().describe('Name for the file in Drive'),
-        parents: z.array(z.string()).optional().describe('Parent folder IDs'),
+        parent: z.string().optional().describe('Parent folder ID'),
       },
     },
     async (input) => {
-      const args = ['drive', '+upload', '--file', input.filePath, '--format', 'json'];
+      const args = ['drive', '+upload', input.filePath, '--format', 'json'];
       if (input.name) args.push('--name', input.name);
-      if (input.parents) args.push('--parents', input.parents.join(','));
+      if (input.parent) args.push('--parent', input.parent);
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 }

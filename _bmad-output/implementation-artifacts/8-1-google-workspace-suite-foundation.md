@@ -272,6 +272,7 @@ Claude Opus 4.6 (1M context)
 
 ### Change Log
 - 2026-03-19: Story 8.1 implemented — full Google Workspace MCP server, suite, agent, email watcher, orchestrator wiring, config, docs, and tests
+- 2026-03-19: Code review fixes — corrected CLI flag mismatches (gmail_triage --max, gmail_read --id, drive_upload positional arg, calendar_insert --attendee repeatable), merged gmail_list params into single --params call, removed duplicate gmail_search tool (8→7 gmail tools), added missing CLI flags (--html, --from, --attach on send/reply/forward, --headers on read, --tomorrow/--week/--calendar/--meet on calendar, --page-all on list operations)
 
 ### File List
 - packages/shared/src/suites/constants.ts (modified)

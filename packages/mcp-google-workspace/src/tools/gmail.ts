@@ -2,53 +2,63 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { gwsExec } from '../gws-exec.ts';
 
-// eslint-disable-next-line max-lines-per-function -- registers 9 Gmail MCP tools
+function formatResult(data: unknown): { content: [{ type: 'text'; text: string }] } {
+  return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+}
+
+// eslint-disable-next-line max-lines-per-function -- registers 8 Gmail MCP tools
 export function registerGmailTools(server: McpServer, credFile: string): void {
   server.registerTool(
     'gmail_triage',
     {
-      description: 'Triage inbox — summarize unread emails with AI categorization',
+      description:
+        'Triage inbox — summarize unread emails with AI categorization. Also supports search via --query.',
       inputSchema: {
-        maxResults: z.number().optional().describe('Max emails to triage (default: 10)'),
-        labels: z.string().optional().describe('Comma-separated label filter'),
+        max: z.number().optional().describe('Max emails to show (default: 20)'),
+        query: z.string().optional().describe('Gmail search query (default: is:unread)'),
+        labels: z.boolean().optional().describe('Include label names in output'),
       },
     },
     async (input) => {
       const args = ['gmail', '+triage', '--format', 'json'];
-      if (input.maxResults) args.push('--max-results', String(input.maxResults));
-      if (input.labels) args.push('--labels', input.labels);
+      if (input.max) args.push('--max', String(input.max));
+      if (input.query) args.push('--query', input.query);
+      if (input.labels) args.push('--labels');
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
   server.registerTool(
     'gmail_read',
     {
-      description: 'Read a specific email message by ID',
+      description: 'Read a specific email message by ID — extracts body and optionally headers',
       inputSchema: {
-        messageId: z.string().describe('Gmail message ID'),
-        format: z.enum(['full', 'metadata', 'minimal']).optional().describe('Message format'),
+        id: z.string().describe('Gmail message ID'),
+        headers: z.boolean().optional().describe('Include headers (From, To, Subject, Date)'),
       },
     },
     async (input) => {
-      const args = ['gmail', '+read', '--message-id', input.messageId, '--format', 'json'];
-      if (input.format) args.push('--msg-format', input.format);
+      const args = ['gmail', '+read', '--id', input.id, '--format', 'json'];
+      if (input.headers) args.push('--headers');
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
   server.registerTool(
     'gmail_send',
     {
-      description: 'Send a new email',
+      description: 'Send a new email with optional attachments and HTML support',
       inputSchema: {
-        to: z.string().describe('Recipient email address'),
+        to: z.string().describe('Recipient email address(es), comma-separated'),
         subject: z.string().describe('Email subject'),
-        body: z.string().describe('Email body (plain text)'),
+        body: z.string().describe('Email body (plain text, or HTML if html=true)'),
         cc: z.string().optional().describe('CC recipients (comma-separated)'),
         bcc: z.string().optional().describe('BCC recipients (comma-separated)'),
+        from: z.string().optional().describe('Sender address (for send-as/alias)'),
+        html: z.boolean().optional().describe('Treat body as HTML content'),
+        attach: z.array(z.string()).optional().describe('File paths to attach'),
       },
     },
     async (input) => {
@@ -66,18 +76,28 @@ export function registerGmailTools(server: McpServer, credFile: string): void {
       ];
       if (input.cc) args.push('--cc', input.cc);
       if (input.bcc) args.push('--bcc', input.bcc);
+      if (input.from) args.push('--from', input.from);
+      if (input.html) args.push('--html');
+      if (input.attach) {
+        for (const file of input.attach) args.push('--attach', file);
+      }
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
   server.registerTool(
     'gmail_reply',
     {
-      description: 'Reply to an email message',
+      description: 'Reply to an email message with optional attachments and HTML',
       inputSchema: {
         messageId: z.string().describe('Gmail message ID to reply to'),
-        body: z.string().describe('Reply body (plain text)'),
+        body: z.string().describe('Reply body (plain text, or HTML if html=true)'),
+        cc: z.string().optional().describe('CC recipients (comma-separated)'),
+        bcc: z.string().optional().describe('BCC recipients (comma-separated)'),
+        from: z.string().optional().describe('Sender address (for send-as/alias)'),
+        html: z.boolean().optional().describe('Treat body as HTML content'),
+        attach: z.array(z.string()).optional().describe('File paths to attach'),
       },
     },
     async (input) => {
@@ -91,8 +111,15 @@ export function registerGmailTools(server: McpServer, credFile: string): void {
         '--format',
         'json',
       ];
+      if (input.cc) args.push('--cc', input.cc);
+      if (input.bcc) args.push('--bcc', input.bcc);
+      if (input.from) args.push('--from', input.from);
+      if (input.html) args.push('--html');
+      if (input.attach) {
+        for (const file of input.attach) args.push('--attach', file);
+      }
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
@@ -102,7 +129,12 @@ export function registerGmailTools(server: McpServer, credFile: string): void {
       description: 'Reply-all to an email message',
       inputSchema: {
         messageId: z.string().describe('Gmail message ID to reply-all to'),
-        body: z.string().describe('Reply body (plain text)'),
+        body: z.string().describe('Reply body (plain text, or HTML if html=true)'),
+        cc: z.string().optional().describe('CC recipients (comma-separated)'),
+        bcc: z.string().optional().describe('BCC recipients (comma-separated)'),
+        from: z.string().optional().describe('Sender address (for send-as/alias)'),
+        html: z.boolean().optional().describe('Treat body as HTML content'),
+        attach: z.array(z.string()).optional().describe('File paths to attach'),
       },
     },
     async (input) => {
@@ -116,19 +148,31 @@ export function registerGmailTools(server: McpServer, credFile: string): void {
         '--format',
         'json',
       ];
+      if (input.cc) args.push('--cc', input.cc);
+      if (input.bcc) args.push('--bcc', input.bcc);
+      if (input.from) args.push('--from', input.from);
+      if (input.html) args.push('--html');
+      if (input.attach) {
+        for (const file of input.attach) args.push('--attach', file);
+      }
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
   server.registerTool(
     'gmail_forward',
     {
-      description: 'Forward an email message',
+      description: 'Forward an email message to new recipients',
       inputSchema: {
         messageId: z.string().describe('Gmail message ID to forward'),
-        to: z.string().describe('Forward recipient email address'),
-        body: z.string().optional().describe('Additional message body'),
+        to: z.string().describe('Forward recipient email address(es), comma-separated'),
+        body: z.string().optional().describe('Note to include above the forwarded message'),
+        cc: z.string().optional().describe('CC recipients (comma-separated)'),
+        bcc: z.string().optional().describe('BCC recipients (comma-separated)'),
+        from: z.string().optional().describe('Sender address (for send-as/alias)'),
+        html: z.boolean().optional().describe('Treat body as HTML content'),
+        attach: z.array(z.string()).optional().describe('File paths to attach'),
       },
     },
     async (input) => {
@@ -143,28 +187,39 @@ export function registerGmailTools(server: McpServer, credFile: string): void {
         'json',
       ];
       if (input.body) args.push('--body', input.body);
+      if (input.cc) args.push('--cc', input.cc);
+      if (input.bcc) args.push('--bcc', input.bcc);
+      if (input.from) args.push('--from', input.from);
+      if (input.html) args.push('--html');
+      if (input.attach) {
+        for (const file of input.attach) args.push('--attach', file);
+      }
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
   server.registerTool(
     'gmail_list',
     {
-      description: 'List messages matching a query',
+      description: 'List messages matching a query via Gmail API (raw API access with full params)',
       inputSchema: {
         query: z.string().optional().describe('Gmail search query (e.g. "is:unread from:boss")'),
         maxResults: z.number().optional().describe('Max results to return'),
         labelIds: z.string().optional().describe('Comma-separated label IDs'),
+        pageAll: z.boolean().optional().describe('Auto-paginate through all results'),
       },
     },
     async (input) => {
+      const params: Record<string, unknown> = {};
+      if (input.query) params.q = input.query;
+      if (input.maxResults) params.maxResults = input.maxResults;
+      if (input.labelIds) params.labelIds = input.labelIds;
       const args = ['gmail', 'users', 'messages', 'list', '--format', 'json'];
-      if (input.query) args.push('--params', JSON.stringify({ q: input.query }));
-      if (input.maxResults) args.push('--params', JSON.stringify({ maxResults: input.maxResults }));
-      if (input.labelIds) args.push('--params', JSON.stringify({ labelIds: input.labelIds }));
+      if (Object.keys(params).length > 0) args.push('--params', JSON.stringify(params));
+      if (input.pageAll) args.push('--page-all');
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
@@ -195,25 +250,7 @@ export function registerGmailTools(server: McpServer, credFile: string): void {
         'json',
       ];
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
-    },
-  );
-
-  server.registerTool(
-    'gmail_search',
-    {
-      description: 'Search emails with detailed results including snippets',
-      inputSchema: {
-        query: z.string().describe('Gmail search query'),
-        maxResults: z.number().optional().describe('Max results (default: 10)'),
-      },
-    },
-    async (input) => {
-      const args = ['gmail', '+triage', '--format', 'json'];
-      if (input.query) args.push('--query', input.query);
-      if (input.maxResults) args.push('--max-results', String(input.maxResults));
-      const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 }

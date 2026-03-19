@@ -2,6 +2,10 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { gwsExec } from '../gws-exec.ts';
 
+function formatResult(data: unknown): { content: [{ type: 'text'; text: string }] } {
+  return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+}
+
 // eslint-disable-next-line max-lines-per-function -- registers 4 Workflow MCP tools
 export function registerWorkflowTools(server: McpServer, credFile: string): void {
   server.registerTool(
@@ -16,7 +20,7 @@ export function registerWorkflowTools(server: McpServer, credFile: string): void
       const args = ['calendar', '+standup-report', '--format', 'json'];
       if (input.timezone) args.push('--timezone', input.timezone);
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
@@ -31,7 +35,7 @@ export function registerWorkflowTools(server: McpServer, credFile: string): void
     async (input) => {
       const args = ['calendar', '+meeting-prep', '--event-id', input.eventId, '--format', 'json'];
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
@@ -48,7 +52,7 @@ export function registerWorkflowTools(server: McpServer, credFile: string): void
       const args = ['gmail', '+email-to-task', '--message-id', input.messageId, '--format', 'json'];
       if (input.taskListId) args.push('--task-list', input.taskListId);
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
@@ -64,7 +68,7 @@ export function registerWorkflowTools(server: McpServer, credFile: string): void
       const args = ['calendar', '+weekly-digest', '--format', 'json'];
       if (input.timezone) args.push('--timezone', input.timezone);
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 }

@@ -2,40 +2,51 @@ import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { gwsExec } from '../gws-exec.ts';
 
+function formatResult(data: unknown): { content: [{ type: 'text'; text: string }] } {
+  return { content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }] };
+}
+
 // eslint-disable-next-line max-lines-per-function -- registers 6 Calendar MCP tools
 export function registerCalendarTools(server: McpServer, credFile: string): void {
   server.registerTool(
     'calendar_agenda',
     {
-      description: 'Show upcoming calendar events',
+      description: 'Show upcoming calendar events across all calendars',
       inputSchema: {
         today: z.boolean().optional().describe('Show only today'),
-        days: z.number().optional().describe('Number of days to show'),
-        timezone: z.string().optional().describe('IANA timezone'),
+        tomorrow: z.boolean().optional().describe('Show only tomorrow'),
+        week: z.boolean().optional().describe('Show this week'),
+        days: z.number().optional().describe('Number of days ahead to show'),
+        calendar: z.string().optional().describe('Filter to specific calendar name or ID'),
+        timezone: z.string().optional().describe('IANA timezone override'),
       },
     },
     async (input) => {
       const args = ['calendar', '+agenda', '--format', 'json'];
       if (input.today) args.push('--today');
+      if (input.tomorrow) args.push('--tomorrow');
+      if (input.week) args.push('--week');
       if (input.days) args.push('--days', String(input.days));
+      if (input.calendar) args.push('--calendar', input.calendar);
       if (input.timezone) args.push('--timezone', input.timezone);
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
   server.registerTool(
     'calendar_insert',
     {
-      description: 'Create a new calendar event',
+      description: 'Create a new calendar event with optional Meet link',
       inputSchema: {
         summary: z.string().describe('Event title'),
         start: z.string().describe('Start datetime (ISO 8601)'),
         end: z.string().describe('End datetime (ISO 8601)'),
         description: z.string().optional().describe('Event description'),
         location: z.string().optional().describe('Event location'),
-        attendees: z.string().optional().describe('Comma-separated attendee emails'),
-        timezone: z.string().optional().describe('IANA timezone'),
+        attendees: z.array(z.string()).optional().describe('Attendee email addresses'),
+        calendar: z.string().optional().describe('Calendar ID (default: primary)'),
+        meet: z.boolean().optional().describe('Add a Google Meet video conference link'),
       },
     },
     async (input) => {
@@ -53,10 +64,13 @@ export function registerCalendarTools(server: McpServer, credFile: string): void
       ];
       if (input.description) args.push('--description', input.description);
       if (input.location) args.push('--location', input.location);
-      if (input.attendees) args.push('--attendees', input.attendees);
-      if (input.timezone) args.push('--timezone', input.timezone);
+      if (input.attendees) {
+        for (const email of input.attendees) args.push('--attendee', email);
+      }
+      if (input.calendar) args.push('--calendar', input.calendar);
+      if (input.meet) args.push('--meet');
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
@@ -82,7 +96,7 @@ export function registerCalendarTools(server: McpServer, credFile: string): void
         'json',
       ];
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
@@ -121,7 +135,7 @@ export function registerCalendarTools(server: McpServer, credFile: string): void
         'json',
       ];
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
@@ -147,7 +161,7 @@ export function registerCalendarTools(server: McpServer, credFile: string): void
         'json',
       ];
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 
@@ -160,7 +174,7 @@ export function registerCalendarTools(server: McpServer, credFile: string): void
     async () => {
       const args = ['calendar', 'calendarList', 'list', '--format', 'json'];
       const result = await gwsExec(args, { credentialsFile: credFile });
-      return { content: [{ type: 'text' as const, text: JSON.stringify(result.data, null, 2) }] };
+      return formatResult(result.data);
     },
   );
 }
