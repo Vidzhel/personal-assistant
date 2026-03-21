@@ -263,9 +263,10 @@ Full Google Workspace integration via `gws` CLI — direct CLI execution through
 **Phase:** Growth–Vision
 
 ### Epic 9: Deep Knowledge & Intelligence
-Visual knowledge graph with relationship detection, cross-domain correlation engine, knowledge gap detection, and learning track suggestions.
+Proactive cross-domain insight delivery and knowledge gap detection with learning tracks. Visual graph explorer and core relationship detection were completed in Epic 6 — this epic builds the remaining intelligence layer on top.
 **FRs covered:** FR46-48
 **Phase:** Vision
+**Note:** Significantly reduced scope — Epic 6 (Knowledge System) already delivered graph visualization, embedding-based similarity, link suggestions, clustering, hub detection, and multi-domain classification.
 
 ### Epic 10: Self-Extending System
 Raven builds its own skills from conversation descriptions, suggests pipelines from detected patterns, enables conversational pipeline creation, and provides full config version management with selective revert.
@@ -1391,57 +1392,58 @@ So that finances, focus, and meetings are all managed proactively.
 
 ## Epic 9: Deep Knowledge & Intelligence
 
-Visual knowledge graph with relationship detection, cross-domain correlation engine, knowledge gap detection, and learning track suggestions. Uses Obsidian-style file index — relationships stored in markdown frontmatter, in-memory graph index cached to JSON. No SQL tables for graph relationships.
+Proactive cross-domain insight delivery and knowledge gap detection with learning tracks. Builds on Epic 6's comprehensive knowledge system — graph visualization, embedding-based similarity, link suggestions, clustering, hub detection, and multi-domain classification are already implemented.
 
-### Story 9.1: Cross-Domain Connection Detection
+**What Epic 6 already delivered:**
+- Visual knowledge graph explorer with 5 view modes, 6 color dimensions, search, filtering, bulk actions (`packages/web/src/components/knowledge/`)
+- Embedding-based similarity detection with `bge-small-en-v1.5` (`packages/core/src/knowledge-engine/embeddings.ts`)
+- Link suggestion engine with 5 relationship types and cosine threshold (`link-ops.ts`)
+- Agglomerative clustering, merge detection, hub splitting (`clustering-ops.ts`, `merge-ops.ts`, `hub-ops.ts`)
+- Multi-domain classification with configurable rules (`clustering.ts`)
+- Hierarchical tag tree with rebalancing and auto-suggestions (`tag-tree.ts`)
+- Multi-tier retrieval pipeline with permanence weighting (`retrieval.ts`)
+- Pervasive context injection into all agent tasks (`context-injector.ts`)
+- Knowledge lifecycle: access tracking, stale detection, snooze, merge, retrospective (`knowledge-lifecycle.ts`)
+
+### Story 9.1: Proactive Cross-Domain Insight Delivery
 
 As the system operator,
-I want Raven to detect connections between knowledge nodes across different domains,
-So that non-obvious relationships surface insights I wouldn't find myself.
+I want novel cross-domain connections to be surfaced proactively via Telegram,
+So that non-obvious relationships reach me without manually browsing the graph.
 
-**Storage approach:** Obsidian-style file index. Relationships are stored as frontmatter `connections:` arrays and `[[wikilinks]]` within knowledge bubble markdown files. An in-memory graph index is built on startup by scanning files and cached to `data/knowledge/graph-index.json` for fast reload. No SQL tables for relationships — the markdown files are the source of truth.
-
-**Acceptance Criteria:**
-
-**Given** a knowledge bubble about "saga pattern in event-driven architecture" and another about "Raven pipeline cross-skill coordination"
-**When** the connection detection sub-agent runs
-**Then** a relationship is written to both bubbles' frontmatter `connections:` array with type, target, confidence, and description
-
-**Given** a new knowledge bubble is ingested
-**When** the post-ingestion analysis runs
-**Then** it is compared against existing bubbles, new connections are written to frontmatter, and the in-memory graph index is updated
-
-**Given** a high-confidence cross-domain connection is found
-**When** it is novel (not previously surfaced)
-**Then** it is queued as a proactive insight for delivery
-
-**Given** a low-confidence connection is detected
-**When** confidence is below threshold
-**Then** the connection is stored in frontmatter but not surfaced as an insight
-
-### Story 9.2: Visual Knowledge Graph Explorer
-
-As the dashboard user,
-I want to explore a visual graph showing knowledge relationships,
-So that I can navigate my knowledge base spatially and discover connections.
+**Context:** Epic 6 already detects connections (link suggestions via embedding similarity) and Epic 7 built the proactive intelligence pipeline with urgency tiers and engagement-based throttling. This story wires them together — link suggestions that cross domain boundaries are routed through the proactive delivery system.
 
 **Acceptance Criteria:**
 
-**Given** the knowledge system contains 50 bubbles with 30 relationships
-**When** the user opens the knowledge explorer
-**Then** a graph renders with nodes colored by cluster and edges showing relationship types
+**Given** the link suggestion engine (`link-ops.ts`) detects a new connection between bubbles in different domains (e.g., "health" and "work")
+**When** the connection confidence is above the insight threshold (configurable, default 0.75)
+**Then** it is emitted as a `knowledge:insight:cross-domain` event with both bubbles' titles, domains, relationship type, and confidence
 
-**Given** the user clicks a knowledge node
-**When** the detail panel opens
-**Then** the bubble's content, tags, connections, and source are displayed
+**Given** a cross-domain insight event is emitted
+**When** the proactive intelligence pipeline (Epic 7) processes it
+**Then** it is classified with an urgency tier, respects engagement throttling, and is delivered to Telegram with a formatted message showing the connection
 
-**Given** the user filters by tag "architecture"
-**When** the filter is applied
-**Then** only architecture-tagged nodes and their direct connections are shown
+**Given** a cross-domain insight is delivered to Telegram
+**When** the user views it
+**Then** inline buttons offer `[View in Graph] [Interesting] [Not Useful]`
 
-**Given** the user searches for "SQLite"
-**When** a matching node is found
-**Then** the graph centers on that node and highlights its neighborhood
+**Given** the user taps `[View in Graph]`
+**When** the dashboard opens
+**Then** the graph centers on those two nodes with their neighborhood highlighted
+
+**Given** the user taps `[Not Useful]` on 3+ insights of the same domain pair
+**When** future cross-domain detection runs for that pair
+**Then** the confidence threshold for that domain pair is raised by 0.1 (adaptive suppression)
+
+**Given** a link suggestion is within the same domain (not cross-domain)
+**When** it is processed
+**Then** it follows the existing Epic 6 behavior (stored as pending suggestion, no proactive delivery)
+
+### ~~Story 9.2: Visual Knowledge Graph Explorer~~ — COMPLETED in Epic 6.7
+
+**Status:** Done. Implemented in Epic 6, Story 6.7 (Knowledge Graph Visualization).
+
+Full `react-force-graph-2d` explorer with 5 view modes (links, tags, clusters, domains, timeline), 6 color dimensions, node click/multi-select, tag/domain/permanence filtering, search with auto-zoom, WebSocket real-time updates, bulk actions, and graph chat panel. No additional work needed.
 
 ### Story 9.3: Knowledge Gap Detection & Learning Tracks
 
@@ -1449,33 +1451,219 @@ As the system operator,
 I want Raven to identify gaps in my knowledge and suggest learning tracks,
 So that I can systematically grow in areas I care about.
 
+**Context:** Builds on Epic 6's embedding similarity, tag hierarchy, domain classification, and the retrieval engine. Gap detection analyzes references within bubble content (mentioned topics that have no corresponding bubble) and sparse areas in the tag/domain hierarchy.
+
 **Acceptance Criteria:**
 
-**Given** the knowledge graph has many bubbles about "event-driven architecture" but none about "saga pattern" despite references
-**When** gap detection runs
+**Given** the knowledge graph has many bubbles about "event-driven architecture" but none about "saga pattern" despite references in bubble content
+**When** gap detection runs (scheduled weekly or triggered via API)
 **Then** "saga pattern" is identified as a knowledge gap linked to the user's active interest area
 
+**Given** gap detection analyzes the tag hierarchy
+**When** a domain has significantly fewer bubbles than peer domains (e.g., "health" has 3 bubbles while "work" has 40)
+**Then** the sparse domain is flagged as a potential area of interest with low coverage
+
 **Given** a knowledge gap is identified
-**When** a learning track is generated
-**Then** it suggests 3-5 specific resources or topics to explore, ordered by relevance
+**When** a learning track is generated via LLM sub-agent
+**Then** it suggests 3-5 specific topics to explore, ordered by relevance to existing knowledge, with brief descriptions of why each matters
 
 **Given** a learning track suggestion is delivered to Telegram
 **When** the user views it
 **Then** inline buttons offer `[Start Learning] [Save for Later] [Not Interested]`
 
+**Given** the user taps `[Start Learning]`
+**When** the learning track is activated
+**Then** a knowledge bubble is created as a "learning track" with `source: 'gap-detection'`, `permanence: 'temporary'`, and the suggested topics as content — serving as a checklist
+
 **Given** the user marks a gap as "Not Interested"
 **When** future gap detection runs
-**Then** that gap is suppressed from future suggestions
+**Then** that gap is stored in a suppression list (`data/knowledge/suppressed-gaps.json`) and excluded from future suggestions
 
-## Epic 10: Self-Extending System
+**Given** gaps are detected
+**When** results are persisted
+**Then** they are stored in the `knowledge_gaps` SQLite table with fields: `id, topic, domain, confidence, source_bubble_ids, status (active|snoozed|dismissed), created_at, last_detected_at`
 
-Raven builds its own skills from conversation descriptions, suggests pipelines from detected patterns, enables conversational pipeline creation, and provides full config version management with selective revert.
+## Epic 10: System Intelligence & Self-Management
 
-### Story 10.1: Conversational Pipeline Creation & Pattern-Based Suggestions
+Raven becomes a fully self-managing system with advanced task orchestration, named agent teams with dedicated skills, a meta-project for system-level control, automated maintenance, conversational pipeline/skill creation, and a unified life dashboard. This epic transforms Raven from a tool that executes commands into a system that manages itself and its own evolution.
+
+### Story 10.1: Advanced Task Management System
 
 As the system operator,
-I want to create pipelines through natural language and have Raven suggest pipelines from detected patterns,
-So that automation grows organically from how I actually work.
+I want a comprehensive task management system with rich metadata, agent assignment, and cross-system visibility,
+So that every piece of work Raven does is trackable, linked, and surfaced where I need it.
+
+**Acceptance Criteria:**
+
+**Given** a task is created (manually, by agent, or from a template)
+**When** it is stored
+**Then** it has: `id`, `title`, `description`, `prompt` (additional instructions), `status` (todo|in_progress|completed|archived), `assigned_agent_id`, `project_id`, `pipeline_id` (optional), `schedule_id` (optional), `parent_task_id` (optional), `artifacts` (list of file paths / references produced), `created_at`, `updated_at`, `completed_at`
+
+**Given** an agent completes a task
+**When** results are produced
+**Then** artifact references (files created, messages sent, events emitted) are attached to the task record and the task moves to `completed`
+
+**Given** task templates exist in `config/task-templates/`
+**When** a task is created from a template
+**Then** the template's title, description, prompt, and default agent assignment are pre-filled and can be overridden
+
+**Given** TickTick integration is active
+**When** a TickTick task is synced
+**Then** it appears as a Raven task with `source: 'ticktick'` and `external_id` for bidirectional sync
+
+**Given** a task is assigned to an agent
+**When** the agent spawns subtasks
+**Then** each subtask is linked via `parent_task_id` and inherits the parent's `project_id`
+
+**Given** the orchestrator processes a complex request
+**When** it creates a task with subtasks for multiple agents
+**Then** each subtask shows its assigned agent, status, and artifacts independently
+
+**Given** the user opens the dashboard
+**When** they view a project
+**Then** tasks are grouped by status (todo, in progress, completed) with counts per group
+
+**Given** a task has been in `completed` status for 24 hours
+**When** the archival job runs
+**Then** the task moves to `archived` and is hidden from default views but queryable
+
+**Given** a task is created or completed
+**When** the Telegram notification fires
+**Then** a formatted update is posted to a dedicated "Tasks" topic thread in the Raven supergroup
+
+**Given** the user opens a task detail view
+**When** the page loads
+**Then** it shows full metadata, linked subtasks/parent, agent history (who handled it and when), prompt used, and artifact links
+
+### Story 10.2: Agent Management & Skill Binding
+
+As the system operator,
+I want named agents with dedicated skill sets, task history, and configurable instructions,
+So that I can build specialized teammates and understand what each one does and has done.
+
+**Acceptance Criteria:**
+
+**Given** the agent registry is initialized
+**When** agents are configured in `config/agents.json`
+**Then** each agent has: `id`, `name`, `description`, `instructions` (system prompt additions), `skill_ids` (bound skills), `created_at`
+
+**Given** an agent is bound to specific skills
+**When** it is spawned for a task
+**Then** only its bound skills' MCP servers and sub-agent definitions are available — no access to other agents' skills
+
+**Given** an "exploration" agent is configured with knowledge-base skills
+**When** a research request comes in
+**Then** the orchestrator delegates to this agent, which uses knowledge retrieval, embedding search, and link suggestion tools
+
+**Given** an "analytics" agent is configured with web research skills
+**When** an information-gathering request comes in
+**Then** it uses web fetch, YouTube transcript extraction, and general link parsing — separate from the exploration agent's skill set
+
+**Given** the user opens the agents page in the dashboard
+**When** the page loads
+**Then** each agent shows: name, description, assigned skills, task counts (completed/in-progress), and a link to full task history
+
+**Given** the user wants to create or adjust an agent
+**When** they use the dashboard UI or chat
+**Then** they can set the agent's name, description, instructions, and skill bindings — changes are persisted to `config/agents.json` and git-committed
+
+**Given** an agent completes a task
+**When** the task history is queried
+**Then** it shows chronological entries: task title, status transitions, duration, and artifacts produced
+
+**Given** each agent is registered
+**When** the Telegram bot initializes
+**Then** a dedicated topic thread is created per agent in the Raven supergroup for that agent's task updates and formatted output
+
+**Given** the user asks the orchestrator to adjust an agent's skills via chat
+**When** the request is processed
+**Then** the agent config is updated, the change is git-committed, and the agent is reloaded with the new skill set
+
+### Story 10.3: Meta-Project & System Access Control
+
+As the system operator,
+I want a zero-project chat for system management and configurable access control per project,
+So that I can manage Raven itself through conversation and control which projects can modify system files.
+
+**Acceptance Criteria:**
+
+**Given** no project is selected in the dashboard or Telegram
+**When** the user starts a chat
+**Then** it operates under a built-in "meta" project that has access to system-level operations (create projects, review agents, manage pipelines, adjust config)
+
+**Given** the meta-project chat is active
+**When** the user says "Create a new project called X"
+**Then** a project is created in the database, a Telegram topic thread is created, and the user is notified
+
+**Given** the meta-project chat is active
+**When** the user says "Show me all projects" or "Review project X"
+**Then** project details are displayed including task counts, recent activity, and linked pipelines
+
+**Given** a project is configured in `config/projects.json`
+**When** the `system_access` field is set
+**Then** it controls whether project agents can read/write Raven system files (`config/`, `packages/`, pipeline definitions) — values: `none` (default), `read`, `read-write`
+
+**Given** a project has `system_access: "read-write"`
+**When** its agents propose changes to system files
+**Then** changes follow the existing permission tier system (Red tier by default for system file modifications)
+
+**Given** a project has `system_access: "none"`
+**When** an agent in that project attempts to read or modify system files
+**Then** the operation is blocked and logged in the audit trail
+
+**Given** an agent is spawned for any project
+**When** the orchestrator configures its context
+**Then** the agent receives an explicit instruction to use tools purposefully — no speculative codebase exploration unless the task requires file inspection
+
+**Given** the meta-project has `system_access: "read-write"` by default
+**When** a meta-project agent needs to create a new pipeline or adjust a skill
+**Then** it can read and modify system files, subject to permission tier enforcement
+
+### Story 10.4: System Maintenance Pipeline
+
+As the system operator,
+I want Raven to periodically self-inspect and report on system health, outdated packages, and improvement opportunities,
+So that the system stays healthy without me having to manually audit it.
+
+**Acceptance Criteria:**
+
+**Given** the maintenance pipeline is configured
+**When** its schedule triggers (default: weekly, configurable via `config/schedules.json`)
+**Then** it launches a maintenance agent that performs a full system review
+
+**Given** the maintenance agent runs
+**When** it inspects logs
+**Then** it identifies recurring errors, silent failures, and degraded services from the last period
+
+**Given** the maintenance agent runs
+**When** it checks dependencies
+**Then** it reports packages with available updates, distinguishing patch/minor/major and flagging security advisories
+
+**Given** the maintenance agent runs
+**When** it reviews the skill ecosystem
+**Then** it suggests new skills or MCP integrations that could be added based on detected usage patterns and available MCP servers
+
+**Given** the maintenance agent runs
+**When** it checks system resource usage
+**Then** it reports on database size, log volume, and any resource concerns
+
+**Given** the maintenance report is generated
+**When** it is delivered
+**Then** it is posted to the Raven Telegram supergroup as a formatted summary with sections: Issues Found, Package Updates, Skill Suggestions, Resource Status
+
+**Given** each suite has a `suites/<name>/UPDATE.md` file
+**When** the maintenance agent reviews a suite
+**Then** it reads `UPDATE.md` for instructions on where to check for API changes, version updates, and migration steps specific to that suite's external dependencies
+
+**Given** the user says "Run maintenance now" or "Change maintenance to daily"
+**When** the command is processed
+**Then** the schedule is updated or an immediate run is triggered
+
+### Story 10.5: Conversational Pipeline & Skill Creation
+
+As the system operator,
+I want to create pipelines and skills through natural language and have Raven suggest automations from detected patterns,
+So that extending the system is a conversation, not a coding session.
 
 **Acceptance Criteria:**
 
@@ -1495,14 +1683,6 @@ So that automation grows organically from how I actually work.
 **When** the edit flow starts
 **Then** the user can describe modifications and a revised YAML is generated
 
-### Story 10.2: Skill Scaffolding from Conversation
-
-As the system operator,
-I want Raven to scaffold new skill boilerplate from a conversation description,
-So that adding new integrations is a conversation, not a coding session.
-
-**Acceptance Criteria:**
-
 **Given** the user says "Add a monobank skill that tracks transactions"
 **When** the scaffolding sub-agent processes it
 **Then** a complete skill package is generated at `packages/skills/skill-monobank/` following all project conventions
@@ -1519,7 +1699,7 @@ So that adding new integrations is a conversation, not a coding session.
 **When** modifications are described
 **Then** the sub-agent updates the code accordingly and re-presents for review
 
-### Story 10.3: Config Version Management & Life Dashboard
+### Story 10.6: Config Version Management & Life Dashboard
 
 As the system operator,
 I want to view and revert git-committed config changes and see a unified life dashboard,

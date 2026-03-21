@@ -61,6 +61,10 @@ export function insertInsight(db: DatabaseInterface, params: InsertInsightParams
   return id;
 }
 
+export function getInsightById(db: DatabaseInterface, id: string): InsightRow | undefined {
+  return db.get<InsightRow>('SELECT * FROM insights WHERE id = ?', id);
+}
+
 export function getInsightsByStatus(db: DatabaseInterface, status: InsightStatus): InsightRow[] {
   return db.all<InsightRow>(
     'SELECT * FROM insights WHERE status = ? ORDER BY created_at DESC',

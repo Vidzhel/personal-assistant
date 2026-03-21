@@ -6,5 +6,5 @@ export default defineSuite({
   version: '0.1.0',
   description: 'Background pattern analysis across services with insight generation and delivery',
   capabilities: ['agent-definition', 'event-source', 'services'],
-  services: ['data-collector', 'insight-processor'],
+  services: ['data-collector', 'insight-processor', 'cross-domain-detector'],
 });

@@ -34,7 +34,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-12
-last_updated: 2026-03-21 # story 8.3 done (code review fixes applied)
+last_updated: 2026-03-21 # story 9.3 ready-for-dev
 project: personal-assistant
 project_key: NOKEY
 tracking_system: file-system
@@ -109,23 +109,30 @@ development_status:
   epic-7-retrospective: optional
 
   # Epic 8: Google Workspace Integration & Expanding Integrations (Growth-Vision)
-  epic-8: in-progress
+  epic-8: done
   8-1-google-workspace-suite-foundation: done
   8-2-google-drive-file-monitoring-and-processing: done
   8-3-financial-transaction-tracking-and-categorization: done
-  8-4-financial-anomaly-detection-calendar-defense-and-meeting-prep: backlog
+  8-4-financial-anomaly-detection-calendar-defense-and-meeting-prep: skipped
+  8-5-financial-tracking-enhancements-transfers-flags-multi-account: skipped
   epic-8-retrospective: optional
 
   # Epic 9: Deep Knowledge & Intelligence (Vision)
-  epic-9: backlog
-  9-1-cross-domain-connection-detection: backlog
-  9-2-visual-knowledge-graph-explorer: backlog
-  9-3-knowledge-gap-detection-and-learning-tracks: backlog
+  # NOTE: Significantly descoped — Epic 6 already delivered graph visualization,
+  # embedding similarity, link suggestions, clustering, hub detection, multi-domain.
+  # 9.1 reduced to proactive insight delivery; 9.2 completed via 6.7.
+  epic-9: done
+  9-1-proactive-cross-domain-insight-delivery: done
+  9-2-visual-knowledge-graph-explorer: done # completed in epic 6, story 6.7
+  9-3-knowledge-gap-detection-and-learning-tracks: skipped
   epic-9-retrospective: optional
 
-  # Epic 10: Self-Extending System (Vision)
+  # Epic 10: System Intelligence & Self-Management (Vision)
   epic-10: backlog
-  10-1-conversational-pipeline-creation-and-pattern-based-suggestions: backlog
-  10-2-skill-scaffolding-from-conversation: backlog
-  10-3-config-version-management-and-life-dashboard: backlog
+  10-1-advanced-task-management-system: backlog
+  10-2-agent-management-and-skill-binding: backlog
+  10-3-meta-project-and-system-access-control: backlog
+  10-4-system-maintenance-pipeline: backlog
+  10-5-conversational-pipeline-and-skill-creation: backlog
+  10-6-config-version-management-and-life-dashboard: backlog
   epic-10-retrospective: optional

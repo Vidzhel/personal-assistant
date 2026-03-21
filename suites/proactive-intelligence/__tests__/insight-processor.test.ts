@@ -259,4 +259,107 @@ describe('insight-processor', () => {
       expect(mockUpdateInsightStatus).not.toHaveBeenCalled();
     });
   });
+
+  describe('cross-domain insight handler', () => {
+    let handleCrossDomain: (event: unknown) => void;
+
+    beforeEach(() => {
+      const onCall = mockEventBus.on.mock.calls.find(
+        (c: any) => c[0] === 'knowledge:insight:cross-domain',
+      );
+      expect(onCall).toBeDefined();
+      handleCrossDomain = onCall[1];
+      mockEventBus.emit.mockClear();
+    });
+
+    function makeCrossDomainEvent(overrides: Record<string, unknown> = {}): unknown {
+      return {
+        id: 'evt-cd-1',
+        timestamp: Date.now(),
+        source: 'proactive-intelligence',
+        type: 'knowledge:insight:cross-domain',
+        payload: {
+          sourceBubble: { id: 'b1', title: 'Budget Plan', domains: ['finances'] },
+          targetBubble: { id: 'b2', title: 'Gym Routine', domains: ['health'] },
+          confidence: 0.85,
+          relationshipType: 'RELATES_TO',
+          ...overrides,
+        },
+      };
+    }
+
+    it('creates insight with correct pattern_key and emits notification', () => {
+      mockFindRecentByHash.mockReturnValue(undefined);
+
+      handleCrossDomain(makeCrossDomainEvent());
+
+      expect(mockInsertInsight).toHaveBeenCalledWith(
+        mockDb,
+        expect.objectContaining({
+          patternKey: 'cross-domain:finances-health',
+          status: 'queued',
+          confidence: 0.85,
+        }),
+      );
+
+      const notifEmit = mockEventBus.emit.mock.calls.find(
+        (c: any) => c[0].type === 'notification',
+      );
+      expect(notifEmit).toBeDefined();
+      expect(notifEmit[0].payload.actions).toHaveLength(3);
+      expect(notifEmit[0].payload.actions[0].label).toBe('View in Graph');
+      expect(notifEmit[0].payload.actions[1].label).toBe('Interesting');
+      expect(notifEmit[0].payload.actions[2].label).toBe('Not Useful');
+    });
+
+    it('uses ki: prefix for callback actions', () => {
+      mockFindRecentByHash.mockReturnValue(undefined);
+
+      handleCrossDomain(makeCrossDomainEvent());
+
+      const notifEmit = mockEventBus.emit.mock.calls.find(
+        (c: any) => c[0].type === 'notification',
+      );
+      expect(notifEmit[0].payload.actions[0].action).toMatch(/^ki:v:/);
+      expect(notifEmit[0].payload.actions[1].action).toMatch(/^ki:i:/);
+      expect(notifEmit[0].payload.actions[2].action).toMatch(/^ki:n:/);
+    });
+
+    it('suppresses duplicates via suppression hash', () => {
+      mockFindRecentByHash.mockReturnValue({ id: 'existing', suppression_hash: 'hash-abc' });
+
+      handleCrossDomain(makeCrossDomainEvent());
+
+      expect(mockInsertInsight).not.toHaveBeenCalled();
+      expect(mockEventBus.emit).not.toHaveBeenCalled();
+    });
+
+    it('formats message body with bubble titles, domains, and relationship', () => {
+      mockFindRecentByHash.mockReturnValue(undefined);
+
+      handleCrossDomain(makeCrossDomainEvent());
+
+      const insertCall = mockInsertInsight.mock.calls[0][1];
+      expect(insertCall.body).toContain('Budget Plan');
+      expect(insertCall.body).toContain('Gym Routine');
+      expect(insertCall.body).toContain('finances');
+      expect(insertCall.body).toContain('health');
+      expect(insertCall.body).toContain('RELATES_TO');
+      expect(insertCall.body).toContain('85%');
+    });
+
+    it('sorts domains alphabetically in pattern_key', () => {
+      mockFindRecentByHash.mockReturnValue(undefined);
+
+      handleCrossDomain(makeCrossDomainEvent({
+        sourceBubble: { id: 'b1', title: 'X', domains: ['zebra'] },
+        targetBubble: { id: 'b2', title: 'Y', domains: ['alpha'] },
+      }));
+
+      expect(mockInsertInsight).toHaveBeenCalledWith(
+        mockDb,
+        expect.objectContaining({ patternKey: 'cross-domain:alpha-zebra' }),
+      );
+    });
+  });
 });

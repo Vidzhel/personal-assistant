@@ -676,4 +676,192 @@ describe('handleCallback', () => {
       expect(result.message).toContain('Database not available');
     });
   });
+
+  describe('knowledge-insight actions', () => {
+    it('parses ki:v callback data', () => {
+      const result = parseCallbackData('ki:v:insight123');
+      expect(result).toEqual<CallbackAction>({
+        domain: 'knowledge-insight',
+        action: 'view-graph',
+        target: 'insight123',
+        args: [],
+      });
+    });
+
+    it('parses ki:i callback data', () => {
+      const result = parseCallbackData('ki:i:insight123');
+      expect(result).toEqual<CallbackAction>({
+        domain: 'knowledge-insight',
+        action: 'interesting',
+        target: 'insight123',
+        args: [],
+      });
+    });
+
+    it('parses ki:n callback data', () => {
+      const result = parseCallbackData('ki:n:insight123');
+      expect(result).toEqual<CallbackAction>({
+        domain: 'knowledge-insight',
+        action: 'not-useful',
+        target: 'insight123',
+        args: [],
+      });
+    });
+
+    it('view-graph sends deep link with bubble IDs', () => {
+      const mockInsight = {
+        id: 'insight-1',
+        pattern_key: 'cross-domain:finances-health',
+        title: 'Cross-domain',
+        body: 'Connection...',
+        confidence: 0.85,
+        status: 'queued',
+        service_sources: JSON.stringify(['knowledge-engine', 'bubbles:b1,b2']),
+        suppression_hash: 'h1',
+        created_at: new Date().toISOString(),
+        delivered_at: null,
+        dismissed_at: null,
+      };
+      const mockDb: DatabaseInterface = {
+        get: vi.fn().mockReturnValue(mockInsight),
+        all: vi.fn().mockReturnValue([]),
+        run: vi.fn(),
+      };
+      deps.db = mockDb;
+
+      const action: CallbackAction = { domain: 'knowledge-insight', action: 'view-graph', target: 'insight-1', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(true);
+      const notifCall = (deps.eventBus.emit as any).mock.calls.find(
+        (c: any) => c[0].type === 'notification',
+      );
+      expect(notifCall).toBeDefined();
+      expect(notifCall[0].payload.body).toContain('/knowledge?highlight=b1,b2');
+    });
+
+    it('interesting marks insight as acted and emits feedback', () => {
+      const mockInsight = {
+        id: 'insight-1',
+        pattern_key: 'cross-domain:finances-health',
+        title: 'Test',
+        body: 'Test',
+        confidence: 0.85,
+        status: 'queued',
+        service_sources: JSON.stringify(['knowledge-engine']),
+        suppression_hash: 'h1',
+        created_at: new Date().toISOString(),
+        delivered_at: null,
+        dismissed_at: null,
+      };
+      const mockDb: DatabaseInterface = {
+        get: vi.fn().mockReturnValue(mockInsight),
+        all: vi.fn().mockReturnValue([]),
+        run: vi.fn(),
+      };
+      deps.db = mockDb;
+
+      const action: CallbackAction = { domain: 'knowledge-insight', action: 'interesting', target: 'insight-1', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(true);
+      expect(result.message).toContain('interesting');
+      const feedbackCall = (deps.eventBus.emit as any).mock.calls.find(
+        (c: any) => c[0].type === 'insight:feedback',
+      );
+      expect(feedbackCall).toBeDefined();
+      expect(feedbackCall[0].payload.feedback).toBe('positive');
+    });
+
+    it('not-useful dismisses and records domain-pair dismissal', () => {
+      const mockInsight = {
+        id: 'insight-1',
+        pattern_key: 'cross-domain:finances-health',
+        title: 'Test',
+        body: 'Test',
+        confidence: 0.85,
+        status: 'queued',
+        service_sources: JSON.stringify(['knowledge-engine']),
+        suppression_hash: 'h1',
+        created_at: new Date().toISOString(),
+        delivered_at: null,
+        dismissed_at: null,
+      };
+      const mockDb: DatabaseInterface = {
+        get: vi.fn()
+          .mockReturnValueOnce(mockInsight)
+          .mockReturnValueOnce({ cnt: 1 }),
+        all: vi.fn().mockReturnValue([]),
+        run: vi.fn(),
+      };
+      deps.db = mockDb;
+
+      const action: CallbackAction = { domain: 'knowledge-insight', action: 'not-useful', target: 'insight-1', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(true);
+      expect(result.message).toBe('Dismissed');
+      const runCalls = (mockDb.run as any).mock.calls;
+      const dismissalInsert = runCalls.find((c: any) => c[0].includes('cross_domain_dismissals'));
+      expect(dismissalInsert).toBeDefined();
+    });
+
+    it('bumps adaptive threshold after 3+ dismissals for same domain pair', () => {
+      const mockInsight = {
+        id: 'insight-1',
+        pattern_key: 'cross-domain:finances-health',
+        title: 'Test',
+        body: 'Test',
+        confidence: 0.85,
+        status: 'queued',
+        service_sources: JSON.stringify(['knowledge-engine']),
+        suppression_hash: 'h1',
+        created_at: new Date().toISOString(),
+        delivered_at: null,
+        dismissed_at: null,
+      };
+      const mockDb: DatabaseInterface = {
+        get: vi.fn()
+          .mockReturnValueOnce(mockInsight)
+          .mockReturnValueOnce({ cnt: 3 })
+          .mockReturnValueOnce({ threshold: 0.75 }),
+        all: vi.fn().mockReturnValue([]),
+        run: vi.fn(),
+      };
+      deps.db = mockDb;
+
+      const action: CallbackAction = { domain: 'knowledge-insight', action: 'not-useful', target: 'insight-1', args: [] };
+      handleCallback(action, deps);
+
+      const runCalls = (mockDb.run as any).mock.calls;
+      const thresholdUpsert = runCalls.find((c: any) => c[0].includes('cross_domain_thresholds'));
+      expect(thresholdUpsert).toBeDefined();
+      // New threshold should be 0.85 (0.75 + 0.1)
+      expect(thresholdUpsert[2]).toBeCloseTo(0.85);
+    });
+
+    it('returns error when db is not available', () => {
+      delete deps.db;
+      const action: CallbackAction = { domain: 'knowledge-insight', action: 'view-graph', target: 'x', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('Database not available');
+    });
+
+    it('returns error when insight not found', () => {
+      const mockDb: DatabaseInterface = {
+        get: vi.fn().mockReturnValue(undefined),
+        all: vi.fn().mockReturnValue([]),
+        run: vi.fn(),
+      };
+      deps.db = mockDb;
+
+      const action: CallbackAction = { domain: 'knowledge-insight', action: 'view-graph', target: 'missing', args: [] };
+      const result = handleCallback(action, deps);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('Insight not found');
+    });
+  });
 });

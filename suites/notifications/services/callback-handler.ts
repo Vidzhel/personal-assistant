@@ -24,9 +24,10 @@ import type { InlineKeyboardButton } from 'grammy/types';
 import { generateId, CATEGORY_SHORTCODES, type EventBusInterface, type LoggerInterface, type DatabaseInterface } from '@raven/shared';
 import { createSnooze, removeSnooze, updateLastSuggested, getActiveSnoozes } from '@raven/core/notification-engine/snooze-store.ts';
 import { getSnoozedByCategory, releaseSnoozed } from '@raven/core/notification-engine/notification-queue.ts';
+import { getInsightById, updateInsightStatus } from '@raven/core/insight-engine/insight-store.ts';
 
 export interface CallbackAction {
-  domain: 'task' | 'approval' | 'email' | 'email-reply' | 'snooze';
+  domain: 'task' | 'approval' | 'email' | 'email-reply' | 'snooze' | 'knowledge-insight';
   action: string;
   target: string;
   args: string[];
@@ -76,12 +77,13 @@ export interface CallbackDeps {
   };
 }
 
-const DOMAIN_MAP: Record<string, 'task' | 'approval' | 'email' | 'email-reply' | 'snooze'> = {
+const DOMAIN_MAP: Record<string, 'task' | 'approval' | 'email' | 'email-reply' | 'snooze' | 'knowledge-insight'> = {
   t: 'task',
   a: 'approval',
   e: 'email',
   er: 'email-reply',
   s: 'snooze',
+  ki: 'knowledge-insight',
 };
 
 const SNOOZE_ACTIONS: Record<string, string> = {
@@ -115,6 +117,12 @@ const EMAIL_REPLY_ACTIONS: Record<string, string> = {
   c: 'cancel',
 };
 
+const KI_ACTIONS: Record<string, string> = {
+  v: 'view-graph',
+  i: 'interesting',
+  n: 'not-useful',
+};
+
 const MAX_CALLBACK_BYTES = 64;
 
 export function parseCallbackData(data: string): CallbackAction | null {
@@ -138,6 +146,7 @@ export function parseCallbackData(data: string): CallbackAction | null {
     email: EMAIL_ACTIONS,
     'email-reply': EMAIL_REPLY_ACTIONS,
     snooze: SNOOZE_ACTIONS,
+    'knowledge-insight': KI_ACTIONS,
   };
   const actionMap = actionMaps[domain];
   const action = actionMap[actionPrefix];
@@ -490,6 +499,130 @@ function handleSnoozeAction(
   return { success: false, message: `Unknown snooze action: ${action.action}` };
 }
 
+const DISMISSAL_THRESHOLD = 3;
+const THRESHOLD_INCREMENT = 0.1;
+const THRESHOLD_CAP = 0.95;
+
+// eslint-disable-next-line max-lines-per-function -- knowledge-insight callback handler with 3 action branches
+function handleKnowledgeInsightAction(
+  action: CallbackAction,
+  deps: CallbackDeps,
+): CallbackResult {
+  if (!deps.db) {
+    return { success: false, message: 'Database not available' };
+  }
+
+  const insightId = action.target;
+  const insight = getInsightById(deps.db, insightId);
+  if (!insight) {
+    return { success: false, message: 'Insight not found' };
+  }
+
+  if (action.action === 'view-graph') {
+    const webUrl = process.env.RAVEN_WEB_URL ?? 'http://localhost:3000';
+    updateInsightStatus(deps.db, insightId, 'acted');
+
+    // Extract bubble IDs from service_sources: ["knowledge-engine", "bubbles:id1,id2"]
+    const sources: string[] = JSON.parse(insight.service_sources);
+    const bubbleEntry = sources.find((s) => s.startsWith('bubbles:'));
+    const bubbleIds = bubbleEntry ? bubbleEntry.replace('bubbles:', '') : insightId;
+    const deepLink = `${webUrl}/knowledge?highlight=${bubbleIds}`;
+
+    deps.eventBus.emit({
+      id: generateId(),
+      timestamp: Date.now(),
+      source: 'telegram-callback',
+      type: 'notification',
+      payload: {
+        channel: 'telegram' as const,
+        title: 'View in Knowledge Graph',
+        body: `[Open Knowledge Graph](${deepLink})`,
+        topicName: 'General',
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Opening graph...',
+      updatedKeyboard: [[{ text: 'Viewed \u2713', callback_data: 'noop' }]],
+    };
+  }
+
+  if (action.action === 'interesting') {
+    updateInsightStatus(deps.db, insightId, 'acted');
+
+    deps.eventBus.emit({
+      id: generateId(),
+      timestamp: Date.now(),
+      source: 'telegram-callback',
+      type: 'insight:feedback',
+      payload: { insightId, feedback: 'positive' },
+    });
+
+    return {
+      success: true,
+      message: 'Marked as interesting',
+      updatedKeyboard: [[{ text: 'Interesting \u2713', callback_data: 'noop' }]],
+    };
+  }
+
+  if (action.action === 'not-useful') {
+    updateInsightStatus(deps.db, insightId, 'dismissed');
+
+    // Extract domain pair from pattern_key: 'cross-domain:finances-health'
+    const domainPair = insight.pattern_key.replace('cross-domain:', '');
+
+    // Record dismissal
+    deps.db.run(
+      'INSERT INTO cross_domain_dismissals (id, insight_id, domain_pair, created_at) VALUES (?, ?, ?, ?)',
+      generateId(),
+      insightId,
+      domainPair,
+      new Date().toISOString(),
+    );
+
+    // Check if 3+ dismissals → bump adaptive threshold
+    const dismissalRow = deps.db.get<{ cnt: number }>(
+      'SELECT COUNT(*) AS cnt FROM cross_domain_dismissals WHERE domain_pair = ?',
+      domainPair,
+    );
+
+    const dismissalCount = dismissalRow?.cnt ?? 0;
+    if (dismissalCount >= DISMISSAL_THRESHOLD) {
+      const existing = deps.db.get<{ threshold: number }>(
+        'SELECT threshold FROM cross_domain_thresholds WHERE domain_pair = ?',
+        domainPair,
+      );
+
+      const currentThreshold = existing?.threshold ?? 0.75;
+      const newThreshold = Math.min(currentThreshold + THRESHOLD_INCREMENT, THRESHOLD_CAP);
+
+      deps.db.run(
+        `INSERT INTO cross_domain_thresholds (domain_pair, threshold, dismissal_count, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(domain_pair) DO UPDATE SET threshold = ?, dismissal_count = ?, updated_at = ?`,
+        domainPair,
+        newThreshold,
+        dismissalCount,
+        new Date().toISOString(),
+        newThreshold,
+        dismissalCount,
+        new Date().toISOString(),
+      );
+
+      deps.logger.info(`Adaptive threshold for ${domainPair} bumped to ${newThreshold}`);
+    }
+
+    return {
+      success: true,
+      message: 'Dismissed',
+      updatedKeyboard: [[{ text: 'Dismissed \u2717', callback_data: 'noop' }]],
+    };
+  }
+
+  return { success: false, message: `Unknown knowledge-insight action: ${action.action}` };
+}
+
 export function handleCallback(
   action: CallbackAction,
   deps: CallbackDeps,
@@ -505,6 +638,9 @@ export function handleCallback(
   }
   if (action.domain === 'snooze') {
     return handleSnoozeAction(action, deps);
+  }
+  if (action.domain === 'knowledge-insight') {
+    return handleKnowledgeInsightAction(action, deps);
   }
   return handleApprovalAction(action, deps);
 }

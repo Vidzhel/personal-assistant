@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useCallback, useRef, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useKnowledgeStore } from '@/stores/knowledge-store';
 import { KnowledgeGraph } from '@/components/knowledge/KnowledgeGraph';
 import { GraphControls } from '@/components/knowledge/GraphControls';
@@ -41,9 +42,20 @@ function useWsRefetch(fetchGraph: () => void): void {
 }
 
 export default function KnowledgePage() {
-  const { viewMode, setGraphData, setLoading, selectedNodeIds } = useKnowledgeStore();
+  const { viewMode, setGraphData, setLoading, selectedNodeIds, setHighlightedNodeIds } =
+    useKnowledgeStore();
   const fetchRef = useRef(0);
   const projectId = useFirstProjectId();
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    const highlight = searchParams.get('highlight');
+    if (highlight) {
+      setHighlightedNodeIds(highlight.split(',').filter(Boolean));
+    } else {
+      setHighlightedNodeIds([]);
+    }
+  }, [searchParams, setHighlightedNodeIds]);
 
   const fetchGraph = useCallback(async () => {
     const id = ++fetchRef.current;

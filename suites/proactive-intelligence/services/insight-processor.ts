@@ -224,6 +224,72 @@ function handleTaskComplete(event: unknown): void {
   }
 }
 
+function handleCrossDomainInsight(event: unknown): void {
+  try {
+    const e = event as Record<string, unknown>;
+    const payload = e.payload as {
+      sourceBubble: { id: string; title: string; domains: string[] };
+      targetBubble: { id: string; title: string; domains: string[] };
+      confidence: number;
+      relationshipType: string;
+    };
+
+    const { sourceBubble, targetBubble, confidence, relationshipType } = payload;
+    const sortedDomains = [
+      ...new Set([...sourceBubble.domains, ...targetBubble.domains]),
+    ].sort();
+    const patternKey = `cross-domain:${sortedDomains.join('-')}`;
+
+    const hash = computeSuppressionHash(patternKey, [
+      sourceBubble.id,
+      targetBubble.id,
+    ].sort());
+
+    // Check for duplicates
+    const existing = findRecentByHash(db, hash, suppressionWindowDays);
+    if (existing) {
+      log.info(`Cross-domain insight ${patternKey} suppressed (duplicate)`);
+      return;
+    }
+
+    const title = `Cross-domain: ${sourceBubble.title} ↔ ${targetBubble.title}`;
+    const pct = Math.round(confidence * 100);
+    const body = `Connection detected between **${sourceBubble.title}** (${sourceBubble.domains.join(', ')}) and **${targetBubble.title}** (${targetBubble.domains.join(', ')}) — *${relationshipType}* (confidence: ${pct}%)`;
+
+    const id = insertInsight(db, {
+      patternKey,
+      title,
+      body,
+      confidence,
+      status: 'queued',
+      serviceSources: ['knowledge-engine', `bubbles:${sourceBubble.id},${targetBubble.id}`],
+      suppressionHash: hash,
+    });
+
+    eventBus.emit({
+      id: generateId(),
+      timestamp: Date.now(),
+      source: SUITE_PROACTIVE_INTELLIGENCE,
+      type: 'notification',
+      payload: {
+        channel: 'telegram' as const,
+        title,
+        body,
+        topicName: 'General',
+        actions: [
+          { label: 'View in Graph', action: `ki:v:${id}` },
+          { label: 'Interesting', action: `ki:i:${id}` },
+          { label: 'Not Useful', action: `ki:n:${id}` },
+        ],
+      },
+    });
+
+    log.info(`Cross-domain insight queued: ${patternKey} (confidence: ${confidence})`);
+  } catch (err) {
+    log.error(`Cross-domain insight processing failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 const service: SuiteService = {
   async start(context: ServiceContext): Promise<void> {
     eventBus = context.eventBus;
@@ -244,6 +310,7 @@ const service: SuiteService = {
     }
 
     eventBus.on('agent:task:complete', handleTaskComplete);
+    eventBus.on('knowledge:insight:cross-domain', handleCrossDomainInsight);
     log.info(
       `Insight processor started (threshold: ${confidenceThreshold}, window: ${suppressionWindowDays}d, max: ${maxInsightsPerRun})`,
     );
@@ -251,6 +318,7 @@ const service: SuiteService = {
 
   async stop(): Promise<void> {
     eventBus.off('agent:task:complete', handleTaskComplete);
+    eventBus.off('knowledge:insight:cross-domain', handleCrossDomainInsight);
     log.info('Insight processor service stopped');
   },
 };

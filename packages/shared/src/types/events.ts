@@ -674,6 +674,16 @@ export interface KnowledgeStaleBubblesDetectedEvent extends BaseEvent {
   };
 }
 
+export interface KnowledgeInsightCrossDomainEvent extends BaseEvent {
+  type: 'knowledge:insight:cross-domain';
+  payload: {
+    sourceBubble: { id: string; title: string; domains: string[] };
+    targetBubble: { id: string; title: string; domains: string[] };
+    confidence: number;
+    relationshipType: string;
+  };
+}
+
 export interface InsightGeneratedEvent extends BaseEvent {
   type: 'insight:generated';
   payload: {
@@ -770,6 +780,7 @@ export type RavenEvent =
   | KnowledgeReindexCompleteEvent
   | KnowledgeRetrospectiveCompleteEvent
   | KnowledgeStaleBubblesDetectedEvent
+  | KnowledgeInsightCrossDomainEvent
   | InsightGeneratedEvent
   | InsightQueuedEvent
   | InsightSuppressedEvent

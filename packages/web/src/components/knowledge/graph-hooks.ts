@@ -47,7 +47,7 @@ export function useGraphBehaviors(): {
   const graphRef = useRef<GraphForceRef | null>(null);
   const state = useKnowledgeStore();
   const { filteredNodes, filteredEdges } = getFilteredData(state);
-  const { colorDimension, searchResults, selectedNodeIds } = state;
+  const { colorDimension, searchResults, selectedNodeIds, highlightedNodeIds } = state;
   const isTimeline = state.viewMode === 'timeline';
 
   const maxDegree = useMemo(
@@ -59,6 +59,10 @@ export function useGraphBehaviors(): {
     () => new Set(searchResults.map((r) => r.bubbleId)),
     [searchResults],
   );
+
+  const highlightedSet = useMemo(() => new Set(highlightedNodeIds), [highlightedNodeIds]);
+
+  const hasHighlight = highlightedNodeIds.length > 0;
 
   const graphData = useMemo(
     () => ({
@@ -92,6 +96,18 @@ export function useGraphBehaviors(): {
     graphRef.current.zoom(SEARCH_ZOOM, CENTER_ANIM_MS);
   }, [searchResults, filteredNodes, searchResultIds]);
 
+  useEffect(() => {
+    if (!hasHighlight || !graphRef.current) return;
+    const matchedNodes = filteredNodes.filter((n) => highlightedSet.has(n.id));
+    if (matchedNodes.length === 0) return;
+    type SimNode = GraphNode & { x?: number; y?: number };
+    const simNodes = matchedNodes as SimNode[];
+    const avgX = simNodes.reduce((s, n) => s + (n.x ?? 0), 0) / simNodes.length;
+    const avgY = simNodes.reduce((s, n) => s + (n.y ?? 0), 0) / simNodes.length;
+    graphRef.current.centerAt(avgX, avgY, CENTER_ANIM_MS);
+    graphRef.current.zoom(SEARCH_ZOOM, CENTER_ANIM_MS);
+  }, [hasHighlight, highlightedSet, filteredNodes]);
+
   const handleNodeClick = useCallback(
     (node: { id?: string }, event: MouseEvent) => {
       if (!node.id) return;
@@ -106,7 +122,9 @@ export function useGraphBehaviors(): {
       const gNode = filteredNodes.find((n) => n.id === node.id);
       if (!gNode || node.x === undefined || node.y === undefined) return;
 
-      const isDimmed = searchResults.length > 0 && !searchResultIds.has(gNode.id);
+      const isDimmed =
+        (searchResults.length > 0 && !searchResultIds.has(gNode.id)) ||
+        (hasHighlight && !highlightedSet.has(gNode.id));
       const size =
         NODE_BASE_SIZE + (gNode.connectionDegree / maxDegree) * (NODE_MAX_SIZE - NODE_BASE_SIZE);
       const color = getNodeColor({
@@ -133,18 +151,31 @@ export function useGraphBehaviors(): {
       ctx.fillText(gNode.title.slice(0, LABEL_MAX_CHARS), node.x, node.y + size + 2);
       ctx.globalAlpha = 1;
     },
-    [filteredNodes, colorDimension, searchResults, searchResultIds, selectedNodeIds, maxDegree],
+    [
+      filteredNodes,
+      colorDimension,
+      searchResults,
+      searchResultIds,
+      selectedNodeIds,
+      maxDegree,
+      hasHighlight,
+      highlightedSet,
+    ],
   );
 
   const linkColor = useCallback(
     (link: LinkObj) => {
-      if (searchResults.length === 0) return getLinkOpacity(link.confidence);
       const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
       const targetId = typeof link.target === 'string' ? link.target : link.target.id;
-      if (!searchResultIds.has(sourceId) && !searchResultIds.has(targetId)) return LINK_DIMMED;
+      if (searchResults.length > 0) {
+        if (!searchResultIds.has(sourceId) && !searchResultIds.has(targetId)) return LINK_DIMMED;
+      }
+      if (hasHighlight) {
+        if (!highlightedSet.has(sourceId) && !highlightedSet.has(targetId)) return LINK_DIMMED;
+      }
       return getLinkOpacity(link.confidence);
     },
-    [searchResults, searchResultIds],
+    [searchResults, searchResultIds, hasHighlight, highlightedSet],
   );
 
   const linkWidth = useCallback((link: LinkObj) => getLinkWidth(link.confidence), []);
