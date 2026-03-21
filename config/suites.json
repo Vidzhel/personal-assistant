@@ -22,7 +22,13 @@
   },
   "daily-briefing": { "enabled": true },
   "gemini-transcription": { "enabled": true },
-  "google-workspace": { "enabled": true },
+  "google-workspace": {
+    "enabled": true,
+    "config": {
+      "driveFolders": [],
+      "drivePollingIntervalMs": 300000
+    }
+  },
   "proactive-intelligence": {
     "enabled": true,
     "config": {

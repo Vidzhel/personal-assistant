@@ -7,5 +7,5 @@ export default defineSuite({
   description: 'Google Workspace integration via gws CLI — Calendar, Gmail, Drive, Meet, Tasks, Docs, People, and workflow helpers',
   capabilities: ['agent-definition', 'event-source', 'services'],
   requiresEnv: ['GWS_PRIMARY_CREDENTIALS_FILE'],
-  services: ['email-watcher'],
+  services: ['email-watcher', 'drive-watcher'],
 });

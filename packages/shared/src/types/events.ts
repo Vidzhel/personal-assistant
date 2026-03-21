@@ -779,7 +779,8 @@ export type RavenEvent =
   | EngagementStateChangedEvent
   | NotificationEscalatedEvent
   | NotificationSnoozedEvent
-  | SnoozeProposalEvent;
+  | SnoozeProposalEvent
+  | GDriveNewFileEvent;
 
 export type RavenEventType = RavenEvent['type'];
 
@@ -810,6 +811,29 @@ export interface SnoozeProposalEvent extends BaseEvent {
     ignoredCount: number;
   };
 }
+
+export interface GDriveNewFileEvent extends BaseEvent {
+  type: 'gdrive:new-file';
+  payload: {
+    fileId: string;
+    name: string;
+    mimeType: string;
+    folderId: string;
+    modifiedTime: string;
+    size: number;
+    webViewLink?: string;
+  };
+}
+
+export const GDriveNewFilePayloadSchema = z.object({
+  fileId: z.string(),
+  name: z.string(),
+  mimeType: z.string(),
+  folderId: z.string(),
+  modifiedTime: z.string(),
+  size: z.number(),
+  webViewLink: z.string().optional(),
+});
 
 export interface NotificationEscalatedEvent extends BaseEvent {
   type: 'notification:escalated';

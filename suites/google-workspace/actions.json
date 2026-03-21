@@ -14,5 +14,6 @@
   { "name": "google-workspace:modify-task", "description": "Update, complete, or delete a Google Task", "defaultTier": "yellow", "reversible": true },
   { "name": "google-workspace:create-doc", "description": "Create a Google Doc", "defaultTier": "yellow", "reversible": true },
   { "name": "google-workspace:create-drive-file", "description": "Create or upload a file to Drive", "defaultTier": "yellow", "reversible": true },
-  { "name": "google-workspace:delete-drive-file", "description": "Delete a file from Google Drive", "defaultTier": "red", "reversible": false }
+  { "name": "google-workspace:delete-drive-file", "description": "Delete a file from Google Drive", "defaultTier": "red", "reversible": false },
+  { "name": "google-workspace:monitor-drive", "description": "Monitor Google Drive folders for new files", "defaultTier": "green", "reversible": true }
 ]

@@ -31,6 +31,7 @@ export const EVENT_INSIGHT_SUPPRESSED = 'insight:suppressed' as const;
 export const SUITE_GOOGLE_WORKSPACE = 'google-workspace';
 export const AGENT_GWS = 'gws-agent';
 export const SOURCE_GWS_GMAIL = 'gws-gmail';
+export const SOURCE_GWS_DRIVE = 'gws-drive';
 
 // Suite: gemini-transcription
 export const SUITE_GEMINI_TRANSCRIPTION = 'gemini-transcription';
