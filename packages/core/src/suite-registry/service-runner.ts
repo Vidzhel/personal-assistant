@@ -5,6 +5,7 @@ import {
   type EventBusInterface,
   type DatabaseInterface,
   type LoggerInterface,
+  type IntegrationsConfig,
 } from '@raven/shared';
 import type { LoadedSuite } from './suite-loader.ts';
 
@@ -16,6 +17,7 @@ export interface ServiceContext {
   logger: LoggerInterface;
   config: Record<string, unknown>;
   projectRoot: string;
+  integrationsConfig: IntegrationsConfig;
 }
 
 export interface SuiteService {

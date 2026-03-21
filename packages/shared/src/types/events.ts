@@ -780,7 +780,9 @@ export type RavenEvent =
   | NotificationEscalatedEvent
   | NotificationSnoozedEvent
   | SnoozeProposalEvent
-  | GDriveNewFileEvent;
+  | GDriveNewFileEvent
+  | FinancialTransactionRecordedEvent
+  | FinancialSyncCompleteEvent;
 
 export type RavenEventType = RavenEvent['type'];
 
@@ -833,6 +835,50 @@ export const GDriveNewFilePayloadSchema = z.object({
   modifiedTime: z.string(),
   size: z.number(),
   webViewLink: z.string().optional(),
+});
+
+export interface FinancialTransactionRecordedEvent extends BaseEvent {
+  type: 'financial:transaction:recorded';
+  payload: {
+    accountId: string;
+    bankTxId: string;
+    bank: 'monobank' | 'privatbank';
+    amountMinor: number;
+    currencyCode: number;
+    description: string;
+    isDebit: boolean;
+    transactionDate: string;
+    ynabTransactionId?: string;
+  };
+}
+
+export const FinancialTransactionRecordedPayloadSchema = z.object({
+  accountId: z.string(),
+  bankTxId: z.string(),
+  bank: z.enum(['monobank', 'privatbank']),
+  amountMinor: z.number(),
+  currencyCode: z.number(),
+  description: z.string(),
+  isDebit: z.boolean(),
+  transactionDate: z.string(),
+  ynabTransactionId: z.string().optional(),
+});
+
+export interface FinancialSyncCompleteEvent extends BaseEvent {
+  type: 'financial:sync-complete';
+  payload: {
+    newTransactionCount: number;
+    ynabPushSuccessCount: number;
+    ynabPushFailCount: number;
+    accountsSynced: number;
+  };
+}
+
+export const FinancialSyncCompletePayloadSchema = z.object({
+  newTransactionCount: z.number(),
+  ynabPushSuccessCount: z.number(),
+  ynabPushFailCount: z.number(),
+  accountsSynced: z.number(),
 });
 
 export interface NotificationEscalatedEvent extends BaseEvent {

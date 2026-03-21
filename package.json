@@ -49,6 +49,7 @@
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
     "grammy": "^1.41.1",
-    "imapflow": "^1.2.15"
+    "imapflow": "^1.2.15",
+    "ynab": "^4.0.0"
   }
 }

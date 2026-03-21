@@ -2,6 +2,7 @@ import { resolve, dirname } from 'node:path';
 import { mkdirSync, existsSync } from 'node:fs';
 import { createLogger, initFileLogging, type RavenEvent, type RavenEventType } from '@raven/shared';
 import { loadConfig, loadSuitesConfig, loadSchedulesConfig, projectRoot } from './config.ts';
+import { loadIntegrationsConfig } from './config/integrations-config.ts';
 import { initDatabase, createDbInterface, getDb } from './db/database.ts';
 import { EventBus } from './event-bus/event-bus.ts';
 import { SuiteRegistry } from './suite-registry/suite-registry.ts';
@@ -89,6 +90,8 @@ async function main(): Promise<void> {
   const suitesConfig = loadSuitesConfig(configDir);
   const suitesDir = resolve(projectRoot, 'suites');
 
+  const integrationsConfig = loadIntegrationsConfig(configDir);
+
   await suiteRegistry.loadSuites(suitesDir, suitesConfig);
   suiteRegistry.validateAgentTools();
 
@@ -109,6 +112,7 @@ async function main(): Promise<void> {
     logger: log,
     config: {},
     projectRoot,
+    integrationsConfig,
   };
 
   await serviceRunner.startServices(suiteRegistry.getAllSuites(), baseContext);

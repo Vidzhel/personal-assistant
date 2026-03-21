@@ -100,6 +100,12 @@ export const SHORTCODE_FROM_CATEGORY: Record<string, string> = {
   'schedule:triggered': 'sched',
 };
 
+// Suite: financial-tracking
+export const SUITE_FINANCIAL_TRACKING = 'financial-tracking';
+export const SOURCE_FINANCIAL = 'financial';
+export const EVENT_FINANCIAL_TRANSACTION_RECORDED = 'financial:transaction:recorded' as const;
+export const EVENT_FINANCIAL_SYNC_COMPLETE = 'financial:sync-complete' as const;
+
 // Engagement tracking
 export const EVENT_ENGAGEMENT_STATE_CHANGED = 'engagement:state-changed' as const;
 export const SERVICE_ENGAGEMENT_TRACKER = 'engagement-tracker';

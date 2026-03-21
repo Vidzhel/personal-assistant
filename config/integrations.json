@@ -1,0 +1,27 @@
+{
+  "ynab": {
+    "planId": "default"
+  },
+  "accounts": [
+    {
+      "accounts": [
+        {
+          "bank": "monobank",
+          "displayName": "Monobank Black",
+          "bankAccountId": "0",
+          "ynabAccountId": "31ba4068-faa6-4434-b280-fa081a9ac743",
+          "currency": "UAH",
+          "enabled": true
+        }
+      ]
+    },
+    {
+      "bank": "privatbank",
+      "displayName": "PrivatBank",
+      "iban": "UA123456789012345678901234567",
+      "ynabAccountId": "a98c2da0-a4a5-491b-a02f-7c51ad0fd178",
+      "currency": "UAH",
+      "enabled": true
+    }
+  ]
+}

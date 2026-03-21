@@ -58,7 +58,12 @@
       "Bash(sqlite3:*)",
       "Bash(gws meet:*)",
       "Bash(gws gmail:*)",
-      "Skill(commit-commands:commit)"
+      "Skill(commit-commands:commit)",
+      "Bash(gws drive:*)",
+      "WebFetch(domain:api.monobank.ua)",
+      "WebFetch(domain:api.privatbank.ua)",
+      "WebFetch(domain:python-privatbank-client.readthedocs.io)",
+      "WebFetch(domain:api.ynab.com)"
     ]
   }
 }

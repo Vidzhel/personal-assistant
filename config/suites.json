@@ -29,6 +29,14 @@
       "drivePollingIntervalMs": 300000
     }
   },
+  "financial-tracking": {
+    "enabled": true,
+    "config": {
+      "syncIntervalMs": 3600000,
+      "ynabPlanId": "default",
+      "categorySyncIntervalMs": 14400000
+    }
+  },
   "proactive-intelligence": {
     "enabled": true,
     "config": {

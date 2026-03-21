@@ -1,0 +1,6 @@
+[
+  { "name": "financial-tracking:read-transactions", "description": "Read local transaction history", "defaultTier": "green", "reversible": true },
+  { "name": "financial-tracking:read-ynab-report", "description": "Fetch YNAB monthly spending report", "defaultTier": "green", "reversible": true },
+  { "name": "financial-tracking:push-to-ynab", "description": "Push transactions to YNAB", "defaultTier": "yellow", "reversible": false },
+  { "name": "financial-tracking:sync-categories", "description": "Sync categories from YNAB", "defaultTier": "yellow", "reversible": true }
+]
