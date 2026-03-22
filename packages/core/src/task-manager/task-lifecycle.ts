@@ -68,7 +68,9 @@ export function createTaskLifecycle(deps: {
             if (task && task.status === 'in_progress') {
               const artifacts = extractArtifacts(e.payload.result ?? '');
               taskStore.completeTask(ravenTaskId, artifacts);
-              log.info(`Auto-completed task ${ravenTaskId} from agent:task:complete ${e.payload.taskId}`);
+              log.info(
+                `Auto-completed task ${ravenTaskId} from agent:task:complete ${e.payload.taskId}`,
+              );
             }
           }
         } catch (err) {

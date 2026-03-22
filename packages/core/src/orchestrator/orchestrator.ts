@@ -4,6 +4,8 @@ import {
   SUITE_EMAIL,
   SOURCE_ORCHESTRATOR,
   SKILL_ORCHESTRATOR,
+  type McpServerConfig,
+  type SubAgentDefinition,
   type NewEmailEvent,
   type ScheduleTriggeredEvent,
   type UserChatMessageEvent,
@@ -14,6 +16,8 @@ import type { SessionManager } from '../session-manager/session-manager.ts';
 import type { MessageStore } from '../session-manager/message-store.ts';
 import type { ContextInjector } from '../knowledge-engine/context-injector.ts';
 import type { Retrospective } from '../knowledge-engine/retrospective.ts';
+import type { NamedAgentStore } from '../agent-registry/named-agent-store.ts';
+import type { AgentResolver } from '../agent-registry/agent-resolver.ts';
 import { createKnowledgeAgentDefinition } from '../knowledge-engine/knowledge-agent.ts';
 import { getDb } from '../db/database.ts';
 
@@ -28,6 +32,8 @@ export interface OrchestratorDeps {
   messageStore: MessageStore;
   contextInjector?: ContextInjector;
   retrospective?: Retrospective;
+  namedAgentStore?: NamedAgentStore;
+  agentResolver?: AgentResolver;
   port: number;
 }
 
@@ -44,6 +50,8 @@ export class Orchestrator {
   private messageStore: MessageStore;
   private contextInjector?: ContextInjector;
   private retrospective?: Retrospective;
+  private namedAgentStore?: NamedAgentStore;
+  private agentResolver?: AgentResolver;
   private port: number;
 
   constructor(deps: OrchestratorDeps) {
@@ -53,6 +61,8 @@ export class Orchestrator {
     this.messageStore = deps.messageStore;
     this.contextInjector = deps.contextInjector;
     this.retrospective = deps.retrospective;
+    this.namedAgentStore = deps.namedAgentStore;
+    this.agentResolver = deps.agentResolver;
     this.port = deps.port;
     this.eventBus.on<NewEmailEvent>('email:new', (e) => {
       this.handleNewEmail(e).catch((err: unknown) => log.error(`handleNewEmail failed: ${err}`));
@@ -191,7 +201,7 @@ export class Orchestrator {
     }
   }
 
-  // eslint-disable-next-line max-lines-per-function -- async handler with context injection and knowledge agent merging
+  // eslint-disable-next-line max-lines-per-function, complexity -- async handler with context injection, named agent resolution, and knowledge agent merging
   private async handleUserChat(event: UserChatMessageEvent): Promise<void> {
     const { projectId, sessionId, message, topicId, topicName } = event.payload;
     log.info(`User chat in project ${projectId}: ${message.slice(0, LOG_MESSAGE_PREVIEW_LENGTH)}`);
@@ -224,9 +234,31 @@ export class Orchestrator {
       }
     }
 
-    // Collect sub-agent definitions from all enabled suites.
-    // The orchestrator agent itself has NO MCPs - it delegates via Agent tool to sub-agents.
-    const agentDefinitions = this.suiteRegistry.collectAgentDefinitions();
+    // Resolve capabilities from named agent (if configured) or fall back to all suites
+    let agentDefinitions: Record<string, SubAgentDefinition>;
+    let mcpServers: Record<string, McpServerConfig>;
+    let namedAgentInstructions: string | undefined;
+    let namedAgentId: string | undefined;
+
+    if (this.namedAgentStore && this.agentResolver) {
+      try {
+        const namedAgent = this.namedAgentStore.getDefaultAgent();
+        const capabilities = this.agentResolver.resolveAgentCapabilities(namedAgent);
+        agentDefinitions = capabilities.agentDefinitions;
+        mcpServers = capabilities.mcpServers;
+        namedAgentId = namedAgent.id;
+        if (namedAgent.instructions) {
+          namedAgentInstructions = namedAgent.instructions;
+        }
+      } catch (err) {
+        log.warn(`Named agent resolution failed, falling back to all suites: ${err}`);
+        agentDefinitions = this.suiteRegistry.collectAgentDefinitions();
+        mcpServers = this.suiteRegistry.collectMcpServers();
+      }
+    } else {
+      agentDefinitions = this.suiteRegistry.collectAgentDefinitions();
+      mcpServers = this.suiteRegistry.collectMcpServers();
+    }
 
     // Merge knowledge agent into agent definitions
     agentDefinitions['knowledge-agent'] = createKnowledgeAgentDefinition(this.port);
@@ -241,6 +273,14 @@ export class Orchestrator {
       prompt += `\n\n[Media file available on disk: ${mediaAttachment.filePath} (${mediaAttachment.fileName}, ${mediaAttachment.mimeType}, ${mediaAttachment.type})]`;
     }
 
+    // Prepend named agent instructions and config management capability
+    if (namedAgentInstructions) {
+      prompt = `[Agent Instructions: ${namedAgentInstructions}]\n\n${prompt}`;
+    }
+    if (this.namedAgentStore) {
+      prompt = `[System: You can manage named agents via the REST API at http://localhost:${this.port}/api/agents (GET, POST, PATCH, DELETE). Use this to create, update, or adjust agent configurations when asked.]\n\n${prompt}`;
+    }
+
     const taskId = generateId();
 
     this.eventBus.emit({
@@ -253,12 +293,13 @@ export class Orchestrator {
         taskId,
         prompt,
         skillName: SKILL_ORCHESTRATOR,
-        mcpServers: this.suiteRegistry.collectMcpServers(), // Declared for SDK to spawn; only sub-agents use them
+        mcpServers, // Resolved from named agent or all suites
         agentDefinitions, // Sub-agents carry the MCPs + knowledge agent
         knowledgeContext,
         priority: 'high',
         sessionId: session.id,
         projectId,
+        namedAgentId,
       },
     });
   }

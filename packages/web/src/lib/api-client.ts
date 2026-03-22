@@ -194,6 +194,40 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ message }),
     }),
+
+  // Named agents management
+  getAgents: () => request<NamedAgentRecord[]>('/agents'),
+  getAgent: (id: string) => request<NamedAgentRecord>(`/agents/${id}`),
+  createAgent: (data: {
+    name: string;
+    description?: string;
+    instructions?: string;
+    suiteIds?: string[];
+  }) => request<NamedAgentRecord>('/agents', { method: 'POST', body: JSON.stringify(data) }),
+  updateAgent: (
+    id: string,
+    data: {
+      name?: string;
+      description?: string | null;
+      instructions?: string | null;
+      suiteIds?: string[];
+    },
+  ) => request<NamedAgentRecord>(`/agents/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteAgent: (id: string) => request(`/agents/${id}`, { method: 'DELETE' }),
+  getNamedAgentTasks: (id: string, params?: { limit?: number; offset?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.limit) qs.set('limit', String(params.limit));
+    if (params?.offset) qs.set('offset', String(params.offset));
+    return request<RavenTaskRecord[]>(`/agents/${id}/tasks?${qs}`);
+  },
+  createSuite: (data: { name: string; displayName: string; description?: string }) =>
+    request<{ name: string; displayName: string; description: string; suitePath: string }>(
+      '/suites',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    ),
 };
 
 export interface Project {
@@ -274,6 +308,7 @@ export interface ActiveTaskInfo {
   startedAt?: number;
   createdAt: number;
   durationMs?: number;
+  namedAgentId?: string;
 }
 
 export interface ActiveTasks {
@@ -461,6 +496,20 @@ export interface RavenTaskRecord {
 
 export interface RavenTaskDetail extends RavenTaskRecord {
   subtasks: RavenTaskRecord[];
+}
+
+export interface NamedAgentRecord {
+  id: string;
+  name: string;
+  description: string | null;
+  instructions: string | null;
+  suiteIds: string[];
+  isDefault: boolean;
+  createdAt: string;
+  updatedAt: string;
+  suites?: Array<{ name: string; displayName: string }>;
+  isActive?: boolean;
+  taskCounts?: { completed: number; inProgress: number };
 }
 
 export interface TaskTemplateRecord {

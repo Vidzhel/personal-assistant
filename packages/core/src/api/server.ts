@@ -41,8 +41,11 @@ import { registerNotificationPreferencesRoutes } from './routes/notification-pre
 import { registerLogRoutes } from './routes/logs.ts';
 import { registerFinancialRoutes } from './routes/financial.ts';
 import { registerTaskRoutes } from './routes/tasks.ts';
+import { registerAgentRoutes } from './routes/agents.ts';
 import type { TaskStore } from '../task-manager/task-store.ts';
 import type { TemplateLoader } from '../task-manager/template-loader.ts';
+import type { NamedAgentStore } from '../agent-registry/named-agent-store.ts';
+import type { SuiteScaffolder } from '../suite-registry/suite-scaffolder.ts';
 import { registerSSERoutes } from './sse/stream.ts';
 import { registerWebSocketHandler } from './ws/handler.ts';
 
@@ -75,6 +78,8 @@ export interface ApiDeps {
   unsnoozableCategories?: string[];
   taskStore?: TaskStore;
   templateLoader?: TemplateLoader;
+  namedAgentStore?: NamedAgentStore;
+  suiteScaffolder?: SuiteScaffolder;
 }
 
 // eslint-disable-next-line max-lines-per-function -- server setup registers all route groups
@@ -96,7 +101,7 @@ export async function createApiServer(
   registerProjectRoutes(app);
   registerSessionRoutes(app, deps);
   registerChatRoute(app, deps);
-  registerSuiteRoutes(app, deps);
+  registerSuiteRoutes(app, { ...deps, suiteScaffolder: deps.suiteScaffolder });
   registerScheduleRoutes(app, deps);
   registerEventRoutes(app);
   registerAuditLogRoutes(app, deps.auditLog);
@@ -141,6 +146,16 @@ export async function createApiServer(
     registerTaskRoutes(app, {
       taskStore: deps.taskStore,
       templateLoader: deps.templateLoader,
+    });
+  }
+
+  // Named agents management
+  if (deps.namedAgentStore) {
+    registerAgentRoutes(app, {
+      namedAgentStore: deps.namedAgentStore,
+      agentManager: deps.agentManager,
+      suiteRegistry: deps.suiteRegistry,
+      taskStore: deps.taskStore,
     });
   }
 

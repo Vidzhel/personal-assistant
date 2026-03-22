@@ -52,6 +52,7 @@ export interface ActiveTaskInfo {
   startedAt?: number;
   createdAt: number;
   durationMs?: number;
+  namedAgentId?: string;
 }
 
 export class AgentManager {
@@ -103,6 +104,7 @@ export class AgentManager {
       createdAt: Date.now(),
       actionName: payload.actionName,
       knowledgeContext: payload.knowledgeContext,
+      namedAgentId: payload.namedAgentId,
     };
 
     // Insert by priority
@@ -282,6 +284,7 @@ export class AgentManager {
           startedAt: task.startedAt,
           createdAt: task.createdAt,
           durationMs: task.startedAt ? now - task.startedAt : undefined,
+          namedAgentId: task.namedAgentId,
         });
       }
     }
@@ -294,6 +297,7 @@ export class AgentManager {
       priority: task.priority,
       status: task.status,
       createdAt: task.createdAt,
+      namedAgentId: task.namedAgentId,
     }));
     return { running, queued };
   }

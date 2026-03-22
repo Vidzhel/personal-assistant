@@ -48,9 +48,12 @@ export function registerAgentTaskRoutes(
         if (row) projectNames.set(pid, row.name);
       }
 
-      const enrich = (t: (typeof active.running)[number]): (typeof active.running)[number] & { projectName?: string } => ({
+      const enrich = (
+        t: (typeof active.running)[number],
+      ): (typeof active.running)[number] & { projectName?: string } => ({
         ...t,
-        ...(t.projectId && projectNames.has(t.projectId) && { projectName: projectNames.get(t.projectId) }),
+        ...(t.projectId &&
+          projectNames.has(t.projectId) && { projectName: projectNames.get(t.projectId) }),
       });
 
       return {

@@ -172,7 +172,7 @@ export function parseTopicConfig(): TopicConfig {
 export function getTopicThreadId(topicName: string): number | undefined {
   if (topicName === 'General') return topicConfig.generalTopicId;
   if (topicName === 'System') return topicConfig.systemTopicId;
-  return topicConfig.topicMap[topicName];
+  return topicConfig.topicMap[topicName] ?? agentTopicMap.get(topicName);
 }
 
 async function sendMessage(
@@ -827,6 +827,28 @@ const service: SuiteService = {
       }
     }
 
+    // Bootstrap agent topics from DB and listen for new agent creation
+    if (operatingMode === 'group' && dbRef) {
+      try {
+        const rows = dbRef.all<{ name: string }>('SELECT name FROM named_agents');
+        const agentNames = rows.map((r) => r.name);
+        if (agentNames.length > 0) {
+          ensureAllAgentTopics(agentNames).catch((err: unknown) => {
+            logger.warn(`Failed to bootstrap agent topics: ${err}`);
+          });
+        }
+      } catch (err) {
+        logger.warn(`Failed to query named agents for topic bootstrap: ${err}`);
+      }
+
+      context.eventBus.on('agent:config:created', (event: unknown) => {
+        const e = event as { payload: { name: string } };
+        ensureAgentTopic(e.payload.name).catch((err: unknown) => {
+          logger.warn(`Failed to create topic for new agent "${e.payload.name}": ${err}`);
+        });
+      });
+    }
+
     bot.catch((err) => {
       logger.error(`Grammy unhandled error: ${err.error ?? err.message ?? err}`);
     });
@@ -846,8 +868,49 @@ const service: SuiteService = {
       bot = null;
     }
     projectTopicMap.clear();
+    agentTopicMap.clear();
     logger.info('Telegram bot stopped');
   },
 };
+
+// Agent topic thread management — dynamically create and track topics per named agent
+const agentTopicMap = new Map<string, number>(); // agentName → threadId
+
+export async function ensureAgentTopic(agentName: string): Promise<number | undefined> {
+  if (operatingMode !== 'group' || !bot) return undefined;
+
+  // Check if already mapped
+  const existing = agentTopicMap.get(agentName);
+  if (existing !== undefined) return existing;
+
+  // Check if a topic already exists in the static config
+  const staticId = topicConfig.topicMap[agentName];
+  if (staticId !== undefined) {
+    agentTopicMap.set(agentName, staticId);
+    return staticId;
+  }
+
+  // Create a new forum topic for this agent
+  try {
+    const displayName = agentName.charAt(0).toUpperCase() + agentName.slice(1);
+    const result = await bot.api.createForumTopic(groupId, `Agent: ${displayName}`);
+    agentTopicMap.set(agentName, result.message_thread_id);
+    logger.info(`Created Telegram topic for agent "${agentName}" (thread: ${result.message_thread_id})`);
+    return result.message_thread_id;
+  } catch (err) {
+    logger.warn(`Failed to create Telegram topic for agent "${agentName}": ${err}`);
+    return undefined;
+  }
+}
+
+export function getAgentTopicThreadId(agentName: string): number | undefined {
+  return agentTopicMap.get(agentName) ?? topicConfig.topicMap[agentName];
+}
+
+export async function ensureAllAgentTopics(agentNames: string[]): Promise<void> {
+  for (const name of agentNames) {
+    await ensureAgentTopic(name);
+  }
+}
 
 export default service;

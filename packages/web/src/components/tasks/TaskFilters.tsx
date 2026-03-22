@@ -11,11 +11,14 @@ const DEBOUNCE_MS = 300;
 export function TaskFilters() {
   const { filters, setFilters, clearFilters } = useTaskStore();
   const [searchInput, setSearchInput] = useState(filters.search ?? '');
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => setFilters({ search: searchInput || undefined }), DEBOUNCE_MS);
+    timerRef.current = setTimeout(
+      () => setFilters({ search: searchInput || undefined }),
+      DEBOUNCE_MS,
+    );
     return () => clearTimeout(timerRef.current);
   }, [searchInput, setFilters]);
 

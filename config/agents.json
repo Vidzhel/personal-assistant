@@ -1,0 +1,18 @@
+[
+  {
+    "id": "default-raven-agent",
+    "name": "raven",
+    "description": "General-purpose assistant — handles all requests when no specialized agent is assigned",
+    "instructions": "",
+    "suite_ids": [],
+    "is_default": true
+  },
+  {
+    "id": "researcher-agent",
+    "name": "researcher",
+    "description": "Knowledge exploration and web research",
+    "instructions": "Focus on thorough research. Use knowledge retrieval, embedding search, and link suggestion tools to find relevant information. Provide well-sourced answers with references.",
+    "suite_ids": ["proactive-intelligence", "google-workspace"],
+    "is_default": false
+  }
+]

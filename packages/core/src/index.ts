@@ -32,6 +32,10 @@ import { createPipelineEngine } from './pipeline-engine/pipeline-engine.ts';
 import { createPipelineStore } from './pipeline-engine/pipeline-store.ts';
 import { createPipelineScheduler } from './pipeline-engine/pipeline-scheduler.ts';
 import { createPipelineEventTrigger } from './pipeline-engine/pipeline-event-trigger.ts';
+import { createNamedAgentStore } from './agent-registry/named-agent-store.ts';
+import { createAgentResolver } from './agent-registry/agent-resolver.ts';
+import { createConfigCommitter } from './agent-registry/config-committer.ts';
+import { createSuiteScaffolder } from './suite-registry/suite-scaffolder.ts';
 import { createKnowledgeStore } from './knowledge-engine/knowledge-store.ts';
 import { createIngestionProcessor } from './knowledge-engine/ingestion.ts';
 import { createEmbeddingEngine } from './knowledge-engine/embeddings.ts';
@@ -154,7 +158,23 @@ async function main(): Promise<void> {
   // Expose task store globally for suite services
   (globalThis as unknown as Record<string, unknown>).__raven_task_store__ = taskStore;
 
-  // 7f. Archival schedule handler
+  // 7f. Init named agent registry
+  const namedAgentStore = createNamedAgentStore({
+    db: dbInterface,
+    eventBus: baseContext.eventBus,
+    configDir: configDir,
+  });
+  namedAgentStore.loadFromConfigFile();
+  const agentResolver = createAgentResolver({ suiteRegistry });
+  const configCommitter = createConfigCommitter({
+    eventBus,
+    configFilePath: resolve(configDir, 'agents.json'),
+  });
+  configCommitter.start();
+  const suiteScaffolder = createSuiteScaffolder({ suitesDir, configDir });
+  log.info(`Named agent registry initialized (${namedAgentStore.listAgents().length} agents)`);
+
+  // 7g. Archival schedule handler
   eventBus.on('schedule:triggered', (event: RavenEvent) => {
     if (event.type === 'schedule:triggered' && 'payload' in event) {
       const payload = event.payload as { scheduleName?: string };
@@ -169,7 +189,7 @@ async function main(): Promise<void> {
   const taskLifecycle = createTaskLifecycle({ eventBus: baseContext.eventBus, taskStore });
   taskLifecycle.start();
 
-  // 7h. Task notification handler — post to Telegram "Tasks" topic
+  // 7h. Task notification handler — post to Telegram agent topic or "Tasks" fallback
   for (const eventType of ['task:created', 'task:completed'] as const) {
     eventBus.on(eventType, (event: RavenEvent) => {
       if (event.type !== 'task:created' && event.type !== 'task:completed') return;
@@ -184,6 +204,13 @@ async function main(): Promise<void> {
       if (payload.assignedAgentId) parts.push(`Agent: ${payload.assignedAgentId}`);
       if (payload.projectId) parts.push(`Project: ${payload.projectId}`);
 
+      // Route to agent-specific topic if assigned, otherwise fall back to "Tasks"
+      let topicName = 'Tasks';
+      if (payload.assignedAgentId) {
+        const agent = namedAgentStore.getAgent(payload.assignedAgentId);
+        if (agent) topicName = agent.name;
+      }
+
       eventBus.emit({
         id: generateId(),
         timestamp: Date.now(),
@@ -193,7 +220,7 @@ async function main(): Promise<void> {
           channel: 'telegram' as const,
           title: `Task ${action}`,
           body: parts.join('\n'),
-          topicName: 'Tasks',
+          topicName,
         },
       });
     });
@@ -363,6 +390,8 @@ async function main(): Promise<void> {
     messageStore,
     contextInjector,
     retrospective,
+    namedAgentStore,
+    agentResolver,
     port: config.RAVEN_PORT,
   });
 
@@ -399,6 +428,8 @@ async function main(): Promise<void> {
       db: dbInterface,
       taskStore,
       templateLoader,
+      namedAgentStore,
+      suiteScaffolder,
       configuredSuiteCount,
       unsnoozableCategories: (suitesConfig['notifications']?.config?.unsnoozableCategories ??
         []) as string[],

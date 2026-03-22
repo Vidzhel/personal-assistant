@@ -51,6 +51,7 @@ export interface AgentTaskRequestEvent extends BaseEvent {
     priority: Priority;
     sessionId?: string;
     projectId?: string;
+    namedAgentId?: string;
   };
 }
 
@@ -794,6 +795,9 @@ export type RavenEvent =
   | GDriveNewFileEvent
   | FinancialTransactionRecordedEvent
   | FinancialSyncCompleteEvent
+  | AgentConfigCreatedEvent
+  | AgentConfigUpdatedEvent
+  | AgentConfigDeletedEvent
   | TaskCreatedEvent
   | TaskUpdatedEvent
   | TaskCompletedEvent
@@ -878,6 +882,33 @@ export const FinancialTransactionRecordedPayloadSchema = z.object({
   transactionDate: z.string(),
   ynabTransactionId: z.string().optional(),
 });
+
+export interface AgentConfigCreatedEvent extends BaseEvent {
+  type: 'agent:config:created';
+  payload: {
+    agentId: string;
+    name: string;
+    suiteIds: string[];
+  };
+}
+
+export interface AgentConfigUpdatedEvent extends BaseEvent {
+  type: 'agent:config:updated';
+  payload: {
+    agentId: string;
+    name: string;
+    suiteIds: string[];
+    changes: string[];
+  };
+}
+
+export interface AgentConfigDeletedEvent extends BaseEvent {
+  type: 'agent:config:deleted';
+  payload: {
+    agentId: string;
+    name: string;
+  };
+}
 
 export interface TaskCreatedEvent extends BaseEvent {
   type: 'task:created';

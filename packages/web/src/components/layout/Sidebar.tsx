@@ -11,6 +11,7 @@ const nav = [
   { href: '/tasks', label: 'Tasks', icon: '=' },
   { href: '/metrics', label: 'Metrics', icon: '%' },
   { href: '/schedules', label: 'Schedules', icon: '@' },
+  { href: '/agents', label: 'Agents', icon: '^' },
   { href: '/skills', label: 'Skills', icon: '*' },
   { href: '/knowledge', label: 'Knowledge', icon: '?' },
   { href: '/logs', label: 'Logs', icon: '!' },

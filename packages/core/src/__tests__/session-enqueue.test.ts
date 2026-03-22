@@ -19,7 +19,16 @@ describe('Session Enqueue API', () => {
   const mockAgentManager = {
     getActiveTasks: () => ({
       running: activeSessionId
-        ? [{ taskId: 'at-1', skillName: 'test', sessionId: activeSessionId, status: 'running', priority: 'normal', createdAt: Date.now() }]
+        ? [
+            {
+              taskId: 'at-1',
+              skillName: 'test',
+              sessionId: activeSessionId,
+              status: 'running',
+              priority: 'normal',
+              createdAt: Date.now(),
+            },
+          ]
         : [],
       queued: [],
     }),
