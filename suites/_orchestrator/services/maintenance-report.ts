@@ -6,6 +6,7 @@ import type { LogAnalysisResult } from './log-analyzer.ts';
 import type { DependencyReport } from './dependency-checker.ts';
 import type { ResourceReport } from './resource-monitor.ts';
 import type { SuiteUpdateReport } from './suite-update-checker.ts';
+import type { ConventionAuditReport } from './convention-auditor.ts';
 
 const log = createLogger('maintenance-report');
 
@@ -14,6 +15,7 @@ export interface MaintenanceReportData {
   dependencyReport: DependencyReport;
   resourceReport: ResourceReport;
   suiteUpdateReport: SuiteUpdateReport;
+  conventionAuditReport?: ConventionAuditReport;
   agentAnalysis?: string;
 }
 
@@ -126,6 +128,28 @@ function buildFallbackReport(data: MaintenanceReportData, date: string): string 
     }
   } else {
     lines.push('No new suggestions at this time.');
+  }
+  lines.push('');
+
+  // Convention Compliance
+  lines.push('## 🔍 Convention Compliance');
+  if (data.conventionAuditReport && data.conventionAuditReport.violations.length > 0) {
+    const report = data.conventionAuditReport;
+    lines.push(`${String(report.violations.length)} violations found across ${String(report.totalChecked)} resources:`);
+    const byType = new Map<string, typeof report.violations>();
+    for (const v of report.violations) {
+      const existing = byType.get(v.resourceType) ?? [];
+      existing.push(v);
+      byType.set(v.resourceType, existing);
+    }
+    for (const [type, violations] of byType) {
+      lines.push(`### ${type}`);
+      for (const v of violations) {
+        lines.push(`- **${v.resourceName}** [${v.severity}]: ${v.message} — Fix: ${v.fix}`);
+      }
+    }
+  } else {
+    lines.push('All resources follow conventions.');
   }
   lines.push('');
 

@@ -17,17 +17,20 @@
  *   s:k:{cat}      → keep (dismiss snooze suggestion)
  *   s:m:{cat}      → mute category indefinitely
  *   s:u:{id}       → unsnooze (remove snooze)
+ *   c:a:{id}       → config change apply
+ *   c:e:{id}       → config change edit
+ *   c:d:{id}       → config change discard
  *   noop           → disabled button (no action)
  */
 
 import type { InlineKeyboardButton } from 'grammy/types';
-import { generateId, CATEGORY_SHORTCODES, type EventBusInterface, type LoggerInterface, type DatabaseInterface } from '@raven/shared';
+import { generateId, CATEGORY_SHORTCODES, type EventBusInterface, type LoggerInterface, type DatabaseInterface, type ConfigChangeResolver } from '@raven/shared';
 import { createSnooze, removeSnooze, updateLastSuggested, getActiveSnoozes } from '@raven/core/notification-engine/snooze-store.ts';
 import { getSnoozedByCategory, releaseSnoozed } from '@raven/core/notification-engine/notification-queue.ts';
 import { getInsightById, updateInsightStatus } from '@raven/core/insight-engine/insight-store.ts';
 
 export interface CallbackAction {
-  domain: 'task' | 'approval' | 'email' | 'email-reply' | 'snooze' | 'knowledge-insight';
+  domain: 'task' | 'approval' | 'email' | 'email-reply' | 'snooze' | 'knowledge-insight' | 'config';
   action: string;
   target: string;
   args: string[];
@@ -47,6 +50,8 @@ export interface PendingApprovalInfo {
   resolution?: 'approved' | 'denied';
   sessionId?: string;
 }
+
+export type { ConfigChangeResolver };
 
 export interface CallbackDeps {
   eventBus: EventBusInterface;
@@ -75,15 +80,17 @@ export interface CallbackDeps {
       details?: string;
     }): void;
   };
+  configChangeResolver?: ConfigChangeResolver;
 }
 
-const DOMAIN_MAP: Record<string, 'task' | 'approval' | 'email' | 'email-reply' | 'snooze' | 'knowledge-insight'> = {
+const DOMAIN_MAP: Record<string, 'task' | 'approval' | 'email' | 'email-reply' | 'snooze' | 'knowledge-insight' | 'config'> = {
   t: 'task',
   a: 'approval',
   e: 'email',
   er: 'email-reply',
   s: 'snooze',
   ki: 'knowledge-insight',
+  c: 'config',
 };
 
 const SNOOZE_ACTIONS: Record<string, string> = {
@@ -123,6 +130,12 @@ const KI_ACTIONS: Record<string, string> = {
   n: 'not-useful',
 };
 
+const CONFIG_ACTIONS: Record<string, string> = {
+  a: 'apply',
+  e: 'edit',
+  d: 'discard',
+};
+
 const MAX_CALLBACK_BYTES = 64;
 
 export function parseCallbackData(data: string): CallbackAction | null {
@@ -147,6 +160,7 @@ export function parseCallbackData(data: string): CallbackAction | null {
     'email-reply': EMAIL_REPLY_ACTIONS,
     snooze: SNOOZE_ACTIONS,
     'knowledge-insight': KI_ACTIONS,
+    config: CONFIG_ACTIONS,
   };
   const actionMap = actionMaps[domain];
   const action = actionMap[actionPrefix];
@@ -623,6 +637,69 @@ function handleKnowledgeInsightAction(
   return { success: false, message: `Unknown knowledge-insight action: ${action.action}` };
 }
 
+function handleConfigAction(
+  action: CallbackAction,
+  deps: CallbackDeps,
+): CallbackResult {
+  const shortId = action.target;
+
+  if (action.action === 'apply') {
+    if (!deps.configChangeResolver) {
+      return { success: false, message: 'Config change resolver not available' };
+    }
+
+    const result = deps.configChangeResolver.resolve(shortId, 'apply');
+    if (!result.success) {
+      return { success: false, message: result.message };
+    }
+
+    return {
+      success: true,
+      message: 'Applied \u2713',
+      updatedKeyboard: [[{ text: 'Applied \u2713', callback_data: 'noop' }]],
+    };
+  }
+
+  if (action.action === 'edit') {
+    deps.eventBus.emit({
+      id: generateId(),
+      timestamp: Date.now(),
+      source: 'telegram-callback',
+      type: 'notification',
+      payload: {
+        channel: 'telegram' as const,
+        title: 'Edit Config Change',
+        body: 'Describe the changes you want to make to this configuration.',
+        topicName: 'Raven System',
+      },
+    });
+
+    return {
+      success: true,
+      message: 'Describe your changes:',
+    };
+  }
+
+  if (action.action === 'discard') {
+    if (!deps.configChangeResolver) {
+      return { success: false, message: 'Config change resolver not available' };
+    }
+
+    const result = deps.configChangeResolver.resolve(shortId, 'discard');
+    if (!result.success) {
+      return { success: false, message: result.message };
+    }
+
+    return {
+      success: true,
+      message: 'Discarded \u2717',
+      updatedKeyboard: [[{ text: 'Discarded \u2717', callback_data: 'noop' }]],
+    };
+  }
+
+  return { success: false, message: `Unknown config action: ${action.action}` };
+}
+
 export function handleCallback(
   action: CallbackAction,
   deps: CallbackDeps,
@@ -641,6 +718,9 @@ export function handleCallback(
   }
   if (action.domain === 'knowledge-insight') {
     return handleKnowledgeInsightAction(action, deps);
+  }
+  if (action.domain === 'config') {
+    return handleConfigAction(action, deps);
   }
   return handleApprovalAction(action, deps);
 }

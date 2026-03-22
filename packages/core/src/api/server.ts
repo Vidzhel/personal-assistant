@@ -48,6 +48,7 @@ import type { NamedAgentStore } from '../agent-registry/named-agent-store.ts';
 import type { SuiteScaffolder } from '../suite-registry/suite-scaffolder.ts';
 import { registerSSERoutes } from './sse/stream.ts';
 import { registerWebSocketHandler } from './ws/handler.ts';
+import { registerConfigChangesRoutes, type ConfigChangeResolver } from './routes/config-changes.ts';
 
 const log = createLogger('api');
 
@@ -80,6 +81,7 @@ export interface ApiDeps {
   templateLoader?: TemplateLoader;
   namedAgentStore?: NamedAgentStore;
   suiteScaffolder?: SuiteScaffolder;
+  configChangeResolver?: ConfigChangeResolver;
 }
 
 // eslint-disable-next-line max-lines-per-function -- server setup registers all route groups
@@ -170,6 +172,15 @@ export async function createApiServer(
     registerNotificationPreferencesRoutes(app, {
       db: deps.db,
       unsnoozableCategories: deps.unsnoozableCategories,
+    });
+  }
+
+  // Config changes management
+  if (deps.db) {
+    registerConfigChangesRoutes(app, {
+      db: deps.db,
+      eventBus: deps.eventBus,
+      resolver: deps.configChangeResolver,
     });
   }
 

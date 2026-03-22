@@ -11,6 +11,7 @@ import { analyzeLogs } from './log-analyzer.ts';
 import { checkDependencies } from './dependency-checker.ts';
 import { checkResources } from './resource-monitor.ts';
 import { checkSuiteUpdates } from './suite-update-checker.ts';
+import { auditConventions } from './convention-auditor.ts';
 import { buildMaintenancePrompt } from './maintenance-agent.ts';
 import { compileReport, emitReportEvent, sendReportNotification } from './maintenance-report.ts';
 
@@ -81,11 +82,13 @@ async function runMaintenance(taskId: string): Promise<void> {
     const reportsDir = resolve(dataDir, 'maintenance-reports');
     const healthUrl = `http://localhost:${String(port)}/api/health`;
 
-    const [logAnalysis, dependencyReport, resourceReport, suiteUpdateReport] = await Promise.all([
+    const configDir = resolve(projectRoot, 'config');
+    const [logAnalysis, dependencyReport, resourceReport, suiteUpdateReport, conventionAuditReport] = await Promise.all([
       analyzeLogs(logDir),
       checkDependencies(projectRoot),
       checkResources(dataDir, healthUrl),
       checkSuiteUpdates(suitesDir),
+      auditConventions(suitesDir, configDir),
     ]);
 
     log.info('Data gathering complete, building agent prompt');
@@ -96,6 +99,7 @@ async function runMaintenance(taskId: string): Promise<void> {
       dependencyReport,
       resourceReport,
       suiteUpdateReport,
+      conventionAuditReport,
       runDate: new Date().toISOString(),
     });
 
@@ -126,6 +130,7 @@ async function runMaintenance(taskId: string): Promise<void> {
         dependencyReport,
         resourceReport,
         suiteUpdateReport,
+        conventionAuditReport,
         agentAnalysis: analysisResult ?? undefined,
       },
       reportsDir,

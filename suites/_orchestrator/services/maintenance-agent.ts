@@ -3,6 +3,7 @@ import type { LogAnalysisResult } from './log-analyzer.ts';
 import type { DependencyReport } from './dependency-checker.ts';
 import type { ResourceReport } from './resource-monitor.ts';
 import type { SuiteUpdateReport } from './suite-update-checker.ts';
+import type { ConventionAuditReport } from './convention-auditor.ts';
 
 const log = createLogger('maintenance-agent');
 
@@ -11,6 +12,7 @@ export interface MaintenanceData {
   dependencyReport: DependencyReport;
   resourceReport: ResourceReport;
   suiteUpdateReport: SuiteUpdateReport;
+  conventionAuditReport?: ConventionAuditReport;
   runDate: string;
 }
 
@@ -23,6 +25,7 @@ export function buildMaintenancePrompt(data: MaintenanceData): string {
     buildDependencySection(data.dependencyReport),
     buildResourceSection(data.resourceReport),
     buildSuiteSection(data.suiteUpdateReport),
+    buildConventionSection(data.conventionAuditReport),
     buildOutputInstructions(),
   ];
 
@@ -153,6 +156,48 @@ function buildSuiteSection(report: SuiteUpdateReport): string {
   return lines.join('\n');
 }
 
+function buildConventionSection(report?: ConventionAuditReport): string {
+  const lines: string[] = ['## Convention Compliance'];
+
+  if (!report) {
+    lines.push('Convention audit was not run.');
+    return lines.join('\n');
+  }
+
+  const pct = report.totalChecked > 0
+    ? ((report.compliantCount / report.totalChecked) * 100).toFixed(0)
+    : '100';
+  lines.push(`Compliance: ${report.compliantCount}/${String(report.totalChecked)} resources (${pct}%)`);
+
+  if (report.violations.length === 0) {
+    lines.push('All resources are compliant with conventions.');
+    return lines.join('\n');
+  }
+
+  const errors = report.violations.filter((v) => v.severity === 'error');
+  const warnings = report.violations.filter((v) => v.severity === 'warning');
+
+  if (errors.length > 0) {
+    lines.push(`\n### Errors (${String(errors.length)})`);
+    for (const v of errors) {
+      lines.push(`- **${v.resourceType}/${v.resourceName}** [${v.rule}]: ${v.message}`);
+      lines.push(`  Fix: ${v.fix}`);
+    }
+  }
+
+  if (warnings.length > 0) {
+    lines.push(`\n### Warnings (${String(warnings.length)})`);
+    for (const v of warnings) {
+      lines.push(`- **${v.resourceType}/${v.resourceName}** [${v.rule}]: ${v.message}`);
+      lines.push(`  Fix: ${v.fix}`);
+    }
+  }
+
+  lines.push('\nPrioritize errors over warnings. Suggest specific fixes for each violation.');
+
+  return lines.join('\n');
+}
+
 function buildOutputInstructions(): string {
   return `## Output Format
 
@@ -182,6 +227,14 @@ If all up to date: "All packages are current."
 - Links to repositories
 
 If none: "No new suggestions at this time."
+
+## 🔍 Convention Compliance
+For each violation found:
+- Resource type and name
+- Rule violated and severity (error/warning)
+- Recommended fix
+
+If all compliant: "All resources follow conventions."
 
 ## 📊 Resource Status
 - Database, logs, sessions sizes

@@ -8,3 +8,7 @@ data/
 .playwright-mcp/
 .suite-debug/
 .playwright-cli
+suites/**/*.js
+suites/**/*.js.map
+suites/**/*.d.ts
+suites/**/*.d.ts.map
