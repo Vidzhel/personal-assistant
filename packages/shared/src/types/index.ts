@@ -9,3 +9,4 @@ export * from './email-rules.ts';
 export * from './knowledge.ts';
 export * from './insights.ts';
 export * from './integrations-config.ts';
+export * from './tasks.ts';

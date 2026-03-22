@@ -44,6 +44,7 @@ export interface ApprovedActionParams {
 export interface ActiveTaskInfo {
   taskId: string;
   skillName: string;
+  actionName?: string;
   sessionId?: string;
   projectId?: string;
   priority: string;
@@ -273,6 +274,7 @@ export class AgentManager {
         running.push({
           taskId: task.id,
           skillName: task.skillName,
+          actionName: task.actionName,
           sessionId: task.sessionId,
           projectId: task.projectId,
           priority: task.priority,
@@ -286,6 +288,7 @@ export class AgentManager {
     const queued: ActiveTaskInfo[] = this.queue.map((task) => ({
       taskId: task.id,
       skillName: task.skillName,
+      actionName: task.actionName,
       sessionId: task.sessionId,
       projectId: task.projectId,
       priority: task.priority,

@@ -1,7 +1,12 @@
+import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import { HTTP_STATUS } from '@raven/shared';
 import type { ApiDeps } from '../server.ts';
 import type { StoredMessage } from '../../session-manager/message-store.ts';
+
+const EnqueueBodySchema = z.object({
+  message: z.string().min(1),
+});
 
 const HEADING_PREFIX_LENGTH = 4;
 
@@ -186,5 +191,38 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
     const offset = req.query.offset ? parseInt(req.query.offset, 10) : undefined;
 
     return deps.messageStore.getMessages(req.params.id, { limit, offset });
+  });
+
+  // Enqueue a message to a session — will be processed as the next user turn
+  app.post<{ Params: { id: string } }>('/api/sessions/:id/enqueue', async (req, reply) => {
+    const session = deps.sessionManager.getSession(req.params.id);
+    if (!session) {
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Session not found' });
+    }
+
+    const result = EnqueueBodySchema.safeParse(req.body);
+    if (!result.success) {
+      return reply
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .send({ error: 'Invalid body', details: result.error.issues });
+    }
+
+    // Check if session has an active agent — reject if no agent is running or queued
+    const activeTasks = deps.agentManager.getActiveTasks();
+    const hasActiveAgent = [...activeTasks.running, ...activeTasks.queued].some(
+      (t) => t.sessionId === req.params.id,
+    );
+    if (!hasActiveAgent) {
+      return reply
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .send({ error: 'No active agent on this session — use chat instead' });
+    }
+
+    deps.messageStore.appendMessage(req.params.id, {
+      role: 'user',
+      content: result.data.message,
+    });
+
+    return { status: 'queued', sessionId: req.params.id };
   });
 }

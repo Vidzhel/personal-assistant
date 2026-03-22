@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { HTTP_STATUS } from '@raven/shared';
+import { HTTP_STATUS, type DatabaseInterface } from '@raven/shared';
 import type { FastifyInstance } from 'fastify';
 import type { ExecutionLogger } from '../../agent-manager/execution-logger.ts';
 import type { AgentManager } from '../../agent-manager/agent-manager.ts';
@@ -17,7 +17,7 @@ const TaskQuerySchema = z.object({
 
 export function registerAgentTaskRoutes(
   app: FastifyInstance,
-  deps: { executionLogger: ExecutionLogger; agentManager: AgentManager },
+  deps: { executionLogger: ExecutionLogger; agentManager: AgentManager; db?: DatabaseInterface },
 ): void {
   app.get<{
     Querystring: Record<string, string | undefined>;
@@ -33,7 +33,33 @@ export function registerAgentTaskRoutes(
   });
 
   app.get('/api/agent-tasks/active', async () => {
-    return deps.agentManager.getActiveTasks();
+    const active = deps.agentManager.getActiveTasks();
+
+    // Enrich with human-readable project names
+    if (deps.db) {
+      const projectIds = new Set<string>();
+      for (const t of [...active.running, ...active.queued]) {
+        if (t.projectId) projectIds.add(t.projectId);
+      }
+
+      const projectNames = new Map<string, string>();
+      for (const pid of projectIds) {
+        const row = deps.db.get<{ name: string }>('SELECT name FROM projects WHERE id = ?', pid);
+        if (row) projectNames.set(pid, row.name);
+      }
+
+      const enrich = (t: (typeof active.running)[number]): (typeof active.running)[number] & { projectName?: string } => ({
+        ...t,
+        ...(t.projectId && projectNames.has(t.projectId) && { projectName: projectNames.get(t.projectId) }),
+      });
+
+      return {
+        running: active.running.map(enrich),
+        queued: active.queued.map(enrich),
+      };
+    }
+
+    return active;
   });
 
   app.get<{

@@ -16,6 +16,22 @@
     "enabled": true
   },
   {
+    "id": "task-archival",
+    "name": "Task Archival",
+    "cron": "0 * * * *",
+    "taskType": "task-archival",
+    "skillName": "task-manager",
+    "enabled": true
+  },
+  {
+    "id": "ticktick-task-sync",
+    "name": "TickTick Task Sync",
+    "cron": "*/15 * * * *",
+    "taskType": "ticktick-task-sync",
+    "skillName": "task-management",
+    "enabled": true
+  },
+  {
     "id": "knowledge-retrospective",
     "name": "Weekly Knowledge Retrospective",
     "cron": "0 9 * * 1",

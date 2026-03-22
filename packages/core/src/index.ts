@@ -1,6 +1,12 @@
 import { resolve, dirname } from 'node:path';
 import { mkdirSync, existsSync } from 'node:fs';
-import { createLogger, initFileLogging, type RavenEvent, type RavenEventType } from '@raven/shared';
+import {
+  createLogger,
+  generateId,
+  initFileLogging,
+  type RavenEvent,
+  type RavenEventType,
+} from '@raven/shared';
 import { loadConfig, loadSuitesConfig, loadSchedulesConfig, projectRoot } from './config.ts';
 import { loadIntegrationsConfig } from './config/integrations-config.ts';
 import { initDatabase, createDbInterface, getDb } from './db/database.ts';
@@ -19,6 +25,9 @@ import { createAuditLog } from './permission-engine/audit-log.ts';
 import { createPendingApprovals } from './permission-engine/pending-approvals.ts';
 import { createExecutionLogger } from './agent-manager/execution-logger.ts';
 import { initializeBackend } from './agent-manager/agent-session.ts';
+import { createTaskStore } from './task-manager/task-store.ts';
+import { createTemplateLoader } from './task-manager/template-loader.ts';
+import { createTaskLifecycle } from './task-manager/task-lifecycle.ts';
 import { createPipelineEngine } from './pipeline-engine/pipeline-engine.ts';
 import { createPipelineStore } from './pipeline-engine/pipeline-store.ts';
 import { createPipelineScheduler } from './pipeline-engine/pipeline-scheduler.ts';
@@ -136,7 +145,61 @@ async function main(): Promise<void> {
   const executionLogger = createExecutionLogger({ db: getDb() });
   log.info('Execution logger initialized');
 
-  // 7e. Inject permission deps into service context for callback handler (lazy resolution)
+  // 7e. Init task store and template loader
+  const taskStore = createTaskStore({ db: dbInterface, eventBus: baseContext.eventBus });
+  const templatesDir = resolve(projectRoot, 'config/task-templates');
+  const templateLoader = createTemplateLoader({ templatesDir, taskStore });
+  log.info('Task manager initialized');
+
+  // Expose task store globally for suite services
+  (globalThis as unknown as Record<string, unknown>).__raven_task_store__ = taskStore;
+
+  // 7f. Archival schedule handler
+  eventBus.on('schedule:triggered', (event: RavenEvent) => {
+    if (event.type === 'schedule:triggered' && 'payload' in event) {
+      const payload = event.payload as { scheduleName?: string };
+      if (payload.scheduleName === 'Task Archival') {
+        const count = taskStore.archiveCompletedTasks();
+        if (count > 0) log.info(`Archived ${count} completed tasks`);
+      }
+    }
+  });
+
+  // 7g. Task lifecycle bridge — connects agent events to RavenTask lifecycle
+  const taskLifecycle = createTaskLifecycle({ eventBus: baseContext.eventBus, taskStore });
+  taskLifecycle.start();
+
+  // 7h. Task notification handler — post to Telegram "Tasks" topic
+  for (const eventType of ['task:created', 'task:completed'] as const) {
+    eventBus.on(eventType, (event: RavenEvent) => {
+      if (event.type !== 'task:created' && event.type !== 'task:completed') return;
+      const payload = event.payload as {
+        taskId: string;
+        title: string;
+        assignedAgentId?: string;
+        projectId?: string;
+      };
+      const action = event.type === 'task:created' ? 'Created' : 'Completed';
+      const parts = [`Task ${action}: ${payload.title}`];
+      if (payload.assignedAgentId) parts.push(`Agent: ${payload.assignedAgentId}`);
+      if (payload.projectId) parts.push(`Project: ${payload.projectId}`);
+
+      eventBus.emit({
+        id: generateId(),
+        timestamp: Date.now(),
+        source: 'task-manager',
+        type: 'notification',
+        payload: {
+          channel: 'telegram' as const,
+          title: `Task ${action}`,
+          body: parts.join('\n'),
+          topicName: 'Tasks',
+        },
+      });
+    });
+  }
+
+  // 7h. Inject permission deps into service context for callback handler (lazy resolution)
   Object.assign(baseContext.config, { pendingApprovals, auditLog });
 
   // 8. Init MCP manager
@@ -161,6 +224,9 @@ async function main(): Promise<void> {
 
   // 10b. Inject agentManager into service context for callback handler
   Object.assign(baseContext.config, { agentManager });
+
+  // Expose agent manager globally for suite services (ticktick-sync)
+  (globalThis as unknown as Record<string, unknown>).__raven_agent_manager__ = agentManager;
 
   // 11. Orchestrator — initialized after knowledge engine (step 12j) for context injection
 
@@ -331,6 +397,8 @@ async function main(): Promise<void> {
       knowledgeLifecycle,
       retrospective,
       db: dbInterface,
+      taskStore,
+      templateLoader,
       configuredSuiteCount,
       unsnoozableCategories: (suitesConfig['notifications']?.config?.unsnoozableCategories ??
         []) as string[],

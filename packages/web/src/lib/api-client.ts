@@ -145,6 +145,55 @@ export const api = {
     id: string,
     data: { name?: string; description?: string; skills?: string[]; systemPrompt?: string | null },
   ) => request<Project>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+
+  // Task management
+  getTasks: (params?: {
+    status?: string;
+    projectId?: string;
+    source?: string;
+    assignedAgentId?: string;
+    search?: string;
+    includeArchived?: boolean;
+    limit?: number;
+    offset?: number;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.status) qs.set('status', params.status);
+    if (params?.projectId) qs.set('projectId', params.projectId);
+    if (params?.source) qs.set('source', params.source);
+    if (params?.assignedAgentId) qs.set('assignedAgentId', params.assignedAgentId);
+    if (params?.search) qs.set('search', params.search);
+    if (params?.includeArchived) qs.set('includeArchived', 'true');
+    if (params?.limit) qs.set('limit', String(params.limit));
+    if (params?.offset) qs.set('offset', String(params.offset));
+    return request<RavenTaskRecord[]>(`/tasks?${qs}`);
+  },
+  getTask: (id: string) => request<RavenTaskDetail>(`/tasks/${id}`),
+  createTask: (data: {
+    title: string;
+    description?: string;
+    prompt?: string;
+    templateName?: string;
+    projectId?: string;
+    assignedAgentId?: string;
+  }) => request<RavenTaskRecord>('/tasks', { method: 'POST', body: JSON.stringify(data) }),
+  updateTask: (id: string, data: Record<string, unknown>) =>
+    request<RavenTaskRecord>(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  completeTask: (id: string, artifacts?: string[]) =>
+    request<RavenTaskRecord>(`/tasks/${id}/complete`, {
+      method: 'POST',
+      body: JSON.stringify({ artifacts }),
+    }),
+  getTaskCounts: (projectId?: string) => {
+    const qs = projectId ? `?projectId=${projectId}` : '';
+    return request<Record<string, number>>(`/tasks/counts${qs}`);
+  },
+  getTaskTemplates: () => request<TaskTemplateRecord[]>('/task-templates'),
+  enqueueMessage: (sessionId: string, message: string) =>
+    request(`/sessions/${sessionId}/enqueue`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    }),
 };
 
 export interface Project {
@@ -216,8 +265,10 @@ export interface TaskRecord {
 export interface ActiveTaskInfo {
   taskId: string;
   skillName: string;
+  actionName?: string;
   sessionId?: string;
   projectId?: string;
+  projectName?: string;
   priority: string;
   status: string;
   startedAt?: number;
@@ -387,4 +438,36 @@ export interface LogFile {
   name: string;
   size: number;
   modified: number;
+}
+
+export interface RavenTaskRecord {
+  id: string;
+  title: string;
+  description?: string;
+  prompt?: string;
+  status: string;
+  assignedAgentId?: string;
+  projectId?: string;
+  pipelineId?: string;
+  scheduleId?: string;
+  parentTaskId?: string;
+  source: string;
+  externalId?: string;
+  artifacts: string[];
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
+export interface RavenTaskDetail extends RavenTaskRecord {
+  subtasks: RavenTaskRecord[];
+}
+
+export interface TaskTemplateRecord {
+  name: string;
+  title: string;
+  description?: string;
+  prompt?: string;
+  defaultAgentId?: string;
+  projectId?: string;
 }

@@ -793,7 +793,11 @@ export type RavenEvent =
   | SnoozeProposalEvent
   | GDriveNewFileEvent
   | FinancialTransactionRecordedEvent
-  | FinancialSyncCompleteEvent;
+  | FinancialSyncCompleteEvent
+  | TaskCreatedEvent
+  | TaskUpdatedEvent
+  | TaskCompletedEvent
+  | TaskArchivedEvent;
 
 export type RavenEventType = RavenEvent['type'];
 
@@ -874,6 +878,46 @@ export const FinancialTransactionRecordedPayloadSchema = z.object({
   transactionDate: z.string(),
   ynabTransactionId: z.string().optional(),
 });
+
+export interface TaskCreatedEvent extends BaseEvent {
+  type: 'task:created';
+  payload: {
+    taskId: string;
+    title: string;
+    source: string;
+    projectId?: string;
+    assignedAgentId?: string;
+    parentTaskId?: string;
+  };
+}
+
+export interface TaskUpdatedEvent extends BaseEvent {
+  type: 'task:updated';
+  payload: {
+    taskId: string;
+    title: string;
+    changes: string[];
+  };
+}
+
+export interface TaskCompletedEvent extends BaseEvent {
+  type: 'task:completed';
+  payload: {
+    taskId: string;
+    title: string;
+    artifacts: string[];
+    assignedAgentId?: string;
+    projectId?: string;
+  };
+}
+
+export interface TaskArchivedEvent extends BaseEvent {
+  type: 'task:archived';
+  payload: {
+    taskId: string;
+    title: string;
+  };
+}
 
 export interface FinancialSyncCompleteEvent extends BaseEvent {
   type: 'financial:sync-complete';

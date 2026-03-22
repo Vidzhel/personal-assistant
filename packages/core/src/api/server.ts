@@ -40,6 +40,9 @@ import { registerKnowledgeRoutes } from './routes/knowledge.ts';
 import { registerNotificationPreferencesRoutes } from './routes/notification-preferences.ts';
 import { registerLogRoutes } from './routes/logs.ts';
 import { registerFinancialRoutes } from './routes/financial.ts';
+import { registerTaskRoutes } from './routes/tasks.ts';
+import type { TaskStore } from '../task-manager/task-store.ts';
+import type { TemplateLoader } from '../task-manager/template-loader.ts';
 import { registerSSERoutes } from './sse/stream.ts';
 import { registerWebSocketHandler } from './ws/handler.ts';
 
@@ -70,6 +73,8 @@ export interface ApiDeps {
   db?: DatabaseInterface;
   configuredSuiteCount: number;
   unsnoozableCategories?: string[];
+  taskStore?: TaskStore;
+  templateLoader?: TemplateLoader;
 }
 
 // eslint-disable-next-line max-lines-per-function -- server setup registers all route groups
@@ -104,6 +109,7 @@ export async function createApiServer(
   registerAgentTaskRoutes(app, {
     executionLogger: deps.executionLogger,
     agentManager: deps.agentManager,
+    db: deps.db,
   });
   registerPipelineRoutes(app, {
     pipelineEngine: deps.pipelineEngine,
@@ -127,6 +133,14 @@ export async function createApiServer(
       retrievalEngine: deps.retrievalEngine,
       knowledgeLifecycle: deps.knowledgeLifecycle,
       retrospective: deps.retrospective,
+    });
+  }
+
+  // Task management
+  if (deps.taskStore && deps.templateLoader) {
+    registerTaskRoutes(app, {
+      taskStore: deps.taskStore,
+      templateLoader: deps.templateLoader,
     });
   }
 
