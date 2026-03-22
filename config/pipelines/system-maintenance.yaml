@@ -1,0 +1,24 @@
+name: system-maintenance
+description: Periodic system health inspection, dependency audit, and improvement recommendations
+version: 1
+
+trigger:
+  type: cron
+  schedule: '0 2 * * 0'
+
+settings:
+  retry:
+    maxAttempts: 2
+    backoffMs: 10000
+  timeout: 900000
+  onError: stop
+
+nodes:
+  run-maintenance:
+    skill: orchestrator
+    action: maintenance:run
+    params: {}
+
+connections: []
+
+enabled: true

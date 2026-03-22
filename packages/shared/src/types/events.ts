@@ -803,7 +803,8 @@ export type RavenEvent =
   | TaskCompletedEvent
   | TaskArchivedEvent
   | ProjectCreatedEvent
-  | ProjectDeletedEvent;
+  | ProjectDeletedEvent
+  | MaintenanceReportGeneratedEvent;
 
 export type RavenEventType = RavenEvent['type'];
 
@@ -992,6 +993,21 @@ export interface NotificationEscalatedEvent extends BaseEvent {
     urgencyTier: UrgencyTier;
   };
 }
+
+export interface MaintenanceReportGeneratedEvent extends BaseEvent {
+  type: 'maintenance:report:generated';
+  payload: {
+    date: string;
+    filePath: string;
+    reportLength: number;
+  };
+}
+
+export const MaintenanceReportGeneratedPayloadSchema = z.object({
+  date: z.string(),
+  filePath: z.string(),
+  reportLength: z.number(),
+});
 
 export type Priority = 'low' | 'normal' | 'high' | 'urgent';
 

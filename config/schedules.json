@@ -38,5 +38,13 @@
     "taskType": "knowledge:retrospective",
     "skillName": "knowledge",
     "enabled": true
+  },
+  {
+    "id": "system-maintenance",
+    "name": "System Maintenance",
+    "cron": "0 2 * * 0",
+    "taskType": "system-maintenance",
+    "skillName": "orchestrator",
+    "enabled": true
   }
 ]

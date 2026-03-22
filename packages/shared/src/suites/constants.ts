@@ -107,6 +107,10 @@ export const SOURCE_FINANCIAL = 'financial';
 export const EVENT_FINANCIAL_TRANSACTION_RECORDED = 'financial:transaction:recorded' as const;
 export const EVENT_FINANCIAL_SYNC_COMPLETE = 'financial:sync-complete' as const;
 
+// Maintenance
+export const EVENT_MAINTENANCE_REPORT_GENERATED = 'maintenance:report:generated' as const;
+export const SOURCE_MAINTENANCE = 'maintenance';
+
 // Engagement tracking
 export const EVENT_ENGAGEMENT_STATE_CHANGED = 'engagement:state-changed' as const;
 export const SERVICE_ENGAGEMENT_TRACKER = 'engagement-tracker';
