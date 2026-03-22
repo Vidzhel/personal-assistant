@@ -97,7 +97,7 @@ describe('database', () => {
       now,
     );
     const all = dbi.all<{ id: string }>('SELECT * FROM projects');
-    expect(all).toHaveLength(2);
+    expect(all).toHaveLength(3); // p1, p2, + meta-project from migration 017
 
     // Delete
     dbi.run('DELETE FROM projects WHERE id = ?', 'p1');

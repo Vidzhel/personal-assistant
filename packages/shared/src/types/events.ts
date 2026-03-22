@@ -801,7 +801,9 @@ export type RavenEvent =
   | TaskCreatedEvent
   | TaskUpdatedEvent
   | TaskCompletedEvent
-  | TaskArchivedEvent;
+  | TaskArchivedEvent
+  | ProjectCreatedEvent
+  | ProjectDeletedEvent;
 
 export type RavenEventType = RavenEvent['type'];
 
@@ -947,6 +949,21 @@ export interface TaskArchivedEvent extends BaseEvent {
   payload: {
     taskId: string;
     title: string;
+  };
+}
+
+export interface ProjectCreatedEvent extends BaseEvent {
+  type: 'project:created';
+  payload: {
+    projectId: string;
+    projectName: string;
+  };
+}
+
+export interface ProjectDeletedEvent extends BaseEvent {
+  type: 'project:deleted';
+  payload: {
+    projectId: string;
   };
 }
 

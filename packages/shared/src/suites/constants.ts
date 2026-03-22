@@ -64,6 +64,7 @@ export const SOURCE_ORCHESTRATOR = 'orchestrator';
 
 // Project identifiers
 export const PROJECT_TELEGRAM_DEFAULT = 'telegram-default';
+export const META_PROJECT_ID = 'meta';
 
 // Skill name used for orchestrator tasks
 export const SKILL_ORCHESTRATOR = 'orchestrator';

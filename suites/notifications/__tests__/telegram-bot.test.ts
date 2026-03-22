@@ -47,6 +47,7 @@ vi.mock('@raven/shared', () => ({
   generateId: vi.fn(() => 'test-id'),
   SOURCE_TELEGRAM: 'telegram',
   PROJECT_TELEGRAM_DEFAULT: 'telegram-default',
+  META_PROJECT_ID: 'meta',
   createLogger: () => ({
     info: vi.fn(),
     warn: vi.fn(),
@@ -260,7 +261,7 @@ describe('telegram-bot service', () => {
       const payload = mockEventBus.emit.mock.calls[0][0].payload;
       expect(payload.topicId).toBe(999);
       expect(payload.topicName).toBeUndefined();
-      expect(payload.projectId).toBe('telegram-default');
+      expect(payload.projectId).toBe('meta');
     });
 
     it('handles messages without message_thread_id in group mode', async () => {

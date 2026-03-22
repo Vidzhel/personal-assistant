@@ -108,7 +108,11 @@ describe('Orchestrator', () => {
     const payload = (event as unknown as { payload: Record<string, unknown> }).payload;
     expect(payload.skillName).toBe('orchestrator');
     expect(payload.mcpServers).toEqual({}); // NO MCPs on orchestrator
-    expect(payload.prompt).toBe('Hello Raven');
+    // System access and tool use instructions are now prepended
+    expect(payload.prompt).toContain('Hello Raven');
+    expect(payload.prompt).toContain('System Access Control');
+    expect(payload.prompt).toContain('MUST NOT read or modify'); // default 'none' for regular projects
+    expect(payload.prompt).toContain('Use tools purposefully');
     expect(payload.priority).toBe('high');
   });
 
@@ -197,6 +201,47 @@ describe('Orchestrator', () => {
     const event = await taskRequestPromise;
     const payload = (event as unknown as { payload: Record<string, unknown> }).payload;
     expect(payload.skillName).toBe('daily-briefing');
+  });
+
+  it('meta-project chat includes management API instructions and read-write access', async () => {
+    const suiteRegistry = makeSuiteRegistry();
+    _orchestrator = new Orchestrator({
+      eventBus,
+      suiteRegistry,
+      sessionManager: new SessionManager(),
+      messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
+      port: 4000,
+    });
+
+    const taskRequestPromise = new Promise<RavenEvent>((resolve) => {
+      eventBus.on('agent:task:request', (e) => resolve(e));
+    });
+
+    eventBus.emit({
+      id: 'evt-meta',
+      timestamp: Date.now(),
+      source: 'test',
+      type: 'user:chat:message',
+      payload: { projectId: 'meta', message: 'Show me all projects' },
+    } as RavenEvent);
+
+    const event = await taskRequestPromise;
+    const payload = (event as unknown as { payload: Record<string, unknown> }).payload;
+    const prompt = payload.prompt as string;
+
+    // System access should be read-write for meta-project
+    expect(prompt).toContain('may read and modify system files');
+    // Should include meta-project management instructions
+    expect(prompt).toContain('Raven System meta-project agent');
+    expect(prompt).toContain('/api/projects');
+    expect(prompt).toContain('/api/pipelines');
+    expect(prompt).toContain('/api/agents');
+    expect(prompt).toContain('/api/schedules');
+    expect(prompt).toContain('/api/audit-logs');
+    // Tool use instructions
+    expect(prompt).toContain('Use tools purposefully');
+    // Original message
+    expect(prompt).toContain('Show me all projects');
   });
 
   it('schedule:triggered with unknown taskType logs warning and does not emit', async () => {

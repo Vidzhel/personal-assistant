@@ -87,7 +87,7 @@ describe('API routes', () => {
     } as any;
 
     registerHealthRoute(app, deps);
-    registerProjectRoutes(app);
+    registerProjectRoutes(app, { eventBus });
     registerChatRoute(app, deps);
     registerSuiteRoutes(app, deps);
     registerScheduleRoutes(app, deps);

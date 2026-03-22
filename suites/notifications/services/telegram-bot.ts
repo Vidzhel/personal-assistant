@@ -6,6 +6,7 @@ import {
   generateId,
   SOURCE_TELEGRAM,
   PROJECT_TELEGRAM_DEFAULT,
+  META_PROJECT_ID,
   type EventBusInterface,
   type LoggerInterface,
   type NotificationDeliverEvent,
@@ -222,8 +223,16 @@ function resolveTopicName(messageThreadId: number | undefined): string | undefin
 }
 
 function resolveProjectId(topicName: string | undefined): string {
+  // System topic and "Raven System" map to meta-project
+  if (topicName === 'System' || topicName === 'Raven System') {
+    return META_PROJECT_ID;
+  }
   if (topicName && topicConfig.topicToProject[topicName]) {
     return topicConfig.topicToProject[topicName];
+  }
+  // Messages without a topic association route to meta-project
+  if (!topicName) {
+    return META_PROJECT_ID;
   }
   return PROJECT_TELEGRAM_DEFAULT;
 }
@@ -847,6 +856,22 @@ const service: SuiteService = {
           logger.warn(`Failed to create topic for new agent "${e.payload.name}": ${err}`);
         });
       });
+
+      // Listen for project creation events and create Telegram topics for new projects
+      context.eventBus.on('project:created', (event: unknown) => {
+        const e = event as { payload: { projectId: string; projectName: string } };
+        ensureProjectTopic(e.payload.projectId, e.payload.projectName).catch((err: unknown) => {
+          logger.warn(`Failed to create topic for project "${e.payload.projectName}": ${err}`);
+        });
+      });
+
+      // Listen for project deletion events and close the Telegram topic
+      context.eventBus.on('project:deleted', (event: unknown) => {
+        const e = event as { payload: { projectId: string } };
+        closeProjectTopic(e.payload.projectId).catch((err: unknown) => {
+          logger.warn(`Failed to close topic for deleted project "${e.payload.projectId}": ${err}`);
+        });
+      });
     }
 
     bot.catch((err) => {
@@ -900,6 +925,51 @@ export async function ensureAgentTopic(agentName: string): Promise<number | unde
   } catch (err) {
     logger.warn(`Failed to create Telegram topic for agent "${agentName}": ${err}`);
     return undefined;
+  }
+}
+
+// Project topic thread management — create topics for newly created projects
+export async function ensureProjectTopic(
+  projectId: string,
+  projectName: string,
+): Promise<number | undefined> {
+  if (operatingMode !== 'group' || !bot) return undefined;
+
+  // Meta-project uses the System topic
+  if (projectId === META_PROJECT_ID) return topicConfig.systemTopicId;
+
+  // Check if already tracked
+  const existing = projectTopicMap.get(projectId);
+  if (existing !== undefined) return existing;
+
+  try {
+    const result = await bot.api.createForumTopic(groupId, projectName);
+    projectTopicMap.set(projectId, result.message_thread_id);
+    // Also update topicToProject mapping for incoming message routing
+    topicConfig.topicToProject[projectName] = projectId;
+    topicConfig.reverseMap[result.message_thread_id] = projectName;
+    logger.info(
+      `Created Telegram topic for project "${projectName}" (thread: ${result.message_thread_id})`,
+    );
+    return result.message_thread_id;
+  } catch (err) {
+    logger.warn(`Failed to create Telegram topic for project "${projectName}": ${err}`);
+    return undefined;
+  }
+}
+
+export async function closeProjectTopic(projectId: string): Promise<void> {
+  if (operatingMode !== 'group' || !bot) return;
+
+  const threadId = projectTopicMap.get(projectId);
+  if (threadId === undefined) return;
+
+  try {
+    await bot.api.closeForumTopic(groupId, threadId);
+    projectTopicMap.delete(projectId);
+    logger.info(`Closed Telegram topic for deleted project "${projectId}" (thread: ${threadId})`);
+  } catch (err) {
+    logger.warn(`Failed to close Telegram topic for project "${projectId}": ${err}`);
   }
 }
 

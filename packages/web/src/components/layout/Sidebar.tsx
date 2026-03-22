@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+const META_PROJECT_ID = 'meta';
+
 const nav = [
   { href: '/', label: 'Dashboard', icon: '~' },
   { href: '/projects', label: 'Projects', icon: '#' },
@@ -18,8 +20,11 @@ const nav = [
   { href: '/settings', label: 'Settings', icon: '&' },
 ];
 
+// eslint-disable-next-line max-lines-per-function -- sidebar with meta-project pinned section
 export function Sidebar() {
   const pathname = usePathname() ?? '/';
+  const metaHref = `/projects/${META_PROJECT_ID}`;
+  const metaActive = pathname === metaHref;
 
   return (
     <aside
@@ -34,6 +39,26 @@ export function Sidebar() {
           Personal Assistant
         </p>
       </div>
+
+      {/* Meta-project pinned at top */}
+      <div className="px-2 pt-2">
+        <Link
+          href={metaHref}
+          aria-current={metaActive ? 'page' : undefined}
+          className="flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors"
+          style={{
+            background: metaActive ? 'var(--bg-hover)' : 'transparent',
+            color: metaActive ? 'var(--accent)' : 'var(--text-muted)',
+          }}
+        >
+          <span className="w-4 text-center font-mono" title="System">
+            {'$'}
+          </span>
+          Raven System
+        </Link>
+      </div>
+      <div className="mx-3 border-b" style={{ borderColor: 'var(--border)' }} />
+
       <nav className="flex-1 p-2 space-y-1">
         {nav.map((item) => {
           const active =

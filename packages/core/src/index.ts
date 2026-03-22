@@ -47,6 +47,7 @@ import { createKnowledgeLifecycle } from './knowledge-engine/knowledge-lifecycle
 import { createRetrospective } from './knowledge-engine/retrospective.ts';
 import { loadKnowledgeDomainConfig } from './knowledge-engine/domain-config.ts';
 import { createNeo4jClient } from './knowledge-engine/neo4j-client.ts';
+import { getMetaProject } from './project-manager/meta-project.ts';
 
 const log = createLogger('raven');
 
@@ -78,6 +79,15 @@ async function main(): Promise<void> {
   // 3. Init database
   initDatabase(dbPath);
   const dbInterface = createDbInterface();
+
+  // 3b. Verify meta-project exists (seeded by migration 017)
+  try {
+    const meta = getMetaProject();
+    log.info(`Meta-project verified: "${meta.name}" (id: ${meta.id})`);
+  } catch (err) {
+    log.error(`Meta-project missing — migration 017 may not have run: ${err}`);
+    process.exit(1);
+  }
 
   // 4. Init event bus
   const eventBus = new EventBus();

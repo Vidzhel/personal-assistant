@@ -9,6 +9,8 @@ import {
   type NewEmailEvent,
   type ScheduleTriggeredEvent,
   type UserChatMessageEvent,
+  type Project,
+  type SystemAccessLevel,
 } from '@raven/shared';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { SuiteRegistry } from '../suite-registry/suite-registry.ts';
@@ -20,6 +22,12 @@ import type { NamedAgentStore } from '../agent-registry/named-agent-store.ts';
 import type { AgentResolver } from '../agent-registry/agent-resolver.ts';
 import { createKnowledgeAgentDefinition } from '../knowledge-engine/knowledge-agent.ts';
 import { getDb } from '../db/database.ts';
+import { isMetaProject } from '../project-manager/meta-project.ts';
+import {
+  resolveSystemAccessInstructions,
+  resolveToolUseInstructions,
+} from '../project-manager/system-access-gate.ts';
+import { createAuditLog } from '../permission-engine/audit-log.ts';
 
 const log = createLogger('orchestrator');
 
@@ -263,6 +271,41 @@ export class Orchestrator {
     // Merge knowledge agent into agent definitions
     agentDefinitions['knowledge-agent'] = createKnowledgeAgentDefinition(this.port);
 
+    // Look up project for system access level
+    const db = getDb();
+    const projectRow = db
+      .prepare('SELECT name, system_access FROM projects WHERE id = ?')
+      .get(projectId) as { name: string; system_access: string } | undefined;
+    const systemAccess = (projectRow?.system_access ?? 'none') as SystemAccessLevel;
+    const projectForAccess: Project = {
+      id: projectId,
+      name: projectRow?.name ?? projectId,
+      skills: [],
+      systemAccess,
+      createdAt: 0,
+      updatedAt: 0,
+    };
+
+    // Audit log: record system access configuration (only for non-default access levels)
+    if (systemAccess !== 'none') {
+      try {
+        const auditLog = createAuditLog(db);
+        auditLog.insert({
+          skillName: SKILL_ORCHESTRATOR,
+          actionName: 'system:access:configured',
+          permissionTier: 'green',
+          outcome: 'executed',
+          details: JSON.stringify({
+            projectId,
+            systemAccess,
+            projectName: projectRow?.name ?? projectId,
+          }),
+        });
+      } catch {
+        log.warn('Failed to write system access audit entry');
+      }
+    }
+
     // Build prompt with topic context and media context if available
     let prompt = message;
     if (topicName) {
@@ -280,6 +323,30 @@ export class Orchestrator {
     if (this.namedAgentStore) {
       prompt = `[System: You can manage named agents via the REST API at http://localhost:${this.port}/api/agents (GET, POST, PATCH, DELETE). Use this to create, update, or adjust agent configurations when asked.]\n\n${prompt}`;
     }
+
+    // Prepend meta-project management instructions (only for meta-project)
+    if (isMetaProject(projectId)) {
+      const metaInstructions = [
+        '[System: You are operating as the Raven System meta-project agent. You can manage the system through these REST APIs:',
+        `- GET/POST http://localhost:${this.port}/api/projects — List and create projects`,
+        `- PUT/DELETE http://localhost:${this.port}/api/projects/:id — Update and delete projects`,
+        `- GET/POST/PATCH/DELETE http://localhost:${this.port}/api/agents — Named agent management`,
+        `- GET http://localhost:${this.port}/api/pipelines — List pipelines`,
+        `- POST http://localhost:${this.port}/api/pipelines/:name/trigger — Trigger a pipeline`,
+        `- GET/POST http://localhost:${this.port}/api/schedules — Schedule management`,
+        `- GET http://localhost:${this.port}/api/suites — List available suites`,
+        `- GET http://localhost:${this.port}/api/skills — List registered skills`,
+        `- GET http://localhost:${this.port}/api/audit-logs — View audit trail`,
+        'Use these APIs to fulfill system management requests.]',
+      ].join('\n');
+      prompt = `${metaInstructions}\n\n${prompt}`;
+    }
+
+    // Prepend tool use instructions
+    prompt = `[System: ${resolveToolUseInstructions()}]\n\n${prompt}`;
+
+    // Prepend system access instructions (topmost layer)
+    prompt = `[System Access Control: ${resolveSystemAccessInstructions(projectForAccess)}]\n\n${prompt}`;
 
     const taskId = generateId();
 

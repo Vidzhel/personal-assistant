@@ -28,8 +28,12 @@ export const api = {
   },
   getProjects: () => request<Project[]>('/projects'),
   getProject: (id: string) => request<Project>(`/projects/${id}`),
-  createProject: (data: { name: string; description?: string; skills?: string[] }) =>
-    request<Project>('/projects', { method: 'POST', body: JSON.stringify(data) }),
+  createProject: (data: {
+    name: string;
+    description?: string;
+    skills?: string[];
+    systemAccess?: 'none' | 'read' | 'read-write';
+  }) => request<Project>('/projects', { method: 'POST', body: JSON.stringify(data) }),
   deleteProject: (id: string) => request(`/projects/${id}`, { method: 'DELETE' }),
   getSkills: () => request<Skill[]>('/skills'),
   getSchedules: () => request<Schedule[]>('/schedules'),
@@ -143,7 +147,13 @@ export const api = {
   },
   updateProject: (
     id: string,
-    data: { name?: string; description?: string; skills?: string[]; systemPrompt?: string | null },
+    data: {
+      name?: string;
+      description?: string;
+      skills?: string[];
+      systemPrompt?: string | null;
+      systemAccess?: 'none' | 'read' | 'read-write';
+    },
   ) => request<Project>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 
   // Task management
@@ -236,6 +246,8 @@ export interface Project {
   description: string | null;
   skills: string[];
   systemPrompt: string | null;
+  systemAccess?: 'none' | 'read' | 'read-write';
+  isMeta?: boolean;
   createdAt: number;
   updatedAt: number;
 }

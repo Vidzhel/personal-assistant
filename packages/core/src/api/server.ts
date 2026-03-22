@@ -98,7 +98,7 @@ export async function createApiServer(
 
   // REST routes
   registerHealthRoute(app, deps);
-  registerProjectRoutes(app);
+  registerProjectRoutes(app, { eventBus: deps.eventBus });
   registerSessionRoutes(app, deps);
   registerChatRoute(app, deps);
   registerSuiteRoutes(app, { ...deps, suiteScaffolder: deps.suiteScaffolder });
