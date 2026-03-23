@@ -5,8 +5,13 @@ import { useAppStore } from '@/stores/app-store';
 import { usePolling } from '@/hooks/usePolling';
 import { StatusCards } from '@/components/dashboard/StatusCards';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
+import { LifeSummary } from '@/components/dashboard/LifeSummary';
+import { InsightsPanel } from '@/components/dashboard/InsightsPanel';
+import { UpcomingEvents } from '@/components/dashboard/UpcomingEvents';
+import type { LifeDashboardData } from '@raven/shared';
 
 const HEALTH_REFRESH_INTERVAL_MS = 10000;
+const DASHBOARD_REFRESH_INTERVAL_MS = 30000;
 
 interface HealthResponse {
   status: string;
@@ -17,7 +22,7 @@ interface HealthResponse {
   };
 }
 
-// eslint-disable-next-line max-lines-per-function -- page component with layout and data fetching
+// eslint-disable-next-line max-lines-per-function -- life dashboard page with multiple data sources
 export default function DashboardPage() {
   const { health, projects, schedules, loading, fetchAll, fetchProjects, fetchSchedules } =
     useAppStore();
@@ -27,6 +32,10 @@ export default function DashboardPage() {
   }, [fetchAll]);
 
   const { data: healthData } = usePolling<HealthResponse>('/health', HEALTH_REFRESH_INTERVAL_MS);
+  const { data: dashboardData } = usePolling<LifeDashboardData>(
+    '/dashboard/life',
+    DASHBOARD_REFRESH_INTERVAL_MS,
+  );
 
   useEffect(() => {
     if (healthData) {
@@ -58,6 +67,36 @@ export default function DashboardPage() {
     );
   }
 
+  const summaryCards = dashboardData
+    ? [
+        {
+          label: 'Actions Today',
+          value: dashboardData.today.autonomousActionsCount,
+          href: '/activity',
+        },
+        {
+          label: 'Active Pipelines',
+          value: dashboardData.pipelines.activeCount,
+          href: '/pipelines',
+        },
+        {
+          label: 'Pending Approvals',
+          value: dashboardData.pendingApprovalsCount,
+          href: '/settings',
+          color: dashboardData.pendingApprovalsCount > 0 ? 'var(--warning, #f59e0b)' : undefined,
+        },
+        {
+          label: 'System Health',
+          value: dashboardData.systemHealth.status,
+          href: '/settings',
+          color:
+            dashboardData.systemHealth.status === 'ok'
+              ? 'var(--success)'
+              : 'var(--error)',
+        },
+      ]
+    : [];
+
   return (
     <div className="p-8 space-y-6">
       <div>
@@ -73,45 +112,15 @@ export default function DashboardPage() {
         scheduleCount={schedules.length}
       />
 
+      {dashboardData && <LifeSummary cards={summaryCards} />}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <ActivityFeed />
-        <div
-          className="rounded-lg"
-          style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
-        >
-          <div className="p-4 border-b" style={{ borderColor: 'var(--border)' }}>
-            <h2 className="text-sm font-semibold">Quick Actions</h2>
-          </div>
-          <div className="p-4 space-y-2">
-            <QuickAction
-              href="/projects"
-              label="Open Projects"
-              desc="Chat with Raven about your tasks"
-            />
-            <QuickAction
-              href="/schedules"
-              label="View Schedules"
-              desc="Morning digest and recurring tasks"
-            />
-            <QuickAction href="/skills" label="Manage Skills" desc="Configure integrations" />
-          </div>
+        <div className="space-y-6">
+          {dashboardData && <InsightsPanel insights={dashboardData.insights} />}
+          {dashboardData && <UpcomingEvents events={dashboardData.upcomingEvents} />}
         </div>
       </div>
     </div>
-  );
-}
-
-function QuickAction({ href, label, desc }: { href: string; label: string; desc: string }) {
-  return (
-    <a
-      href={href}
-      className="block p-3 rounded-lg transition-colors"
-      style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}
-    >
-      <p className="text-sm font-medium">{label}</p>
-      <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-        {desc}
-      </p>
-    </a>
   );
 }

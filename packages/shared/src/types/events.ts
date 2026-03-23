@@ -807,7 +807,8 @@ export type RavenEvent =
   | MaintenanceReportGeneratedEvent
   | ConfigChangeProposedEvent
   | ConfigChangeAppliedEvent
-  | ConfigChangeRejectedEvent;
+  | ConfigChangeRejectedEvent
+  | ConfigVersionRevertedEvent;
 
 export type RavenEventType = RavenEvent['type'];
 
@@ -1014,6 +1015,23 @@ export const MaintenanceReportGeneratedPayloadSchema = z.object({
 
 export type ConfigChangeAction = 'create' | 'update' | 'delete' | 'view';
 export type ConfigResourceType = 'pipeline' | 'suite' | 'agent' | 'schedule';
+
+export interface ConfigVersionRevertedEvent extends BaseEvent {
+  type: 'config:version:reverted';
+  payload: {
+    commitHash: string;
+    revertHash: string;
+    files: string[];
+    timestamp: string;
+  };
+}
+
+export const ConfigVersionRevertedPayloadSchema = z.object({
+  commitHash: z.string(),
+  revertHash: z.string(),
+  files: z.array(z.string()),
+  timestamp: z.string(),
+});
 
 export interface ConfigChangeProposedEvent extends BaseEvent {
   type: 'config:change:proposed';

@@ -49,6 +49,8 @@ import type { SuiteScaffolder } from '../suite-registry/suite-scaffolder.ts';
 import { registerSSERoutes } from './sse/stream.ts';
 import { registerWebSocketHandler } from './ws/handler.ts';
 import { registerConfigChangesRoutes, type ConfigChangeResolver } from './routes/config-changes.ts';
+import { registerConfigHistoryRoutes } from './routes/config-history.ts';
+import { registerDashboardRoutes } from './routes/dashboard.ts';
 
 const log = createLogger('api');
 
@@ -183,6 +185,18 @@ export async function createApiServer(
       resolver: deps.configChangeResolver,
     });
   }
+
+  // Config version history (git-based)
+  registerConfigHistoryRoutes(app, { eventBus: deps.eventBus });
+
+  // Life dashboard aggregation
+  registerDashboardRoutes(app, {
+    scheduler: deps.scheduler,
+    agentManager: deps.agentManager,
+    pendingApprovals: deps.pendingApprovals,
+    pipelineStore: deps.pipelineStore,
+    db: deps.db,
+  });
 
   // SSE streaming
   registerSSERoutes(app, {

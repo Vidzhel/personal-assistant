@@ -16,6 +16,7 @@ const nav = [
   { href: '/agents', label: 'Agents', icon: '^' },
   { href: '/skills', label: 'Skills', icon: '*' },
   { href: '/knowledge', label: 'Knowledge', icon: '?' },
+  { href: '/config-history', label: 'Config', icon: '{' },
   { href: '/logs', label: 'Logs', icon: '!' },
   { href: '/settings', label: 'Settings', icon: '&' },
 ];

@@ -142,6 +142,36 @@ export class Scheduler {
     return this.jobs.size;
   }
 
+  getUpcomingRuns(limit: number): Array<{ name: string; scheduledAt: string; type: string }> {
+    const db = getDb();
+    const rows = db
+      .prepare('SELECT * FROM schedules WHERE enabled = 1 ORDER BY name')
+      .all() as ScheduleDbRow[];
+
+    const upcoming: Array<{ name: string; scheduledAt: string; type: string; nextMs: number }> =
+      [];
+
+    for (const row of rows) {
+      const job = this.jobs.get(row.id);
+      const next = job?.nextRun();
+      if (next) {
+        upcoming.push({
+          name: row.name,
+          scheduledAt: next.toISOString(),
+          type: row.task_type,
+          nextMs: next.getTime(),
+        });
+      }
+    }
+
+    upcoming.sort((a, b) => a.nextMs - b.nextMs);
+    return upcoming.slice(0, limit).map(({ name, scheduledAt, type }) => ({
+      name,
+      scheduledAt,
+      type,
+    }));
+  }
+
   shutdown(): void {
     for (const job of this.jobs.values()) {
       job.stop();
