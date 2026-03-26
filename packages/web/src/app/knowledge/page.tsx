@@ -1,14 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useKnowledgeStore } from '@/stores/knowledge-store';
 import { KnowledgeView } from '@/components/knowledge/KnowledgeView';
 import { api } from '@/lib/api-client';
-import { useWebSocket } from '@/hooks/useWebSocket';
-import { useState } from 'react';
-
-const WS_CHANNELS = ['global'];
 
 function useFirstProjectId(): string | null {
   const [projectId, setProjectId] = useState<string | null>(null);

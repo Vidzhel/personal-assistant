@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import {
+  HTTP_STATUS,
   TaskCreateInputSchema,
   TaskUpdateInputSchema,
   TaskStatusValues,
@@ -8,8 +9,6 @@ import {
 } from '@raven/shared';
 import type { TaskStore } from '../../task-manager/task-store.ts';
 import type { TemplateLoader } from '../../task-manager/template-loader.ts';
-
-const HTTP_STATUS = { BAD_REQUEST: 400, NOT_FOUND: 404 } as const;
 
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
@@ -92,14 +91,14 @@ export function registerTaskRoutes(
     if (templateName) {
       try {
         const task = templateLoader.createTaskFromTemplate(templateName, input);
-        return reply.status(201).send(task);
+        return reply.status(HTTP_STATUS.CREATED).send(task);
       } catch (err) {
         return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: (err as Error).message });
       }
     }
 
     const task = taskStore.createTask(input);
-    return reply.status(201).send(task);
+    return reply.status(HTTP_STATUS.CREATED).send(task);
   });
 
   // PATCH /api/tasks/:id — update task fields

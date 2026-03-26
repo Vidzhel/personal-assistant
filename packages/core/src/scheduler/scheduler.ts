@@ -148,8 +148,7 @@ export class Scheduler {
       .prepare('SELECT * FROM schedules WHERE enabled = 1 ORDER BY name')
       .all() as ScheduleDbRow[];
 
-    const upcoming: Array<{ name: string; scheduledAt: string; type: string; nextMs: number }> =
-      [];
+    const upcoming: Array<{ name: string; scheduledAt: string; type: string; nextMs: number }> = [];
 
     for (const row of rows) {
       const job = this.jobs.get(row.id);

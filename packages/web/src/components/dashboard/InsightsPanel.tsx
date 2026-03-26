@@ -21,13 +21,12 @@ export function InsightsPanel({ insights }: InsightsPanelProps) {
       className="rounded-lg"
       style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
     >
-      <div className="p-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
+      <div
+        className="p-4 border-b flex items-center justify-between"
+        style={{ borderColor: 'var(--border)' }}
+      >
         <h2 className="text-sm font-semibold">Latest Insights</h2>
-        <Link
-          href="/knowledge"
-          className="text-xs"
-          style={{ color: 'var(--accent)' }}
-        >
+        <Link href="/knowledge" className="text-xs" style={{ color: 'var(--accent)' }}>
           View all
         </Link>
       </div>

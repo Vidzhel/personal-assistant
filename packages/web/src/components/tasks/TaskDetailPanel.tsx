@@ -26,6 +26,7 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleString();
 }
 
+// eslint-disable-next-line max-lines-per-function -- panel renders header, description, prompt, metadata rows, subtasks, and artifacts
 export function TaskDetailPanel() {
   const { selectedTask, clearSelection } = useTaskStore();
   if (!selectedTask) return null;

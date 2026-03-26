@@ -17,6 +17,7 @@ interface ConfigChange {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4001';
 
+// eslint-disable-next-line max-lines-per-function -- page component with filter, SSE, resolve, and change list rendering
 export default function ConfigPage() {
   const [changes, setChanges] = useState<ConfigChange[]>([]);
   const [filter, setFilter] = useState<string>('all');
@@ -129,6 +130,7 @@ export default function ConfigPage() {
         </p>
       ) : (
         <div className="space-y-3">
+          {/* eslint-disable-next-line max-lines-per-function -- change row renders action icon, status badge, diff/content preview, and resolve buttons */}
           {changes.map((change) => {
             const sc = statusColor(change.status);
             return (

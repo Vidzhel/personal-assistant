@@ -26,10 +26,7 @@ export function LifeSummary({ cards }: LifeSummaryProps) {
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
             {card.label}
           </p>
-          <p
-            className="text-2xl font-bold mt-1"
-            style={{ color: card.color ?? 'var(--text)' }}
-          >
+          <p className="text-2xl font-bold mt-1" style={{ color: card.color ?? 'var(--text)' }}>
             {card.value}
           </p>
         </Link>

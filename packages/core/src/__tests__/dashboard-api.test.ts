@@ -37,9 +37,7 @@ function createMockAgentManager(): AgentManager {
 
 function createMockPendingApprovals(): PendingApprovals {
   return {
-    query: () => [
-      { id: '1', actionName: 'test', skillName: 'test', requestedAt: '2026-03-23' },
-    ],
+    query: () => [{ id: '1', actionName: 'test', skillName: 'test', requestedAt: '2026-03-23' }],
     initialize: () => {},
   } as unknown as PendingApprovals;
 }
@@ -149,7 +147,7 @@ describe('GET /api/dashboard/life', () => {
     const db = getDb();
 
     db.prepare(
-      "INSERT INTO insights (id, pattern_key, title, body, confidence, status, service_sources, suppression_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      'INSERT INTO insights (id, pattern_key, title, body, confidence, status, service_sources, suppression_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     ).run(
       'ins-1',
       'meeting-overload',

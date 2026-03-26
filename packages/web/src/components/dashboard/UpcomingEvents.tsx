@@ -18,13 +18,12 @@ export function UpcomingEvents({ events }: UpcomingEventsProps) {
       className="rounded-lg"
       style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
     >
-      <div className="p-4 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
+      <div
+        className="p-4 border-b flex items-center justify-between"
+        style={{ borderColor: 'var(--border)' }}
+      >
         <h2 className="text-sm font-semibold">Upcoming Events</h2>
-        <Link
-          href="/schedules"
-          className="text-xs"
-          style={{ color: 'var(--accent)' }}
-        >
+        <Link href="/schedules" className="text-xs" style={{ color: 'var(--accent)' }}>
           View all
         </Link>
       </div>

@@ -13,6 +13,7 @@ export interface TaskLifecycle {
   stop: () => void;
 }
 
+// eslint-disable-next-line max-lines-per-function -- factory with start/stop handlers and event subscription logic
 export function createTaskLifecycle(deps: {
   eventBus: EventBusInterface;
   taskStore: TaskStore;

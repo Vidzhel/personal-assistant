@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { HTTP_STATUS } from '@raven/shared';
 import type { EventBus } from '../../event-bus/event-bus.ts';
 import {
   getConfigCommits,
@@ -6,19 +7,19 @@ import {
   revertConfigFile,
 } from '../../config-history/git-history.ts';
 
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 100;
+
 interface ConfigHistoryDeps {
   eventBus: EventBus;
 }
 
-export function registerConfigHistoryRoutes(
-  app: FastifyInstance,
-  deps: ConfigHistoryDeps,
-): void {
+export function registerConfigHistoryRoutes(app: FastifyInstance, deps: ConfigHistoryDeps): void {
   // GET /api/config-history — paginated list of config commits
   app.get<{
     Querystring: { limit?: string; offset?: string };
   }>('/api/config-history', async (request) => {
-    const limit = Math.min(Math.max(Number(request.query.limit) || 20, 1), 100);
+    const limit = Math.min(Math.max(Number(request.query.limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
     const offset = Math.max(Number(request.query.offset) || 0, 0);
     const commits = await getConfigCommits(limit, offset);
     return { commits, limit, offset };
@@ -33,7 +34,7 @@ export function registerConfigHistoryRoutes(
       return detail;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return reply.status(400).send({ error: message });
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: message });
     }
   });
 
@@ -43,20 +44,16 @@ export function registerConfigHistoryRoutes(
     Body: { file?: string };
   }>('/api/config-history/:hash/revert', async (request, reply) => {
     try {
-      const result = await revertConfigFile(
-        request.params.hash,
-        deps.eventBus,
-        request.body?.file,
-      );
+      const result = await revertConfigFile(request.params.hash, deps.eventBus, request.body?.file);
 
       if (!result.success) {
-        return reply.status(500).send(result);
+        return reply.status(HTTP_STATUS.INTERNAL_SERVER_ERROR).send(result);
       }
 
       return result;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return reply.status(400).send({ error: message });
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: message });
     }
   });
 }

@@ -29,11 +29,9 @@ interface CountRow {
   count: number;
 }
 
-// eslint-disable-next-line max-lines-per-function -- dashboard aggregation from multiple sources
-export function registerDashboardRoutes(
-  app: FastifyInstance,
-  deps: DashboardDeps,
-): void {
+// eslint-disable-next-line max-lines-per-function -- contains one large route handler aggregating multiple data sources
+export function registerDashboardRoutes(app: FastifyInstance, deps: DashboardDeps): void {
+  // eslint-disable-next-line max-lines-per-function, complexity -- aggregates data from multiple sources with conditional guards
   app.get('/api/dashboard/life', async (): Promise<LifeDashboardData> => {
     // Autonomous actions today
     const todayMidnight = new Date();

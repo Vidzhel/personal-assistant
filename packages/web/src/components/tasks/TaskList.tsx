@@ -45,6 +45,7 @@ function StatusSection({
   );
 }
 
+// eslint-disable-next-line max-lines-per-function, complexity -- builds filter query, polls tasks, groups by status, and renders sections with detail panel
 export function TaskList() {
   const { tasks, fetchTasks, fetchCounts, selectTask, selectedTask, filters } = useTaskStore();
 

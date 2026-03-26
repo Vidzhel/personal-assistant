@@ -84,6 +84,7 @@ describe('email-triage service', () => {
       db: {},
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
       config: { agentManager: mockAgentManager },
+      projectRoot: '/tmp/test-project',
     });
   }
 

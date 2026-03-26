@@ -21,7 +21,6 @@ function makeDbInterface(db: ReturnType<typeof getDb>) {
   };
 }
 
-// eslint-disable-next-line max-lines-per-function
 describe('Tasks API', () => {
   let tmpDir: string;
   let app: ReturnType<typeof Fastify>;

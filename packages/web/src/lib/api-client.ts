@@ -157,6 +157,7 @@ export const api = {
   ) => request<Project>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 
   // Task management
+  // eslint-disable-next-line complexity -- builds query string from many optional filter params
   getTasks: (params?: {
     status?: string;
     projectId?: string;

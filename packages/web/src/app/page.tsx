@@ -89,10 +89,7 @@ export default function DashboardPage() {
           label: 'System Health',
           value: dashboardData.systemHealth.status,
           href: '/settings',
-          color:
-            dashboardData.systemHealth.status === 'ok'
-              ? 'var(--success)'
-              : 'var(--error)',
+          color: dashboardData.systemHealth.status === 'ok' ? 'var(--success)' : 'var(--error)',
         },
       ]
     : [];

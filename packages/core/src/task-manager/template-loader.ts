@@ -21,6 +21,7 @@ export interface TemplateLoader {
   ) => RavenTask;
 }
 
+// eslint-disable-next-line max-lines-per-function -- factory with file loading, parsing, and CRUD methods
 export function createTemplateLoader(deps: {
   templatesDir: string;
   taskStore: TaskStore;

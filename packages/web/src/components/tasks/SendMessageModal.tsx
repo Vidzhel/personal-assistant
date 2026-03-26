@@ -3,11 +3,15 @@
 import { useState } from 'react';
 import { api } from '@/lib/api-client';
 
+const COPY_FEEDBACK_MS = 1500;
+const OPACITY_HALF = 0.5;
+
 interface SendMessageModalProps {
   sessionId: string;
   onClose: () => void;
 }
 
+// eslint-disable-next-line max-lines-per-function -- modal with sent/unsent states, textarea, and action buttons
 export function SendMessageModal({ sessionId, onClose }: SendMessageModalProps) {
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
@@ -19,7 +23,7 @@ export function SendMessageModal({ sessionId, onClose }: SendMessageModalProps) 
     try {
       await api.enqueueMessage(sessionId, message);
       setSent(true);
-      setTimeout(onClose, 1500);
+      setTimeout(onClose, COPY_FEEDBACK_MS);
     } catch {
       /* handle error silently */
     } finally {
@@ -65,7 +69,7 @@ export function SendMessageModal({ sessionId, onClose }: SendMessageModalProps) 
               style={{
                 background: 'var(--accent)',
                 color: 'white',
-                opacity: sending || !message.trim() ? 0.5 : 1,
+                opacity: sending || !message.trim() ? OPACITY_HALF : 1,
               }}
             >
               {sending ? 'Sending...' : 'Send'}

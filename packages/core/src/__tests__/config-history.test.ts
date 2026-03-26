@@ -14,11 +14,8 @@ vi.mock('node:util', () => ({
 const { execFile } = await import('node:child_process');
 const mockedExecFile = vi.mocked(execFile);
 
-const {
-  getConfigCommits,
-  getCommitDetail,
-  revertConfigFile,
-} = await import('../config-history/git-history.ts');
+const { getConfigCommits, getCommitDetail, revertConfigFile } =
+  await import('../config-history/git-history.ts');
 
 function mockExecResult(stdout: string): { stdout: string; stderr: string } {
   return { stdout, stderr: '' };
@@ -125,9 +122,7 @@ describe('revertConfigFile', () => {
     // git revert
     mockedExecFile.mockResolvedValueOnce(mockExecResult('') as any);
     // git diff-tree for files
-    mockedExecFile.mockResolvedValueOnce(
-      mockExecResult('config/permissions.json\n') as any,
-    );
+    mockedExecFile.mockResolvedValueOnce(mockExecResult('config/permissions.json\n') as any);
     // git rev-parse HEAD
     mockedExecFile.mockResolvedValueOnce(mockExecResult('newreverthash123\n') as any);
 
@@ -177,9 +172,7 @@ describe('revertConfigFile', () => {
 // --- API route integration tests (Task 6.3) ---
 
 const { default: Fastify } = await import('fastify');
-const { registerConfigHistoryRoutes } = await import(
-  '../api/routes/config-history.ts'
-);
+const { registerConfigHistoryRoutes } = await import('../api/routes/config-history.ts');
 
 describe('Config History API routes', () => {
   let app: ReturnType<typeof Fastify>;
@@ -247,9 +240,7 @@ describe('Config History API routes', () => {
     // git revert --no-edit
     mockedExecFile.mockResolvedValueOnce(mockExecResult('') as any);
     // git diff-tree for files
-    mockedExecFile.mockResolvedValueOnce(
-      mockExecResult('config/permissions.json\n') as any,
-    );
+    mockedExecFile.mockResolvedValueOnce(mockExecResult('config/permissions.json\n') as any);
     // git rev-parse HEAD
     mockedExecFile.mockResolvedValueOnce(mockExecResult('newreverthash\n') as any);
 

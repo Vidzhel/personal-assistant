@@ -2,6 +2,10 @@
 
 import type { RavenTaskRecord } from '@/lib/api-client';
 
+const MS_PER_MINUTE = 60000;
+const MINUTES_PER_HOUR = 60;
+const HOURS_PER_DAY = 24;
+
 const STATUS_COLORS: Record<string, string> = {
   todo: 'var(--text-muted)',
   in_progress: 'var(--warning)',
@@ -19,12 +23,12 @@ const SOURCE_LABELS: Record<string, string> = {
 
 function formatRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
+  const mins = Math.floor(diff / MS_PER_MINUTE);
   if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
+  if (mins < MINUTES_PER_HOUR) return `${mins}m ago`;
+  const hrs = Math.floor(mins / MINUTES_PER_HOUR);
+  if (hrs < HOURS_PER_DAY) return `${hrs}h ago`;
+  const days = Math.floor(hrs / HOURS_PER_DAY);
   return `${days}d ago`;
 }
 
@@ -34,6 +38,7 @@ interface TaskListCardProps {
   subtaskCount?: number;
 }
 
+// eslint-disable-next-line max-lines-per-function -- card renders title, description, source badge, relative time, project, agent, and subtask count
 export function TaskListCard({ task, onSelect, subtaskCount }: TaskListCardProps) {
   return (
     <button

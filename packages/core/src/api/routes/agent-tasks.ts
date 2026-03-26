@@ -15,6 +15,7 @@ const TaskQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 
+// eslint-disable-next-line max-lines-per-function -- multiple route handlers registered in one function
 export function registerAgentTaskRoutes(
   app: FastifyInstance,
   deps: { executionLogger: ExecutionLogger; agentManager: AgentManager; db?: DatabaseInterface },

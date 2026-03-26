@@ -8,6 +8,7 @@ const SOURCE_OPTIONS = ['manual', 'agent', 'template', 'ticktick', 'pipeline'] a
 
 const DEBOUNCE_MS = 300;
 
+// eslint-disable-next-line max-lines-per-function -- renders search input, status select, source select, and clear button with debounce logic
 export function TaskFilters() {
   const { filters, setFilters, clearFilters } = useTaskStore();
   const [searchInput, setSearchInput] = useState(filters.search ?? '');

@@ -132,6 +132,7 @@ async function enrichReferences(
   return result;
 }
 
+// eslint-disable-next-line max-lines-per-function -- multiple session route handlers with auth/validation logic
 export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void {
   app.get<{ Params: { id: string } }>('/api/projects/:id/sessions', async (req) => {
     return deps.sessionManager.getProjectSessions(req.params.id);

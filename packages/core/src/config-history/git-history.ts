@@ -10,6 +10,7 @@ const log = createLogger('config-history');
 const SHA_PATTERN = /^[0-9a-f]{7,40}$/i;
 const CONFIG_DIR = 'config/';
 const GIT_LOG_FORMAT = '%H|%aI|%an|%s';
+const SHORT_SHA_LENGTH = 7;
 
 function validateHash(hash: string): void {
   if (!SHA_PATTERN.test(hash)) {
@@ -26,10 +27,7 @@ function validateFilePath(filePath: string): void {
   }
 }
 
-export async function getConfigCommits(
-  limit: number,
-  offset: number,
-): Promise<ConfigCommit[]> {
+export async function getConfigCommits(limit: number, offset: number): Promise<ConfigCommit[]> {
   try {
     const { stdout } = await execFile('git', [
       'log',
@@ -121,10 +119,7 @@ export async function getCommitDetail(hash: string): Promise<ConfigCommitDetail>
   };
 }
 
-function parseFileDiffs(
-  rawDiff: string,
-  files: string[],
-): Array<{ file: string; diff: string }> {
+function parseFileDiffs(rawDiff: string, files: string[]): Array<{ file: string; diff: string }> {
   const diffs: Array<{ file: string; diff: string }> = [];
   const diffSections = rawDiff.split(/^diff --git /m).filter(Boolean);
 
@@ -145,6 +140,7 @@ function parseFileDiffs(
   return diffs;
 }
 
+// eslint-disable-next-line max-lines-per-function -- handles both single-file and full-commit revert paths with event emission
 export async function revertConfigFile(
   hash: string,
   eventBus: EventBus,
@@ -158,28 +154,19 @@ export async function revertConfigFile(
       validateFilePath(filePath);
 
       // Resolve absolute path from repo root
-      const { stdout: repoRoot } = await execFile('git', [
-        'rev-parse',
-        '--show-toplevel',
-      ]);
+      const { stdout: repoRoot } = await execFile('git', ['rev-parse', '--show-toplevel']);
       const { join } = await import('node:path');
       const absolutePath = join(repoRoot.trim(), filePath);
 
       // Restore previous version of specific file
-      await execFile('git', ['show', `${hash}~1:${filePath}`]).then(
-        async ({ stdout: content }) => {
-          const { writeFile } = await import('node:fs/promises');
-          await writeFile(absolutePath, content);
-        },
-      );
+      await execFile('git', ['show', `${hash}~1:${filePath}`]).then(async ({ stdout: content }) => {
+        const { writeFile } = await import('node:fs/promises');
+        await writeFile(absolutePath, content);
+      });
       await execFile('git', ['add', filePath]);
 
-      const shortHash = hash.slice(0, 7);
-      await execFile('git', [
-        'commit',
-        '-m',
-        `revert: ${filePath} from commit ${shortHash}`,
-      ]);
+      const shortHash = hash.slice(0, SHORT_SHA_LENGTH);
+      await execFile('git', ['commit', '-m', `revert: ${filePath} from commit ${shortHash}`]);
 
       reloadedConfigs.push(filePath);
     } else {
@@ -231,17 +218,19 @@ export async function revertConfigFile(
       },
     });
 
-    log.info(`Config reverted: ${hash.slice(0, 7)} → ${revertHash.slice(0, 7)} (${reloadedConfigs.join(', ')})`);
+    log.info(
+      `Config reverted: ${hash.slice(0, SHORT_SHA_LENGTH)} → ${revertHash.slice(0, SHORT_SHA_LENGTH)} (${reloadedConfigs.join(', ')})`,
+    );
 
     return {
       success: true,
-      message: `Reverted ${filePath ?? `commit ${hash.slice(0, 7)}`}`,
+      message: `Reverted ${filePath ?? `commit ${hash.slice(0, SHORT_SHA_LENGTH)}`}`,
       revertHash,
       reloadedConfigs,
     };
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
-    log.error(`Config revert failed for ${hash.slice(0, 7)}: ${errorMessage}`);
+    log.error(`Config revert failed for ${hash.slice(0, SHORT_SHA_LENGTH)}: ${errorMessage}`);
     return {
       success: false,
       message: `Revert failed: ${errorMessage}`,

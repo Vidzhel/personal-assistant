@@ -4,16 +4,22 @@ import { useState } from 'react';
 import { api, type ActiveTaskInfo } from '@/lib/api-client';
 import { SendMessageModal } from './SendMessageModal';
 
+const MS_PER_SECOND = 1000;
+const SECONDS_PER_MINUTE = 60;
+const MINUTES_PER_HOUR = 60;
+const ID_DISPLAY_LENGTH = 8;
+const OPACITY_HALF = 0.5;
+
 function formatElapsed(startMs?: number, createdMs?: number): string {
   const base = startMs ?? createdMs;
   if (!base) return '—';
   const elapsed = Date.now() - base;
-  const secs = Math.floor(elapsed / 1000);
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ${secs % 60}s`;
-  const hrs = Math.floor(mins / 60);
-  return `${hrs}h ${mins % 60}m`;
+  const secs = Math.floor(elapsed / MS_PER_SECOND);
+  if (secs < SECONDS_PER_MINUTE) return `${secs}s`;
+  const mins = Math.floor(secs / SECONDS_PER_MINUTE);
+  if (mins < MINUTES_PER_HOUR) return `${mins}m ${secs % SECONDS_PER_MINUTE}s`;
+  const hrs = Math.floor(mins / MINUTES_PER_HOUR);
+  return `${hrs}h ${mins % MINUTES_PER_HOUR}m`;
 }
 
 interface AgentMonitorCardProps {
@@ -22,6 +28,7 @@ interface AgentMonitorCardProps {
   onRefresh: () => void;
 }
 
+// eslint-disable-next-line max-lines-per-function, complexity -- card renders task info, session link, cancel/message actions, and modal
 export function AgentMonitorCard({ task, section, onRefresh }: AgentMonitorCardProps) {
   const [showMessage, setShowMessage] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -91,7 +98,7 @@ export function AgentMonitorCard({ task, section, onRefresh }: AgentMonitorCardP
           className="text-xs mt-1 inline-block"
           style={{ color: 'var(--accent)' }}
         >
-          Session {task.sessionId.slice(0, 8)}...
+          Session {task.sessionId.slice(0, ID_DISPLAY_LENGTH)}...
         </a>
       )}
 
@@ -101,7 +108,7 @@ export function AgentMonitorCard({ task, section, onRefresh }: AgentMonitorCardP
           onClick={handleCancel}
           disabled={cancelling}
           className="text-xs px-2 py-1 rounded"
-          style={{ color: 'var(--error)', opacity: cancelling ? 0.5 : 1 }}
+          style={{ color: 'var(--error)', opacity: cancelling ? OPACITY_HALF : 1 }}
         >
           {cancelling ? 'Cancelling...' : 'Terminate'}
         </button>

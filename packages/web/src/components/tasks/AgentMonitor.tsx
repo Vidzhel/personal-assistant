@@ -7,6 +7,8 @@ import { AgentMonitorCard } from './AgentMonitorCard';
 
 const ACTIVE_POLL_MS = 3000;
 const HISTORY_LIMIT = 20;
+const MS_PER_SECOND = 1000;
+const HISTORY_POLL_MULTIPLIER = 3;
 
 function RecentExecution({ task }: { task: TaskRecord }) {
   return (
@@ -22,15 +24,16 @@ function RecentExecution({ task }: { task: TaskRecord }) {
       <span style={{ color: 'var(--text-muted)' }}>{task.status}</span>
       {task.durationMs !== undefined && (
         <span className="font-mono" style={{ color: 'var(--text-muted)' }}>
-          {task.durationMs < 1000
+          {task.durationMs < MS_PER_SECOND
             ? `${task.durationMs}ms`
-            : `${(task.durationMs / 1000).toFixed(1)}s`}
+            : `${(task.durationMs / MS_PER_SECOND).toFixed(1)}s`}
         </span>
       )}
     </div>
   );
 }
 
+// eslint-disable-next-line max-lines-per-function, complexity -- renders running/queued/recent sections with conditional branches
 export function AgentMonitor() {
   const [showRecent, setShowRecent] = useState(false);
 
@@ -41,7 +44,7 @@ export function AgentMonitor() {
 
   const { data: recentTasks } = usePolling<TaskRecord[]>(
     `/agent-tasks?limit=${HISTORY_LIMIT}`,
-    ACTIVE_POLL_MS * 3,
+    ACTIVE_POLL_MS * HISTORY_POLL_MULTIPLIER,
   );
 
   const running = activeTasks?.running ?? [];

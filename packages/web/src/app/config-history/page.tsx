@@ -17,6 +17,9 @@ interface CommitDetail extends ConfigCommit {
 
 const API_BASE = process.env.NEXT_PUBLIC_CORE_API_URL || 'http://localhost:4001/api';
 const PAGE_SIZE = 20;
+const COMMIT_HASH_DISPLAY_LENGTH = 7;
+const TOAST_DURATION_MS = 4000;
+const OPACITY_HALF = 0.5;
 
 // eslint-disable-next-line max-lines-per-function -- page component with commit list, diff viewer, and revert
 export default function ConfigHistoryPage() {
@@ -72,7 +75,12 @@ export default function ConfigHistoryPage() {
 
   const handleRevert = useCallback(
     async (hash: string) => {
-      if (!confirm(`Revert commit ${hash.slice(0, 7)}? This will create a new commit.`)) return;
+      if (
+        !confirm(
+          `Revert commit ${hash.slice(0, COMMIT_HASH_DISPLAY_LENGTH)}? This will create a new commit.`,
+        )
+      )
+        return;
 
       setReverting(hash);
       try {
@@ -95,7 +103,7 @@ export default function ConfigHistoryPage() {
         });
       } finally {
         setReverting(null);
-        setTimeout(() => setToast(null), 4000);
+        setTimeout(() => setToast(null), TOAST_DURATION_MS);
       }
     },
     [fetchCommits, offset],
@@ -129,6 +137,7 @@ export default function ConfigHistoryPage() {
         <p style={{ color: 'var(--text-muted)' }}>No config commits found.</p>
       ) : (
         <div className="space-y-2">
+          {/* eslint-disable-next-line max-lines-per-function -- commit row renders hash, timestamp, files, revert button, and inline diff */}
           {commits.map((commit) => (
             <div
               key={commit.hash}
@@ -144,8 +153,13 @@ export default function ConfigHistoryPage() {
                   >
                     {commit.message || '(no message)'}
                   </button>
-                  <div className="flex items-center gap-3 mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
-                    <span className="font-mono">{commit.hash.slice(0, 7)}</span>
+                  <div
+                    className="flex items-center gap-3 mt-1 text-xs"
+                    style={{ color: 'var(--text-muted)' }}
+                  >
+                    <span className="font-mono">
+                      {commit.hash.slice(0, COMMIT_HASH_DISPLAY_LENGTH)}
+                    </span>
                     <span>{new Date(commit.timestamp).toLocaleString()}</span>
                     <span>{commit.author}</span>
                   </div>
@@ -171,7 +185,7 @@ export default function ConfigHistoryPage() {
                     background: 'var(--bg)',
                     border: '1px solid var(--border)',
                     color: 'var(--error)',
-                    opacity: reverting === commit.hash ? 0.5 : 1,
+                    opacity: reverting === commit.hash ? OPACITY_HALF : 1,
                   }}
                 >
                   {reverting === commit.hash ? 'Reverting...' : 'Revert'}
@@ -188,7 +202,10 @@ export default function ConfigHistoryPage() {
                     <div className="space-y-3">
                       {detail.diffs.map((d) => (
                         <div key={d.file}>
-                          <p className="text-xs font-mono mb-1" style={{ color: 'var(--text-muted)' }}>
+                          <p
+                            className="text-xs font-mono mb-1"
+                            style={{ color: 'var(--text-muted)' }}
+                          >
                             {d.file}
                           </p>
                           <DiffViewer diff={d.diff} />
@@ -214,7 +231,7 @@ export default function ConfigHistoryPage() {
               style={{
                 background: 'var(--bg-card)',
                 border: '1px solid var(--border)',
-                opacity: offset === 0 ? 0.5 : 1,
+                opacity: offset === 0 ? OPACITY_HALF : 1,
               }}
             >
               Previous
@@ -229,7 +246,7 @@ export default function ConfigHistoryPage() {
               style={{
                 background: 'var(--bg-card)',
                 border: '1px solid var(--border)',
-                opacity: commits.length < PAGE_SIZE ? 0.5 : 1,
+                opacity: commits.length < PAGE_SIZE ? OPACITY_HALF : 1,
               }}
             >
               Next

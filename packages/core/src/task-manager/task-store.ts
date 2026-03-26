@@ -12,7 +12,11 @@ import {
 const log = createLogger('task-store');
 
 const DEFAULT_QUERY_LIMIT = 50;
-const ARCHIVE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+const HOURS_PER_DAY = 24;
+const MINUTES_PER_HOUR = 60;
+const SECONDS_PER_MINUTE = 60;
+const MS_PER_SECOND = 1000;
+const ARCHIVE_THRESHOLD_MS = HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_MINUTE * MS_PER_SECOND;
 
 export interface TaskQueryFilters {
   status?: TaskStatus;
@@ -45,6 +49,7 @@ interface TaskRow {
   completed_at: string | null;
 }
 
+// eslint-disable-next-line complexity -- one conditional spread per optional column field
 function rowToTask(row: TaskRow): RavenTask {
   return {
     id: row.id,
@@ -100,6 +105,7 @@ export function createTaskStore(deps: {
   }
 
   return {
+    // eslint-disable-next-line complexity -- many optional fields mapped from input with null coalescing
     createTask(input: TaskCreateInput): RavenTask {
       const id = generateId();
       const now = new Date().toISOString();
@@ -252,6 +258,7 @@ export function createTaskStore(deps: {
       return rows.map(rowToTask);
     },
 
+    // eslint-disable-next-line complexity -- dynamic query builder with one branch per filter field
     queryTasks(filters: TaskQueryFilters): RavenTask[] {
       const conditions: string[] = [];
       const params: unknown[] = [];
