@@ -73,6 +73,7 @@ export interface AgentTask {
   agentDefinitions: Record<string, SubAgentDefinition>;
   knowledgeContext?: string;
   sessionReferencesContext?: string;
+  projectDataSourcesContext?: string;
   namedAgentId?: string;
   result?: string;
   durationMs?: number;

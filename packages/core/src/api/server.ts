@@ -51,6 +51,7 @@ import { registerWebSocketHandler } from './ws/handler.ts';
 import { registerConfigChangesRoutes, type ConfigChangeResolver } from './routes/config-changes.ts';
 import { registerConfigHistoryRoutes } from './routes/config-history.ts';
 import { registerDashboardRoutes } from './routes/dashboard.ts';
+import { registerProjectKnowledgeRoutes } from './routes/project-knowledge.ts';
 
 const log = createLogger('api');
 
@@ -162,6 +163,12 @@ export async function createApiServer(
       taskStore: deps.taskStore,
     });
   }
+
+  // Project knowledge (data sources + knowledge links)
+  registerProjectKnowledgeRoutes(app, {
+    neo4j: deps.neo4jClient,
+    knowledgeStore: deps.knowledgeStore,
+  });
 
   // Financial tracking
   registerFinancialRoutes(app);

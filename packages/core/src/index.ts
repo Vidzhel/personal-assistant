@@ -47,6 +47,7 @@ import { createKnowledgeLifecycle } from './knowledge-engine/knowledge-lifecycle
 import { createRetrospective } from './knowledge-engine/retrospective.ts';
 import { loadKnowledgeDomainConfig } from './knowledge-engine/domain-config.ts';
 import { createNeo4jClient } from './knowledge-engine/neo4j-client.ts';
+import { syncProjectNodes } from './knowledge-engine/project-knowledge.ts';
 import { getMetaProject } from './project-manager/meta-project.ts';
 
 const log = createLogger('raven');
@@ -320,6 +321,7 @@ async function main(): Promise<void> {
     password: config.NEO4J_PASSWORD,
   });
   await neo4jClient.ensureSchema();
+  await syncProjectNodes(neo4jClient);
   log.info(`Neo4j connected (${config.NEO4J_URI})`);
 
   // 12e. Init knowledge store and reindex

@@ -49,6 +49,7 @@ export interface AgentTaskRequestEvent extends BaseEvent {
     agentDefinitions?: Record<string, SubAgentDefinition>;
     knowledgeContext?: string;
     sessionReferencesContext?: string;
+    projectDataSourcesContext?: string;
     priority: Priority;
     sessionId?: string;
     projectId?: string;

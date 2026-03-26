@@ -1,5 +1,6 @@
 import { SKILL_ORCHESTRATOR, type AgentTask, type Project } from '@raven/shared';
 
+// eslint-disable-next-line max-lines-per-function -- assembles system prompt from multiple context blocks
 export function buildSystemPrompt(task: AgentTask, project?: Project): string {
   const parts: string[] = [
     'You are Raven, a personal assistant agent. You help the user manage tasks, emails, schedules, and daily planning.',
@@ -37,8 +38,24 @@ export function buildSystemPrompt(task: AgentTask, project?: Project): string {
     parts.push('', '## Related Sessions', task.sessionReferencesContext);
   }
 
+  if (task.projectDataSourcesContext) {
+    parts.push('', '## Project Data Sources', task.projectDataSourcesContext);
+  }
+
   if (project?.systemPrompt) {
     parts.push('', '## Project Context', project.systemPrompt);
+  }
+
+  // Knowledge discovery instruction for project sessions
+  if (task.projectId && task.skillName === SKILL_ORCHESTRATOR) {
+    parts.push(
+      '',
+      '## Knowledge Discovery',
+      'When you encounter valuable information during this conversation — patterns, findings,',
+      'external references, data locations, or decisions — you may propose adding it to project',
+      'knowledge. Format proposals as structured suggestions the user can approve, reject, or modify.',
+      'Do not re-suggest content similar to previously rejected proposals.',
+    );
   }
 
   return parts.join('\n');

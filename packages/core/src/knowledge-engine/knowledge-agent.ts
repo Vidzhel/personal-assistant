@@ -94,7 +94,33 @@ Returns: { taskId, status: "queued" }
 - For management operations, confirm destructive actions (delete, merge accept) before executing
 - Use the search endpoint for semantic queries and the list endpoint for browsing/filtering
 - Present tag hierarchies and domain structures when the user wants to understand their knowledge organization
-- When creating links, choose appropriate relationship types based on the content relationship`;
+- When creating links, choose appropriate relationship types based on the content relationship
+
+## Project Knowledge Management
+
+You can also manage project-scoped knowledge: data sources and knowledge bubble links.
+
+### Data Sources (per-project external references)
+
+**GET ${baseUrl}/api/projects/:id/data-sources** — List all data sources for a project
+**POST ${baseUrl}/api/projects/:id/data-sources** — Add a data source
+Body: { "uri": "...", "label": "...", "description": "optional", "sourceType": "gdrive|file|url|other" }
+**PUT ${baseUrl}/api/projects/:id/data-sources/:dsId** — Update a data source
+**DELETE ${baseUrl}/api/projects/:id/data-sources/:dsId** — Remove a data source
+
+### Knowledge Links (per-project bubble associations)
+
+**GET ${baseUrl}/api/projects/:id/knowledge-links** — List linked knowledge bubbles for a project
+**POST ${baseUrl}/api/projects/:id/knowledge-links** — Link a bubble to a project
+Body: { "bubbleId": "..." }
+**DELETE ${baseUrl}/api/projects/:id/knowledge-links/:bubbleId** — Unlink a bubble from a project
+
+### Knowledge Discovery Proposals
+
+**POST ${baseUrl}/api/projects/:id/knowledge-proposals/:action** — Handle a discovery proposal
+Body: { "action": "approve|reject|modify", "title": "...", "content": "...", "tags": [...], "contentHash": "...", "sessionId": "...", "modifiedContent": "optional", "reason": "optional" }
+
+The current project ID is available in the system prompt context. Use it for project-scoped operations.`;
 }
 
 export function createKnowledgeAgentDefinition(port: number): SubAgentDefinition {

@@ -254,6 +254,40 @@ export const api = {
         body: JSON.stringify(data),
       },
     ),
+
+  // Project data sources
+  getProjectDataSources: (projectId: string) =>
+    request<ProjectDataSource[]>(`/projects/${projectId}/data-sources`),
+  createProjectDataSource: (
+    projectId: string,
+    data: { uri: string; label: string; description?: string; sourceType: string },
+  ) =>
+    request<ProjectDataSource>(`/projects/${projectId}/data-sources`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateProjectDataSource: (
+    projectId: string,
+    dsId: string,
+    data: Partial<{ uri: string; label: string; description: string; sourceType: string }>,
+  ) =>
+    request<ProjectDataSource>(`/projects/${projectId}/data-sources/${dsId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deleteProjectDataSource: (projectId: string, dsId: string) =>
+    request(`/projects/${projectId}/data-sources/${dsId}`, { method: 'DELETE' }),
+
+  // Project knowledge links
+  getProjectKnowledgeLinks: (projectId: string) =>
+    request<LinkedBubbleSummary[]>(`/projects/${projectId}/knowledge-links`),
+  linkKnowledgeToProject: (projectId: string, bubbleId: string) =>
+    request(`/projects/${projectId}/knowledge-links`, {
+      method: 'POST',
+      body: JSON.stringify({ bubbleId }),
+    }),
+  unlinkKnowledgeFromProject: (projectId: string, bubbleId: string) =>
+    request(`/projects/${projectId}/knowledge-links/${bubbleId}`, { method: 'DELETE' }),
 };
 
 export interface Project {
@@ -559,4 +593,25 @@ export interface TaskTemplateRecord {
   prompt?: string;
   defaultAgentId?: string;
   projectId?: string;
+}
+
+export interface ProjectDataSource {
+  id: string;
+  projectId: string;
+  uri: string;
+  label: string;
+  description?: string;
+  sourceType: 'gdrive' | 'file' | 'url' | 'other';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LinkedBubbleSummary {
+  bubbleId: string;
+  title: string;
+  contentPreview: string;
+  tags: string[];
+  source: string;
+  linkedBy: string | null;
+  createdAt: string;
 }

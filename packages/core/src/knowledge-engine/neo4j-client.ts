@@ -106,6 +106,7 @@ export function createNeo4jClient(deps: Neo4jClientDeps): Neo4jClient {
       'CREATE CONSTRAINT tag_name IF NOT EXISTS FOR (t:Tag) REQUIRE t.name IS UNIQUE',
       'CREATE CONSTRAINT domain_name IF NOT EXISTS FOR (d:Domain) REQUIRE d.name IS UNIQUE',
       'CREATE CONSTRAINT cluster_id IF NOT EXISTS FOR (c:Cluster) REQUIRE c.id IS UNIQUE',
+      'CREATE CONSTRAINT project_node_id IF NOT EXISTS FOR (p:Project) REQUIRE p.id IS UNIQUE',
 
       // Range indexes on Bubble properties
       'CREATE INDEX bubble_updated_at IF NOT EXISTS FOR (b:Bubble) ON (b.updatedAt)',

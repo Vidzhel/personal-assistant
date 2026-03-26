@@ -29,6 +29,7 @@ import {
 } from '../project-manager/system-access-gate.ts';
 import { createAuditLog } from '../permission-engine/audit-log.ts';
 import { buildSessionReferencesContext } from '../session-manager/session-references.ts';
+import { buildProjectDataSourcesContext } from '../project-manager/project-data-sources.ts';
 
 const log = createLogger('orchestrator');
 
@@ -243,6 +244,14 @@ export class Orchestrator {
       log.warn(`Session references context retrieval failed: ${err}`);
     }
 
+    // Project data sources context for agent prompt
+    let projectDataSourcesContext: string | undefined;
+    try {
+      projectDataSourcesContext = buildProjectDataSourcesContext(projectId);
+    } catch (err) {
+      log.warn(`Project data sources context retrieval failed: ${err}`);
+    }
+
     // Pervasive context injection: query from user message text
     let knowledgeContext: string | undefined;
     if (this.contextInjector) {
@@ -378,6 +387,7 @@ export class Orchestrator {
         agentDefinitions, // Sub-agents carry the MCPs + knowledge agent
         knowledgeContext,
         sessionReferencesContext,
+        projectDataSourcesContext,
         priority: 'high',
         sessionId: session.id,
         projectId,
