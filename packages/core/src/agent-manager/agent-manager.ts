@@ -104,6 +104,7 @@ export class AgentManager {
       createdAt: Date.now(),
       actionName: payload.actionName,
       knowledgeContext: payload.knowledgeContext,
+      sessionReferencesContext: payload.sessionReferencesContext,
       namedAgentId: payload.namedAgentId,
     };
 

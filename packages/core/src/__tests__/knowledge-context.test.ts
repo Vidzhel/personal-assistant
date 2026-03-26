@@ -584,7 +584,8 @@ describe('Orchestrator context injection integration', () => {
     const payload = (event as any).payload;
     // Task still fires, just without knowledge context
     expect(payload.knowledgeContext).toBeUndefined();
-    expect(payload.prompt).toBe('Hello despite errors');
+    // Orchestrator prepends system instructions to the user message
+    expect(payload.prompt).toContain('Hello despite errors');
   });
 });
 

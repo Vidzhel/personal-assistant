@@ -174,8 +174,16 @@ describe('Embedding Engine', () => {
       const engine = createEmbeddingEngine({ neo4j, eventBus, knowledgeStore: store });
       engine.start();
 
-      const emitted: RavenEvent[] = [];
-      eventBus.on('knowledge:embedding:generated', (e: RavenEvent) => emitted.push(e));
+      const eventPromise = new Promise<RavenEvent>((resolve, reject) => {
+        const timeout = setTimeout(
+          () => reject(new Error('Timed out waiting for embedding event')),
+          5000,
+        );
+        eventBus.on('knowledge:embedding:generated', (e: RavenEvent) => {
+          clearTimeout(timeout);
+          resolve(e);
+        });
+      });
 
       eventBus.emit({
         id: 'test-1',
@@ -185,9 +193,8 @@ describe('Embedding Engine', () => {
         payload: { bubbleId: bubble.id, title: 'Test Bubble', filePath: 'test.md' },
       } as RavenEvent);
 
-      await new Promise((r) => setTimeout(r, 200));
-      expect(emitted).toHaveLength(1);
-      expect(emitted[0].type).toBe('knowledge:embedding:generated');
+      const event = await eventPromise;
+      expect(event.type).toBe('knowledge:embedding:generated');
     });
   });
 });

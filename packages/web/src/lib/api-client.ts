@@ -53,6 +53,21 @@ export const api = {
   createSession: (projectId: string) =>
     request<Session>(`/projects/${projectId}/sessions/new`, { method: 'POST' }),
   getSessionDebug: (sessionId: string) => request<SessionDebug>(`/sessions/${sessionId}/debug`),
+  updateSession: (
+    sessionId: string,
+    data: { name?: string; description?: string; pinned?: boolean },
+  ) => request<Session>(`/sessions/${sessionId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  getCrossReferences: (sessionId: string) =>
+    request<{ from: CrossSessionReference[]; to: CrossSessionReference[] }>(
+      `/sessions/${sessionId}/cross-references`,
+    ),
+  createCrossReference: (sessionId: string, data: { targetSessionId: string; context?: string }) =>
+    request<CrossSessionReference>(`/sessions/${sessionId}/cross-references`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  deleteCrossReference: (sessionId: string, refId: string) =>
+    request(`/sessions/${sessionId}/cross-references/${refId}`, { method: 'DELETE' }),
   getAgentTasks: (params?: {
     status?: string;
     skillName?: string;
@@ -281,6 +296,18 @@ export interface Session {
   lastActiveAt: number;
   turnCount: number;
   sdkSessionId?: string;
+  name?: string;
+  description?: string;
+  pinned?: boolean;
+  summary?: string;
+}
+
+export interface CrossSessionReference {
+  id: string;
+  sourceSessionId: string;
+  targetSessionId: string;
+  context?: string;
+  createdAt: string;
 }
 
 export interface SessionDebug {

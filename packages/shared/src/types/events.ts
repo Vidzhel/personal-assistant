@@ -48,6 +48,7 @@ export interface AgentTaskRequestEvent extends BaseEvent {
     mcpServers: Record<string, McpServerConfig>;
     agentDefinitions?: Record<string, SubAgentDefinition>;
     knowledgeContext?: string;
+    sessionReferencesContext?: string;
     priority: Priority;
     sessionId?: string;
     projectId?: string;

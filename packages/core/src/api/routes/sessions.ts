@@ -3,6 +3,11 @@ import type { FastifyInstance } from 'fastify';
 import { HTTP_STATUS } from '@raven/shared';
 import type { ApiDeps } from '../server.ts';
 import type { StoredMessage } from '../../session-manager/message-store.ts';
+import {
+  createReference,
+  getAllReferences,
+  deleteReference,
+} from '../../session-manager/session-references.ts';
 
 const EnqueueBodySchema = z.object({
   message: z.string().min(1),
@@ -193,6 +198,70 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
 
     return deps.messageStore.getMessages(req.params.id, { limit, offset });
   });
+
+  // Update session name, description, or pinned status
+  app.patch<{ Params: { id: string } }>('/api/sessions/:id', async (req, reply) => {
+    const session = deps.sessionManager.getSession(req.params.id);
+    if (!session) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Session not found' });
+
+    const schema = z.object({
+      name: z.string().optional(),
+      description: z.string().optional(),
+      pinned: z.boolean().optional(),
+    });
+    const result = schema.safeParse(req.body);
+    if (!result.success) {
+      return reply
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .send({ error: 'Invalid body', details: result.error.issues });
+    }
+
+    deps.sessionManager.updateSession(req.params.id, result.data);
+    return deps.sessionManager.getSession(req.params.id);
+  });
+
+  // Get cross-references for a session
+  app.get<{ Params: { id: string } }>('/api/sessions/:id/cross-references', async (req, reply) => {
+    const session = deps.sessionManager.getSession(req.params.id);
+    if (!session) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Session not found' });
+
+    return getAllReferences(req.params.id);
+  });
+
+  // Create a cross-reference between sessions
+  app.post<{ Params: { id: string } }>('/api/sessions/:id/cross-references', async (req, reply) => {
+    const session = deps.sessionManager.getSession(req.params.id);
+    if (!session) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Session not found' });
+
+    const schema = z.object({
+      targetSessionId: z.string().min(1),
+      context: z.string().optional(),
+    });
+    const result = schema.safeParse(req.body);
+    if (!result.success) {
+      return reply
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .send({ error: 'Invalid body', details: result.error.issues });
+    }
+
+    const target = deps.sessionManager.getSession(result.data.targetSessionId);
+    if (!target)
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Target session not found' });
+
+    const ref = createReference(req.params.id, result.data.targetSessionId, result.data.context);
+    return ref;
+  });
+
+  // Delete a cross-reference
+  app.delete<{ Params: { id: string; refId: string } }>(
+    '/api/sessions/:id/cross-references/:refId',
+    async (req, reply) => {
+      const deleted = deleteReference(req.params.refId);
+      if (!deleted)
+        return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Reference not found' });
+      return reply.status(HTTP_STATUS.NO_CONTENT).send();
+    },
+  );
 
   // Enqueue a message to a session — will be processed as the next user turn
   app.post<{ Params: { id: string } }>('/api/sessions/:id/enqueue', async (req, reply) => {

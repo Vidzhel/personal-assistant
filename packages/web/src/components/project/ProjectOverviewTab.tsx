@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { api, type Project, type Session } from '@/lib/api-client';
+import { api, type Session } from '@/lib/api-client';
 import { ProjectMemory } from './ProjectMemory';
 import type { ProjectTabProps } from './project-tab-registry';
 
@@ -24,28 +24,21 @@ function formatRelativeTime(ts: number): string {
 }
 
 // eslint-disable-next-line max-lines-per-function -- overview tab with stats, sessions, memory, and references
-export function ProjectOverviewTab({ projectId }: ProjectTabProps) {
-  const [project, setProject] = useState<Project | null>(null);
+export function ProjectOverviewTab({ projectId, project, onProjectUpdated }: ProjectTabProps) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    void api.getProject(projectId).then(setProject);
     void api.getProjectSessions(projectId).then(setSessions);
     void api.getTaskCounts(projectId).then(setCounts);
   }, [projectId]);
 
-  const handleMemorySaved = useCallback((prompt: string | null) => {
-    setProject((p) => (p ? { ...p, systemPrompt: prompt } : p));
-  }, []);
-
-  if (!project) {
-    return (
-      <div className="p-6" style={{ color: 'var(--text-muted)' }}>
-        Loading...
-      </div>
-    );
-  }
+  const handleMemorySaved = useCallback(
+    (prompt: string | null) => {
+      onProjectUpdated({ ...project, systemPrompt: prompt });
+    },
+    [project, onProjectUpdated],
+  );
 
   const recentSessions = sessions.slice(0, RECENT_SESSION_LIMIT);
   const totalTasks = Object.values(counts).reduce((a, b) => a + b, 0);
@@ -85,15 +78,28 @@ export function ProjectOverviewTab({ projectId }: ProjectTabProps) {
                 className="flex items-center justify-between p-3 rounded border"
                 style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
               >
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs" style={{ color: 'var(--text-muted)' }}>
-                    {s.id.slice(0, ID_DISPLAY_LENGTH)}
+                <div className="flex items-center gap-2 min-w-0">
+                  {s.pinned && <span title="Pinned">{'\u{1F4CC}'}</span>}
+                  <span className="text-sm truncate">
+                    {s.name || `Session ${s.id.slice(0, ID_DISPLAY_LENGTH)}`}
                   </span>
-                  <span className="text-sm">{s.turnCount} turns</span>
+                  <span className="text-xs shrink-0" style={{ color: 'var(--text-muted)' }}>
+                    {s.turnCount} turns
+                  </span>
                 </div>
-                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                  {formatRelativeTime(s.lastActiveAt ?? s.createdAt)}
-                </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  {s.description && (
+                    <span
+                      className="text-xs truncate max-w-[200px]"
+                      style={{ color: 'var(--text-muted)' }}
+                    >
+                      {s.description}
+                    </span>
+                  )}
+                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                    {formatRelativeTime(s.lastActiveAt ?? s.createdAt)}
+                  </span>
+                </div>
               </div>
             ))}
           </div>

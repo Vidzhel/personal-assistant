@@ -107,9 +107,67 @@ export class SessionManager {
   getProjectSessions(projectId: string): AgentSession[] {
     const db = getDb();
     const rows = db
-      .prepare('SELECT * FROM sessions WHERE project_id = ? ORDER BY last_active_at DESC')
+      .prepare(
+        'SELECT * FROM sessions WHERE project_id = ? ORDER BY pinned DESC, last_active_at DESC',
+      )
       .all(projectId) as SessionRow[];
     return rows.map(rowToSession);
+  }
+
+  updateSession(
+    sessionId: string,
+    updates: { name?: string; description?: string; pinned?: boolean },
+  ): void {
+    const db = getDb();
+    const sets: string[] = [];
+    const values: unknown[] = [];
+
+    if (updates.name !== undefined) {
+      sets.push('name = ?');
+      values.push(updates.name);
+    }
+    if (updates.description !== undefined) {
+      sets.push('description = ?');
+      values.push(updates.description);
+    }
+    if (updates.pinned !== undefined) {
+      sets.push('pinned = ?');
+      values.push(updates.pinned ? 1 : 0);
+    }
+
+    if (sets.length === 0) return;
+
+    sets.push('last_active_at = ?');
+    values.push(Date.now());
+    values.push(sessionId);
+
+    db.prepare(`UPDATE sessions SET ${sets.join(', ')} WHERE id = ?`).run(...values);
+  }
+
+  updateSummary(sessionId: string, summary: string): void {
+    const db = getDb();
+    db.prepare('UPDATE sessions SET summary = ? WHERE id = ?').run(summary, sessionId);
+  }
+
+  autoGenerateName(sessionId: string, firstMessage: string): void {
+    const db = getDb();
+    const row = db.prepare('SELECT name FROM sessions WHERE id = ?').get(sessionId) as
+      | { name: string | null }
+      | undefined;
+
+    if (!row || row.name !== null) return;
+
+    const maxLength = 60;
+    let name: string;
+    if (firstMessage.length <= maxLength) {
+      name = firstMessage;
+    } else {
+      const truncated = firstMessage.slice(0, maxLength);
+      const lastSpace = truncated.lastIndexOf(' ');
+      name = (lastSpace > 0 ? truncated.slice(0, lastSpace) : truncated) + '...';
+    }
+
+    db.prepare('UPDATE sessions SET name = ? WHERE id = ?').run(name, sessionId);
   }
 }
 
@@ -122,6 +180,10 @@ interface SessionRow {
   last_active_at: number;
   turn_count: number;
   current_task_id: string | null;
+  name: string | null;
+  description: string | null;
+  pinned: number;
+  summary: string | null;
 }
 
 function rowToSession(row: SessionRow): AgentSession {
@@ -134,5 +196,9 @@ function rowToSession(row: SessionRow): AgentSession {
     lastActiveAt: row.last_active_at,
     turnCount: row.turn_count,
     currentTaskId: row.current_task_id ?? undefined,
+    name: row.name ?? undefined,
+    description: row.description ?? undefined,
+    pinned: row.pinned === 1,
+    summary: row.summary ?? undefined,
   };
 }

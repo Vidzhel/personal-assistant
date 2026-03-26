@@ -28,6 +28,7 @@ import {
   resolveToolUseInstructions,
 } from '../project-manager/system-access-gate.ts';
 import { createAuditLog } from '../permission-engine/audit-log.ts';
+import { buildSessionReferencesContext } from '../session-manager/session-references.ts';
 
 const log = createLogger('orchestrator');
 
@@ -229,6 +230,19 @@ export class Orchestrator {
       content: message,
     });
 
+    // Auto-generate session name on first turn
+    if (session.turnCount === 0) {
+      this.sessionManager.autoGenerateName(session.id, message);
+    }
+
+    // Session cross-references context for agent prompt
+    let sessionReferencesContext: string | undefined;
+    try {
+      sessionReferencesContext = buildSessionReferencesContext(session.id);
+    } catch (err) {
+      log.warn(`Session references context retrieval failed: ${err}`);
+    }
+
     // Pervasive context injection: query from user message text
     let knowledgeContext: string | undefined;
     if (this.contextInjector) {
@@ -363,6 +377,7 @@ export class Orchestrator {
         mcpServers, // Resolved from named agent or all suites
         agentDefinitions, // Sub-agents carry the MCPs + knowledge agent
         knowledgeContext,
+        sessionReferencesContext,
         priority: 'high',
         sessionId: session.id,
         projectId,

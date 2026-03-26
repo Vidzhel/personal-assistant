@@ -59,7 +59,7 @@ describe('buildSystemPrompt', () => {
   });
 
   it('includes knowledge context section when knowledgeContext is provided', () => {
-    const prompt = buildSystemPrompt(makeTask(), undefined, 'Some knowledge content');
+    const prompt = buildSystemPrompt(makeTask({ knowledgeContext: 'Some knowledge content' }));
     expect(prompt).toContain('## Relevant Knowledge');
     expect(prompt).toContain('Some knowledge content');
   });
@@ -70,7 +70,7 @@ describe('buildSystemPrompt', () => {
   });
 
   it('does not include knowledge section when knowledgeContext is empty string', () => {
-    const prompt = buildSystemPrompt(makeTask(), undefined, '');
+    const prompt = buildSystemPrompt(makeTask({ knowledgeContext: '' }));
     expect(prompt).not.toContain('Relevant Knowledge');
   });
 
@@ -84,12 +84,25 @@ describe('buildSystemPrompt', () => {
       updatedAt: Date.now(),
     };
 
-    const prompt = buildSystemPrompt(makeTask(), project, 'Knowledge info');
+    const prompt = buildSystemPrompt(makeTask({ knowledgeContext: 'Knowledge info' }), project);
     const knowledgeIdx = prompt.indexOf('## Relevant Knowledge');
     const projectIdx = prompt.indexOf('## Project Context');
     expect(knowledgeIdx).toBeGreaterThan(-1);
     expect(projectIdx).toBeGreaterThan(-1);
     expect(knowledgeIdx).toBeLessThan(projectIdx);
+  });
+
+  it('includes session references context when provided', () => {
+    const prompt = buildSystemPrompt(
+      makeTask({ sessionReferencesContext: '- **Session A**: Summary here' }),
+    );
+    expect(prompt).toContain('## Related Sessions');
+    expect(prompt).toContain('Session A');
+  });
+
+  it('does not include session references when not provided', () => {
+    const prompt = buildSystemPrompt(makeTask());
+    expect(prompt).not.toContain('Related Sessions');
   });
 });
 

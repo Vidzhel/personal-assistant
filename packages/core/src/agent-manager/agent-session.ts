@@ -243,7 +243,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       };
     }
 
-    const systemPrompt = buildSystemPrompt(task, undefined, task.knowledgeContext);
+    const systemPrompt = buildSystemPrompt(task);
 
     // Compute allowed tools: base tools + MCP wildcards + Agent delegation
     const allowedTools = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'];

@@ -179,10 +179,12 @@ async function buildGraphData(
   }>(
     `MATCH (b:Bubble) ${whereClause}
      OPTIONAL MATCH (b)-[r:LINKED_TO]-()
+     OPTIONAL MATCH (b)-[:HAS_TAG]->(tag:Tag)
+     WITH b, count(DISTINCT r) as degree, collect(DISTINCT tag.name) as tagNames
      RETURN b.id as id, b.title as title, b.permanence as permanence,
-            b.tags as tags, b.domains as domains, b.clusterLabel as clusterLabel,
+            tagNames as tags, b.domains as domains, b.clusterLabel as clusterLabel,
             b.createdAt as createdAt, b.updatedAt as updatedAt,
-            b.lastAccessedAt as lastAccessedAt, count(r) as degree`,
+            b.lastAccessedAt as lastAccessedAt, degree`,
     filterParams,
   );
 

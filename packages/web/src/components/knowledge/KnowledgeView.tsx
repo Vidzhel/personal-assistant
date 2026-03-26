@@ -21,6 +21,7 @@ export function KnowledgeView({ projectId }: KnowledgeViewProps) {
     const id = ++fetchRef.current;
     setLoading(true);
     try {
+      // TODO: backend /knowledge/graph doesn't support projectId filtering yet
       const data = await api.getKnowledgeGraph({ view: viewMode });
       if (id === fetchRef.current) {
         setGraphData(data.nodes, data.edges);

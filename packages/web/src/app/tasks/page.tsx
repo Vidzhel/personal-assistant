@@ -1,7 +1,9 @@
 'use client';
 
+import { useState } from 'react';
 import { useTaskStore } from '@/stores/task-store';
 import { TaskList } from '@/components/tasks/TaskList';
+import { KanbanBoard } from '@/components/tasks/KanbanBoard';
 import { AgentMonitor } from '@/components/tasks/AgentMonitor';
 
 const TABS = [
@@ -9,8 +11,37 @@ const TABS = [
   { key: 'monitor', label: 'Agent Monitor' },
 ] as const;
 
+type TaskViewMode = 'list' | 'kanban';
+
+function ViewToggle({
+  viewMode,
+  onChangeView,
+}: {
+  viewMode: TaskViewMode;
+  onChangeView: (mode: TaskViewMode) => void;
+}) {
+  return (
+    <div className="ml-auto flex gap-1 mb-px">
+      {(['list', 'kanban'] as const).map((mode) => (
+        <button
+          key={mode}
+          onClick={() => onChangeView(mode)}
+          className="px-2 py-1 text-xs rounded transition-colors"
+          style={{
+            background: viewMode === mode ? 'var(--bg-hover)' : 'transparent',
+            color: viewMode === mode ? 'var(--text)' : 'var(--text-muted)',
+          }}
+        >
+          {mode === 'list' ? 'List' : 'Board'}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function TasksPage() {
   const { tab, setTab } = useTaskStore();
+  const [viewMode, setViewMode] = useState<TaskViewMode>('list');
 
   return (
     <div className="p-8 space-y-6">
@@ -24,7 +55,7 @@ export default function TasksPage() {
       </div>
 
       {/* Tab bar */}
-      <div className="flex gap-1 border-b" style={{ borderColor: 'var(--border)' }}>
+      <div className="flex items-center gap-1 border-b" style={{ borderColor: 'var(--border)' }}>
         {TABS.map((t) => (
           <button
             key={t.key}
@@ -38,10 +69,21 @@ export default function TasksPage() {
             {t.label}
           </button>
         ))}
+        {tab === 'tasks' && <ViewToggle viewMode={viewMode} onChangeView={setViewMode} />}
       </div>
 
       {/* Tab content */}
-      {tab === 'tasks' ? <TaskList /> : <AgentMonitor />}
+      {tab === 'tasks' ? (
+        viewMode === 'list' ? (
+          <TaskList />
+        ) : (
+          <div style={{ height: 'calc(100vh - 220px)' }}>
+            <KanbanBoard />
+          </div>
+        )
+      ) : (
+        <AgentMonitor />
+      )}
     </div>
   );
 }

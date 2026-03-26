@@ -46,6 +46,18 @@ export interface AgentSession {
   lastActiveAt: number;
   turnCount: number;
   currentTaskId?: string;
+  name?: string;
+  description?: string;
+  pinned?: boolean;
+  summary?: string;
+}
+
+export interface SessionReference {
+  id: string;
+  sourceSessionId: string;
+  targetSessionId: string;
+  context?: string;
+  createdAt: string;
 }
 
 export interface AgentTask {
@@ -60,6 +72,7 @@ export interface AgentTask {
   mcpServers: Record<string, McpServerConfig>;
   agentDefinitions: Record<string, SubAgentDefinition>;
   knowledgeContext?: string;
+  sessionReferencesContext?: string;
   namedAgentId?: string;
   result?: string;
   durationMs?: number;

@@ -67,10 +67,10 @@ export function KanbanBoard({ projectId }: KanbanBoardProps) {
         await api.updateTask(taskId, { status: newStatus });
       } catch {
         // Revert on failure
-        if (projectId) {
-          const fresh = await api.getTasks({ projectId });
-          setTasks(fresh);
-        }
+        const qs: Record<string, string> = {};
+        if (projectId) qs.projectId = projectId;
+        const fresh = await api.getTasks(qs);
+        setTasks(fresh);
       }
     },
     [projectId],

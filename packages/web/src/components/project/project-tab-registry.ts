@@ -1,4 +1,5 @@
 import type { ComponentType } from 'react';
+import type { Project } from '@/lib/api-client';
 import { ProjectOverviewTab } from './ProjectOverviewTab';
 import { ProjectTasksTab } from './ProjectTasksTab';
 import { ProjectKnowledgeTab } from './ProjectKnowledgeTab';
@@ -7,6 +8,8 @@ import { ProjectSessionsTab } from './ProjectSessionsTab';
 export interface ProjectTabProps {
   projectId: string;
   projectName: string;
+  project: Project;
+  onProjectUpdated: (project: Project) => void;
   onNewSession: () => Promise<void>;
 }
 

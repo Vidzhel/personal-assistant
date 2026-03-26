@@ -126,6 +126,8 @@ export default function ProjectPage() {
           <ActiveComponent
             projectId={id}
             projectName={project.name}
+            project={project}
+            onProjectUpdated={setProject}
             onNewSession={handleNewSession}
           />
         )}
