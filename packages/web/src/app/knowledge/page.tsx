@@ -1,15 +1,12 @@
 'use client';
 
-import { useEffect, useCallback, useRef, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useKnowledgeStore } from '@/stores/knowledge-store';
-import { KnowledgeGraph } from '@/components/knowledge/KnowledgeGraph';
-import { GraphControls } from '@/components/knowledge/GraphControls';
-import { BubbleDetailPanel } from '@/components/knowledge/BubbleDetailPanel';
-import { BulkActionBar } from '@/components/knowledge/BulkActionBar';
-import { GraphChatPanel } from '@/components/knowledge/GraphChatPanel';
+import { KnowledgeView } from '@/components/knowledge/KnowledgeView';
 import { api } from '@/lib/api-client';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { useState } from 'react';
 
 const WS_CHANNELS = ['global'];
 
@@ -28,23 +25,8 @@ function useFirstProjectId(): string | null {
   return projectId;
 }
 
-function useWsRefetch(fetchGraph: () => void): void {
-  const channels = useMemo(() => WS_CHANNELS, []);
-  const { messages } = useWebSocket(channels);
-  const lastMsgCount = useRef(0);
-
-  useEffect(() => {
-    if (messages.length > lastMsgCount.current) {
-      lastMsgCount.current = messages.length;
-      void fetchGraph();
-    }
-  }, [messages.length, fetchGraph]);
-}
-
 export default function KnowledgePage() {
-  const { viewMode, setGraphData, setLoading, selectedNodeIds, setHighlightedNodeIds } =
-    useKnowledgeStore();
-  const fetchRef = useRef(0);
+  const { setHighlightedNodeIds } = useKnowledgeStore();
   const projectId = useFirstProjectId();
   const searchParams = useSearchParams();
 
@@ -57,37 +39,5 @@ export default function KnowledgePage() {
     }
   }, [searchParams, setHighlightedNodeIds]);
 
-  const fetchGraph = useCallback(async () => {
-    const id = ++fetchRef.current;
-    setLoading(true);
-    try {
-      const data = await api.getKnowledgeGraph({ view: viewMode });
-      if (id === fetchRef.current) {
-        setGraphData(data.nodes, data.edges);
-      }
-    } finally {
-      if (id === fetchRef.current) setLoading(false);
-    }
-  }, [viewMode, setGraphData, setLoading]);
-
-  useEffect(() => {
-    void fetchGraph();
-  }, [fetchGraph]);
-
-  useWsRefetch(fetchGraph);
-
-  const showDetail = selectedNodeIds.length === 1;
-  const showBulk = selectedNodeIds.length >= 2;
-
-  return (
-    <div className="flex flex-col h-full">
-      <GraphControls onRefetch={fetchGraph} />
-      <div className="flex-1 min-h-0 relative">
-        <KnowledgeGraph />
-        {showBulk && <BulkActionBar onRefetch={fetchGraph} />}
-        {showDetail && <BubbleDetailPanel onRefetch={fetchGraph} />}
-        <GraphChatPanel projectId={projectId} onRefetch={fetchGraph} />
-      </div>
-    </div>
-  );
+  return <KnowledgeView projectId={projectId ?? undefined} />;
 }

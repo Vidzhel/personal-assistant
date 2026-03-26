@@ -1722,3 +1722,227 @@ So that I have full control over system configuration and complete visibility in
 **Given** any dashboard section has actionable items
 **When** the user clicks through
 **Then** they navigate to the relevant detailed page (activity, pipelines, permissions, etc.)
+
+### Story 10.7: Project Hub & Landing Page Redesign
+
+As the system operator,
+I want a project landing page that gives me a full overview before I start chatting,
+So that I can see what's happening in a project, manage it, and jump into the right session — not just be dropped into a blank chat.
+
+**Acceptance Criteria:**
+
+**Given** the user opens a project in the dashboard
+**When** the project detail page loads
+**Then** it shows the **Overview** tab by default with: project name (editable inline), description (editable inline), list of enabled suites/skills, and a summary of recent activity
+
+**Given** the project overview tab is displayed
+**When** the user looks at the sessions section
+**Then** it shows the latest sessions ordered by recency, each displaying: name (or auto-generated summary), description snippet, turn count, last active timestamp, and pinned status
+
+**Given** the project overview tab is displayed
+**When** the user scrolls to the bottom
+**Then** a "New Chat" input widget is visible — typing a message and submitting creates a new session and navigates to it with the message sent
+
+**Given** the project detail page is loaded
+**When** the user looks at the tab bar
+**Then** tabs are available: **Overview** | **Tasks** | **Knowledge** | **Sessions**
+
+**Given** the user selects the **Tasks** tab within a project
+**When** the tab loads
+**Then** it shows a kanban board view for tasks scoped to this project only — columns: To Do, In Progress, Completed (with optional Archived toggle)
+
+**Given** the kanban board is displayed
+**When** the user drags a task card between columns
+**Then** the task status is updated via API and the board reflects the change immediately
+
+**Given** the user selects the **Sessions** tab
+**When** the tab loads
+**Then** it shows all sessions for the project with search, date filter, and status filter — clicking a session opens the chat view for that session
+
+**Given** the user clicks a session from the overview or sessions tab
+**When** the session opens
+**Then** the chat panel loads with full conversation history and the session selector bar is visible for switching between sessions
+
+**Given** the user is on any project tab
+**When** they look at the header
+**Then** the project name, description, and enabled suites are always visible in a compact header bar
+
+### Story 10.8: Session Management & Cross-Referencing
+
+As the system operator,
+I want to name, pin, describe, and reference sessions across a project,
+So that important conversations are findable, reusable, and connected to each other.
+
+**Acceptance Criteria:**
+
+**Given** a session exists in a project
+**When** the user clicks the session name
+**Then** it becomes editable inline — they can set a custom name (default: auto-generated from first message or timestamp)
+
+**Given** a session exists
+**When** the user adds or edits a description
+**Then** the description is persisted and shown in session lists and the overview page
+
+**Given** a session exists
+**When** the user clicks the pin toggle
+**Then** the session is marked as pinned, appears first in the overview's session list, and retains its pin across page loads
+
+**Given** the database schema is updated
+**When** the migration runs
+**Then** the `sessions` table has new columns: `name TEXT`, `description TEXT`, `pinned INTEGER DEFAULT 0`, `summary TEXT`
+
+**Given** a new table `session_references` is created
+**When** sessions are cross-referenced
+**Then** rows store: `source_session_id`, `target_session_id`, `context TEXT` (why the reference was made), `created_at`
+
+**Given** the user is in a chat session
+**When** they type a command or the agent decides to reference another session
+**Then** the reference is created in `session_references` and the target session's name/summary is injected as context into the current session's agent prompt
+
+**Given** an agent is spawned for a session
+**When** the session has references to other sessions
+**Then** the agent receives a "Related Sessions" context block with each referenced session's name, summary, and key findings
+
+**Given** the user views a session's detail
+**When** they look at the references section
+**Then** they see both "references" (sessions this one links to) and "referenced by" (sessions that link to this one) with clickable navigation
+
+**Given** a session is created via the "New Chat" widget
+**When** the session is initialized
+**Then** it has no name (auto-generates from first message after the first turn completes), empty description, and unpinned status
+
+### Story 10.9: Project Knowledge Bubbles & Agent-Driven Discovery
+
+As the system operator,
+I want a per-project knowledge system where agents proactively discover and suggest relevant knowledge to link,
+So that every project accumulates institutional memory without me manually curating it.
+
+**Acceptance Criteria:**
+
+**Given** the user selects the **Knowledge** tab within a project
+**When** the tab loads
+**Then** it shows: linked knowledge bubbles, linked documents/data sources, and a project instructions editor (system prompt)
+
+**Given** the knowledge tab is displayed
+**When** the user clicks "Link Document" or "Add Data Source"
+**Then** they can specify a URI (Google Drive link, local file path, URL, or any accessible location) with a label and description — stored as a knowledge reference for the project
+
+**Given** a data source is linked to a project
+**When** an agent is spawned for that project
+**Then** the agent's context includes a "Project Data Sources" block listing all linked sources with their labels, descriptions, and access instructions
+
+**Given** an agent is working within a project session
+**When** it encounters information that could be valuable as project knowledge (patterns, findings, external references, data locations)
+**Then** it proposes a knowledge bubble to the user: "I found [X] — want me to add this to project knowledge?" with a preview of the bubble content
+
+**Given** the agent proposes a knowledge bubble
+**When** the user approves it
+**Then** the bubble is created in the knowledge store, linked to the project, and tagged with the source session ID
+
+**Given** the agent proposes a knowledge bubble
+**When** the user rejects or modifies it
+**Then** the rejection is noted (to avoid re-suggesting similar content) or the modified version is saved
+
+**Given** the `suite-project-management` suite is registered
+**When** it initializes
+**Then** it provides skills for: knowledge CRUD, data source management, project context building, and knowledge discovery — with its own MCP servers and sub-agent definitions as needed
+
+**Given** the suite is active for a project
+**When** the orchestrator processes a request in that project
+**Then** the project management suite's skills are available for the agent to use for knowledge operations
+
+**Given** a knowledge bubble is linked to a project
+**When** the user views it in the knowledge tab
+**Then** they can see: content preview, source (which session/agent created it), tags, linked data sources, and creation date — with edit and unlink actions
+
+**Given** the user edits project instructions in the knowledge tab
+**When** they save
+**Then** the system prompt is updated and all future sessions in this project use the updated instructions
+
+### Story 10.10: Session Auto-Compaction & Background Retrospective
+
+As the system operator,
+I want sessions to be automatically summarized and their knowledge extracted into the project when I stop working,
+So that valuable context is never lost and project knowledge grows organically without manual effort.
+
+**Acceptance Criteria:**
+
+**Given** a session has been idle for a configurable timeout (default: 30 minutes)
+**When** the idle detector triggers
+**Then** a background retrospective agent is spawned for that session
+
+**Given** the retrospective agent is spawned
+**When** it processes the session
+**Then** it produces: a structured session summary, key decisions made, findings/discoveries, action items identified, and candidate knowledge bubbles
+
+**Given** the retrospective agent extracts knowledge
+**When** it compares against existing project knowledge
+**Then** it deduplicates — merging new information into existing bubbles where appropriate rather than creating redundant entries
+
+**Given** the retrospective produces candidate knowledge bubbles
+**When** the confidence is high (clear factual findings, explicit decisions)
+**Then** bubbles are auto-approved and linked to the project with `source: 'auto-retrospective'`
+
+**Given** the retrospective produces candidate knowledge bubbles
+**When** the confidence is low (subjective interpretations, tentative conclusions)
+**Then** bubbles are saved as drafts requiring user approval, with a notification sent via Telegram
+
+**Given** a session summary is generated
+**When** it is stored
+**Then** the `sessions.summary` field is populated and the summary appears in session lists and the project overview
+
+**Given** multiple retrospectives have run for a project
+**When** the project's knowledge base grows
+**Then** a periodic consolidation pass (configurable, default: weekly) reviews all auto-generated bubbles — merging, pruning outdated entries, and surfacing a consolidated project digest
+
+**Given** the consolidation runs
+**When** it processes accumulated knowledge
+**Then** it follows the Claude Code deep research pattern: not just appending "what was done" entries, but synthesizing, summarizing, and pruning to keep knowledge concise and actionable — removing noise, merging related findings, and updating stale information
+
+**Given** the user triggers a manual retrospective via chat or dashboard
+**When** the command is processed
+**Then** the retrospective runs immediately on the current or specified session, with results shown inline
+
+**Given** auto-compaction is configured
+**When** a session exceeds a configurable context size threshold
+**Then** older messages are summarized into a compaction block and the full messages are archived — the session continues with the compacted context
+
+### Story 10.11: Claude Code Execution Modes Research & Integration
+
+As the system operator,
+I want to understand and leverage Claude Code's execution modes (deep mode, auto mode, sandbox) for Raven's agent spawning,
+So that agents run in the optimal mode for their task — balancing capability, safety, and autonomy.
+
+**Acceptance Criteria:**
+
+**Given** the research phase begins
+**When** Claude Code's current execution modes are investigated
+**Then** a technical findings document is produced covering: deep mode capabilities and when it activates, auto mode behavior vs interactive mode, sandbox mode (what it isolates, filesystem/network restrictions, how it differs from auto mode), and any relevant CLI flags or SDK options
+
+**Given** the research document is complete
+**When** findings are analyzed for Raven's use case
+**Then** recommendations are made for: which agent tasks should use sandbox (e.g., untrusted code execution, web research), which should use auto mode (e.g., routine maintenance, knowledge extraction), and whether deep mode can be leveraged for complex multi-step agent tasks
+
+**Given** recommendations are approved
+**When** implementation begins
+**Then** the agent session spawning system (`agent-session.ts`) is updated to accept an execution mode parameter: `'auto' | 'sandbox' | 'default'`
+
+**Given** the execution mode is configurable
+**When** a skill or agent definition specifies a preferred mode
+**Then** the agent manager spawns the Claude SDK session with the appropriate flags/configuration for that mode
+
+**Given** sandbox mode is enabled for an agent task
+**When** the agent runs
+**Then** it operates within Claude Code's sandbox restrictions — the task result indicates whether sandbox was used and any restrictions that were hit
+
+**Given** the orchestrator routes a task
+**When** it selects the execution mode
+**Then** the mode is chosen based on: skill-level defaults, agent-level overrides, and task-level overrides (most specific wins)
+
+**Given** a new execution mode is added to Claude Code in the future
+**When** Raven's configuration is updated
+**Then** the mode enum and spawning logic can be extended without changing the orchestrator or skill interfaces
+
+**Given** the findings document is finalized
+**When** it is stored
+**Then** it lives at `docs/claude-code-execution-modes.md` and is referenced from the architecture documentation
