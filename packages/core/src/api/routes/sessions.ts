@@ -263,6 +263,32 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
     },
   );
 
+  // Trigger manual retrospective on a session
+  app.post<{ Params: { id: string } }>('/api/sessions/:id/retrospective', async (req, reply) => {
+    const session = deps.sessionManager.getSession(req.params.id);
+    if (!session) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Session not found' });
+
+    if (!deps.sessionRetrospective) {
+      return reply
+        .status(HTTP_STATUS.BAD_REQUEST)
+        .send({ error: 'Session retrospective not available' });
+    }
+
+    const result = await deps.sessionRetrospective.runRetrospective(
+      req.params.id,
+      session.projectId,
+    );
+
+    return {
+      summary: result.summary,
+      decisions: result.decisions,
+      findings: result.findings,
+      actionItems: result.actionItems,
+      bubblesCreated: result.bubblesCreated,
+      bubblesDrafted: result.bubblesDrafted,
+    };
+  });
+
   // Enqueue a message to a session — will be processed as the next user turn
   app.post<{ Params: { id: string } }>('/api/sessions/:id/enqueue', async (req, reply) => {
     const session = deps.sessionManager.getSession(req.params.id);

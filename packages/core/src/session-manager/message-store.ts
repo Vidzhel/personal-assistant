@@ -1,4 +1,11 @@
-import { appendFileSync, readFileSync, mkdirSync, existsSync } from 'node:fs';
+import {
+  appendFileSync,
+  readFileSync,
+  writeFileSync,
+  renameSync,
+  mkdirSync,
+  existsSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { createLogger, generateId } from '@raven/shared';
 
@@ -27,6 +34,8 @@ export interface MessageStore {
   getMessages: (sessionId: string, opts?: { limit?: number; offset?: number }) => StoredMessage[];
   appendRawMessage: (sessionId: string, rawJson: string) => void;
   getRawMessages: (sessionId: string) => string[];
+  archiveTranscript: (sessionId: string) => void;
+  replaceTranscript: (sessionId: string, messages: StoredMessage[]) => void;
 }
 
 // eslint-disable-next-line max-lines-per-function -- factory function that initializes all message store methods
@@ -116,5 +125,33 @@ export function createMessageStore(options: MessageStoreOptions): MessageStore {
     }
   }
 
-  return { appendMessage, getMessages, appendRawMessage, getRawMessages };
+  function archiveTranscript(sessionId: string): void {
+    const path = getTranscriptPath(sessionId);
+    if (!existsSync(path)) return;
+    try {
+      const archiveName = `transcript-archived-${Date.now()}.jsonl`;
+      renameSync(path, join(getSessionDir(sessionId), archiveName));
+    } catch (err) {
+      log.error(`Failed to archive transcript for session ${sessionId}: ${err}`);
+    }
+  }
+
+  function replaceTranscript(sessionId: string, messages: StoredMessage[]): void {
+    const path = getTranscriptPath(sessionId);
+    try {
+      const content = messages.map((m) => JSON.stringify(m)).join('\n') + '\n';
+      writeFileSync(path, content);
+    } catch (err) {
+      log.error(`Failed to replace transcript for session ${sessionId}: ${err}`);
+    }
+  }
+
+  return {
+    appendMessage,
+    getMessages,
+    appendRawMessage,
+    getRawMessages,
+    archiveTranscript,
+    replaceTranscript,
+  };
 }

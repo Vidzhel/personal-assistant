@@ -23,6 +23,7 @@ import type { RetrievalEngine } from '../knowledge-engine/retrieval.ts';
 import type { Neo4jClient } from '../knowledge-engine/neo4j-client.ts';
 import type { KnowledgeLifecycle } from '../knowledge-engine/knowledge-lifecycle.ts';
 import type { Retrospective } from '../knowledge-engine/retrospective.ts';
+import type { SessionRetrospective } from '../session-manager/session-retrospective.ts';
 import type { DatabaseInterface } from '@raven/shared';
 import { registerHealthRoute } from './routes/health.ts';
 import { registerProjectRoutes } from './routes/projects.ts';
@@ -85,6 +86,7 @@ export interface ApiDeps {
   namedAgentStore?: NamedAgentStore;
   suiteScaffolder?: SuiteScaffolder;
   configChangeResolver?: ConfigChangeResolver;
+  sessionRetrospective?: SessionRetrospective;
 }
 
 // eslint-disable-next-line max-lines-per-function -- server setup registers all route groups

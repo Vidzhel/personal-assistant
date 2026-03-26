@@ -715,6 +715,35 @@ export interface InsightSuppressedEvent extends BaseEvent {
   };
 }
 
+export interface SessionIdleEvent extends BaseEvent {
+  type: 'session:idle';
+  payload: {
+    sessionId: string;
+    projectId: string;
+    idleMinutes: number;
+  };
+}
+
+export interface SessionRetrospectiveCompleteEvent extends BaseEvent {
+  type: 'session:retrospective:complete';
+  payload: {
+    sessionId: string;
+    projectId: string;
+    summary: string;
+    bubblesCreated: number;
+    bubblesDrafted: number;
+  };
+}
+
+export interface SessionCompactedEvent extends BaseEvent {
+  type: 'session:compacted';
+  payload: {
+    sessionId: string;
+    messagesCompacted: number;
+    summaryLength: number;
+  };
+}
+
 export interface SystemHealthAlertEvent extends BaseEvent {
   type: 'system:health:alert';
   payload: {
@@ -810,7 +839,10 @@ export type RavenEvent =
   | ConfigChangeProposedEvent
   | ConfigChangeAppliedEvent
   | ConfigChangeRejectedEvent
-  | ConfigVersionRevertedEvent;
+  | ConfigVersionRevertedEvent
+  | SessionIdleEvent
+  | SessionRetrospectiveCompleteEvent
+  | SessionCompactedEvent;
 
 export type RavenEventType = RavenEvent['type'];
 

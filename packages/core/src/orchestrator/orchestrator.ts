@@ -18,6 +18,10 @@ import type { SessionManager } from '../session-manager/session-manager.ts';
 import type { MessageStore } from '../session-manager/message-store.ts';
 import type { ContextInjector } from '../knowledge-engine/context-injector.ts';
 import type { Retrospective } from '../knowledge-engine/retrospective.ts';
+import type { KnowledgeConsolidation } from '../knowledge-engine/knowledge-consolidation.ts';
+import type { SessionCompaction } from '../session-manager/session-compaction.ts';
+import type { SessionRetrospective } from '../session-manager/session-retrospective.ts';
+import type { AgentTaskCompleteEvent } from '@raven/shared';
 import type { NamedAgentStore } from '../agent-registry/named-agent-store.ts';
 import type { AgentResolver } from '../agent-registry/agent-resolver.ts';
 import { createKnowledgeAgentDefinition } from '../knowledge-engine/knowledge-agent.ts';
@@ -42,6 +46,9 @@ export interface OrchestratorDeps {
   messageStore: MessageStore;
   contextInjector?: ContextInjector;
   retrospective?: Retrospective;
+  knowledgeConsolidation?: KnowledgeConsolidation;
+  sessionCompaction?: SessionCompaction;
+  sessionRetrospective?: SessionRetrospective;
   namedAgentStore?: NamedAgentStore;
   agentResolver?: AgentResolver;
   port: number;
@@ -60,6 +67,9 @@ export class Orchestrator {
   private messageStore: MessageStore;
   private contextInjector?: ContextInjector;
   private retrospective?: Retrospective;
+  private knowledgeConsolidation?: KnowledgeConsolidation;
+  private sessionCompaction?: SessionCompaction;
+  private sessionRetrospective?: SessionRetrospective;
   private namedAgentStore?: NamedAgentStore;
   private agentResolver?: AgentResolver;
   private port: number;
@@ -71,6 +81,9 @@ export class Orchestrator {
     this.messageStore = deps.messageStore;
     this.contextInjector = deps.contextInjector;
     this.retrospective = deps.retrospective;
+    this.knowledgeConsolidation = deps.knowledgeConsolidation;
+    this.sessionCompaction = deps.sessionCompaction;
+    this.sessionRetrospective = deps.sessionRetrospective;
     this.namedAgentStore = deps.namedAgentStore;
     this.agentResolver = deps.agentResolver;
     this.port = deps.port;
@@ -82,6 +95,11 @@ export class Orchestrator {
     });
     this.eventBus.on<UserChatMessageEvent>('user:chat:message', (e) => {
       this.handleUserChat(e).catch((err: unknown) => log.error(`handleUserChat failed: ${err}`));
+    });
+    this.eventBus.on<AgentTaskCompleteEvent>('agent:task:complete', (e) => {
+      this.handleTaskCompleteCompaction(e).catch((err: unknown) =>
+        log.error(`handleTaskCompleteCompaction failed: ${err}`),
+      );
     });
 
     log.info('Orchestrator initialized');
@@ -140,6 +158,7 @@ export class Orchestrator {
     });
   }
 
+  // eslint-disable-next-line max-lines-per-function -- handles multiple schedule types with context injection
   private async handleSchedule(event: ScheduleTriggeredEvent): Promise<void> {
     const { taskType, scheduleName } = event.payload;
     log.info(`Schedule triggered: ${scheduleName} (${taskType})`);
@@ -151,6 +170,16 @@ export class Orchestrator {
         return;
       }
       await this.retrospective.runFullRetrospective();
+      return;
+    }
+
+    // Handle knowledge-consolidation inline
+    if (taskType === 'knowledge-consolidation') {
+      if (!this.knowledgeConsolidation) {
+        log.warn('Knowledge consolidation not available, ignoring schedule trigger');
+        return;
+      }
+      await this.knowledgeConsolidation.runConsolidation();
       return;
     }
 
@@ -230,6 +259,27 @@ export class Orchestrator {
       role: 'user',
       content: message,
     });
+
+    // Check for manual retrospective intent
+    const lowerMsg = message.toLowerCase();
+    if (
+      this.sessionRetrospective &&
+      (lowerMsg === 'retrospective' ||
+        lowerMsg.includes('summarize this session') ||
+        lowerMsg.includes('run retrospective'))
+    ) {
+      try {
+        const result = await this.sessionRetrospective.runRetrospective(session.id, projectId);
+        this.messageStore.appendMessage(session.id, {
+          role: 'assistant',
+          content: `**Session Retrospective**\n\n${result.summary}\n\n**Decisions:** ${result.decisions.length ? result.decisions.join(', ') : 'None'}\n**Findings:** ${result.findings.length ? result.findings.join(', ') : 'None'}\n**Action Items:** ${result.actionItems.length ? result.actionItems.join(', ') : 'None'}`,
+        });
+        this.sessionManager.updateStatus(session.id, 'idle');
+        return;
+      } catch (err) {
+        log.error(`Manual retrospective failed: ${err}`);
+      }
+    }
 
     // Auto-generate session name on first turn
     if (session.turnCount === 0) {
@@ -394,5 +444,15 @@ export class Orchestrator {
         namedAgentId,
       },
     });
+  }
+
+  private async handleTaskCompleteCompaction(event: AgentTaskCompleteEvent): Promise<void> {
+    if (!this.sessionCompaction || !event.payload.sessionId) return;
+
+    try {
+      await this.sessionCompaction.checkAndCompact(event.payload.sessionId);
+    } catch (err) {
+      log.warn(`Session compaction check failed for ${event.payload.sessionId}: ${err}`);
+    }
   }
 }

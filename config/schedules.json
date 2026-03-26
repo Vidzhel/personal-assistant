@@ -46,5 +46,13 @@
     "taskType": "system-maintenance",
     "skillName": "orchestrator",
     "enabled": true
+  },
+  {
+    "id": "knowledge-consolidation",
+    "name": "Weekly Knowledge Consolidation",
+    "cron": "0 3 * * 0",
+    "taskType": "knowledge-consolidation",
+    "skillName": "system",
+    "enabled": true
   }
 ]

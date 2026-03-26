@@ -140,6 +140,11 @@ export const api = {
     }),
   getSessionReferences: (sessionId: string) =>
     request<SessionReferences>(`/sessions/${sessionId}/references`),
+  runSessionRetrospective: (sessionId: string) =>
+    request<{ summary: string; bubblesCreated: number; bubblesDrafted: number }>(
+      `/sessions/${sessionId}/retrospective`,
+      { method: 'POST' },
+    ),
   getLogs: (params?: { lines?: number; level?: string; component?: string; search?: string }) => {
     const qs = new URLSearchParams();
     if (params?.lines) qs.set('lines', String(params.lines));

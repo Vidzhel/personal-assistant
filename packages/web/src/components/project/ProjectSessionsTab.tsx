@@ -12,6 +12,7 @@ import type { ProjectTabProps } from './project-tab-registry';
 
 const ID_DISPLAY_LENGTH = 8;
 const COPY_FEEDBACK_DURATION_MS = 1500;
+const SUMMARY_PREVIEW_LENGTH = 100;
 
 // eslint-disable-next-line max-lines-per-function, complexity -- sessions tab with session list, chat panel, debug, references, cross-refs
 export function ProjectSessionsTab({ projectId }: ProjectTabProps) {
@@ -22,6 +23,8 @@ export function ProjectSessionsTab({ projectId }: ProjectTabProps) {
   const [showRefs, setShowRefs] = useState(false);
   const [showCrossRefs, setShowCrossRefs] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [retroLoading, setRetroLoading] = useState(false);
+  const [retroResult, setRetroResult] = useState<{ summary: string } | null>(null);
   const { references, externalRefs } = useReferences(activeSessionId);
 
   useEffect(() => {
@@ -51,6 +54,21 @@ export function ProjectSessionsTab({ projectId }: ProjectTabProps) {
     },
     [],
   );
+
+  const handleRunRetrospective = useCallback(async () => {
+    if (!activeSessionId) return;
+    setRetroLoading(true);
+    setRetroResult(null);
+    try {
+      const result = await api.runSessionRetrospective(activeSessionId);
+      setRetroResult(result);
+      // Refresh sessions to get updated summary
+      const updated = await api.getProjectSessions(projectId);
+      setSessions(updated);
+    } finally {
+      setRetroLoading(false);
+    }
+  }, [activeSessionId, projectId]);
 
   const filteredSessions = useMemo(() => {
     if (!searchQuery.trim()) return sessions;
@@ -114,6 +132,14 @@ export function ProjectSessionsTab({ projectId }: ProjectTabProps) {
               {s.description && (
                 <div className="text-xs mt-0.5 truncate" style={{ color: 'var(--text-muted)' }}>
                   {s.description}
+                </div>
+              )}
+              {s.summary && (
+                <div
+                  className="text-xs mt-0.5 truncate"
+                  style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}
+                >
+                  {s.summary.slice(0, SUMMARY_PREVIEW_LENGTH)}
                 </div>
               )}
               <div className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
@@ -206,6 +232,15 @@ export function ProjectSessionsTab({ projectId }: ProjectTabProps) {
                 Refs
               </button>
               <button
+                onClick={() => void handleRunRetrospective()}
+                disabled={retroLoading}
+                className="text-xs px-2 py-1 rounded hover:opacity-80 shrink-0"
+                style={{ color: 'var(--text-muted)' }}
+                title="Run retrospective on this session"
+              >
+                {retroLoading ? 'Running...' : 'Retro'}
+              </button>
+              <button
                 onClick={() => setShowDebug(true)}
                 className="text-xs px-2 py-1 rounded hover:opacity-80 shrink-0"
                 style={{ color: 'var(--text-muted)' }}
@@ -214,6 +249,34 @@ export function ProjectSessionsTab({ projectId }: ProjectTabProps) {
                 Debug
               </button>
             </div>
+          </div>
+        )}
+
+        {/* Session summary (from retrospective) */}
+        {activeSession?.summary && (
+          <details
+            className="px-4 py-2 border-b text-xs"
+            style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}
+          >
+            <summary style={{ color: 'var(--text-muted)', cursor: 'pointer' }}>
+              Session Summary
+            </summary>
+            <p className="mt-1 whitespace-pre-wrap" style={{ color: 'var(--text)' }}>
+              {activeSession.summary}
+            </p>
+          </details>
+        )}
+        {retroResult && (
+          <div
+            className="px-4 py-2 border-b text-xs"
+            style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}
+          >
+            <p className="font-medium mb-1" style={{ color: 'var(--accent)' }}>
+              Retrospective Result
+            </p>
+            <p className="whitespace-pre-wrap" style={{ color: 'var(--text)' }}>
+              {retroResult.summary}
+            </p>
           </div>
         )}
 
