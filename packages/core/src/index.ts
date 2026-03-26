@@ -49,6 +49,11 @@ import { loadKnowledgeDomainConfig } from './knowledge-engine/domain-config.ts';
 import { createNeo4jClient } from './knowledge-engine/neo4j-client.ts';
 import { syncProjectNodes } from './knowledge-engine/project-knowledge.ts';
 import { getMetaProject } from './project-manager/meta-project.ts';
+import { createIdleDetector } from './session-manager/idle-detector.ts';
+import { createSessionRetrospective } from './session-manager/session-retrospective.ts';
+import { createSessionCompaction } from './session-manager/session-compaction.ts';
+import { createKnowledgeConsolidation } from './knowledge-engine/knowledge-consolidation.ts';
+import type { SessionIdleEvent } from '@raven/shared';
 
 const log = createLogger('raven');
 
@@ -394,7 +399,40 @@ async function main(): Promise<void> {
   });
   log.info('Knowledge lifecycle & retrospective engines initialized');
 
-  // 11. Init orchestrator (after knowledge engine for context injection)
+  // 11a. Init session retrospective, compaction, and consolidation
+  const sessionRetrospective = createSessionRetrospective({
+    messageStore,
+    sessionManager,
+    eventBus,
+    config,
+    knowledgeStore,
+    neo4j: neo4jClient,
+  });
+
+  const sessionCompaction = createSessionCompaction({
+    messageStore,
+    eventBus,
+    config,
+    sessionBasePath: sessionPath,
+  });
+
+  const knowledgeConsolidation = createKnowledgeConsolidation({
+    neo4j: neo4jClient,
+    eventBus,
+    config,
+  });
+
+  // 11b. Init idle detector + register session:idle handler
+  const idleDetector = createIdleDetector({ eventBus, config });
+  eventBus.on<SessionIdleEvent>('session:idle', (e) => {
+    sessionRetrospective
+      .runRetrospective(e.payload.sessionId, e.payload.projectId)
+      .catch((err: unknown) => log.error(`Session retrospective failed: ${err}`));
+  });
+  idleDetector.start();
+  log.info('Session idle detector started');
+
+  // 11c. Init orchestrator (after knowledge engine for context injection)
   const _orchestrator = new Orchestrator({
     eventBus,
     suiteRegistry,
@@ -402,6 +440,9 @@ async function main(): Promise<void> {
     messageStore,
     contextInjector,
     retrospective,
+    knowledgeConsolidation,
+    sessionCompaction,
+    sessionRetrospective,
     namedAgentStore,
     agentResolver,
     port: config.RAVEN_PORT,
@@ -445,6 +486,7 @@ async function main(): Promise<void> {
       configuredSuiteCount,
       unsnoozableCategories: (suitesConfig['notifications']?.config?.unsnoozableCategories ??
         []) as string[],
+      sessionRetrospective,
     },
     config.RAVEN_PORT,
   );
@@ -454,6 +496,7 @@ async function main(): Promise<void> {
   // Graceful shutdown
   const shutdown = async (): Promise<void> => {
     log.info('Shutting down...');
+    idleDetector.stop();
     pipelineScheduler.shutdown();
     pipelineEventTrigger.shutdown();
     pipelineEngine.shutdown();

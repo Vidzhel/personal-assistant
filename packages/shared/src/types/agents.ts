@@ -60,6 +60,32 @@ export interface SessionReference {
   createdAt: string;
 }
 
+export interface CandidateBubble {
+  title: string;
+  content: string;
+  tags: string[];
+  confidence: 'high' | 'low';
+  sourceDescription: string;
+}
+
+export interface SessionRetrospectiveResult {
+  sessionId: string;
+  projectId: string;
+  summary: string;
+  decisions: string[];
+  findings: string[];
+  actionItems: string[];
+  candidateBubbles: CandidateBubble[];
+}
+
+export interface CompactionBlock {
+  id: string;
+  sessionId: string;
+  summarizedMessageIds: string[];
+  summary: string;
+  createdAt: number;
+}
+
 export interface AgentTask {
   id: string;
   sessionId?: string;

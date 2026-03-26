@@ -34,7 +34,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-03-12
-last_updated: 2026-03-26 # story 10.9 in-progress
+last_updated: 2026-03-26 # story 10.10 ready-for-dev
 project: personal-assistant
 project_key: NOKEY
 tracking_system: file-system
@@ -138,6 +138,6 @@ development_status:
   10-7-project-hub-and-landing-page-redesign: review
   10-8-session-management-and-cross-referencing: done
   10-9-project-knowledge-bubbles-and-agent-driven-discovery: done
-  10-10-session-auto-compaction-and-background-retrospective: backlog
+  10-10-session-auto-compaction-and-background-retrospective: review
   10-11-claude-code-execution-modes-research-and-integration: backlog
   epic-10-retrospective: optional
