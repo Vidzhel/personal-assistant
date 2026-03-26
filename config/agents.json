@@ -8,11 +8,11 @@
     "is_default": true
   },
   {
-    "id": "researcher-agent",
-    "name": "researcher",
-    "description": "Knowledge exploration and web research",
-    "instructions": "Focus on thorough research. Use knowledge retrieval, embedding search, and link suggestion tools to find relevant information. Provide well-sourced answers with references.",
-    "suite_ids": ["proactive-intelligence", "google-workspace"],
+    "id": "597ce8e8-d859-46bb-be7e-03313dd0714b",
+    "name": "test-agent",
+    "description": "Test agent for manual testing",
+    "instructions": "You are a test agent.",
+    "suite_ids": [],
     "is_default": false
   }
 ]
