@@ -8,10 +8,28 @@
     "is_default": true
   },
   {
+    "id": "6fc9e1f1-7133-45de-b88b-e81e9ff00219",
+    "name": "bound-agent",
+    "description": "Agent with suites",
+    "instructions": null,
+    "suite_ids": [
+      "email"
+    ],
+    "is_default": false
+  },
+  {
     "id": "597ce8e8-d859-46bb-be7e-03313dd0714b",
     "name": "test-agent",
     "description": "Test agent for manual testing",
     "instructions": "You are a test agent.",
+    "suite_ids": [],
+    "is_default": false
+  },
+  {
+    "id": "1ed8cb17-eb8d-497b-afb6-1994363ff0fb",
+    "name": "unique-agent",
+    "description": "Unique agent",
+    "instructions": null,
     "suite_ids": [],
     "is_default": false
   }
