@@ -15,7 +15,7 @@ settings:
 
 nodes:
   run-maintenance:
-    skill: orchestrator
+    skill: _orchestrator
     action: maintenance:run
     params: {}
 
