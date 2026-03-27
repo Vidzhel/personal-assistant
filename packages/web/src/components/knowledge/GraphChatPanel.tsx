@@ -67,7 +67,7 @@ export function GraphChatPanel({
     return (
       <button
         onClick={() => setOpen(true)}
-        className="absolute bottom-4 right-4 px-3 py-2 rounded-lg shadow-lg text-xs z-10"
+        className="absolute bottom-4 right-4 px-3 py-2 rounded-lg shadow-lg text-xs z-30"
         style={{ background: 'var(--accent)', color: '#fff' }}
       >
         Chat
