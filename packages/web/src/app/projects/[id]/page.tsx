@@ -60,8 +60,6 @@ export default function ProjectPage() {
     );
   }
 
-  const ActiveComponent = tabs.find((t) => t.key === activeTab)?.component;
-
   return (
     <div className="flex flex-col h-screen">
       {/* Compact project header — persists across all tabs */}
@@ -122,15 +120,21 @@ export default function ProjectPage() {
 
       {/* Tab content */}
       <div className="flex-1 overflow-hidden">
-        {ActiveComponent && (
-          <ActiveComponent
-            projectId={id}
-            projectName={project.name}
-            project={project}
-            onProjectUpdated={setProject}
-            onNewSession={handleNewSession}
-          />
-        )}
+        {tabs.map((t) => (
+          <div
+            key={t.key}
+            className="h-full"
+            style={{ display: activeTab === t.key ? 'block' : 'none' }}
+          >
+            <t.component
+              projectId={id}
+              projectName={project.name}
+              project={project}
+              onProjectUpdated={setProject}
+              onNewSession={handleNewSession}
+            />
+          </div>
+        ))}
       </div>
     </div>
   );
