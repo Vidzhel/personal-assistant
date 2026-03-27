@@ -17,8 +17,14 @@ export function StatusCards({ health, projectCount, scheduleCount }: StatusCards
   const cards = [
     {
       label: 'Status',
-      value: health?.status === 'ok' ? 'Online' : 'Offline',
-      color: health?.status === 'ok' ? 'var(--success)' : 'var(--error)',
+      value:
+        health?.status === 'ok' ? 'Online' : health?.status === 'degraded' ? 'Degraded' : 'Offline',
+      color:
+        health?.status === 'ok'
+          ? 'var(--success)'
+          : health?.status === 'degraded'
+            ? 'var(--warning, #eab308)'
+            : 'var(--error)',
     },
     {
       label: 'Skills',
