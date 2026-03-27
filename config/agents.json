@@ -8,14 +8,6 @@
     "is_default": true
   },
   {
-    "id": "c5d0e2c8-553d-49f0-b08d-4ddb6b178eb4",
-    "name": "agent05-retest",
-    "description": "Updated description for AGENT-05",
-    "instructions": "Test agent.",
-    "suite_ids": [],
-    "is_default": false
-  },
-  {
     "id": "6fc9e1f1-7133-45de-b88b-e81e9ff00219",
     "name": "bound-agent",
     "description": "Agent with suites",
@@ -23,14 +15,6 @@
     "suite_ids": [
       "email"
     ],
-    "is_default": false
-  },
-  {
-    "id": "ac5fd79f-c770-4c6b-8c3e-62008158b29c",
-    "name": "retest-agent",
-    "description": "Updated description",
-    "instructions": "",
-    "suite_ids": [],
     "is_default": false
   },
   {
