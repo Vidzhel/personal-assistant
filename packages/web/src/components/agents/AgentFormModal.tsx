@@ -65,17 +65,20 @@ export function AgentFormModal() {
 
   async function handleSubmit() {
     if (!validateName(name)) return;
-    const data = {
-      name,
-      description: description || undefined,
-      instructions: instructions || undefined,
-      suiteIds: Array.from(selectedSuites),
-    };
-
     if (editing) {
-      await updateAgent(editing.id, data);
+      await updateAgent(editing.id, {
+        name,
+        description,
+        instructions,
+        suiteIds: Array.from(selectedSuites),
+      });
     } else {
-      await createAgent(data);
+      await createAgent({
+        name,
+        description: description || undefined,
+        instructions: instructions || undefined,
+        suiteIds: Array.from(selectedSuites),
+      });
     }
   }
 
