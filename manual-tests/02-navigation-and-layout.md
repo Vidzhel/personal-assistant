@@ -11,7 +11,7 @@ Prerequisites: Smoke tests (01) passing, at least one project exists
 **Steps:**
 1. navigate: `http://localhost:4000`
 2. snapshot → assert:
-   - 10 navigation links: Dashboard, Projects, Activity, Pipelines, Tasks, Metrics, Schedules, Skills, Knowledge, Settings
+   - 13 navigation links: Dashboard, Projects, Activity, Pipelines, Tasks, Metrics, Schedules, Agents, Skills, Knowledge, Config, Logs, Settings
    - role "navigation" containing all links
 
 ### NAV-02: Active state highlights current route

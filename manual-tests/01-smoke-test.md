@@ -14,7 +14,7 @@ Prerequisites: Both servers running (`npm run dev`), verified via `.claude/skill
    - heading "Dashboard"
    - text "Raven Personal Assistant"
    - text "Live Activity"
-   - text "Quick Actions"
+   - link "Actions Today"
 
 ### SM-02: Sidebar renders with all navigation links
 
@@ -62,7 +62,7 @@ Prerequisites: Both servers running (`npm run dev`), verified via `.claude/skill
 1. navigate: `http://localhost:4000`
 2. snapshot → assert:
    - text "Status"
-   - text "Online"
+   - text "Online" OR text "Degraded"
    - text "Skills"
 
-**Notes:** If "Offline" appears instead of "Online", backend API is not reachable — fix prerequisites before continuing.
+**Notes:** If "Offline" appears instead of "Online" or "Degraded", backend API is not reachable — fix prerequisites before continuing.

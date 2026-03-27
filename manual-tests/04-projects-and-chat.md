@@ -99,11 +99,17 @@ Prerequisites: Smoke tests (01) passing, backend running with skills loaded
 
 **Steps:**
 1. navigate: `http://localhost:4000/projects`
-2. click: first project card
-3. wait: 1s
-4. snapshot → assert:
-   - project name visible as heading or text
-   - textbox "Ask Raven..." (chat input present)
+2. click: first project card link
+3. snapshot → assert:
+   - heading with project name
+   - button "Overview" or tab bar with "Overview" active
+   - button "Tasks"
+   - button "Knowledge"
+   - button "Sessions"
+   - button "New Chat"
+   - NOT textbox "Ask Raven..." (chat input is on Sessions tab, not Overview)
+
+**Notes:** Project detail page uses a hub/tabbed layout (Story 10.7). Chat is accessible via "New Chat" button or Sessions tab.
 
 ## Test Cases — Chat
 
@@ -184,3 +190,120 @@ Prerequisites: Smoke tests (01) passing, backend running with skills loaded
    - text "Second message"
 
 **Notes:** Messages should appear in order. Auto-scroll keeps latest message visible.
+
+## Test Cases — Project Hub & Tabbed Layout (Story 10.7)
+
+### HUB-01: Tabbed layout on project detail page
+
+**Steps:**
+1. navigate to a project detail page
+2. snapshot → assert:
+   - tab bar visible with tabs: "Overview", "Tasks", "Knowledge", "Sessions"
+   - "Overview" tab is active by default
+
+### HUB-02: Compact project header persists across tabs
+
+**Steps:**
+1. navigate to a project detail page
+2. snapshot → assert:
+   - project name visible in header
+   - description visible
+   - skill badges visible (if project has skills)
+   - "New Chat" button at top-right
+3. click: "Tasks" tab
+4. snapshot → assert: same header elements still visible
+5. click: "Knowledge" tab
+6. snapshot → assert: same header elements still visible
+
+### HUB-03: Inline-editable project name
+
+**Steps:**
+1. navigate to a project → Overview tab
+2. click: project name text
+3. snapshot → assert: name becomes editable (input field appears)
+4. type new name → press Enter or blur
+5. wait: 1s → snapshot → assert:
+   - updated name displayed
+   - page did not navigate away
+
+### HUB-04: Inline-editable project description
+
+**Steps:**
+1. navigate to a project → Overview tab
+2. click: project description text
+3. snapshot → assert: description becomes editable
+4. type new description → blur
+5. wait: 1s → assert: updated description persisted
+
+### HUB-05: Overview tab — recent sessions list
+
+**Steps:**
+1. navigate to a project with sessions → Overview tab
+2. snapshot → assert:
+   - "Sessions" section visible
+   - sessions listed with: name (or auto-generated summary), turn count, last active timestamp
+   - pinned sessions appear first
+
+### HUB-06: Overview tab — quick stats
+
+**Steps:**
+1. navigate to a project → Overview tab
+2. snapshot → assert:
+   - session count visible
+   - task counts by status visible (todo, in_progress, completed)
+
+### HUB-07: Overview tab — project memory / instructions editor
+
+**Steps:**
+1. navigate to a project → Overview tab
+2. snapshot → assert:
+   - ProjectMemory / instructions component visible
+   - editing is enabled (textarea or editable area)
+3. edit instructions → save
+4. assert: instructions persisted (refresh page and verify)
+
+### HUB-08: Tasks tab — kanban board scoped to project
+
+**Steps:**
+1. navigate to a project → click "Tasks" tab
+2. snapshot → assert:
+   - kanban board displayed with columns: To Do, In Progress, Completed
+   - tasks shown are scoped to this project only (not global tasks)
+
+### HUB-09: Knowledge tab — project-scoped knowledge
+
+**Steps:**
+1. navigate to a project → click "Knowledge" tab
+2. snapshot → assert:
+   - knowledge bubbles linked to this project displayed
+   - knowledge is project-scoped (not the full global graph)
+
+### HUB-10: Sessions tab — session list with chat
+
+**Steps:**
+1. navigate to a project → click "Sessions" tab
+2. snapshot → assert:
+   - all sessions listed with search/filter controls
+3. click: a session
+4. snapshot → assert:
+   - chat panel loads with conversation history
+   - session selector bar visible for switching
+   - NO project memory editor visible (editing only on Overview tab)
+
+### HUB-11: "New Chat" button creates session and switches to Sessions tab
+
+**Steps:**
+1. navigate to a project → Overview tab
+2. click: "New Chat" button (top-right)
+3. wait: 2s
+4. snapshot → assert:
+   - switched to Sessions tab
+   - new session active with chat view
+   - chat input visible ("Ask Raven...")
+
+### HUB-12: Tab switching preserves state
+
+**Steps:**
+1. navigate to a project → Sessions tab → click a session → type some text
+2. click: Overview tab → snapshot → assert: overview content loads
+3. click: Sessions tab → snapshot → assert: session still selected, chat input preserved
