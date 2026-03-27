@@ -12,6 +12,15 @@ const CONFIG_DIR = 'config/';
 const GIT_LOG_FORMAT = '%H|%aI|%an|%s';
 const SHORT_SHA_LENGTH = 7;
 
+let cachedRoot: string | undefined;
+async function getProjectRoot(): Promise<string> {
+  if (!cachedRoot) {
+    const { stdout } = await execFile('git', ['rev-parse', '--show-toplevel']);
+    cachedRoot = stdout.trim();
+  }
+  return cachedRoot;
+}
+
 function validateHash(hash: string): void {
   if (!SHA_PATTERN.test(hash)) {
     throw new Error(`Invalid git SHA: ${hash}`);
@@ -29,14 +38,19 @@ function validateFilePath(filePath: string): void {
 
 export async function getConfigCommits(limit: number, offset: number): Promise<ConfigCommit[]> {
   try {
-    const { stdout } = await execFile('git', [
-      'log',
-      `--pretty=format:${GIT_LOG_FORMAT}`,
-      `--skip=${offset}`,
-      `-${limit}`,
-      '--',
-      CONFIG_DIR,
-    ]);
+    const cwd = await getProjectRoot();
+    const { stdout } = await execFile(
+      'git',
+      [
+        'log',
+        `--pretty=format:${GIT_LOG_FORMAT}`,
+        `--skip=${offset}`,
+        `-${limit}`,
+        '--',
+        CONFIG_DIR,
+      ],
+      { cwd },
+    );
 
     if (!stdout.trim()) return [];
 
@@ -50,15 +64,11 @@ export async function getConfigCommits(limit: number, offset: number): Promise<C
       const message = messageParts.join('|');
 
       // Get affected files for this commit
-      const { stdout: filesOut } = await execFile('git', [
-        'diff-tree',
-        '--no-commit-id',
-        '--name-only',
-        '-r',
-        hash,
-        '--',
-        CONFIG_DIR,
-      ]);
+      const { stdout: filesOut } = await execFile(
+        'git',
+        ['diff-tree', '--no-commit-id', '--name-only', '-r', hash, '--', CONFIG_DIR],
+        { cwd },
+      );
 
       const files = filesOut.trim() ? filesOut.trim().split('\n') : [];
 
@@ -74,15 +84,13 @@ export async function getConfigCommits(limit: number, offset: number): Promise<C
 
 export async function getCommitDetail(hash: string): Promise<ConfigCommitDetail> {
   validateHash(hash);
+  const cwd = await getProjectRoot();
 
-  const { stdout: logOut } = await execFile('git', [
-    'log',
-    '-1',
-    `--pretty=format:${GIT_LOG_FORMAT}`,
-    hash,
-    '--',
-    CONFIG_DIR,
-  ]);
+  const { stdout: logOut } = await execFile(
+    'git',
+    ['log', '-1', `--pretty=format:${GIT_LOG_FORMAT}`, hash, '--', CONFIG_DIR],
+    { cwd },
+  );
 
   const [commitHash, timestamp, author, ...messageParts] = logOut.trim().split('|');
   if (!commitHash || !timestamp || !author) {
@@ -92,19 +100,15 @@ export async function getCommitDetail(hash: string): Promise<ConfigCommitDetail>
   const message = messageParts.join('|');
 
   // Get affected files
-  const { stdout: filesOut } = await execFile('git', [
-    'diff-tree',
-    '--no-commit-id',
-    '--name-only',
-    '-r',
-    hash,
-    '--',
-    CONFIG_DIR,
-  ]);
+  const { stdout: filesOut } = await execFile(
+    'git',
+    ['diff-tree', '--no-commit-id', '--name-only', '-r', hash, '--', CONFIG_DIR],
+    { cwd },
+  );
   const files = filesOut.trim() ? filesOut.trim().split('\n') : [];
 
   // Get diff for config files
-  const { stdout: diffOut } = await execFile('git', ['show', hash, '--', CONFIG_DIR]);
+  const { stdout: diffOut } = await execFile('git', ['show', hash, '--', CONFIG_DIR], { cwd });
 
   // Parse per-file diffs from unified diff output
   const diffs = parseFileDiffs(diffOut, files);
@@ -150,44 +154,45 @@ export async function revertConfigFile(
 
   try {
     validateHash(hash);
+    const cwd = await getProjectRoot();
+
     if (filePath) {
       validateFilePath(filePath);
 
       // Resolve absolute path from repo root
-      const { stdout: repoRoot } = await execFile('git', ['rev-parse', '--show-toplevel']);
       const { join } = await import('node:path');
-      const absolutePath = join(repoRoot.trim(), filePath);
+      const absolutePath = join(cwd, filePath);
 
       // Restore previous version of specific file
-      await execFile('git', ['show', `${hash}~1:${filePath}`]).then(async ({ stdout: content }) => {
-        const { writeFile } = await import('node:fs/promises');
-        await writeFile(absolutePath, content);
-      });
-      await execFile('git', ['add', filePath]);
+      await execFile('git', ['show', `${hash}~1:${filePath}`], { cwd }).then(
+        async ({ stdout: content }) => {
+          const { writeFile } = await import('node:fs/promises');
+          await writeFile(absolutePath, content);
+        },
+      );
+      await execFile('git', ['add', filePath], { cwd });
 
       const shortHash = hash.slice(0, SHORT_SHA_LENGTH);
-      await execFile('git', ['commit', '-m', `revert: ${filePath} from commit ${shortHash}`]);
+      await execFile('git', ['commit', '-m', `revert: ${filePath} from commit ${shortHash}`], {
+        cwd,
+      });
 
       reloadedConfigs.push(filePath);
     } else {
       // Revert entire commit
-      await execFile('git', ['revert', '--no-edit', hash]);
+      await execFile('git', ['revert', '--no-edit', hash], { cwd });
 
       // Get files that were in the reverted commit
-      const { stdout: filesOut } = await execFile('git', [
-        'diff-tree',
-        '--no-commit-id',
-        '--name-only',
-        '-r',
-        hash,
-        '--',
-        CONFIG_DIR,
-      ]);
+      const { stdout: filesOut } = await execFile(
+        'git',
+        ['diff-tree', '--no-commit-id', '--name-only', '-r', hash, '--', CONFIG_DIR],
+        { cwd },
+      );
       reloadedConfigs.push(...(filesOut.trim() ? filesOut.trim().split('\n') : []));
     }
 
     // Get the new revert commit hash
-    const { stdout: headOut } = await execFile('git', ['rev-parse', 'HEAD']);
+    const { stdout: headOut } = await execFile('git', ['rev-parse', 'HEAD'], { cwd });
     const revertHash = headOut.trim();
 
     // Emit config reload event
