@@ -26,6 +26,14 @@
     "is_default": false
   },
   {
+    "id": "ac5fd79f-c770-4c6b-8c3e-62008158b29c",
+    "name": "retest-agent",
+    "description": "Updated description",
+    "instructions": "",
+    "suite_ids": [],
+    "is_default": false
+  },
+  {
     "id": "94457481-5b90-4850-99e8-f9090e0dc949",
     "name": "ui-test-agent",
     "description": "Created from UI test",
