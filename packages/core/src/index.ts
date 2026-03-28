@@ -34,6 +34,7 @@ import { createPipelineScheduler } from './pipeline-engine/pipeline-scheduler.ts
 import { createPipelineEventTrigger } from './pipeline-engine/pipeline-event-trigger.ts';
 import { createNamedAgentStore } from './agent-registry/named-agent-store.ts';
 import { createAgentResolver } from './agent-registry/agent-resolver.ts';
+import { CapabilityLibrary } from './capability-library/capability-library.ts';
 import { createConfigCommitter } from './agent-registry/config-committer.ts';
 import { createSuiteScaffolder } from './suite-registry/suite-scaffolder.ts';
 import { createKnowledgeStore } from './knowledge-engine/knowledge-store.ts';
@@ -57,7 +58,7 @@ import type { SessionIdleEvent } from '@raven/shared';
 
 const log = createLogger('raven');
 
-// eslint-disable-next-line max-lines-per-function -- boot sequence that initializes all subsystems
+// eslint-disable-next-line max-lines-per-function, complexity -- boot sequence that initializes all subsystems
 async function main(): Promise<void> {
   log.info('Starting Raven...');
 
@@ -124,6 +125,18 @@ async function main(): Promise<void> {
   await suiteRegistry.loadSuites(suitesDir, suitesConfig);
   suiteRegistry.validateAgentTools();
 
+  // Load capability library (v2 — runs alongside suite registry during migration)
+  const capabilityLibrary = new CapabilityLibrary();
+  const libraryDir = resolve(projectRoot, 'library');
+  try {
+    await capabilityLibrary.load(libraryDir);
+    log.info(
+      `Capability library loaded (${String(capabilityLibrary.getSkillNames().length)} skills)`,
+    );
+  } catch (err) {
+    log.warn(`Capability library not found or failed to load, using suite registry only: ${err}`);
+  }
+
   // Count configured (enabled) suites
   const configuredSuiteCount = Object.values(suitesConfig).filter((s) => s?.enabled).length;
 
@@ -181,7 +194,7 @@ async function main(): Promise<void> {
     configDir: configDir,
   });
   namedAgentStore.loadFromConfigFile();
-  const agentResolver = createAgentResolver({ suiteRegistry });
+  const agentResolver = createAgentResolver({ capabilityLibrary, suiteRegistry });
   const configCommitter = createConfigCommitter({
     eventBus,
     configFilePath: resolve(configDir, 'agents.json'),
@@ -444,6 +457,7 @@ async function main(): Promise<void> {
     sessionRetrospective,
     namedAgentStore,
     agentResolver,
+    capabilityLibrary,
     port: config.RAVEN_PORT,
   });
 

@@ -50,6 +50,7 @@ export interface AgentTaskRequestEvent extends BaseEvent {
     knowledgeContext?: string;
     sessionReferencesContext?: string;
     projectDataSourcesContext?: string;
+    skillCatalogContext?: string;
     priority: Priority;
     sessionId?: string;
     projectId?: string;

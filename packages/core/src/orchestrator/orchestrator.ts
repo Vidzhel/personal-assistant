@@ -24,6 +24,7 @@ import type { SessionRetrospective } from '../session-manager/session-retrospect
 import type { AgentTaskCompleteEvent } from '@raven/shared';
 import type { NamedAgentStore } from '../agent-registry/named-agent-store.ts';
 import type { AgentResolver } from '../agent-registry/agent-resolver.ts';
+import type { CapabilityLibrary } from '../capability-library/capability-library.ts';
 import { createKnowledgeAgentDefinition } from '../knowledge-engine/knowledge-agent.ts';
 import { getDb } from '../db/database.ts';
 import { isMetaProject } from '../project-manager/meta-project.ts';
@@ -51,6 +52,7 @@ export interface OrchestratorDeps {
   sessionRetrospective?: SessionRetrospective;
   namedAgentStore?: NamedAgentStore;
   agentResolver?: AgentResolver;
+  capabilityLibrary?: CapabilityLibrary;
   port: number;
 }
 
@@ -72,6 +74,7 @@ export class Orchestrator {
   private sessionRetrospective?: SessionRetrospective;
   private namedAgentStore?: NamedAgentStore;
   private agentResolver?: AgentResolver;
+  private capabilityLibrary?: CapabilityLibrary;
   private port: number;
 
   constructor(deps: OrchestratorDeps) {
@@ -86,6 +89,7 @@ export class Orchestrator {
     this.sessionRetrospective = deps.sessionRetrospective;
     this.namedAgentStore = deps.namedAgentStore;
     this.agentResolver = deps.agentResolver;
+    this.capabilityLibrary = deps.capabilityLibrary;
     this.port = deps.port;
     this.eventBus.on<NewEmailEvent>('email:new', (e) => {
       this.handleNewEmail(e).catch((err: unknown) => log.error(`handleNewEmail failed: ${err}`));
@@ -349,6 +353,20 @@ export class Orchestrator {
       plugins = this.suiteRegistry.collectVendorPlugins();
     }
 
+    // Inject skill catalog from capability library (v2) into agent context
+    let skillCatalogContext: string | undefined;
+    if (this.capabilityLibrary) {
+      try {
+        const skillNames = Object.keys(agentDefinitions);
+        const catalog = this.capabilityLibrary.getSkillCatalog(skillNames);
+        if (catalog) {
+          skillCatalogContext = catalog;
+        }
+      } catch (err) {
+        log.warn(`Skill catalog generation failed: ${err}`);
+      }
+    }
+
     // Merge knowledge agent into agent definitions
     agentDefinitions['knowledge-agent'] = createKnowledgeAgentDefinition(this.port);
 
@@ -447,6 +465,7 @@ export class Orchestrator {
         knowledgeContext,
         sessionReferencesContext,
         projectDataSourcesContext,
+        skillCatalogContext,
         priority: 'high',
         sessionId: session.id,
         projectId,

@@ -42,6 +42,10 @@ export function buildSystemPrompt(task: AgentTask, project?: Project): string {
     parts.push('', '## Project Data Sources', task.projectDataSourcesContext);
   }
 
+  if (task.skillCatalogContext) {
+    parts.push('', task.skillCatalogContext);
+  }
+
   if (project?.systemPrompt) {
     parts.push('', '## Project Context', project.systemPrompt);
   }

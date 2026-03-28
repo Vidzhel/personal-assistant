@@ -106,6 +106,8 @@ export class AgentManager {
       actionName: payload.actionName,
       knowledgeContext: payload.knowledgeContext,
       sessionReferencesContext: payload.sessionReferencesContext,
+      projectDataSourcesContext: payload.projectDataSourcesContext,
+      skillCatalogContext: payload.skillCatalogContext,
       namedAgentId: payload.namedAgentId,
     };
 
