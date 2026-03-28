@@ -6,7 +6,8 @@ export interface NamedAgent {
   name: string;
   description: string | null;
   instructions: string | null;
-  suiteIds: string[];
+  suiteIds: string[]; // DEPRECATED — kept for migration
+  skills: string[]; // references library skill names
   isDefault: boolean;
   createdAt: string;
   updatedAt: string;
@@ -20,6 +21,7 @@ export const NamedAgentCreateInputSchema = z.object({
   description: z.string().optional(),
   instructions: z.string().optional(),
   suiteIds: z.array(z.string()).default([]),
+  skills: z.array(z.string()).default([]),
 });
 
 export type NamedAgentCreateInput = z.infer<typeof NamedAgentCreateInputSchema>;
@@ -33,6 +35,7 @@ export const NamedAgentUpdateInputSchema = z.object({
   description: z.string().nullable().optional(),
   instructions: z.string().nullable().optional(),
   suiteIds: z.array(z.string()).optional(),
+  skills: z.array(z.string()).optional(),
 });
 
 export type NamedAgentUpdateInput = z.infer<typeof NamedAgentUpdateInputSchema>;

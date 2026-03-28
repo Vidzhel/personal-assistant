@@ -5,6 +5,7 @@
     "description": "General-purpose assistant — handles all requests when no specialized agent is assigned",
     "instructions": "",
     "suite_ids": [],
+    "skills": [],
     "is_default": true
   },
   {
@@ -15,6 +16,7 @@
     "suite_ids": [
       "email"
     ],
+    "skills": [],
     "is_default": false
   },
   {
@@ -23,6 +25,7 @@
     "description": "Created from UI test",
     "instructions": "Test instructions",
     "suite_ids": [],
+    "skills": [],
     "is_default": false
   },
   {
@@ -31,6 +34,7 @@
     "description": "Unique agent",
     "instructions": null,
     "suite_ids": [],
+    "skills": [],
     "is_default": false
   }
 ]

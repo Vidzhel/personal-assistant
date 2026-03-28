@@ -19,12 +19,13 @@ interface NamedAgentRow {
   description: string | null;
   instructions: string | null;
   suite_ids: string;
+  skills: string;
   is_default: number;
   created_at: string;
   updated_at: string;
 }
 
-function safeParseSuiteIds(raw: string): string[] {
+function safeParseJsonArray(raw: string): string[] {
   try {
     return JSON.parse(raw) as string[];
   } catch {
@@ -38,7 +39,8 @@ function rowToAgent(row: NamedAgentRow): NamedAgent {
     name: row.name,
     description: row.description,
     instructions: row.instructions,
-    suiteIds: safeParseSuiteIds(row.suite_ids),
+    suiteIds: safeParseJsonArray(row.suite_ids),
+    skills: safeParseJsonArray(row.skills),
     isDefault: row.is_default === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -55,6 +57,36 @@ export interface NamedAgentStore {
   listAgents: () => NamedAgent[];
   syncToConfigFile: () => void;
   loadFromConfigFile: () => void;
+}
+
+interface UpdateFields {
+  sets: string[];
+  params: unknown[];
+  changes: string[];
+}
+
+function buildUpdateFields(input: NamedAgentUpdateInput): UpdateFields {
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  const changes: string[] = [];
+
+  const fieldMap: Array<[keyof NamedAgentUpdateInput, string, boolean]> = [
+    ['name', 'name', false],
+    ['description', 'description', false],
+    ['instructions', 'instructions', false],
+    ['suiteIds', 'suite_ids', true],
+    ['skills', 'skills', true],
+  ];
+
+  for (const [key, column, isJson] of fieldMap) {
+    if (input[key] !== undefined) {
+      sets.push(`${column} = ?`);
+      params.push(isJson ? JSON.stringify(input[key]) : input[key]);
+      changes.push(key);
+    }
+  }
+
+  return { sets, params, changes };
 }
 
 // eslint-disable-next-line max-lines-per-function -- factory initializing all store methods
@@ -76,7 +108,13 @@ export function createNamedAgentStore(deps: {
       timestamp: Date.now(),
       source: 'named-agent-store',
       type,
-      payload: { agentId: agent.id, name: agent.name, suiteIds: agent.suiteIds, ...extra },
+      payload: {
+        agentId: agent.id,
+        name: agent.name,
+        suiteIds: agent.suiteIds,
+        skills: agent.skills,
+        ...extra,
+      },
     });
   }
 
@@ -86,13 +124,14 @@ export function createNamedAgentStore(deps: {
       const now = new Date().toISOString();
 
       db.run(
-        `INSERT INTO named_agents (id, name, description, instructions, suite_ids, is_default, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
+        `INSERT INTO named_agents (id, name, description, instructions, suite_ids, skills, is_default, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
         id,
         input.name,
         input.description ?? null,
         input.instructions ?? null,
         JSON.stringify(input.suiteIds),
+        JSON.stringify(input.skills),
         now,
         now,
       );
@@ -112,30 +151,7 @@ export function createNamedAgentStore(deps: {
         throw new Error('Cannot rename the default agent');
       }
 
-      const sets: string[] = [];
-      const params: unknown[] = [];
-      const changes: string[] = [];
-
-      if (input.name !== undefined) {
-        sets.push('name = ?');
-        params.push(input.name);
-        changes.push('name');
-      }
-      if (input.description !== undefined) {
-        sets.push('description = ?');
-        params.push(input.description);
-        changes.push('description');
-      }
-      if (input.instructions !== undefined) {
-        sets.push('instructions = ?');
-        params.push(input.instructions);
-        changes.push('instructions');
-      }
-      if (input.suiteIds !== undefined) {
-        sets.push('suite_ids = ?');
-        params.push(JSON.stringify(input.suiteIds));
-        changes.push('suiteIds');
-      }
+      const { sets, params, changes } = buildUpdateFields(input);
 
       if (sets.length === 0) return existing;
 
@@ -195,6 +211,7 @@ export function createNamedAgentStore(deps: {
         description: a.description,
         instructions: a.instructions,
         suite_ids: a.suiteIds,
+        skills: a.skills,
         is_default: a.isDefault,
       }));
       writeFileSync(configFilePath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
@@ -228,6 +245,7 @@ const ConfigEntrySchema = z.object({
   description: z.string().optional(),
   instructions: z.string().optional(),
   suite_ids: z.array(z.string()).optional(),
+  skills: z.array(z.string()).optional(),
   is_default: z.union([z.boolean(), z.number()]).optional(),
 });
 
@@ -264,13 +282,14 @@ function seedAgentsFromConfig(entries: ConfigEntry[], db: DatabaseInterface): vo
   for (const entry of entries) {
     const id = entry.id ?? generateId();
     db.run(
-      `INSERT OR IGNORE INTO named_agents (id, name, description, instructions, suite_ids, is_default, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO named_agents (id, name, description, instructions, suite_ids, skills, is_default, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       entry.name,
       entry.description ?? null,
       entry.instructions ?? null,
       JSON.stringify(entry.suite_ids ?? []),
+      JSON.stringify(entry.skills ?? []),
       entry.is_default ? 1 : 0,
       now,
       now,

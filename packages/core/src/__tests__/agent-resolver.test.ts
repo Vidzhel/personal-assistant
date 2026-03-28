@@ -9,6 +9,7 @@ function makeAgent(overrides: Partial<NamedAgent> = {}): NamedAgent {
     description: null,
     instructions: null,
     suiteIds: [],
+    skills: [],
     isDefault: false,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

@@ -126,7 +126,7 @@ describe('Agents API', () => {
 
   describe('GET /api/agents/:id', () => {
     it('returns agent by id', async () => {
-      const created = store.createAgent({ name: 'get-api-test', suiteIds: [] });
+      const created = store.createAgent({ name: 'get-api-test', suiteIds: [], skills: [] });
       const res = await app.inject({ method: 'GET', url: `/api/agents/${created.id}` });
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.payload);
@@ -141,7 +141,7 @@ describe('Agents API', () => {
 
   describe('PATCH /api/agents/:id', () => {
     it('updates agent fields', async () => {
-      const created = store.createAgent({ name: 'patch-test', suiteIds: [] });
+      const created = store.createAgent({ name: 'patch-test', suiteIds: [], skills: [] });
       const res = await app.inject({
         method: 'PATCH',
         url: `/api/agents/${created.id}`,
@@ -164,7 +164,7 @@ describe('Agents API', () => {
 
   describe('DELETE /api/agents/:id', () => {
     it('deletes a non-default agent', async () => {
-      const created = store.createAgent({ name: 'delete-api-test', suiteIds: [] });
+      const created = store.createAgent({ name: 'delete-api-test', suiteIds: [], skills: [] });
       const res = await app.inject({ method: 'DELETE', url: `/api/agents/${created.id}` });
       expect(res.statusCode).toBe(200);
       expect(store.getAgent(created.id)).toBeUndefined();
@@ -179,7 +179,7 @@ describe('Agents API', () => {
 
   describe('GET /api/agents/:id/tasks', () => {
     it('returns empty array when no task store', async () => {
-      const created = store.createAgent({ name: 'tasks-api-test', suiteIds: [] });
+      const created = store.createAgent({ name: 'tasks-api-test', suiteIds: [], skills: [] });
       const res = await app.inject({
         method: 'GET',
         url: `/api/agents/${created.id}/tasks`,
