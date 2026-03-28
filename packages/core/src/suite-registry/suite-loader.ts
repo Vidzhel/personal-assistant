@@ -30,10 +30,7 @@ export interface LoadedSuite {
   suiteDir: string;
 }
 
-export function resolveVendorPlugins(
-  vendorPlugins: string[],
-  vendorDir: string,
-): ResolvedPlugin[] {
+export function resolveVendorPlugins(vendorPlugins: string[], vendorDir: string): ResolvedPlugin[] {
   return vendorPlugins.map((name) => ({
     type: 'local' as const,
     path: resolve(vendorDir, name),

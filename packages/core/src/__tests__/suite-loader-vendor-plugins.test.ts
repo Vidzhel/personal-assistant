@@ -3,10 +3,7 @@ import { resolveVendorPlugins } from '../suite-registry/suite-loader.ts';
 
 describe('resolveVendorPlugins', () => {
   it('resolves vendor plugin names to absolute paths', () => {
-    const result = resolveVendorPlugins(
-      ['anthropic-skills', 'ffmpeg-master'],
-      '/project/vendor',
-    );
+    const result = resolveVendorPlugins(['anthropic-skills', 'ffmpeg-master'], '/project/vendor');
 
     expect(result).toEqual([
       { type: 'local', path: '/project/vendor/anthropic-skills' },
