@@ -11,3 +11,4 @@ export * from './insights.ts';
 export * from './integrations-config.ts';
 export * from './tasks.ts';
 export * from './config-history.ts';
+export * from './library.ts';
