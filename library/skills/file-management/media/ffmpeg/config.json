@@ -1,0 +1,15 @@
+{
+  "name": "ffmpeg",
+  "displayName": "FFmpeg Media Processing",
+  "description": "Process audio and video with ffmpeg (transcode, trim, split, extract audio, concatenate, and more)",
+  "mcps": [],
+  "vendorSkills": ["claude-plugin-marketplace/plugins/ffmpeg-master"],
+  "tools": ["Bash", "Read", "Write", "Glob", "Grep"],
+  "systemDeps": ["ffmpeg"],
+  "model": "sonnet",
+  "maxTurns": 25,
+  "actions": [
+    { "name": "ffmpeg:process", "description": "Process audio or video with ffmpeg", "defaultTier": "yellow", "reversible": true },
+    { "name": "ffmpeg:convert", "description": "Convert media between formats", "defaultTier": "yellow", "reversible": true }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "name": "pptx",
+  "displayName": "PowerPoint Processing",
+  "description": "Read, create, and edit PowerPoint presentations",
+  "mcps": [],
+  "vendorSkills": ["anthropic-skills/pptx"],
+  "tools": ["Bash", "Read", "Write", "Glob", "Grep"],
+  "model": "sonnet",
+  "maxTurns": 25,
+  "actions": [
+    { "name": "pptx:read", "description": "Read and extract content from PowerPoint presentations", "defaultTier": "green", "reversible": true },
+    { "name": "pptx:create", "description": "Create or modify PowerPoint presentations", "defaultTier": "yellow", "reversible": true },
+    { "name": "pptx:convert", "description": "Convert presentations to other formats", "defaultTier": "yellow", "reversible": true }
+  ]
+}

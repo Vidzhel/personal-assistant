@@ -1,0 +1,15 @@
+{
+  "name": "pdf",
+  "displayName": "PDF Processing",
+  "description": "Read, create, merge, split, OCR, watermark, and encrypt PDF files",
+  "mcps": ["markdownify"],
+  "vendorSkills": ["anthropic-skills/pdf"],
+  "tools": ["Bash", "Read", "Write", "Glob", "Grep"],
+  "model": "sonnet",
+  "maxTurns": 25,
+  "actions": [
+    { "name": "pdf:read", "description": "Read and extract content from PDF documents", "defaultTier": "green", "reversible": true },
+    { "name": "pdf:create", "description": "Create or modify PDF files", "defaultTier": "yellow", "reversible": true },
+    { "name": "pdf:convert", "description": "Convert PDF to other formats", "defaultTier": "yellow", "reversible": true }
+  ]
+}

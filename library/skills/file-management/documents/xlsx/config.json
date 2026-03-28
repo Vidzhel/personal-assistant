@@ -1,0 +1,15 @@
+{
+  "name": "xlsx",
+  "displayName": "Excel Spreadsheet Processing",
+  "description": "Read, create, and edit Excel spreadsheets with formulas and charts",
+  "mcps": [],
+  "vendorSkills": ["anthropic-skills/xlsx"],
+  "tools": ["Bash", "Read", "Write", "Glob", "Grep"],
+  "model": "sonnet",
+  "maxTurns": 25,
+  "actions": [
+    { "name": "xlsx:read", "description": "Read and extract data from Excel spreadsheets", "defaultTier": "green", "reversible": true },
+    { "name": "xlsx:create", "description": "Create or modify Excel spreadsheets", "defaultTier": "yellow", "reversible": true },
+    { "name": "xlsx:convert", "description": "Convert spreadsheets to other formats", "defaultTier": "yellow", "reversible": true }
+  ]
+}

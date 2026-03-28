@@ -1,0 +1,15 @@
+{
+  "name": "docx",
+  "displayName": "Word Document Processing",
+  "description": "Read, create, and edit Word documents with full formatting",
+  "mcps": [],
+  "vendorSkills": ["anthropic-skills/docx"],
+  "tools": ["Bash", "Read", "Write", "Glob", "Grep"],
+  "model": "sonnet",
+  "maxTurns": 25,
+  "actions": [
+    { "name": "docx:read", "description": "Read and extract content from Word documents", "defaultTier": "green", "reversible": true },
+    { "name": "docx:create", "description": "Create or modify Word documents", "defaultTier": "yellow", "reversible": true },
+    { "name": "docx:convert", "description": "Convert Word documents to other formats", "defaultTier": "yellow", "reversible": true }
+  ]
+}

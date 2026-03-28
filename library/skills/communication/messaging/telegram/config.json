@@ -1,0 +1,14 @@
+{
+  "name": "telegram",
+  "displayName": "Telegram",
+  "description": "Sends messages and notifications to the user via Telegram",
+  "mcps": [],
+  "vendorSkills": [],
+  "tools": [],
+  "model": "haiku",
+  "maxTurns": 3,
+  "actions": [
+    { "name": "telegram:send-message", "description": "Send a message to user", "defaultTier": "green", "reversible": false },
+    { "name": "telegram:send-notification", "description": "Send a system notification", "defaultTier": "green", "reversible": false }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "daily-digest",
+  "displayName": "Daily Digest",
+  "description": "Compiles daily morning briefings by gathering data from task and email agents",
+  "mcps": [],
+  "vendorSkills": [],
+  "tools": ["Read", "Grep"],
+  "model": "sonnet",
+  "maxTurns": 15,
+  "actions": [
+    { "name": "daily-digest:compile-briefing", "description": "Compile a digest briefing from skill data", "defaultTier": "green", "reversible": true }
+  ]
+}

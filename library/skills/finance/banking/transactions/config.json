@@ -1,0 +1,16 @@
+{
+  "name": "transactions",
+  "displayName": "Financial Transactions",
+  "description": "Bank transaction sync (Monobank, PrivatBank) to local DB and YNAB integration",
+  "mcps": [],
+  "vendorSkills": [],
+  "tools": ["Bash", "Read", "Grep"],
+  "model": "sonnet",
+  "maxTurns": 10,
+  "actions": [
+    { "name": "transactions:read-transactions", "description": "Read local transaction history", "defaultTier": "green", "reversible": true },
+    { "name": "transactions:read-ynab-report", "description": "Fetch YNAB monthly spending report", "defaultTier": "green", "reversible": true },
+    { "name": "transactions:push-to-ynab", "description": "Push transactions to YNAB", "defaultTier": "yellow", "reversible": false },
+    { "name": "transactions:sync-categories", "description": "Sync categories from YNAB", "defaultTier": "yellow", "reversible": true }
+  ]
+}

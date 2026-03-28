@@ -1,0 +1,11 @@
+{
+  "name": "config-management",
+  "displayName": "Config Management",
+  "description": "Generates, edits, and manages system configuration (pipelines, suites, agents, schedules) from natural language",
+  "mcps": [],
+  "vendorSkills": [],
+  "tools": ["Read", "Glob", "Grep"],
+  "model": "sonnet",
+  "maxTurns": 15,
+  "actions": []
+}

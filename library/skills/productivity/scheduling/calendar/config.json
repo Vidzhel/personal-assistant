@@ -1,0 +1,15 @@
+{
+  "name": "calendar",
+  "displayName": "Google Calendar",
+  "description": "View, create, and manage Google Calendar events via the gws CLI",
+  "mcps": [],
+  "vendorSkills": [],
+  "tools": ["Bash", "Read", "Grep"],
+  "model": "sonnet",
+  "maxTurns": 15,
+  "actions": [
+    { "name": "calendar:read-calendar", "description": "View calendar events and agenda", "defaultTier": "green", "reversible": true },
+    { "name": "calendar:create-event", "description": "Create a calendar event", "defaultTier": "yellow", "reversible": true },
+    { "name": "calendar:modify-event", "description": "Update or delete a calendar event", "defaultTier": "yellow", "reversible": true }
+  ]
+}

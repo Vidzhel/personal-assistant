@@ -1,0 +1,13 @@
+{
+  "name": "transcription",
+  "displayName": "Audio/Video Transcription",
+  "description": "Transcribes audio and video files using Google Gemini, handling files up to 9.5 hours long",
+  "mcps": [],
+  "vendorSkills": [],
+  "tools": ["Bash", "Read", "Write", "Glob"],
+  "model": "sonnet",
+  "maxTurns": 10,
+  "actions": [
+    { "name": "transcription:transcribe", "description": "Transcribe a voice or media file using Google Gemini", "defaultTier": "green", "reversible": false }
+  ]
+}

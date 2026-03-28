@@ -1,0 +1,14 @@
+{
+  "name": "pattern-analysis",
+  "displayName": "Pattern Analysis",
+  "description": "Analyzes data snapshots to detect patterns and generate actionable insights",
+  "mcps": [],
+  "vendorSkills": [],
+  "tools": [],
+  "model": "haiku",
+  "maxTurns": 1,
+  "actions": [
+    { "name": "pattern-analysis:generate-insight", "description": "Generate insights from pattern analysis", "defaultTier": "green", "reversible": true },
+    { "name": "pattern-analysis:deliver-insight", "description": "Deliver an insight notification to the user", "defaultTier": "yellow", "reversible": true }
+  ]
+}

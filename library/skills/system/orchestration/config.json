@@ -1,0 +1,11 @@
+{
+  "name": "orchestration",
+  "displayName": "Orchestrator",
+  "description": "Top-level request router that delegates to domain-specific skills",
+  "mcps": [],
+  "vendorSkills": [],
+  "tools": ["Read", "Glob", "Grep"],
+  "model": "sonnet",
+  "maxTurns": 20,
+  "actions": []
+}
