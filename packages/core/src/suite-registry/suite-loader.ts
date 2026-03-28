@@ -15,13 +15,29 @@ import {
 
 const log = createLogger('suite-loader');
 
+export interface ResolvedPlugin {
+  type: 'local';
+  path: string;
+}
+
 export interface LoadedSuite {
   manifest: ResolvedSuiteManifest;
   agents: ResolvedAgentDefinition[];
   mcpServers: Record<string, McpServerConfig>;
   actions: ActionDefinition[];
   schedules: SuiteSchedule[];
+  vendorPlugins: ResolvedPlugin[];
   suiteDir: string;
+}
+
+export function resolveVendorPlugins(
+  vendorPlugins: string[],
+  vendorDir: string,
+): ResolvedPlugin[] {
+  return vendorPlugins.map((name) => ({
+    type: 'local' as const,
+    path: resolve(vendorDir, name),
+  }));
 }
 
 export interface SuiteSchedule {
@@ -73,7 +89,11 @@ export async function loadSuite(suiteDir: string): Promise<LoadedSuite> {
   // Load schedules
   const schedules = await loadSchedules(absDir);
 
-  return { manifest, agents, mcpServers, actions, schedules, suiteDir: absDir };
+  // Resolve vendor plugins relative to project vendor directory
+  const vendorDir = resolve(absDir, '..', '..', 'vendor');
+  const vendorPlugins = resolveVendorPlugins(manifest.vendorPlugins ?? [], vendorDir);
+
+  return { manifest, agents, mcpServers, actions, schedules, vendorPlugins, suiteDir: absDir };
 }
 
 async function loadAgents(suiteDir: string): Promise<ResolvedAgentDefinition[]> {
