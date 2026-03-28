@@ -15,7 +15,7 @@ describe('SDK backend plugins', () => {
     mockQuery.mockReset();
     mockQuery.mockImplementation(async function* () {
       yield { type: 'result', result: 'ok', subtype: 'success' };
-    });
+    } as unknown as typeof query);
   });
 
   it('passes plugins to query options when provided', async () => {
@@ -39,7 +39,7 @@ describe('SDK backend plugins', () => {
     });
 
     const callArgs = mockQuery.mock.calls[0][0];
-    expect(callArgs.options.plugins).toEqual(plugins);
+    expect(callArgs.options!.plugins).toEqual(plugins);
   });
 
   it('omits plugins from query options when empty', async () => {
@@ -59,6 +59,6 @@ describe('SDK backend plugins', () => {
     });
 
     const callArgs = mockQuery.mock.calls[0][0];
-    expect(callArgs.options.plugins).toBeUndefined();
+    expect(callArgs.options!.plugins).toBeUndefined();
   });
 });
