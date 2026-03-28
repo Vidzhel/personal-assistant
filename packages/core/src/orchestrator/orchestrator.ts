@@ -130,6 +130,7 @@ export class Orchestrator {
     }
 
     const mcpServers = emailSuite.mcpServers;
+    const plugins = emailSuite.vendorPlugins;
     const taskId = generateId();
 
     this.eventBus.emit({
@@ -151,6 +152,7 @@ export class Orchestrator {
         ].join('\n'),
         skillName: SUITE_EMAIL,
         mcpServers,
+        plugins,
         knowledgeContext,
         priority: 'normal',
         projectId: event.projectId,
@@ -203,10 +205,11 @@ export class Orchestrator {
       }
     }
 
-    // Collect agent definitions and MCPs from all enabled suites
+    // Collect agent definitions, MCPs, and vendor plugins from all enabled suites
     // so the scheduled agent can delegate to other suites' agents
     const agentDefinitions = this.suiteRegistry.collectAgentDefinitions();
     const mcpServers = this.suiteRegistry.collectMcpServers();
+    const plugins = this.suiteRegistry.collectVendorPlugins();
 
     const taskId = generateId();
 
@@ -221,6 +224,7 @@ export class Orchestrator {
         skillName: suite.manifest.name,
         mcpServers,
         agentDefinitions,
+        plugins,
         knowledgeContext,
         priority: 'normal',
       },
@@ -318,6 +322,7 @@ export class Orchestrator {
     // Resolve capabilities from named agent (if configured) or fall back to all suites
     let agentDefinitions: Record<string, SubAgentDefinition>;
     let mcpServers: Record<string, McpServerConfig>;
+    let plugins: Array<{ type: 'local'; path: string }>;
     let namedAgentInstructions: string | undefined;
     let namedAgentId: string | undefined;
 
@@ -327,6 +332,7 @@ export class Orchestrator {
         const capabilities = this.agentResolver.resolveAgentCapabilities(namedAgent);
         agentDefinitions = capabilities.agentDefinitions;
         mcpServers = capabilities.mcpServers;
+        plugins = capabilities.plugins;
         namedAgentId = namedAgent.id;
         if (namedAgent.instructions) {
           namedAgentInstructions = namedAgent.instructions;
@@ -335,10 +341,12 @@ export class Orchestrator {
         log.warn(`Named agent resolution failed, falling back to all suites: ${err}`);
         agentDefinitions = this.suiteRegistry.collectAgentDefinitions();
         mcpServers = this.suiteRegistry.collectMcpServers();
+        plugins = this.suiteRegistry.collectVendorPlugins();
       }
     } else {
       agentDefinitions = this.suiteRegistry.collectAgentDefinitions();
       mcpServers = this.suiteRegistry.collectMcpServers();
+      plugins = this.suiteRegistry.collectVendorPlugins();
     }
 
     // Merge knowledge agent into agent definitions
@@ -435,6 +443,7 @@ export class Orchestrator {
         skillName: SKILL_ORCHESTRATOR,
         mcpServers, // Resolved from named agent or all suites
         agentDefinitions, // Sub-agents carry the MCPs + knowledge agent
+        plugins,
         knowledgeContext,
         sessionReferencesContext,
         projectDataSourcesContext,

@@ -11,6 +11,7 @@ const log = createLogger('agent-resolver');
 export interface ResolvedCapabilities {
   mcpServers: Record<string, McpServerConfig>;
   agentDefinitions: Record<string, SubAgentDefinition>;
+  plugins: Array<{ type: 'local'; path: string }>;
 }
 
 export interface AgentResolver {
@@ -27,6 +28,7 @@ export function createAgentResolver(deps: { suiteRegistry: SuiteRegistry }): Age
         return {
           mcpServers: suiteRegistry.collectMcpServers(),
           agentDefinitions: suiteRegistry.collectAgentDefinitions(),
+          plugins: suiteRegistry.collectVendorPlugins(),
         };
       }
 
@@ -43,6 +45,7 @@ export function createAgentResolver(deps: { suiteRegistry: SuiteRegistry }): Age
       return {
         mcpServers: suiteRegistry.collectMcpServers(validSuites),
         agentDefinitions: suiteRegistry.collectAgentDefinitions(validSuites),
+        plugins: suiteRegistry.collectVendorPlugins(validSuites),
       };
     },
   };

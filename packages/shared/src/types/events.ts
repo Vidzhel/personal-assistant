@@ -54,6 +54,7 @@ export interface AgentTaskRequestEvent extends BaseEvent {
     sessionId?: string;
     projectId?: string;
     namedAgentId?: string;
+    plugins?: Array<{ type: 'local'; path: string }>;
   };
 }
 

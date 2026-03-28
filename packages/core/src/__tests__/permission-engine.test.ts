@@ -24,6 +24,7 @@ function makeSuiteRegistryWithActions(suiteActions: Record<string, SkillAction[]
       mcpServers: {},
       actions,
       schedules: [],
+      vendorPlugins: [],
       suiteDir: '/tmp/test',
     });
   }
