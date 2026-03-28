@@ -14,5 +14,5 @@ suites/**/*.js.map
 suites/**/*.d.ts
 suites/**/*.d.ts.map
 # Vendor build artifacts
-vendor/markdownify-mcp/node_modules/
-vendor/markdownify-mcp/dist/
+library/vendor/markdownify-mcp/node_modules/
+library/vendor/markdownify-mcp/dist/

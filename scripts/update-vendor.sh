@@ -11,7 +11,7 @@ git submodule update --remote --merge
 
 echo ""
 echo "=== Building markdownify-mcp ==="
-cd "$PROJECT_ROOT/vendor/markdownify-mcp"
+cd "$PROJECT_ROOT/library/vendor/markdownify-mcp"
 npm install
 npm run build
 

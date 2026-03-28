@@ -1,12 +1,12 @@
 [submodule "vendor/anthropic-skills"]
-	path = vendor/anthropic-skills
+	path = library/vendor/anthropic-skills
 	url = https://github.com/anthropics/skills.git
 [submodule "vendor/smart-extractors"]
-	path = vendor/smart-extractors
+	path = library/vendor/smart-extractors
 	url = https://github.com/diegocconsolini/ClaudeSkillCollection.git
 [submodule "vendor/markdownify-mcp"]
-	path = vendor/markdownify-mcp
+	path = library/vendor/markdownify-mcp
 	url = https://github.com/zcaceres/markdownify-mcp.git
 [submodule "vendor/claude-plugin-marketplace"]
-	path = vendor/claude-plugin-marketplace
+	path = library/vendor/claude-plugin-marketplace
 	url = https://github.com/JosiahSiegel/claude-plugin-marketplace.git

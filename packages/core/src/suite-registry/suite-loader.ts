@@ -86,8 +86,8 @@ export async function loadSuite(suiteDir: string): Promise<LoadedSuite> {
   // Load schedules
   const schedules = await loadSchedules(absDir);
 
-  // Resolve vendor plugins relative to project vendor directory
-  const vendorDir = resolve(absDir, '..', '..', 'vendor');
+  // Resolve vendor plugins relative to project library/vendor directory
+  const vendorDir = resolve(absDir, '..', '..', 'library', 'vendor');
   const vendorPlugins = resolveVendorPlugins(manifest.vendorPlugins ?? [], vendorDir);
 
   return { manifest, agents, mcpServers, actions, schedules, vendorPlugins, suiteDir: absDir };
