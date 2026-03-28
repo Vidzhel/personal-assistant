@@ -5,6 +5,7 @@ import {
   type NamedAgent,
 } from '@raven/shared';
 import type { SuiteRegistry } from '../suite-registry/suite-registry.ts';
+import type { CapabilityLibrary } from '../capability-library/capability-library.ts';
 
 const log = createLogger('agent-resolver');
 
@@ -18,35 +19,76 @@ export interface AgentResolver {
   resolveAgentCapabilities: (agent: NamedAgent) => ResolvedCapabilities;
 }
 
-export function createAgentResolver(deps: { suiteRegistry: SuiteRegistry }): AgentResolver {
-  const { suiteRegistry } = deps;
+const EMPTY_CAPABILITIES: ResolvedCapabilities = {
+  mcpServers: {},
+  agentDefinitions: {},
+  plugins: [],
+};
+
+function resolveFromLibrary(
+  library: CapabilityLibrary,
+  skillNames?: string[],
+): ResolvedCapabilities {
+  return {
+    mcpServers: library.collectMcpServers(skillNames),
+    agentDefinitions: library.collectAgentDefinitions(skillNames),
+    plugins: library.resolveVendorPlugins(skillNames),
+  };
+}
+
+function resolveFromSuiteRegistry(
+  registry: SuiteRegistry,
+  agent: NamedAgent,
+): ResolvedCapabilities {
+  if (agent.suiteIds.length === 0 || agent.isDefault) {
+    return {
+      mcpServers: registry.collectMcpServers(),
+      agentDefinitions: registry.collectAgentDefinitions(),
+      plugins: registry.collectVendorPlugins(),
+    };
+  }
+
+  const enabledNames = new Set(registry.getEnabledSuiteNames());
+  for (const suiteId of agent.suiteIds) {
+    if (!enabledNames.has(suiteId)) {
+      log.warn(`Agent "${agent.name}" references missing/disabled suite: ${suiteId}`);
+    }
+  }
+
+  const validSuites = agent.suiteIds.filter((s) => enabledNames.has(s));
+
+  return {
+    mcpServers: registry.collectMcpServers(validSuites),
+    agentDefinitions: registry.collectAgentDefinitions(validSuites),
+    plugins: registry.collectVendorPlugins(validSuites),
+  };
+}
+
+export function createAgentResolver(deps: {
+  capabilityLibrary?: CapabilityLibrary;
+  suiteRegistry?: SuiteRegistry;
+}): AgentResolver {
+  const { capabilityLibrary, suiteRegistry } = deps;
 
   return {
     resolveAgentCapabilities(agent: NamedAgent): ResolvedCapabilities {
-      // Empty suite_ids or default agent → all suites (backward-compatible)
-      if (agent.suiteIds.length === 0 || agent.isDefault) {
-        return {
-          mcpServers: suiteRegistry.collectMcpServers(),
-          agentDefinitions: suiteRegistry.collectAgentDefinitions(),
-          plugins: suiteRegistry.collectVendorPlugins(),
-        };
+      // NEW PATH: if agent has skills populated, use CapabilityLibrary
+      if (capabilityLibrary && agent.skills.length > 0) {
+        return resolveFromLibrary(capabilityLibrary, agent.skills);
       }
 
-      // Validate that all suite_ids reference enabled suites
-      const enabledNames = new Set(suiteRegistry.getEnabledSuiteNames());
-      for (const suiteId of agent.suiteIds) {
-        if (!enabledNames.has(suiteId)) {
-          log.warn(`Agent "${agent.name}" references missing/disabled suite: ${suiteId}`);
-        }
+      // DEFAULT/ALL: if agent is default or has empty skills+suiteIds, use all capabilities
+      const hasNoBindings = agent.skills.length === 0 && agent.suiteIds.length === 0;
+      if (capabilityLibrary && (agent.isDefault || hasNoBindings)) {
+        return resolveFromLibrary(capabilityLibrary);
       }
 
-      const validSuites = agent.suiteIds.filter((s) => enabledNames.has(s));
+      // LEGACY PATH: fall back to suiteIds via SuiteRegistry
+      if (suiteRegistry) {
+        return resolveFromSuiteRegistry(suiteRegistry, agent);
+      }
 
-      return {
-        mcpServers: suiteRegistry.collectMcpServers(validSuites),
-        agentDefinitions: suiteRegistry.collectAgentDefinitions(validSuites),
-        plugins: suiteRegistry.collectVendorPlugins(validSuites),
-      };
+      return EMPTY_CAPABILITIES;
     },
   };
 }
