@@ -54,6 +54,7 @@ export interface RunOptions {
   eventBus: EventBus;
   mcpServers: Record<string, McpServerConfig>;
   agentDefinitions: Record<string, SubAgentDefinition>;
+  plugins?: Array<{ type: 'local'; path: string }>;
   actionName?: string;
   permissionDeps?: PermissionDeps;
   messageStore?: MessageStore;
@@ -280,6 +281,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       maxTurns: config.RAVEN_AGENT_MAX_TURNS,
       mcpServers: sdkMcpServers,
       agents: agentDefinitions,
+      plugins: opts.plugins,
       onAssistantMessage: (text: string, meta?: ToolUseMeta) => {
         const agentName = resolveAgentName(meta);
         let messageId: string | undefined;

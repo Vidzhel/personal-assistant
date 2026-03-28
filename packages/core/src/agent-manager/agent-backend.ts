@@ -15,6 +15,7 @@ export interface BackendOptions {
   maxTurns: number;
   mcpServers: Record<string, { command: string; args: string[]; env?: Record<string, string> }>;
   agents: Record<string, SubAgentDefinition>;
+  plugins?: Array<{ type: 'local'; path: string }>;
   onAssistantMessage: (text: string, meta?: ToolUseMeta) => void;
   onToolUse?: (toolName: string, toolInput: string, meta?: ToolUseMeta) => void;
   onToolResult?: (result: {
