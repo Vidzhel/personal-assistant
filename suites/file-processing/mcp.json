@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "markdownify": {
+      "command": "node",
+      "args": ["vendor/markdownify-mcp/dist/index.js"],
+      "env": {}
+    }
+  }
+}

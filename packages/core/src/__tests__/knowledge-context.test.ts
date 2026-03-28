@@ -287,6 +287,7 @@ function makeSuiteRegistry(
       mcpServers: suite.mcpServers ?? {},
       actions: [],
       schedules: suite.schedules ?? [],
+      vendorPlugins: [],
       suiteDir: '/tmp/test',
     });
   }

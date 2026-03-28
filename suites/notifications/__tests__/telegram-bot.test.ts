@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockSendMessage = vi.fn().mockResolvedValue({});
+const mockSendDocument = vi.fn().mockResolvedValue({});
 const mockGetChat = vi.fn().mockResolvedValue({});
 const mockEditMessageReplyMarkup = vi.fn().mockResolvedValue({});
 const mockEditMessageText = vi.fn().mockResolvedValue({});
@@ -23,7 +24,7 @@ class MockBot {
     if (filter === 'message:photo') photoHandlers.push(handler);
     if (filter === 'message:document') documentHandlers.push(handler);
   }
-  api = { sendMessage: mockSendMessage, getChat: mockGetChat, editMessageReplyMarkup: mockEditMessageReplyMarkup, editMessageText: mockEditMessageText, deleteMessage: mockDeleteMessage };
+  api = { sendMessage: mockSendMessage, sendDocument: mockSendDocument, getChat: mockGetChat, editMessageReplyMarkup: mockEditMessageReplyMarkup, editMessageText: mockEditMessageText, deleteMessage: mockDeleteMessage };
   catch = vi.fn();
   start = mockStart;
   stop = mockStop;
@@ -41,7 +42,18 @@ class MockInlineKeyboard {
   }
 }
 
-vi.mock('grammy', () => ({ Bot: MockBot, InlineKeyboard: MockInlineKeyboard }));
+class MockInputFile {
+  constructor(public path: string) {}
+}
+
+vi.mock('grammy', () => ({ Bot: MockBot, InlineKeyboard: MockInlineKeyboard, InputFile: MockInputFile }));
+
+const mockExistsSync = vi.fn().mockReturnValue(false);
+const mockStatSync = vi.fn().mockReturnValue({ size: 0 });
+vi.mock('node:fs', () => ({
+  existsSync: (...args: any[]) => mockExistsSync(...args),
+  statSync: (...args: any[]) => mockStatSync(...args),
+}));
 
 vi.mock('@raven/shared', () => ({
   generateId: vi.fn(() => 'test-id'),
@@ -81,6 +93,16 @@ describe('telegram-bot service', () => {
     photoHandlers.length = 0;
     documentHandlers.length = 0;
     vi.clearAllMocks();
+    mockSendMessage.mockResolvedValue({});
+    mockSendDocument.mockResolvedValue({});
+    mockGetChat.mockResolvedValue({});
+    mockEditMessageReplyMarkup.mockResolvedValue({});
+    mockEditMessageText.mockResolvedValue({});
+    mockDeleteMessage.mockResolvedValue({});
+    mockStart.mockReturnValue(new Promise(() => {}));
+    mockStop.mockResolvedValue(undefined);
+    mockExistsSync.mockReturnValue(false);
+    mockStatSync.mockReturnValue({ size: 0 });
 
     eventHandlers = {};
     mockEventBus = {
@@ -403,6 +425,93 @@ describe('telegram-bot service', () => {
       // Second call (fallback): without message_thread_id
       expect(mockSendMessage.mock.calls[1][2]).not.toHaveProperty('message_thread_id');
       expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('falling back'));
+    });
+  });
+
+  describe('file attachment sending', () => {
+    beforeEach(async () => {
+      process.env.TELEGRAM_BOT_TOKEN = 'test-token';
+      process.env.TELEGRAM_CHAT_ID = '123';
+      process.env.TELEGRAM_GROUP_ID = '-1001234567890';
+      process.env.TELEGRAM_TOPIC_GENERAL = '1';
+      process.env.TELEGRAM_TOPIC_SYSTEM = '42';
+      process.env.TELEGRAM_TOPIC_MAP = '{"Work":5}';
+    });
+
+    it('calls sendDocument when filePath is present and file exists within size limit', async () => {
+      mockExistsSync.mockReturnValue(true);
+      mockStatSync.mockReturnValue({ size: 1024 }); // 1KB — well under 50MB
+
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      const handler = eventHandlers['notification:deliver']?.[0];
+      handler({
+        type: 'notification',
+        payload: {
+          channel: 'telegram',
+          title: 'Report Ready',
+          body: 'See attached file',
+          topicName: 'Work',
+          filePath: '/data/files/report.pdf',
+        },
+      });
+
+      await vi.waitFor(() => {
+        expect(mockSendDocument).toHaveBeenCalled();
+      });
+
+      const [chatArg, fileArg, optsArg] = mockSendDocument.mock.calls[0];
+      expect(chatArg).toBe('-1001234567890');
+      expect(fileArg).toBeInstanceOf(MockInputFile);
+      expect((fileArg as MockInputFile).path).toBe('/data/files/report.pdf');
+      expect(optsArg).toHaveProperty('message_thread_id', 5); // Work topic
+    });
+
+    it('sends download link when filePath exceeds 50MB limit', async () => {
+      mockExistsSync.mockReturnValue(true);
+      mockStatSync.mockReturnValue({ size: 60 * 1024 * 1024 }); // 60MB — over limit
+
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      const handler = eventHandlers['notification:deliver']?.[0];
+      handler({
+        type: 'notification',
+        payload: {
+          channel: 'telegram',
+          title: 'Large File',
+          body: 'File is ready',
+          filePath: 'data/files/large-export.zip',
+        },
+      });
+
+      await vi.waitFor(() => {
+        // Text message + download link message = 2 calls to sendMessage
+        expect(mockSendMessage).toHaveBeenCalledTimes(2);
+      });
+
+      expect(mockSendDocument).not.toHaveBeenCalled();
+      const downloadCall = mockSendMessage.mock.calls[1];
+      expect(downloadCall[1]).toContain('File too large for Telegram');
+      expect(downloadCall[1]).toContain('/api/files/large-export.zip');
+    });
+
+    it('does not call sendDocument when filePath is absent', async () => {
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      const handler = eventHandlers['notification:deliver']?.[0];
+      handler({
+        type: 'notification',
+        payload: { channel: 'telegram', title: 'Plain', body: 'No file' },
+      });
+
+      await vi.waitFor(() => {
+        expect(mockSendMessage).toHaveBeenCalled();
+      });
+
+      expect(mockSendDocument).not.toHaveBeenCalled();
     });
   });
 

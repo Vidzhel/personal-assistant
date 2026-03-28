@@ -53,6 +53,7 @@ function makeMockSuiteRegistry() {
       }
       return filtered;
     }),
+    collectVendorPlugins: vi.fn(() => []),
   } as any;
 }
 

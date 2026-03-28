@@ -42,6 +42,7 @@ const SuiteManifestSchema = z.object({
   capabilities: z.array(SuiteCapability).default([]),
   requiresEnv: z.array(z.string()).default([]),
   services: z.array(z.string()).default([]),
+  vendorPlugins: z.array(z.string()).default([]),
 });
 
 export type SuiteManifest = z.input<typeof SuiteManifestSchema>;

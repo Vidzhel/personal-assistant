@@ -1,4 +1,5 @@
-import { Bot, InlineKeyboard } from 'grammy';
+import { Bot, InlineKeyboard, InputFile } from 'grammy';
+import { existsSync, statSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { z } from 'zod';
@@ -721,17 +722,48 @@ const service: SuiteService = {
           keyboard = buildInlineKeyboard(actions);
         }
 
-        sendMessageWithFallback(text, 'MarkdownV2', threadId, keyboard)
-          .then(() => {
-            // Mark queued notification as delivered if it came from the queue
-            const queueId = (notifEvent.payload as Record<string, unknown>).queueId as string | undefined;
-            if (queueId && dbRef) {
-              markDelivered(dbRef, queueId);
+        void (async () => {
+          await sendMessageWithFallback(text, 'MarkdownV2', threadId, keyboard);
+
+          // Send file attachment if present
+          const { filePath } = notifEvent.payload;
+          if (filePath && existsSync(filePath)) {
+            const stat = statSync(filePath);
+            const TELEGRAM_FILE_LIMIT = 50 * 1024 * 1024; // 50MB
+            if (stat.size <= TELEGRAM_FILE_LIMIT) {
+              try {
+                const targetChatId = operatingMode === 'group' ? groupId : chatId;
+                await bot!.api.sendDocument(
+                  targetChatId,
+                  new InputFile(filePath),
+                  {
+                    ...(threadId !== undefined && operatingMode === 'group'
+                      ? { message_thread_id: threadId }
+                      : {}),
+                  },
+                );
+              } catch (err) {
+                logger.error(`Failed to send document via Telegram: ${err}`);
+              }
+            } else {
+              const relativePath = filePath.replace(/^data\/files\//, '');
+              const downloadUrl = `${process.env.RAVEN_BASE_URL ?? 'http://localhost:3001'}/api/files/${relativePath}`;
+              await sendMessage(
+                `File too large for Telegram. Download: ${downloadUrl}`,
+                undefined,
+                threadId,
+              );
             }
-          })
-          .catch(() => {
-            // already logged in sendMessageWithFallback
-          });
+          }
+
+          // Mark queued notification as delivered if it came from the queue
+          const queueId = (notifEvent.payload as Record<string, unknown>).queueId as string | undefined;
+          if (queueId && dbRef) {
+            markDelivered(dbRef, queueId);
+          }
+        })().catch(() => {
+          // errors already logged above
+        });
       }
     });
 

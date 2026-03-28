@@ -38,6 +38,23 @@ export const SUITE_GEMINI_TRANSCRIPTION = 'gemini-transcription';
 export const AGENT_GEMINI_TRANSCRIBER = 'gemini-transcriber';
 export const SOURCE_GEMINI = 'gemini';
 
+// File processing suite
+export const SUITE_FILE_PROCESSING = 'file-processing';
+export const AGENT_FILE = 'file-agent';
+export const MCP_MARKDOWNIFY = 'markdownify';
+
+// Transcription agent (addition to gemini-transcription suite)
+export const AGENT_TRANSCRIPTION = 'transcription-agent';
+
+// Event sources
+export const SOURCE_FILE_PROCESSING = 'file-processing';
+export const SOURCE_TRANSCRIPTION = 'transcription';
+
+// Event types
+export const EVENT_TRANSCRIPTION_REQUEST = 'transcription:request' as const;
+export const EVENT_TRANSCRIPTION_COMPLETE = 'transcription:complete' as const;
+export const EVENT_TRANSCRIPTION_FAILED = 'transcription:failed' as const;
+
 // Email reply event types
 export const EVENT_EMAIL_REPLY_START = 'email:reply:start' as const;
 export const EVENT_EMAIL_REPLY_SEND = 'email:reply:send' as const;

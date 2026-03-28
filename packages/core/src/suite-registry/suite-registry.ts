@@ -10,7 +10,12 @@ import {
   type SubAgentDefinition,
   type SkillAction,
 } from '@raven/shared';
-import { loadSuite, type LoadedSuite, type SuiteSchedule } from './suite-loader.ts';
+import {
+  loadSuite,
+  type LoadedSuite,
+  type SuiteSchedule,
+  type ResolvedPlugin,
+} from './suite-loader.ts';
 
 const log = createLogger('suite-registry');
 
@@ -159,6 +164,27 @@ export class SuiteRegistry {
     }
 
     return schedules;
+  }
+
+  /**
+   * Collects vendor plugins from all (or specified) suites.
+   * Deduplicates by resolved path.
+   */
+  collectVendorPlugins(suiteNames?: string[]): ResolvedPlugin[] {
+    const plugins: ResolvedPlugin[] = [];
+    const seen = new Set<string>();
+
+    for (const [name, suite] of this.suites) {
+      if (suiteNames && !suiteNames.includes(name)) continue;
+      for (const plugin of suite.vendorPlugins) {
+        if (!seen.has(plugin.path)) {
+          seen.add(plugin.path);
+          plugins.push(plugin);
+        }
+      }
+    }
+
+    return plugins;
   }
 
   /**

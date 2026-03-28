@@ -54,6 +54,7 @@ export interface AgentTaskRequestEvent extends BaseEvent {
     sessionId?: string;
     projectId?: string;
     namedAgentId?: string;
+    plugins?: Array<{ type: 'local'; path: string }>;
   };
 }
 
@@ -112,6 +113,7 @@ export interface NotificationEvent extends BaseEvent {
     actions?: Array<{ label: string; action: string; data?: unknown }>;
     urgencyTier?: UrgencyTier;
     deliveryMode?: DeliveryMode;
+    filePath?: string;
   };
 }
 
@@ -126,6 +128,7 @@ export interface NotificationDeliverEvent extends BaseEvent {
     urgencyTier?: UrgencyTier;
     deliveryMode?: DeliveryMode;
     queueId?: string;
+    filePath?: string;
   };
 }
 
@@ -761,6 +764,40 @@ export const SystemHealthAlertPayloadSchema = z.object({
   taskId: z.string().optional(),
 });
 
+export const TranscriptionRequestPayloadSchema = z.object({
+  filePath: z.string(),
+  mimeType: z.string(),
+  projectId: z.string().optional(),
+  createKnowledgeBubble: z.boolean().default(true),
+  topicId: z.number().optional(),
+  topicName: z.string().optional(),
+});
+
+export interface TranscriptionRequestEvent extends BaseEvent {
+  type: 'transcription:request';
+  payload: z.infer<typeof TranscriptionRequestPayloadSchema>;
+}
+
+export interface TranscriptionCompleteEvent extends BaseEvent {
+  type: 'transcription:complete';
+  payload: {
+    filePath: string;
+    transcriptPath: string;
+    projectId?: string;
+    topicId?: number;
+    topicName?: string;
+  };
+}
+
+export interface TranscriptionFailedEvent extends BaseEvent {
+  type: 'transcription:failed';
+  payload: {
+    filePath: string;
+    error: string;
+    projectId?: string;
+  };
+}
+
 export type RavenEvent =
   | NewEmailEvent
   | ScheduleTriggeredEvent
@@ -842,7 +879,10 @@ export type RavenEvent =
   | ConfigVersionRevertedEvent
   | SessionIdleEvent
   | SessionRetrospectiveCompleteEvent
-  | SessionCompactedEvent;
+  | SessionCompactedEvent
+  | TranscriptionRequestEvent
+  | TranscriptionCompleteEvent
+  | TranscriptionFailedEvent;
 
 export type RavenEventType = RavenEvent['type'];
 

@@ -53,6 +53,7 @@ import { registerConfigChangesRoutes, type ConfigChangeResolver } from './routes
 import { registerConfigHistoryRoutes } from './routes/config-history.ts';
 import { registerDashboardRoutes } from './routes/dashboard.ts';
 import { registerProjectKnowledgeRoutes } from './routes/project-knowledge.ts';
+import { registerFileRoutes } from './routes/files.ts';
 
 const log = createLogger('api');
 
@@ -87,6 +88,7 @@ export interface ApiDeps {
   suiteScaffolder?: SuiteScaffolder;
   configChangeResolver?: ConfigChangeResolver;
   sessionRetrospective?: SessionRetrospective;
+  dataDir?: string;
 }
 
 // eslint-disable-next-line max-lines-per-function -- server setup registers all route groups
@@ -171,6 +173,11 @@ export async function createApiServer(
     neo4j: deps.neo4jClient,
     knowledgeStore: deps.knowledgeStore,
   });
+
+  // File download (agents save files to data/files/ and clients download via this route)
+  if (deps.dataDir) {
+    registerFileRoutes(app, deps.dataDir);
+  }
 
   // Financial tracking
   registerFinancialRoutes(app);

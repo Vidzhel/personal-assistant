@@ -32,6 +32,10 @@ export function createSdkBackend(): AgentBackend {
       queryOptions.agents = opts.agents;
     }
 
+    if (opts.plugins && opts.plugins.length > 0) {
+      queryOptions.plugins = opts.plugins;
+    }
+
     for await (const message of query({
       prompt: opts.prompt,
       options: queryOptions as Parameters<typeof query>[0]['options'],
