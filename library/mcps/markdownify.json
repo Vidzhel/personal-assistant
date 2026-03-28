@@ -1,0 +1,7 @@
+{
+  "name": "markdownify",
+  "displayName": "Markdownify",
+  "command": "node",
+  "args": ["library/vendor/markdownify-mcp/dist/index.js"],
+  "env": {}
+}
