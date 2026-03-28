@@ -20,6 +20,29 @@ An AI-powered personal assistant that manages your tasks, monitors your email, d
 - Docker & Docker Compose (for containerized deployment)
 - API keys (see Environment Variables below)
 
+### System Dependencies
+
+Install these on your host machine (Ubuntu/WSL2):
+
+```bash
+# Required
+sudo apt install -y ffmpeg libreoffice poppler-utils pandoc tesseract-ocr
+
+# Python (for vendor MCP servers)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+| Dependency | Purpose |
+|---|---|
+| Node.js 22+ | Runtime |
+| Python 3.10+ | Vendor MCP servers |
+| uv | Python package manager |
+| FFmpeg | Audio/video processing (file-processing suite) |
+| LibreOffice | Document conversion (docx/xlsx/pptx skills) |
+| Poppler | PDF rendering — pdftoppm (pdf skill) |
+| Pandoc | Document reading (docx skill) |
+| Tesseract | PDF OCR (pdf skill) |
+
 ### Local Development
 
 ```bash
@@ -86,6 +109,25 @@ docker compose up --build
 5. Run `npm install` to link the workspace
 
 See `ARCHITECTURE.md` for the full skill plugin contract and MCP isolation model.
+
+### Vendor Skills
+
+Third-party Claude Code skills are vendored as git submodules in `vendor/`:
+
+```bash
+# Initial setup (after clone)
+git submodule update --init --recursive
+
+# Update all vendor skills to latest
+./scripts/update-vendor.sh
+```
+
+| Vendor | Source | Purpose |
+|---|---|---|
+| anthropic-skills | anthropics/skills | PDF, DOCX, XLSX, PPTX read/create/edit |
+| claude-plugin-marketplace | JosiahSiegel/claude-plugin-marketplace | ffmpeg-master media processing |
+| smart-extractors | diegocconsolini/ClaudeSkillCollection | Cached document extraction |
+| markdownify-mcp | zcaceres/markdownify-mcp | Document-to-markdown MCP server |
 
 ## Architecture
 
