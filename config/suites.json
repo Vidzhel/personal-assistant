@@ -37,6 +37,7 @@
       "categorySyncIntervalMs": 14400000
     }
   },
+  "file-processing": { "enabled": true },
   "proactive-intelligence": {
     "enabled": true,
     "config": {

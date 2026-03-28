@@ -1,0 +1,32 @@
+[
+  {
+    "name": "file-processing:read",
+    "description": "Read and extract content from documents",
+    "defaultTier": "green",
+    "reversible": true
+  },
+  {
+    "name": "file-processing:create",
+    "description": "Create or modify document files",
+    "defaultTier": "yellow",
+    "reversible": true
+  },
+  {
+    "name": "file-processing:convert",
+    "description": "Convert files between formats",
+    "defaultTier": "yellow",
+    "reversible": true
+  },
+  {
+    "name": "file-processing:media",
+    "description": "Process audio or video with ffmpeg",
+    "defaultTier": "yellow",
+    "reversible": true
+  },
+  {
+    "name": "file-processing:delete",
+    "description": "Permanently delete processed files",
+    "defaultTier": "red",
+    "reversible": false
+  }
+]
