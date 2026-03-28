@@ -26,6 +26,7 @@
     "test:coverage": "vitest run --coverage",
     "test:mcp": "vitest run --project mcp-ticktick",
     "test:mcp:watch": "vitest --project mcp-ticktick",
+    "validate:library": "node --experimental-strip-types scripts/validate-library.ts",
     "test:skill": "node --experimental-strip-types scripts/test-skill.ts",
     "test:ticktick": "node --experimental-strip-types scripts/test-ticktick-manual.ts",
     "test:suite": "node --experimental-strip-types scripts/test-suite.ts",
