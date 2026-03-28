@@ -10,16 +10,49 @@ vi.mock('@google/generative-ai', () => ({
   },
 }));
 
-vi.mock('@raven/shared', () => ({
-  generateId: vi.fn(() => 'test-id'),
-  createLogger: vi.fn(() => ({
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-  })),
-  SOURCE_GEMINI: 'gemini',
+vi.mock('@google/generative-ai/server', () => ({
+  GoogleAIFileManager: class {
+    async uploadFile() {
+      return { file: { name: 'file-1', state: 'ACTIVE', mimeType: 'audio/mp3', uri: 'gs://f' } };
+    }
+    async getFile() {
+      return { name: 'file-1', state: 'ACTIVE', mimeType: 'audio/mp3', uri: 'gs://f' };
+    }
+    async deleteFile() {}
+  },
 }));
+
+vi.mock('node:fs', async () => {
+  const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+  return {
+    ...actual,
+    writeFileSync: vi.fn(),
+    mkdirSync: vi.fn(),
+    existsSync: vi.fn(() => true),
+  };
+});
+
+vi.mock('@raven/shared', async () => {
+  const { z } = await import('zod');
+  return {
+    generateId: vi.fn(() => 'test-id'),
+    createLogger: vi.fn(() => ({
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    })),
+    SOURCE_GEMINI: 'gemini',
+    TranscriptionRequestPayloadSchema: z.object({
+      filePath: z.string(),
+      mimeType: z.string(),
+      projectId: z.string().optional(),
+      createKnowledgeBubble: z.boolean().default(true),
+      topicId: z.number().optional(),
+      topicName: z.string().optional(),
+    }),
+  };
+});
 
 vi.mock('@raven/core/suite-registry/service-runner.ts', () => ({}));
 
@@ -279,6 +312,95 @@ describe('voice-transcriber service', () => {
     });
   });
 
+  describe('transcription:request handling', () => {
+    it('subscribes to transcription:request on start', async () => {
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      expect(mockEventBus.on).toHaveBeenCalledWith(
+        'transcription:request',
+        expect.any(Function),
+      );
+    });
+
+    it('transcribes file and emits completion events', async () => {
+      mockGenerateContent.mockResolvedValue({
+        response: { text: () => 'Transcribed file content' },
+      });
+
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      const handler = eventHandlers['transcription:request']?.[0];
+      expect(handler).toBeDefined();
+
+      handler({
+        payload: {
+          filePath: '/tmp/lecture.mp3',
+          mimeType: 'audio/mp3',
+          projectId: 'proj-1',
+          createKnowledgeBubble: true,
+          topicName: 'Work',
+        },
+      });
+
+      await vi.waitFor(() => {
+        expect(mockEventBus.emit).toHaveBeenCalled();
+      });
+
+      expect(mockEventBus.emit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'transcription:complete',
+          payload: expect.objectContaining({
+            filePath: '/tmp/lecture.mp3',
+            projectId: 'proj-1',
+          }),
+        }),
+      );
+
+      expect(mockEventBus.emit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'notification',
+          payload: expect.objectContaining({
+            title: 'Transcription Complete',
+            body: 'Transcribed: lecture.mp3',
+          }),
+        }),
+      );
+    });
+
+    it('emits transcription:failed on error', async () => {
+      mockGenerateContent.mockRejectedValue(new Error('Gemini quota exceeded'));
+
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+
+      const handler = eventHandlers['transcription:request']?.[0];
+      handler({
+        payload: {
+          filePath: '/tmp/big-video.mp4',
+          mimeType: 'video/mp4',
+          projectId: 'proj-2',
+        },
+      });
+
+      await vi.waitFor(() => {
+        expect(mockEventBus.emit).toHaveBeenCalled();
+      });
+
+      expect(mockEventBus.emit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'transcription:failed',
+          payload: expect.objectContaining({
+            filePath: '/tmp/big-video.mp4',
+            error: 'Gemini quota exceeded',
+            projectId: 'proj-2',
+          }),
+        }),
+      );
+    });
+  });
+
   describe('stop and cleanup', () => {
     it('unsubscribes from event bus on stop', async () => {
       await loadService();
@@ -286,6 +408,10 @@ describe('voice-transcriber service', () => {
       await service.stop();
 
       expect(mockEventBus.off).toHaveBeenCalledWith('voice:received', expect.any(Function));
+      expect(mockEventBus.off).toHaveBeenCalledWith(
+        'transcription:request',
+        expect.any(Function),
+      );
     });
   });
 });
