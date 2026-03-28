@@ -486,6 +486,7 @@ async function main(): Promise<void> {
       unsnoozableCategories: (suitesConfig['notifications']?.config?.unsnoozableCategories ??
         []) as string[],
       sessionRetrospective,
+      dataDir: resolve(projectRoot, 'data'),
     },
     config.RAVEN_PORT,
   );
