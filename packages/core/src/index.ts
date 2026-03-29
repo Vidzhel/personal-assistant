@@ -6,6 +6,7 @@ import {
   initFileLogging,
   type RavenEvent,
   type RavenEventType,
+  type TaskTreeNode,
 } from '@raven/shared';
 import { loadConfig, loadSuitesConfig, loadSchedulesConfig, projectRoot } from './config.ts';
 import { loadIntegrationsConfig } from './config/integrations-config.ts';
@@ -56,6 +57,9 @@ import { createIdleDetector } from './session-manager/idle-detector.ts';
 import { createSessionRetrospective } from './session-manager/session-retrospective.ts';
 import { createSessionCompaction } from './session-manager/session-compaction.ts';
 import { createKnowledgeConsolidation } from './knowledge-engine/knowledge-consolidation.ts';
+import { TaskExecutionEngine } from './task-execution/task-execution-engine.ts';
+import { buildTaskBoardInstructions } from './task-execution/task-board-protocol.ts';
+import { buildRetryPrompt } from './task-execution/validation-pipeline.ts';
 import type { SessionIdleEvent } from '@raven/shared';
 
 const log = createLogger('raven');
@@ -233,7 +237,64 @@ async function main(): Promise<void> {
   const taskLifecycle = createTaskLifecycle({ eventBus: baseContext.eventBus, taskStore });
   taskLifecycle.start();
 
-  // 7h. Task notification handler — post to Telegram agent topic or "Tasks" fallback
+  // 7h. Init task execution engine
+  const executionEngine = new TaskExecutionEngine({
+    db: dbInterface,
+    eventBus: baseContext.eventBus,
+  });
+  log.info('task execution engine initialized');
+
+  // Wire execution:task:run-agent → agent:task:request
+  baseContext.eventBus.on('execution:task:run-agent', (event: unknown) => {
+    const payload = (event as RavenEvent & { payload: Record<string, unknown> }).payload as {
+      treeId: string;
+      taskId: string;
+      agent?: string;
+      prompt: string;
+      parentTaskId: string;
+      retryFeedback?: string;
+      retryCount?: number;
+      projectId?: string;
+    };
+    baseContext.eventBus.emit({
+      id: generateId(),
+      timestamp: Date.now(),
+      source: 'task-execution-engine',
+      type: 'agent:task:request',
+      payload: {
+        taskId: payload.taskId,
+        prompt: payload.retryFeedback
+          ? buildRetryPrompt(payload.prompt, payload.retryFeedback, payload.retryCount ?? 1)
+          : payload.prompt,
+        skillName: 'orchestrator',
+        mcpServers: {},
+        priority: 'normal',
+        projectId: payload.projectId,
+        taskBoardContext: buildTaskBoardInstructions(payload.parentTaskId, payload.retryFeedback),
+      },
+    });
+  });
+
+  // Wire execution:tree:create → executionEngine.createTree
+  baseContext.eventBus.on('execution:tree:create', (event: unknown) => {
+    const payload = (event as RavenEvent & { payload: Record<string, unknown> }).payload as {
+      treeId: string;
+      projectId: string;
+      plan?: string;
+      tasks: TaskTreeNode[];
+    };
+    executionEngine.createTree({
+      id: payload.treeId,
+      projectId: payload.projectId,
+      plan: payload.plan,
+      tasks: payload.tasks,
+    });
+    log.info(
+      `task tree created from orchestrator triage (treeId=${payload.treeId}, tasks=${String(payload.tasks.length)})`,
+    );
+  });
+
+  // 7i. Task notification handler — post to Telegram agent topic or "Tasks" fallback
   for (const eventType of ['task:created', 'task:completed'] as const) {
     eventBus.on(eventType, (event: RavenEvent) => {
       if (event.type !== 'task:created' && event.type !== 'task:completed') return;
@@ -520,6 +581,7 @@ async function main(): Promise<void> {
       projectRegistry,
       agentYamlStore,
       projectsDir,
+      executionEngine,
     },
     config.RAVEN_PORT,
   );

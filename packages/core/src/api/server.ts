@@ -56,6 +56,8 @@ import { registerConfigHistoryRoutes } from './routes/config-history.ts';
 import { registerDashboardRoutes } from './routes/dashboard.ts';
 import { registerProjectKnowledgeRoutes } from './routes/project-knowledge.ts';
 import { registerFileRoutes } from './routes/files.ts';
+import { registerTaskTreeRoutes } from './routes/task-trees.ts';
+import type { TaskExecutionEngine } from '../task-execution/task-execution-engine.ts';
 
 const log = createLogger('api');
 
@@ -94,9 +96,10 @@ export interface ApiDeps {
   projectRegistry?: ProjectRegistry;
   agentYamlStore?: AgentYamlStore;
   projectsDir?: string;
+  executionEngine?: TaskExecutionEngine;
 }
 
-// eslint-disable-next-line max-lines-per-function -- server setup registers all route groups
+// eslint-disable-next-line max-lines-per-function, complexity -- server setup registers all route groups
 export async function createApiServer(
   deps: ApiDeps,
   port: number,
@@ -161,6 +164,11 @@ export async function createApiServer(
       taskStore: deps.taskStore,
       templateLoader: deps.templateLoader,
     });
+  }
+
+  // Task execution trees
+  if (deps.executionEngine) {
+    registerTaskTreeRoutes(app, { executionEngine: deps.executionEngine });
   }
 
   // Named agents management
