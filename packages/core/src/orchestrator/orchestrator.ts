@@ -25,6 +25,7 @@ import type { AgentTaskCompleteEvent } from '@raven/shared';
 import type { NamedAgentStore } from '../agent-registry/named-agent-store.ts';
 import type { AgentResolver } from '../agent-registry/agent-resolver.ts';
 import type { CapabilityLibrary } from '../capability-library/capability-library.ts';
+import type { ProjectRegistry } from '../project-registry/project-registry.ts';
 import { createKnowledgeAgentDefinition } from '../knowledge-engine/knowledge-agent.ts';
 import { getDb } from '../db/database.ts';
 import { isMetaProject } from '../project-manager/meta-project.ts';
@@ -53,6 +54,7 @@ export interface OrchestratorDeps {
   namedAgentStore?: NamedAgentStore;
   agentResolver?: AgentResolver;
   capabilityLibrary?: CapabilityLibrary;
+  projectRegistry?: ProjectRegistry;
   port: number;
 }
 
@@ -75,6 +77,7 @@ export class Orchestrator {
   private namedAgentStore?: NamedAgentStore;
   private agentResolver?: AgentResolver;
   private capabilityLibrary?: CapabilityLibrary;
+  private projectRegistry?: ProjectRegistry;
   private port: number;
 
   constructor(deps: OrchestratorDeps) {
@@ -90,6 +93,7 @@ export class Orchestrator {
     this.namedAgentStore = deps.namedAgentStore;
     this.agentResolver = deps.agentResolver;
     this.capabilityLibrary = deps.capabilityLibrary;
+    this.projectRegistry = deps.projectRegistry;
     this.port = deps.port;
     this.eventBus.on<NewEmailEvent>('email:new', (e) => {
       this.handleNewEmail(e).catch((err: unknown) => log.error(`handleNewEmail failed: ${err}`));
@@ -385,6 +389,23 @@ export class Orchestrator {
       updatedAt: 0,
     };
 
+    // Project context chain from filesystem-based project hierarchy
+    let projectContextChain: string | undefined;
+    if (this.projectRegistry && projectRow) {
+      try {
+        const fsProject = this.projectRegistry.findByName(projectRow.name);
+        if (fsProject) {
+          const resolved = this.projectRegistry.resolveProjectContext(fsProject.id);
+          const chain = resolved.contextChain.filter(Boolean).join('\n\n---\n\n');
+          if (chain) {
+            projectContextChain = chain;
+          }
+        }
+      } catch (err) {
+        log.warn(`Project context chain resolution failed: ${err}`);
+      }
+    }
+
     // Audit log: record system access configuration (only for non-default access levels)
     if (systemAccess !== 'none') {
       try {
@@ -466,6 +487,7 @@ export class Orchestrator {
         sessionReferencesContext,
         projectDataSourcesContext,
         skillCatalogContext,
+        projectContextChain,
         priority: 'high',
         sessionId: session.id,
         projectId,

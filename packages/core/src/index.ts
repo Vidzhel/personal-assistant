@@ -35,6 +35,7 @@ import { createPipelineEventTrigger } from './pipeline-engine/pipeline-event-tri
 import { createNamedAgentStore } from './agent-registry/named-agent-store.ts';
 import { createAgentResolver } from './agent-registry/agent-resolver.ts';
 import { CapabilityLibrary } from './capability-library/capability-library.ts';
+import { ProjectRegistry } from './project-registry/project-registry.ts';
 import { createConfigCommitter } from './agent-registry/config-committer.ts';
 import { createSuiteScaffolder } from './suite-registry/suite-scaffolder.ts';
 import { createKnowledgeStore } from './knowledge-engine/knowledge-store.ts';
@@ -135,6 +136,16 @@ async function main(): Promise<void> {
     );
   } catch (err) {
     log.warn(`Capability library not found or failed to load, using suite registry only: ${err}`);
+  }
+
+  // Load project registry (filesystem-based project hierarchy)
+  const projectRegistry = new ProjectRegistry();
+  const projectsDir = resolve(projectRoot, 'projects');
+  try {
+    await projectRegistry.load(projectsDir);
+    log.info('Project registry loaded');
+  } catch (err) {
+    log.warn(`Project registry failed to load, continuing without: ${err}`);
   }
 
   // Count configured (enabled) suites
@@ -458,6 +469,7 @@ async function main(): Promise<void> {
     namedAgentStore,
     agentResolver,
     capabilityLibrary,
+    projectRegistry,
     port: config.RAVEN_PORT,
   });
 

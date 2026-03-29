@@ -106,6 +106,7 @@ export interface AgentTask {
   sessionReferencesContext?: string;
   projectDataSourcesContext?: string;
   skillCatalogContext?: string;
+  projectContextChain?: string;
   namedAgentId?: string;
   plugins?: Array<{ type: 'local'; path: string }>;
   result?: string;

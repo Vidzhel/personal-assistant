@@ -13,6 +13,14 @@ export class ProjectRegistry {
     return this.index.projects.get(id);
   }
 
+  findByName(name: string): ProjectNode | undefined {
+    const lower = name.toLowerCase();
+    for (const node of this.index.projects.values()) {
+      if (node.name.toLowerCase() === lower) return node;
+    }
+    return undefined;
+  }
+
   getGlobal(): ProjectNode {
     const global = this.index.projects.get('_global');
     if (!global) {

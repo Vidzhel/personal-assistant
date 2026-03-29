@@ -1,6 +1,6 @@
 import { SKILL_ORCHESTRATOR, type AgentTask, type Project } from '@raven/shared';
 
-// eslint-disable-next-line max-lines-per-function -- assembles system prompt from multiple context blocks
+// eslint-disable-next-line max-lines-per-function, complexity -- assembles system prompt from multiple context blocks
 export function buildSystemPrompt(task: AgentTask, project?: Project): string {
   const parts: string[] = [
     'You are Raven, a personal assistant agent. You help the user manage tasks, emails, schedules, and daily planning.',
@@ -22,6 +22,10 @@ export function buildSystemPrompt(task: AgentTask, project?: Project): string {
     );
   } else {
     parts.push('- When using tools from MCP servers, prefer structured data over free-form text');
+  }
+
+  if (task.projectContextChain) {
+    parts.push('', '## Project Context (Inherited)', task.projectContextChain);
   }
 
   if (task.knowledgeContext) {
