@@ -19,7 +19,7 @@ const errorResult = (message: string): ErrResult => ({
 });
 
 // eslint-disable-next-line max-lines-per-function -- builds five system management tools
-export function buildSystemTools(deps: RavenMcpDeps, _scope: ScopeContext): SdkMcpToolDefinition[] {
+export function buildSystemTools(deps: RavenMcpDeps, _scope: ScopeContext): Array<SdkMcpToolDefinition<any>> {
   const listAgents = tool(
     'list_agents',
     'List all named agents, optionally filtered by project.',
@@ -122,7 +122,7 @@ export function buildSystemTools(deps: RavenMcpDeps, _scope: ScopeContext): SdkM
     'Trigger a named pipeline by name.',
     {
       name: z.string().describe('Pipeline name'),
-      params: z.record(z.string()).optional().describe('Optional trigger parameters'),
+      params: z.record(z.string(), z.string()).optional().describe('Optional trigger parameters'),
     },
     async (args) => {
       if (!deps.pipelineEngine) {

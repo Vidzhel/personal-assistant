@@ -71,7 +71,7 @@ async function waitForResolution(
 export function buildEscalationTools(
   deps: RavenMcpDeps,
   scope: ScopeContext,
-): SdkMcpToolDefinition[] {
+): Array<SdkMcpToolDefinition<any>> {
   const escalateToPlanned = tool(
     'escalate_to_planned',
     'Escalate the current request to a planned task tree for structured execution.',
@@ -87,7 +87,7 @@ export function buildEscalationTools(
       const tasks = args.tasks.map((t) => ({
         id: t.id,
         title: t.title,
-        type: t.type ?? 'agent',
+        type: (t.type ?? 'agent') as 'agent',
         ...(t.agent !== undefined && { agent: t.agent }),
         prompt: t.prompt,
         blockedBy: t.blockedBy ?? [],
@@ -111,7 +111,6 @@ export function buildEscalationTools(
           treeId: tree.id,
           plan: args.plan,
           taskCount: tasks.length,
-          projectId: scope.projectId,
         },
       });
 

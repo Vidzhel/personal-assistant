@@ -53,7 +53,7 @@ describe('buildTaskLifecycleTools', () => {
       const result = await tool.handler({ mode: 'direct', reason: 'Simple lookup' }, {});
 
       expect(result.isError).toBeFalsy();
-      const parsed = JSON.parse(result.content[0].text);
+      const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.ack).toBe(true);
       expect(parsed.mode).toBe('direct');
       expect(parsed.reason).toBe('Simple lookup');
@@ -66,7 +66,7 @@ describe('buildTaskLifecycleTools', () => {
       for (const mode of ['direct', 'delegated', 'planned'] as const) {
         const result = await tool.handler({ mode, reason: 'test' }, {});
         expect(result.isError).toBeFalsy();
-        const parsed = JSON.parse(result.content[0].text);
+        const parsed = JSON.parse((result.content[0] as any).text);
         expect(parsed.mode).toBe(mode);
       }
     });
@@ -91,7 +91,7 @@ describe('buildTaskLifecycleTools', () => {
       expect(engine.startTree).toHaveBeenCalledOnce();
 
       expect(result.isError).toBeFalsy();
-      const parsed = JSON.parse(result.content[0].text);
+      const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.treeId).toBeDefined();
       expect(parsed.status).toBeDefined();
     });
@@ -123,7 +123,7 @@ describe('buildTaskLifecycleTools', () => {
       expect(callArgs.artifacts).toEqual(artifacts);
 
       expect(result.isError).toBeFalsy();
-      const parsed = JSON.parse(result.content[0].text);
+      const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.ack).toBe(true);
     });
 
@@ -135,7 +135,7 @@ describe('buildTaskLifecycleTools', () => {
       const result = await tool.handler({ summary: 'done' }, {});
 
       expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain('taskId');
+      expect((result.content[0] as any).text).toContain('taskId');
       expect(engine.onTaskCompleted).not.toHaveBeenCalled();
     });
 
@@ -162,7 +162,7 @@ describe('buildTaskLifecycleTools', () => {
       expect(engine.onTaskBlocked).toHaveBeenCalledWith('tree-1', 'task-1', 'Something broke');
 
       expect(result.isError).toBeFalsy();
-      const parsed = JSON.parse(result.content[0].text);
+      const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.ack).toBe(true);
       expect(parsed.willRetry).toBe(true);
     });
@@ -173,7 +173,7 @@ describe('buildTaskLifecycleTools', () => {
 
       const result = await tool.handler({ error: 'fatal', retryable: false }, {});
 
-      const parsed = JSON.parse(result.content[0].text);
+      const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.willRetry).toBe(false);
     });
 
@@ -203,7 +203,7 @@ describe('buildTaskLifecycleTools', () => {
       expect(emitted.payload.taskId).toBe('task-1');
 
       expect(result.isError).toBeFalsy();
-      const parsed = JSON.parse(result.content[0].text);
+      const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.ack).toBe(true);
     });
   });
@@ -220,12 +220,12 @@ describe('buildTaskLifecycleTools', () => {
 
       expect(deps.eventBus.emit).toHaveBeenCalledOnce();
       const emitted = (deps.eventBus.emit as any).mock.calls[0][0];
-      expect(emitted.type).toBe('execution:task:artifact-saved');
-      expect(emitted.payload.name).toBe('report.txt');
+      expect(emitted.type).toBe('execution:task:progress');
+      expect(emitted.payload.artifact.name).toBe('report.txt');
       expect(emitted.payload.taskId).toBe('task-1');
 
       expect(result.isError).toBeFalsy();
-      const parsed = JSON.parse(result.content[0].text);
+      const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.artifactId).toBeDefined();
     });
   });
@@ -274,7 +274,7 @@ describe('buildTaskLifecycleTools', () => {
       const result = await tool.handler({ include: [] }, {});
 
       expect(result.isError).toBeFalsy();
-      const parsed = JSON.parse(result.content[0].text);
+      const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.taskId).toBe('task-1');
       expect(parsed.title).toBe('Do work');
     });

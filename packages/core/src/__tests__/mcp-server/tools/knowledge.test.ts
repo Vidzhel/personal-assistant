@@ -92,7 +92,7 @@ describe('buildKnowledgeTools', () => {
 
       expect(searchMock).toHaveBeenCalledWith('test query', expect.objectContaining({ limit: 10 }));
       expect(result.isError).toBeUndefined();
-      const data = JSON.parse(result.content[0].text);
+      const data = JSON.parse((result.content[0] as any).text);
       expect(data.results).toHaveLength(1);
       expect(data.results[0].id).toBe('bubble-1');
       expect(data.results[0].title).toBe('Test Bubble');
@@ -134,7 +134,7 @@ describe('buildKnowledgeTools', () => {
       const result = await searchTool.handler({ query: 'hello' }, {});
 
       expect(storeSearch).toHaveBeenCalled();
-      const data = JSON.parse(result.content[0].text);
+      const data = JSON.parse((result.content[0] as any).text);
       expect(data.results[0].id).toBe('store-1');
     });
 
@@ -193,7 +193,7 @@ describe('buildKnowledgeTools', () => {
           tags: ['note'],
         }),
       );
-      const data = JSON.parse(result.content[0].text);
+      const data = JSON.parse((result.content[0] as any).text);
       expect(data.id).toBe('new-bubble-id');
     });
 
@@ -247,7 +247,7 @@ describe('buildKnowledgeTools', () => {
       const result = await contextTool.handler({ query: 'some query', maxResults: 5 }, {});
 
       expect(result.isError).toBeUndefined();
-      const data = JSON.parse(result.content[0].text);
+      const data = JSON.parse((result.content[0] as any).text);
       expect(data.resultCount).toBe(2);
       expect(data.context).toContain('## First Topic');
       expect(data.context).toContain('First content');

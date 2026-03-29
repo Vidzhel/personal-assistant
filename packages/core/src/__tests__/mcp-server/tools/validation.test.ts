@@ -36,7 +36,7 @@ describe('buildValidationTools', () => {
       expect(emittedEvent.payload.pass).toBe(true);
 
       expect(result.isError).toBeFalsy();
-      const parsed = JSON.parse(result.content[0].text);
+      const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.ack).toBe(true);
     });
 

@@ -19,7 +19,7 @@ const okResult = (data: unknown): { content: [{ type: 'text'; text: string }] } 
   content: [{ type: 'text', text: JSON.stringify(data) }],
 });
 
-function buildSendMessage(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDefinition {
+function buildSendMessage(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDefinition<any> {
   return tool(
     'send_message',
     'Send a message to the current session as the assistant.',
@@ -56,7 +56,7 @@ function buildSendMessage(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDe
   );
 }
 
-function buildGetSessionHistory(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDefinition {
+function buildGetSessionHistory(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDefinition<any> {
   return tool(
     'get_session_history',
     'Retrieve the message history for the current session.',
@@ -95,6 +95,6 @@ function buildGetSessionHistory(deps: RavenMcpDeps, scope: ScopeContext): SdkMcp
   );
 }
 
-export function buildSessionTools(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDefinition[] {
+export function buildSessionTools(deps: RavenMcpDeps, scope: ScopeContext): Array<SdkMcpToolDefinition<any>> {
   return [buildSendMessage(deps, scope), buildGetSessionHistory(deps, scope)];
 }

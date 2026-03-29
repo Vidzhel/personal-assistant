@@ -52,7 +52,7 @@ describe('buildSessionTools', () => {
       expect(emittedEvent.payload.sessionId).toBe('sess-abc');
 
       expect(result.isError).toBeFalsy();
-      const text = JSON.parse(result.content[0].text);
+      const text = JSON.parse((result.content[0] as any).text);
       expect(text.messageId).toBe('msg-id-123');
     });
 
@@ -64,7 +64,7 @@ describe('buildSessionTools', () => {
       const result = await tool!.handler({ content: 'Hello' }, {});
 
       expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain('sessionId');
+      expect((result.content[0] as any).text).toContain('sessionId');
       expect(deps.messageStore!.appendMessage).not.toHaveBeenCalled();
     });
   });
@@ -97,7 +97,7 @@ describe('buildSessionTools', () => {
 
       expect(deps.messageStore!.getMessages).toHaveBeenCalledWith('sess-abc');
       expect(result.isError).toBeFalsy();
-      const parsed = JSON.parse(result.content[0].text);
+      const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.messages).toHaveLength(2);
       expect(parsed.messages[0].id).toBe('msg-1');
       expect(parsed.messages[1].agentName).toBe('chat-agent');
@@ -114,7 +114,7 @@ describe('buildSessionTools', () => {
 
       const result = await tool!.handler({ limit: 5 }, {});
 
-      const parsed = JSON.parse(result.content[0].text);
+      const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.messages).toHaveLength(5);
     });
 
@@ -126,7 +126,7 @@ describe('buildSessionTools', () => {
       const result = await tool!.handler({}, {});
 
       expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain('sessionId');
+      expect((result.content[0] as any).text).toContain('sessionId');
     });
 
     it('has readOnlyHint and idempotentHint annotations', () => {

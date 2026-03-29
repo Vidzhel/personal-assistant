@@ -53,7 +53,7 @@ async function handleSearchKnowledge(
   return errorResult('No knowledge backend available — retrievalEngine or knowledgeStore required');
 }
 
-function buildSearchKnowledgeTool(deps: RavenMcpDeps): SdkMcpToolDefinition {
+function buildSearchKnowledgeTool(deps: RavenMcpDeps): SdkMcpToolDefinition<any> {
   return tool(
     'search_knowledge',
     'Search the knowledge base for relevant information.',
@@ -74,7 +74,7 @@ function buildSearchKnowledgeTool(deps: RavenMcpDeps): SdkMcpToolDefinition {
   );
 }
 
-function buildSaveKnowledgeTool(deps: RavenMcpDeps): SdkMcpToolDefinition {
+function buildSaveKnowledgeTool(deps: RavenMcpDeps): SdkMcpToolDefinition<any> {
   return tool(
     'save_knowledge',
     'Save a new piece of knowledge to the knowledge base.',
@@ -108,7 +108,7 @@ function buildSaveKnowledgeTool(deps: RavenMcpDeps): SdkMcpToolDefinition {
   );
 }
 
-function buildGetKnowledgeContextTool(deps: RavenMcpDeps): SdkMcpToolDefinition {
+function buildGetKnowledgeContextTool(deps: RavenMcpDeps): SdkMcpToolDefinition<any> {
   return tool(
     'get_knowledge_context',
     'Retrieve formatted knowledge context for a query, suitable for injecting into prompts.',
@@ -148,7 +148,7 @@ function buildGetKnowledgeContextTool(deps: RavenMcpDeps): SdkMcpToolDefinition 
 export function buildKnowledgeTools(
   deps: RavenMcpDeps,
   _scope: ScopeContext,
-): SdkMcpToolDefinition[] {
+): Array<SdkMcpToolDefinition<any>> {
   return [
     buildSearchKnowledgeTool(deps),
     buildSaveKnowledgeTool(deps),

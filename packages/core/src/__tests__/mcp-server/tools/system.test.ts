@@ -95,7 +95,7 @@ describe('buildSystemTools', () => {
 
       expect(deps.namedAgentStore!.listAgents).toHaveBeenCalledOnce();
       expect(result.isError).toBeFalsy();
-      const parsed = JSON.parse(result.content[0].text);
+      const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.agents).toHaveLength(1);
       expect(parsed.agents[0].id).toBe('agent-1');
     });
@@ -109,7 +109,7 @@ describe('buildSystemTools', () => {
       const result = await tool!.handler({}, {});
 
       expect(result.isError).toBeFalsy();
-      const parsed = JSON.parse(result.content[0].text);
+      const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.agents).toHaveLength(0);
     });
 
@@ -122,7 +122,7 @@ describe('buildSystemTools', () => {
       const result = await tool!.handler({}, {});
 
       expect(result.isError).toBeFalsy();
-      const parsed = JSON.parse(result.content[0].text);
+      const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.agents).toHaveLength(0);
     });
 
@@ -147,7 +147,7 @@ describe('buildSystemTools', () => {
 
       expect(deps.projectRegistry!.listProjects).toHaveBeenCalledOnce();
       expect(result.isError).toBeFalsy();
-      const parsed = JSON.parse(result.content[0].text);
+      const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.projects).toHaveLength(1);
       expect(parsed.projects[0].id).toBe('proj-1');
     });
@@ -161,7 +161,7 @@ describe('buildSystemTools', () => {
       const result = await tool!.handler({}, {});
 
       expect(result.isError).toBeFalsy();
-      const parsed = JSON.parse(result.content[0].text);
+      const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.projects).toHaveLength(0);
     });
 
@@ -174,7 +174,7 @@ describe('buildSystemTools', () => {
       const result = await tool!.handler({}, {});
 
       expect(result.isError).toBeFalsy();
-      const parsed = JSON.parse(result.content[0].text);
+      const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.projects).toHaveLength(0);
     });
 
@@ -206,7 +206,7 @@ describe('buildSystemTools', () => {
         }),
       );
       expect(result.isError).toBeFalsy();
-      const parsed = JSON.parse(result.content[0].text);
+      const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.agentId).toBe('new-agent-id');
     });
 
@@ -219,7 +219,7 @@ describe('buildSystemTools', () => {
       const result = await tool!.handler({ name: 'my-bot' }, {});
 
       expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain('namedAgentStore');
+      expect((result.content[0] as any).text).toContain('namedAgentStore');
     });
   });
 
@@ -238,7 +238,7 @@ describe('buildSystemTools', () => {
         expect.objectContaining({ description: 'Updated desc' }),
       );
       expect(result.isError).toBeFalsy();
-      const parsed = JSON.parse(result.content[0].text);
+      const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.ack).toBe(true);
     });
 
@@ -264,7 +264,7 @@ describe('buildSystemTools', () => {
 
       expect(deps.pipelineEngine!.triggerPipeline).toHaveBeenCalledWith('daily-digest', 'manual');
       expect(result.isError).toBeFalsy();
-      const parsed = JSON.parse(result.content[0].text);
+      const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.treeId).toBe('run-abc');
     });
 
@@ -277,7 +277,7 @@ describe('buildSystemTools', () => {
       const result = await tool!.handler({ name: 'daily-digest' }, {});
 
       expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain('pipelineEngine');
+      expect((result.content[0] as any).text).toContain('pipelineEngine');
     });
   });
 });

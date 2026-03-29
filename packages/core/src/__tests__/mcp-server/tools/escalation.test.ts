@@ -78,7 +78,7 @@ describe('buildEscalationTools', () => {
       expect(emittedEvent.payload.treeId).toBe('tree-123');
 
       expect(result.isError).toBeFalsy();
-      const parsed = JSON.parse(result.content[0].text);
+      const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.treeId).toBe('tree-123');
       expect(parsed.status).toBe('running');
     });
@@ -94,7 +94,7 @@ describe('buildEscalationTools', () => {
       );
 
       expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain('executionEngine');
+      expect((result.content[0] as any).text).toContain('executionEngine');
     });
 
     it('defaults task type to agent', async () => {
@@ -121,7 +121,7 @@ describe('buildEscalationTools', () => {
       const result = await tool!.handler({ question: 'Are you sure?' }, {});
 
       expect(result.isError).toBe(true);
-      expect(result.content[0].text).toContain('pendingApprovals');
+      expect((result.content[0] as any).text).toContain('pendingApprovals');
     });
 
     it('creates a pending approval and emits approval:requested event', async () => {
@@ -150,7 +150,7 @@ describe('buildEscalationTools', () => {
       expect(emittedEvent.payload.approvalId).toBe('approval-123');
 
       expect(result.isError).toBeFalsy();
-      const parsed = JSON.parse(result.content[0].text);
+      const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.approved).toBe(true);
     });
   });

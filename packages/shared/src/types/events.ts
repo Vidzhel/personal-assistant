@@ -887,6 +887,39 @@ export interface ExecutionTaskValidationEvent extends BaseEvent {
   };
 }
 
+export interface ExecutionTaskProgressEvent extends BaseEvent {
+  type: 'execution:task:progress';
+  payload: {
+    treeId?: string;
+    taskId?: string;
+    progress?: number;
+    statusText?: string;
+    artifactId?: string;
+    artifact?: { name: string; content: string; type: string };
+  };
+}
+
+export interface ExecutionTreeCreatedEvent extends BaseEvent {
+  type: 'execution:tree:created';
+  payload: {
+    treeId: string;
+    plan: string;
+    taskCount: number;
+    projectId?: string;
+  };
+}
+
+export interface ApprovalRequestedEvent extends BaseEvent {
+  type: 'approval:requested';
+  payload: {
+    approvalId: string;
+    question: string;
+    options?: string[];
+    sessionId?: string;
+    projectId?: string;
+  };
+}
+
 export type RavenEvent =
   | NewEmailEvent
   | ScheduleTriggeredEvent
@@ -979,7 +1012,10 @@ export type RavenEvent =
   | ExecutionTaskApprovalNeededEvent
   | ExecutionTreeCompletedEvent
   | ExecutionTreeCreateEvent
-  | ExecutionTaskValidationEvent;
+  | ExecutionTaskValidationEvent
+  | ExecutionTaskProgressEvent
+  | ExecutionTreeCreatedEvent
+  | ApprovalRequestedEvent;
 
 export type RavenEventType = RavenEvent['type'];
 
