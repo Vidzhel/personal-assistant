@@ -338,6 +338,8 @@ export interface Project {
   isMeta?: boolean;
   createdAt: number;
   updatedAt: number;
+  agentCount?: number;
+  templateCount?: number;
 }
 
 export interface Skill {

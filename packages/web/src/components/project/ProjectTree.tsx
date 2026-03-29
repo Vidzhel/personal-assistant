@@ -74,19 +74,21 @@ function TreeItem({ node, depth }: { node: TreeNode; depth: number }) {
             — {p.description}
           </span>
         )}
-        <div className="flex gap-1 ml-auto flex-shrink-0">
-          {p.skills.slice(0, 3).map((s) => (
+        <div className="flex gap-2 ml-auto flex-shrink-0">
+          {(p.agentCount ?? 0) > 0 && (
             <span
-              key={s}
               className="text-xs px-1.5 py-0.5 rounded"
-              style={{ background: 'var(--bg-hover)', color: 'var(--accent)' }}
+              style={{ background: 'rgba(99,102,241,0.2)', color: 'rgb(129,140,248)' }}
             >
-              {s}
+              {p.agentCount} agent{p.agentCount !== 1 ? 's' : ''}
             </span>
-          ))}
-          {p.skills.length > 3 && (
-            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              +{p.skills.length - 3}
+          )}
+          {(p.templateCount ?? 0) > 0 && (
+            <span
+              className="text-xs px-1.5 py-0.5 rounded"
+              style={{ background: 'rgba(168,85,247,0.2)', color: 'rgb(192,132,252)' }}
+            >
+              {p.templateCount} template{p.templateCount !== 1 ? 's' : ''}
             </span>
           )}
         </div>

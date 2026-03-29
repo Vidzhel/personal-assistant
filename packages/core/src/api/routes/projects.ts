@@ -8,6 +8,7 @@ import {
 } from '@raven/shared';
 import type { EventBus } from '../../event-bus/event-bus.ts';
 import type { ProjectRegistry } from '../../project-registry/project-registry.ts';
+import type { TemplateRegistry } from '../../template-engine/template-registry.ts';
 import { getDb } from '../../db/database.ts';
 
 const BAD_REQUEST = 400;
@@ -15,6 +16,7 @@ const BAD_REQUEST = 400;
 interface ProjectRouteDeps {
   eventBus: EventBus;
   projectRegistry?: ProjectRegistry;
+  templateRegistry?: TemplateRegistry;
 }
 
 // eslint-disable-next-line max-lines-per-function -- route registration for all project CRUD endpoints
@@ -22,14 +24,16 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
   app.get('/api/projects', async () => {
     const db = getDb();
     const rows = db.prepare('SELECT * FROM projects ORDER BY updated_at DESC').all();
-    return rows.map((row) => enrichWithRegistry(parseProjectRow(row), deps.projectRegistry));
+    return rows.map((row) =>
+      enrichWithRegistry(parseProjectRow(row), deps.projectRegistry, deps.templateRegistry),
+    );
   });
 
   app.get<{ Params: { id: string } }>('/api/projects/:id', async (req, reply) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
     if (!row) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
-    return enrichWithRegistry(parseProjectRow(row), deps.projectRegistry);
+    return enrichWithRegistry(parseProjectRow(row), deps.projectRegistry, deps.templateRegistry);
   });
 
   // GET /api/projects/:id/children — list sub-projects from the filesystem registry
@@ -181,9 +185,15 @@ interface EnrichedProject extends Project {
   parentId?: string;
   children?: string[];
   hasContextMd?: boolean;
+  agentCount?: number;
+  templateCount?: number;
 }
 
-function enrichWithRegistry(project: Project, registry?: ProjectRegistry): EnrichedProject {
+function enrichWithRegistry(
+  project: Project,
+  registry?: ProjectRegistry,
+  templateRegistry?: TemplateRegistry,
+): EnrichedProject {
   if (!registry) return project;
 
   // Match DB project to registry by name (case-insensitive)
@@ -195,6 +205,8 @@ function enrichWithRegistry(project: Project, registry?: ProjectRegistry): Enric
     parentId: node.parentId ?? undefined,
     children: node.children,
     hasContextMd: node.contextMd.length > 0,
+    agentCount: node.agents.length,
+    templateCount: templateRegistry ? templateRegistry.listTemplates(node.id).length : 0,
   };
 }
 
