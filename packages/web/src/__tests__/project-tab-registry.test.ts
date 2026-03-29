@@ -5,7 +5,14 @@ describe('Project Tab Registry', () => {
   it('returns default tabs when no project type specified', () => {
     const tabs = getProjectTabs();
     expect(tabs).toHaveLength(6);
-    expect(tabs.map((t) => t.key)).toEqual(['overview', 'tasks', 'agents', 'templates', 'knowledge', 'sessions']);
+    expect(tabs.map((t) => t.key)).toEqual([
+      'overview',
+      'tasks',
+      'agents',
+      'templates',
+      'knowledge',
+      'sessions',
+    ]);
   });
 
   it('returns default tabs for unknown project type', () => {

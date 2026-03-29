@@ -73,7 +73,14 @@ describe('Project Hub — Tab Content Mapping', () => {
 describe('Project Hub — AC Verification', () => {
   it('AC4: tabs available are Overview, Tasks, Agents, Templates, Knowledge, Sessions', () => {
     const tabs = getProjectTabs();
-    expect(tabs.map((t) => t.label)).toEqual(['Overview', 'Tasks', 'Agents', 'Templates', 'Knowledge', 'Sessions']);
+    expect(tabs.map((t) => t.label)).toEqual([
+      'Overview',
+      'Tasks',
+      'Agents',
+      'Templates',
+      'Knowledge',
+      'Sessions',
+    ]);
   });
 
   it('AC12: new project type can define its own tab set without modifying core', () => {
