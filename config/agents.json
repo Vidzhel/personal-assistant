@@ -7,14 +7,5 @@
     "suite_ids": [],
     "skills": [],
     "is_default": true
-  },
-  {
-    "id": "173576ba-fd09-4dbd-8733-ef3109addb85",
-    "name": "model-test",
-    "description": "test model field",
-    "instructions": null,
-    "suite_ids": [],
-    "skills": [],
-    "is_default": false
   }
 ]
