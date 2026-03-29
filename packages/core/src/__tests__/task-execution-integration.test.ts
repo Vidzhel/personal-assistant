@@ -33,10 +33,8 @@ function makeMockEventBus() {
 function makeDbInterface(db: any) {
   return {
     run: (sql: string, ...params: unknown[]) => db.prepare(sql).run(...params),
-    get: <T>(sql: string, ...params: unknown[]) =>
-      db.prepare(sql).get(...params) as T | undefined,
-    all: <T>(sql: string, ...params: unknown[]) =>
-      db.prepare(sql).all(...params) as T[],
+    get: <T>(sql: string, ...params: unknown[]) => db.prepare(sql).get(...params) as T | undefined,
+    all: <T>(sql: string, ...params: unknown[]) => db.prepare(sql).all(...params) as T[],
   };
 }
 
@@ -636,11 +634,7 @@ describe('task execution integration', () => {
 
     engine.createTree({
       id: treeId,
-      tasks: [
-        agentNode(a),
-        agentNode(b, { blockedBy: [a] }),
-        agentNode(c, { blockedBy: [b] }),
-      ],
+      tasks: [agentNode(a), agentNode(b, { blockedBy: [a] }), agentNode(c, { blockedBy: [b] })],
     });
 
     await engine.startTree(treeId);
