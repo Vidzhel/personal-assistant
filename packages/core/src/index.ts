@@ -36,6 +36,7 @@ import { createNamedAgentStore } from './agent-registry/named-agent-store.ts';
 import { createAgentResolver } from './agent-registry/agent-resolver.ts';
 import { CapabilityLibrary } from './capability-library/capability-library.ts';
 import { ProjectRegistry } from './project-registry/project-registry.ts';
+import { createAgentYamlStore } from './project-registry/agent-yaml-store.ts';
 import { createConfigCommitter } from './agent-registry/config-committer.ts';
 import { createSuiteScaffolder } from './suite-registry/suite-scaffolder.ts';
 import { createKnowledgeStore } from './knowledge-engine/knowledge-store.ts';
@@ -147,6 +148,9 @@ async function main(): Promise<void> {
   } catch (err) {
     log.warn(`Project registry failed to load, continuing without: ${err}`);
   }
+
+  // Create agent YAML store (filesystem-backed agent definitions)
+  const agentYamlStore = createAgentYamlStore();
 
   // Count configured (enabled) suites
   const configuredSuiteCount = Object.values(suitesConfig).filter((s) => s?.enabled).length;
@@ -513,6 +517,9 @@ async function main(): Promise<void> {
         []) as string[],
       sessionRetrospective,
       dataDir: resolve(projectRoot, 'data'),
+      projectRegistry,
+      agentYamlStore,
+      projectsDir,
     },
     config.RAVEN_PORT,
   );
