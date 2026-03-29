@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAppStore } from '@/stores/app-store';
 import { api } from '@/lib/api-client';
+import { ProjectTree } from '@/components/project/ProjectTree';
 
 const SYSTEM_ACCESS_LABELS: Record<string, string> = {
   none: 'No system file access (default)',
@@ -15,6 +16,7 @@ const SYSTEM_ACCESS_LABELS: Record<string, string> = {
 export default function ProjectsPage() {
   const { projects, skills, fetchProjects, fetchSkills } = useAppStore();
   const [showCreate, setShowCreate] = useState(false);
+  const [viewMode, setViewMode] = useState<'flat' | 'tree'>('flat');
   const [name, setName] = useState('');
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const [systemAccess, setSystemAccess] = useState<'none' | 'read' | 'read-write'>('none');
@@ -47,13 +49,40 @@ export default function ProjectsPage() {
             Each project has its own chat session and skill context.
           </p>
         </div>
-        <button
-          onClick={() => setShowCreate(!showCreate)}
-          className="px-4 py-2 rounded-lg text-sm font-medium"
-          style={{ background: 'var(--accent)', color: 'white' }}
-        >
-          New Project
-        </button>
+        <div className="flex items-center gap-2">
+          <div
+            className="flex rounded-md overflow-hidden border"
+            style={{ borderColor: 'var(--border)' }}
+          >
+            <button
+              onClick={() => setViewMode('flat')}
+              className="px-3 py-1.5 text-xs font-medium"
+              style={{
+                background: viewMode === 'flat' ? 'var(--accent)' : 'var(--bg-card)',
+                color: viewMode === 'flat' ? 'white' : 'var(--text-muted)',
+              }}
+            >
+              Grid
+            </button>
+            <button
+              onClick={() => setViewMode('tree')}
+              className="px-3 py-1.5 text-xs font-medium"
+              style={{
+                background: viewMode === 'tree' ? 'var(--accent)' : 'var(--bg-card)',
+                color: viewMode === 'tree' ? 'white' : 'var(--text-muted)',
+              }}
+            >
+              Tree
+            </button>
+          </div>
+          <button
+            onClick={() => setShowCreate(!showCreate)}
+            className="px-4 py-2 rounded-lg text-sm font-medium"
+            style={{ background: 'var(--accent)', color: 'white' }}
+          >
+            New Project
+          </button>
+        </div>
       </div>
 
       {showCreate && (
@@ -132,86 +161,90 @@ export default function ProjectsPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {/* Meta-project pinned first */}
-        {metaProject && (
-          <Link
-            href={`/projects/${metaProject.id}`}
-            className="block p-4 rounded-lg transition-colors"
-            style={{
-              background: 'var(--bg-card)',
-              border: '2px solid var(--accent)',
-            }}
-          >
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-sm" style={{ color: 'var(--accent)' }}>
-                $
-              </span>
-              <h3 className="font-semibold">{metaProject.name}</h3>
-            </div>
-            {metaProject.description && (
-              <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-                {metaProject.description}
-              </p>
-            )}
-            <div className="flex gap-1 mt-3">
-              <span
-                className="text-xs px-2 py-0.5 rounded"
-                style={{ background: 'var(--accent)', color: 'white' }}
-              >
-                system
-              </span>
-              <span
-                className="text-xs px-2 py-0.5 rounded"
-                style={{ background: 'var(--bg-hover)', color: 'var(--accent)' }}
-              >
-                read-write
-              </span>
-            </div>
-          </Link>
-        )}
-
-        {/* Regular projects */}
-        {regularProjects.map((p) => (
-          <Link
-            key={p.id}
-            href={`/projects/${p.id}`}
-            className="block p-4 rounded-lg transition-colors"
-            style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
-          >
-            <h3 className="font-semibold">{p.name}</h3>
-            {p.description && (
-              <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-                {p.description}
-              </p>
-            )}
-            <div className="flex gap-1 mt-3 flex-wrap">
-              {p.skills.map((s) => (
+      {viewMode === 'tree' ? (
+        <ProjectTree projects={projects} />
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {/* Meta-project pinned first */}
+          {metaProject && (
+            <Link
+              href={`/projects/${metaProject.id}`}
+              className="block p-4 rounded-lg transition-colors"
+              style={{
+                background: 'var(--bg-card)',
+                border: '2px solid var(--accent)',
+              }}
+            >
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-sm" style={{ color: 'var(--accent)' }}>
+                  $
+                </span>
+                <h3 className="font-semibold">{metaProject.name}</h3>
+              </div>
+              {metaProject.description && (
+                <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
+                  {metaProject.description}
+                </p>
+              )}
+              <div className="flex gap-1 mt-3">
                 <span
-                  key={s}
+                  className="text-xs px-2 py-0.5 rounded"
+                  style={{ background: 'var(--accent)', color: 'white' }}
+                >
+                  system
+                </span>
+                <span
                   className="text-xs px-2 py-0.5 rounded"
                   style={{ background: 'var(--bg-hover)', color: 'var(--accent)' }}
                 >
-                  {s}
+                  read-write
                 </span>
-              ))}
-              {p.systemAccess && p.systemAccess !== 'none' && (
-                <span
-                  className="text-xs px-2 py-0.5 rounded"
-                  style={{ background: 'var(--bg-hover)', color: 'var(--text-muted)' }}
-                >
-                  {p.systemAccess}
-                </span>
+              </div>
+            </Link>
+          )}
+
+          {/* Regular projects */}
+          {regularProjects.map((p) => (
+            <Link
+              key={p.id}
+              href={`/projects/${p.id}`}
+              className="block p-4 rounded-lg transition-colors"
+              style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
+            >
+              <h3 className="font-semibold">{p.name}</h3>
+              {p.description && (
+                <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
+                  {p.description}
+                </p>
               )}
-            </div>
-          </Link>
-        ))}
-        {projects.length === 0 && (
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-            No projects yet. Create one to start chatting with Raven.
-          </p>
-        )}
-      </div>
+              <div className="flex gap-1 mt-3 flex-wrap">
+                {p.skills.map((s) => (
+                  <span
+                    key={s}
+                    className="text-xs px-2 py-0.5 rounded"
+                    style={{ background: 'var(--bg-hover)', color: 'var(--accent)' }}
+                  >
+                    {s}
+                  </span>
+                ))}
+                {p.systemAccess && p.systemAccess !== 'none' && (
+                  <span
+                    className="text-xs px-2 py-0.5 rounded"
+                    style={{ background: 'var(--bg-hover)', color: 'var(--text-muted)' }}
+                  >
+                    {p.systemAccess}
+                  </span>
+                )}
+              </div>
+            </Link>
+          ))}
+          {projects.length === 0 && (
+            <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+              No projects yet. Create one to start chatting with Raven.
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
