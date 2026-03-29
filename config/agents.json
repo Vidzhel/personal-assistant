@@ -7,5 +7,16 @@
     "suite_ids": [],
     "skills": [],
     "is_default": true
+  },
+  {
+    "id": "d7f05610-1e25-479b-ad34-1edf26f31288",
+    "name": "resolver-test",
+    "description": "Resolver test agent",
+    "instructions": null,
+    "suite_ids": [],
+    "skills": [
+      "email-triage"
+    ],
+    "is_default": false
   }
 ]
