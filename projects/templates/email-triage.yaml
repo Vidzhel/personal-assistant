@@ -1,0 +1,5 @@
+name: email-triage
+title: Triage Inbox Emails
+description: Review and categorize recent emails, extract action items
+prompt: Review recent unread emails, categorize by urgency, extract action items, and create follow-up tasks for anything requiring attention.
+defaultAgentId: orchestrator

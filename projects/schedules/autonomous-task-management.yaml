@@ -1,0 +1,5 @@
+name: autonomous-task-management
+cron: "0 */6 * * *"
+timezone: UTC
+template: autonomous-task-management
+enabled: true

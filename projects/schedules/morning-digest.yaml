@@ -1,0 +1,5 @@
+name: morning-digest
+cron: "0 8 * * *"
+timezone: UTC
+template: morning-digest
+enabled: true

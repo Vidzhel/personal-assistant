@@ -1,0 +1,5 @@
+name: task-archival
+cron: "0 * * * *"
+timezone: UTC
+template: task-archival
+enabled: true

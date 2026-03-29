@@ -1,0 +1,5 @@
+name: knowledge-retrospective
+cron: "0 9 * * 1"
+timezone: UTC
+template: knowledge:retrospective
+enabled: true

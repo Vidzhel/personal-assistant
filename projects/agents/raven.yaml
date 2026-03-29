@@ -1,0 +1,7 @@
+name: raven
+displayName: Raven
+description: General-purpose assistant — handles all requests when no specialized agent is assigned
+isDefault: true
+skills: []
+model: sonnet
+maxTurns: 20

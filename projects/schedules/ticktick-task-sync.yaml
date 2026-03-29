@@ -1,0 +1,5 @@
+name: ticktick-task-sync
+cron: "*/15 * * * *"
+timezone: UTC
+template: ticktick-task-sync
+enabled: true

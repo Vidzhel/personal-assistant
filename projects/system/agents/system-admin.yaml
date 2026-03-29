@@ -1,0 +1,16 @@
+name: system-admin
+displayName: System Administrator
+description: Full system access for configuration and maintenance
+skills: []
+model: sonnet
+maxTurns: 20
+bash:
+  access: scoped
+  allowedPaths:
+    - "data/**"
+    - "config/**"
+    - "library/**"
+    - "packages/**"
+  deniedPaths:
+    - ".env"
+    - ".git/**"

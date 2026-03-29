@@ -1,0 +1,5 @@
+name: system-maintenance
+cron: "0 2 * * 0"
+timezone: UTC
+template: system-maintenance
+enabled: true
