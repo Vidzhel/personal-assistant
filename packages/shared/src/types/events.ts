@@ -874,6 +874,17 @@ export interface ExecutionTreeCreateEvent extends BaseEvent {
   };
 }
 
+export interface ExecutionTaskValidationEvent extends BaseEvent {
+  type: 'execution:task:validation';
+  payload: {
+    treeId: string;
+    taskId: string;
+    score: number;
+    feedback: string;
+    pass: boolean;
+  };
+}
+
 export type RavenEvent =
   | NewEmailEvent
   | ScheduleTriggeredEvent
@@ -965,7 +976,8 @@ export type RavenEvent =
   | ExecutionTaskBlockedEvent
   | ExecutionTaskApprovalNeededEvent
   | ExecutionTreeCompletedEvent
-  | ExecutionTreeCreateEvent;
+  | ExecutionTreeCreateEvent
+  | ExecutionTaskValidationEvent;
 
 export type RavenEventType = RavenEvent['type'];
 
