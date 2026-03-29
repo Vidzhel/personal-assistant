@@ -9,15 +9,6 @@
     "is_default": true
   },
   {
-    "id": "94457481-5b90-4850-99e8-f9090e0dc949",
-    "name": "ui-test-agent",
-    "description": "Created from UI test",
-    "instructions": "Test instructions",
-    "suite_ids": [],
-    "skills": [],
-    "is_default": false
-  },
-  {
     "id": "1ed8cb17-eb8d-497b-afb6-1994363ff0fb",
     "name": "unique-agent",
     "description": "Unique agent",
