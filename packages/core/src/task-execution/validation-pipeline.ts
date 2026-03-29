@@ -55,6 +55,7 @@ function runGate1(task: ExecutionTask, config: TaskValidationConfig): boolean {
 
 // ── Main pipeline ──────────────────────────────────────────────────────
 
+// eslint-disable-next-line max-lines-per-function -- sequential gate pipeline with early returns
 export async function validateTaskResult(
   task: ExecutionTask,
   config: Partial<TaskValidationConfig> | undefined,

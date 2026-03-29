@@ -46,10 +46,7 @@ describe('validateDag', () => {
   });
 
   it('detects cycles (a→b→a)', () => {
-    const tasks = tasksFromList([
-      makeTask('a', ['b']),
-      makeTask('b', ['a']),
-    ]);
+    const tasks = tasksFromList([makeTask('a', ['b']), makeTask('b', ['a'])]);
     const errors = validateDag(tasks);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toMatch(/Cycle detected involving tasks/);
@@ -58,9 +55,7 @@ describe('validateDag', () => {
   });
 
   it('detects missing dependencies', () => {
-    const tasks = tasksFromList([
-      makeTask('a', ['nonexistent']),
-    ]);
+    const tasks = tasksFromList([makeTask('a', ['nonexistent'])]);
     const errors = validateDag(tasks);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toMatch(/Task 'a' references missing dependency 'nonexistent'/);
@@ -80,29 +75,19 @@ describe('validateDag', () => {
 
 describe('findReadyTasks', () => {
   it('returns tasks with no dependencies (status: todo)', () => {
-    const tasks = tasksFromList([
-      makeTask('a'),
-      makeTask('b', ['a']),
-    ]);
+    const tasks = tasksFromList([makeTask('a'), makeTask('b', ['a'])]);
     const ready = findReadyTasks(tasks);
     expect(ready).toEqual(['a']);
   });
 
   it('returns tasks whose deps are all completed', () => {
-    const tasks = tasksFromList([
-      makeTask('a', [], 'completed'),
-      makeTask('b', ['a']),
-    ]);
+    const tasks = tasksFromList([makeTask('a', [], 'completed'), makeTask('b', ['a'])]);
     const ready = findReadyTasks(tasks);
     expect(ready).toEqual(['b']);
   });
 
   it('returns multiple independent ready tasks', () => {
-    const tasks = tasksFromList([
-      makeTask('a'),
-      makeTask('b'),
-      makeTask('c', ['a', 'b']),
-    ]);
+    const tasks = tasksFromList([makeTask('a'), makeTask('b'), makeTask('c', ['a', 'b'])]);
     const ready = findReadyTasks(tasks);
     expect(ready).toEqual(expect.arrayContaining(['a', 'b']));
     expect(ready).toHaveLength(2);
@@ -120,10 +105,7 @@ describe('findReadyTasks', () => {
   });
 
   it('treats skipped deps as satisfied', () => {
-    const tasks = tasksFromList([
-      makeTask('a', [], 'skipped'),
-      makeTask('b', ['a']),
-    ]);
+    const tasks = tasksFromList([makeTask('a', [], 'skipped'), makeTask('b', ['a'])]);
     const ready = findReadyTasks(tasks);
     expect(ready).toEqual(['b']);
   });
@@ -156,11 +138,7 @@ describe('topologicalSort', () => {
   });
 
   it('handles parallel-ready tasks (order within same level may vary)', () => {
-    const tasks = tasksFromList([
-      makeTask('x'),
-      makeTask('y'),
-      makeTask('z', ['x', 'y']),
-    ]);
+    const tasks = tasksFromList([makeTask('x'), makeTask('y'), makeTask('z', ['x', 'y'])]);
     const order = topologicalSort(tasks);
 
     expect(order).toHaveLength(3);
