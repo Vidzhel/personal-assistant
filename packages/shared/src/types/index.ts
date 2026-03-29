@@ -12,3 +12,4 @@ export * from './integrations-config.ts';
 export * from './tasks.ts';
 export * from './config-history.ts';
 export * from './library.ts';
+export * from './project-fs.ts';
