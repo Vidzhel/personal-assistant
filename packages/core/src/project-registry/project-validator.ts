@@ -50,19 +50,53 @@ async function validateYamlFiles(opts: YamlValidateOpts): Promise<string[]> {
   return errors;
 }
 
+interface PathTraversalContext {
+  fieldName: string;
+  agentName: string;
+  projectRel: string;
+}
+
+function checkBashPathTraversal(paths: string[], ctx: PathTraversalContext): string[] {
+  const errors: string[] = [];
+  for (const p of paths) {
+    if (p.includes('..')) {
+      errors.push(
+        `bash.${ctx.fieldName} contains path traversal ".." in agent "${ctx.agentName}" (project "${ctx.projectRel || '_global'}"): ${p}`,
+      );
+    }
+  }
+  return errors;
+}
+
 function checkBashAccess(
   agentRaw: Record<string, unknown>,
   agentName: string,
   projectRel: string,
-): string | null {
+): string[] {
   const bash = agentRaw.bash as Record<string, unknown> | undefined;
-  if (!bash || bash.access !== 'full') return null;
+  if (!bash) return [];
 
-  const isGlobalAgents = projectRel === '' || projectRel === '.';
-  const isSystemAgents = projectRel === 'system';
-  if (isGlobalAgents || isSystemAgents) return null;
+  const errors: string[] = [];
 
-  return `bash.access: full not allowed for agent "${agentName}" in project "${projectRel || '_global'}" (only global or system)`;
+  // Full access restricted to global/system agents
+  if (bash.access === 'full') {
+    const isGlobalAgents = projectRel === '' || projectRel === '.';
+    const isSystemAgents = projectRel === 'system';
+    if (!isGlobalAgents && !isSystemAgents) {
+      errors.push(
+        `bash.access: full not allowed for agent "${agentName}" in project "${projectRel || '_global'}" (only global or system)`,
+      );
+    }
+  }
+
+  // Check for path traversal in allowedPaths and deniedPaths
+  const allowedPaths = Array.isArray(bash.allowedPaths) ? (bash.allowedPaths as string[]) : [];
+  const deniedPaths = Array.isArray(bash.deniedPaths) ? (bash.deniedPaths as string[]) : [];
+  const ctx = { agentName, projectRel };
+  errors.push(...checkBashPathTraversal(allowedPaths, { ...ctx, fieldName: 'allowedPaths' }));
+  errors.push(...checkBashPathTraversal(deniedPaths, { ...ctx, fieldName: 'deniedPaths' }));
+
+  return errors;
 }
 
 async function validateAgentsDir(
@@ -97,8 +131,7 @@ async function validateAgentsDir(
         seenAgentNames.add(parsed.name);
       }
 
-      const bashErr = checkBashAccess(raw, parsed.name, projectRel);
-      if (bashErr) errors.push(bashErr);
+      errors.push(...checkBashAccess(raw, parsed.name, projectRel));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       errors.push(`Invalid agent YAML in ${projectRel || '_global'}/${entry.name}: ${msg}`);
