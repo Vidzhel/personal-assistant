@@ -7,5 +7,14 @@
     "suite_ids": [],
     "skills": [],
     "is_default": true
+  },
+  {
+    "id": "763967ad-8082-4601-91a4-ff2f285e09b9",
+    "name": "dup-test",
+    "description": "first",
+    "instructions": null,
+    "suite_ids": [],
+    "skills": [],
+    "is_default": false
   }
 ]
