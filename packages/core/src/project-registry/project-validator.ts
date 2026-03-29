@@ -3,7 +3,8 @@ import { join, relative } from 'node:path';
 
 import yaml from 'js-yaml';
 
-import { AgentYamlSchema, ScheduleYamlSchema } from '@raven/shared';
+import { AgentYamlSchema, ScheduleYamlSchema, TaskTemplateSchema } from '@raven/shared';
+import type { TaskTemplate } from '@raven/shared';
 
 const yamlLoad = yaml.load;
 
@@ -133,6 +134,139 @@ async function getSubdirectories(dirPath: string): Promise<string[]> {
   }
 }
 
+interface TemplateGraph {
+  taskIds: Set<string>;
+  blockedByMap: Map<string, string[]>;
+}
+
+/** Build in-degree and dependents maps for Kahn's algorithm. */
+function buildTemplateGraph(graph: TemplateGraph): {
+  inDegree: Map<string, number>;
+  dependents: Map<string, string[]>;
+} {
+  const inDegree = new Map<string, number>();
+  const dependents = new Map<string, string[]>();
+
+  for (const id of graph.taskIds) {
+    inDegree.set(id, 0);
+    dependents.set(id, []);
+  }
+
+  for (const [id, deps] of graph.blockedByMap) {
+    const validDeps = deps.filter((d) => graph.taskIds.has(d));
+    inDegree.set(id, validDeps.length);
+    for (const dep of validDeps) {
+      dependents.get(dep)?.push(id);
+    }
+  }
+
+  return { inDegree, dependents };
+}
+
+/** Run Kahn's topological sort, return sorted node IDs. */
+function kahnSortTemplate(
+  inDegree: Map<string, number>,
+  dependents: Map<string, string[]>,
+): string[] {
+  const queue: string[] = [];
+  for (const [id, degree] of inDegree) {
+    if (degree === 0) queue.push(id);
+  }
+
+  const sorted: string[] = [];
+  while (queue.length > 0) {
+    const node = queue.shift() as string;
+    sorted.push(node);
+    for (const dep of dependents.get(node) ?? []) {
+      const newDeg = (inDegree.get(dep) ?? 1) - 1;
+      inDegree.set(dep, newDeg);
+      if (newDeg === 0) queue.push(dep);
+    }
+  }
+  return sorted;
+}
+
+/** Detect cycles using Kahn's algorithm. Returns IDs in cycles (empty = acyclic). */
+function detectCycles(graph: TemplateGraph): string[] {
+  const { inDegree, dependents } = buildTemplateGraph(graph);
+  const sorted = kahnSortTemplate(inDegree, dependents);
+  if (sorted.length < graph.taskIds.size) {
+    const sortedSet = new Set(sorted);
+    return [...graph.taskIds].filter((id) => !sortedSet.has(id));
+  }
+  return [];
+}
+
+/** Extract task IDs and blockedBy map from a parsed template. */
+function extractGraph(template: TaskTemplate): TemplateGraph {
+  const taskIds = new Set<string>();
+  const blockedByMap = new Map<string, string[]>();
+  for (const task of template.tasks) {
+    const t = task as { id: string; blockedBy?: string[] };
+    taskIds.add(t.id);
+    blockedByMap.set(t.id, t.blockedBy ?? []);
+  }
+  return { taskIds, blockedByMap };
+}
+
+/** Check blockedBy refs, cycles, and forEach syntax for a single template. */
+function validateTemplateStructure(template: TaskTemplate, label: string): string[] {
+  const errors: string[] = [];
+  const graph = extractGraph(template);
+
+  for (const [id, deps] of graph.blockedByMap) {
+    for (const dep of deps) {
+      if (!graph.taskIds.has(dep)) {
+        errors.push(`Template ${label}: task "${id}" references missing dependency "${dep}"`);
+      }
+    }
+  }
+
+  const cycleNodes = detectCycles(graph);
+  if (cycleNodes.length > 0) {
+    errors.push(`Template ${label}: circular dependency involving tasks: ${cycleNodes.join(', ')}`);
+  }
+
+  for (const task of template.tasks) {
+    const t = task as { id: string; forEach?: string };
+    if (t.forEach && !t.forEach.includes('{{')) {
+      errors.push(`Template ${label}: task "${t.id}" forEach must contain {{ }} expression`);
+    }
+  }
+
+  return errors;
+}
+
+async function validateTemplatesDir(templatesDir: string, projectRel: string): Promise<string[]> {
+  const errors: string[] = [];
+  let entries;
+  try {
+    entries = await readdir(templatesDir, { withFileTypes: true });
+  } catch {
+    return errors;
+  }
+
+  const yamlFiles = entries.filter(
+    (e) => e.isFile() && (e.name.endsWith('.yaml') || e.name.endsWith('.yml')),
+  );
+
+  for (const entry of yamlFiles) {
+    const filePath = join(templatesDir, entry.name);
+    const label = `${projectRel}/templates/${entry.name}`;
+    try {
+      const content = await readFile(filePath, 'utf-8');
+      const raw = yamlLoad(content);
+      const template = TaskTemplateSchema.parse(raw) as TaskTemplate;
+      errors.push(...validateTemplateStructure(template, label));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      errors.push(`Invalid template YAML in ${label}: ${msg}`);
+    }
+  }
+
+  return errors;
+}
+
 async function validateDir(dirPath: string, depth: number, ctx: ValidateContext): Promise<void> {
   const rel = relative(ctx.projectsDir, dirPath);
   const isRoot = rel === '' || rel === '.';
@@ -155,6 +289,9 @@ async function validateDir(dirPath: string, depth: number, ctx: ValidateContext)
     projectRel: rel || '_global',
   });
   ctx.errors.push(...scheduleErrors);
+
+  const templateErrors = await validateTemplatesDir(join(dirPath, 'templates'), rel || '_global');
+  ctx.errors.push(...templateErrors);
 
   const subdirs = await getSubdirectories(dirPath);
   for (const subdir of subdirs) {

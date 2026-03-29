@@ -40,6 +40,14 @@ function mkSchedule(relPath: string, schedule: Record<string, unknown>): void {
   writeFileSync(join(schedulesDir, `${name}.yaml`), yamlDump(schedule));
 }
 
+function mkTemplate(relPath: string, template: Record<string, unknown>): void {
+  const base = relPath ? join(tmpDir, relPath) : tmpDir;
+  const templatesDir = join(base, 'templates');
+  mkdirSync(templatesDir, { recursive: true });
+  const name = typeof template.name === 'string' ? template.name : 'unnamed';
+  writeFileSync(join(templatesDir, `${name}.yaml`), yamlDump(template));
+}
+
 const VALID_AGENT = {
   name: 'test-agent',
   displayName: 'Test Agent',
@@ -54,6 +62,27 @@ const VALID_SCHEDULE = {
   template: 'morning-digest',
   timezone: 'UTC',
   enabled: true,
+};
+
+const VALID_TEMPLATE = {
+  name: 'test-template',
+  displayName: 'Test Template',
+  tasks: [
+    {
+      id: 'step-1',
+      type: 'agent',
+      title: 'First step',
+      prompt: 'Do something',
+      blockedBy: [],
+    },
+    {
+      id: 'step-2',
+      type: 'agent',
+      title: 'Second step',
+      prompt: 'Do something else',
+      blockedBy: ['step-1'],
+    },
+  ],
 };
 
 describe('validateProjects', () => {
@@ -163,5 +192,53 @@ describe('validateProjects', () => {
     const errors = await validateProjects(tmpDir);
     expect(errors.length).toBeGreaterThan(0);
     expect(errors.some((e) => e.includes('Duplicate agent name'))).toBe(true);
+  });
+
+  it('passes for valid template', async () => {
+    mkProject('', 'Global');
+    mkTemplate('', VALID_TEMPLATE);
+
+    const errors = await validateProjects(tmpDir);
+    expect(errors).toEqual([]);
+  });
+
+  it('reports invalid template YAML', async () => {
+    mkProject('', 'Global');
+    const templatesDir = join(tmpDir, 'templates');
+    mkdirSync(templatesDir, { recursive: true });
+    // Missing required fields (no tasks, no displayName)
+    writeFileSync(join(templatesDir, 'bad.yaml'), yamlDump({ name: 'bad' }));
+
+    const errors = await validateProjects(tmpDir);
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors.some((e) => e.includes('Invalid template YAML'))).toBe(true);
+  });
+
+  it('reports template with circular blockedBy', async () => {
+    mkProject('', 'Global');
+    mkTemplate('', {
+      name: 'cycle-template',
+      displayName: 'Cycle Template',
+      tasks: [
+        {
+          id: 'a',
+          type: 'agent',
+          title: 'Task A',
+          prompt: 'Do A',
+          blockedBy: ['b'],
+        },
+        {
+          id: 'b',
+          type: 'agent',
+          title: 'Task B',
+          prompt: 'Do B',
+          blockedBy: ['a'],
+        },
+      ],
+    });
+
+    const errors = await validateProjects(tmpDir);
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors.some((e) => e.includes('circular dependency'))).toBe(true);
   });
 });
