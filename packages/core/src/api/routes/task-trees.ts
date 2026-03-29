@@ -9,15 +9,16 @@ export function registerTaskTreeRoutes(
 ): void {
   const { executionEngine } = deps;
 
-  // GET /api/task-trees — list active task trees
+  // GET /api/task-trees — list all recent task trees
   app.get('/api/task-trees', async () => {
-    const trees = executionEngine.getActiveTrees();
+    const trees = executionEngine.getAllTrees();
     return trees.map((tree) => ({
       id: tree.id,
       projectId: tree.projectId,
       status: tree.status,
       plan: tree.plan,
       taskCount: tree.tasks.size,
+      completedCount: [...tree.tasks.values()].filter((t) => t.status === 'completed').length,
       createdAt: tree.createdAt,
       updatedAt: tree.updatedAt,
     }));
@@ -31,8 +32,27 @@ export function registerTaskTreeRoutes(
       return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Task tree not found' });
     }
     return {
-      ...tree,
-      tasks: [...tree.tasks.values()],
+      id: tree.id,
+      projectId: tree.projectId,
+      status: tree.status,
+      plan: tree.plan,
+      taskCount: tree.tasks.size,
+      completedCount: [...tree.tasks.values()].filter((t) => t.status === 'completed').length,
+      createdAt: tree.createdAt,
+      updatedAt: tree.updatedAt,
+      tasks: [...tree.tasks.values()].map((t) => ({
+        id: t.id,
+        title: t.node.title,
+        type: t.node.type,
+        status: t.status,
+        agent: 'agent' in t.node ? t.node.agent : undefined,
+        blockedBy: t.node.blockedBy ?? [],
+        summary: t.summary,
+        artifacts: t.artifacts ?? [],
+        retryCount: t.retryCount,
+        lastError: t.lastError,
+        validationResult: t.validationResult,
+      })),
     };
   });
 

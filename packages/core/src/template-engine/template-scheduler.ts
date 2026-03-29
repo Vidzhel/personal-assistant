@@ -39,6 +39,26 @@ export function createTemplateScheduler(deps: TemplateSchedulerDeps): TemplateSc
       throw new Error(`Template "${template.name}" produced zero tasks`);
     }
 
+    // Make task IDs unique per trigger to avoid UNIQUE constraint on re-trigger
+    const TREE_ID_PREFIX_LEN = 8;
+    const prefix = treeId.slice(0, TREE_ID_PREFIX_LEN);
+    for (const node of nodes) {
+      const originalId = node.id;
+      node.id = `${prefix}-${node.id}`;
+      if (node.blockedBy) {
+        node.blockedBy = node.blockedBy.map((dep) =>
+          dep === originalId ? node.id : `${prefix}-${dep}`,
+        );
+      }
+    }
+    // Fix cross-references in blockedBy (other tasks referencing renamed IDs)
+    const idMap = new Map(nodes.map((n) => [n.id.slice(prefix.length + 1), n.id]));
+    for (const node of nodes) {
+      if (node.blockedBy) {
+        node.blockedBy = node.blockedBy.map((dep) => idMap.get(dep) ?? dep);
+      }
+    }
+
     executionEngine.createTree({
       id: treeId,
       plan: template.description,

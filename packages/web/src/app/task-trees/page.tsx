@@ -101,7 +101,9 @@ export default function TaskTreesPage() {
         {trees.map((tree) => {
           const sc = getStatusColor(tree.status);
           const progress =
-            tree.taskCount > 0 ? Math.round((tree.completedCount / tree.taskCount) * 100) : 0;
+            tree.taskCount > 0
+              ? Math.round(((tree.completedCount ?? 0) / tree.taskCount) * 100)
+              : 0;
           const isExpanded = expandedId === tree.id;
 
           return (
@@ -126,7 +128,7 @@ export default function TaskTreesPage() {
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                      {tree.completedCount}/{tree.taskCount} tasks ({progress}%)
+                      {tree.completedCount ?? 0}/{tree.taskCount} tasks ({progress}%)
                     </span>
                     {tree.status === 'waiting-approval' && (
                       <button

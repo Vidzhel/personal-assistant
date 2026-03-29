@@ -88,9 +88,9 @@ export function TaskTreeView({ treeId, tasks, onRefresh }: TaskTreeViewProps) {
               </p>
             )}
 
-            {task.blockedBy.length > 0 && (
+            {(task.blockedBy ?? []).length > 0 && (
               <p className="text-xs mt-1 ml-8" style={{ color: 'var(--text-muted)' }}>
-                Depends on: {task.blockedBy.join(', ')}
+                Depends on: {(task.blockedBy ?? []).join(', ')}
               </p>
             )}
 
@@ -132,9 +132,9 @@ export function TaskTreeView({ treeId, tasks, onRefresh }: TaskTreeViewProps) {
               </div>
             )}
 
-            {task.artifacts.length > 0 && (
+            {(task.artifacts ?? []).length > 0 && (
               <div className="flex gap-1 mt-1 ml-8 flex-wrap">
-                {task.artifacts.map((a, i) => (
+                {(task.artifacts ?? []).map((a, i) => (
                   <span
                     key={i}
                     className="text-xs px-1.5 py-0.5 rounded"

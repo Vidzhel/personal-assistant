@@ -365,6 +365,13 @@ export class TaskExecutionEngine {
     return rows.map((row) => this.loadTreeFromRow(row)).filter(Boolean) as TaskTree[];
   }
 
+  getAllTrees(): TaskTree[] {
+    const rows = this.db.all<TaskTreeRow>(
+      `SELECT * FROM task_trees ORDER BY created_at DESC LIMIT 50`,
+    );
+    return rows.map((row) => this.loadTreeFromRow(row)).filter(Boolean) as TaskTree[];
+  }
+
   // ── Private: task processing ────────────────────────────────────────
 
   private processReadyTasks(tree: TaskTree): void {
@@ -378,37 +385,42 @@ export class TaskExecutionEngine {
   }
 
   private executeTask(tree: TaskTree, task: ExecutionTask): void {
-    // Check runIf condition
-    if (task.node.runIf) {
-      const shouldRun = evaluateCondition(task.node.runIf, tree.tasks);
-      if (!shouldRun) {
-        this.updateTaskStatus(tree, task, 'skipped');
-        this.saveTask(tree.id, task);
-        this.checkTreeCompletion(tree);
-        this.processReadyTasks(tree);
-        return;
+    try {
+      // Check runIf condition
+      if (task.node.runIf) {
+        const shouldRun = evaluateCondition(task.node.runIf, tree.tasks);
+        if (!shouldRun) {
+          this.updateTaskStatus(tree, task, 'skipped');
+          this.saveTask(tree.id, task);
+          this.checkTreeCompletion(tree);
+          this.processReadyTasks(tree);
+          return;
+        }
       }
-    }
 
-    switch (task.node.type) {
-      case 'agent':
-        this.executeAgentTask(tree, task);
-        break;
-      case 'code':
-        this.executeCodeTask(tree, task);
-        break;
-      case 'condition':
-        this.executeConditionTask(tree, task);
-        break;
-      case 'notify':
-        this.executeNotifyTask(tree, task);
-        break;
-      case 'delay':
-        this.executeDelayTask(tree, task);
-        break;
-      case 'approval':
-        this.executeApprovalTask(tree, task);
-        break;
+      switch (task.node.type) {
+        case 'agent':
+          this.executeAgentTask(tree, task);
+          break;
+        case 'code':
+          this.executeCodeTask(tree, task);
+          break;
+        case 'condition':
+          this.executeConditionTask(tree, task);
+          break;
+        case 'notify':
+          this.executeNotifyTask(tree, task);
+          break;
+        case 'delay':
+          this.executeDelayTask(tree, task);
+          break;
+        case 'approval':
+          this.executeApprovalTask(tree, task);
+          break;
+      }
+    } catch (err) {
+      log.error(`Task execution error (${task.id}): ${err}`);
+      this.handleTaskFailure(tree, task, String(err));
     }
   }
 

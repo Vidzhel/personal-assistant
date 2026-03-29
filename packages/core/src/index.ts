@@ -670,6 +670,11 @@ async function main(): Promise<void> {
   process.on('SIGTERM', shutdown);
 }
 
+// Prevent unhandled rejections from crashing the server
+process.on('unhandledRejection', (reason) => {
+  log.error(`Unhandled rejection: ${reason}`);
+});
+
 main().catch((err) => {
   // eslint-disable-next-line no-console -- fatal handler, logger may not be initialized
   console.error('Fatal error:', err);
