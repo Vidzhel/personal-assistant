@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-const KEBAB_CASE_RE = /^[a-z][a-z0-9-]*$/;
+const KEBAB_CASE_RE = /^_?[a-z][a-z0-9-]*$/;
 
 const MAX_QUALITY_THRESHOLD = 5;
 const DEFAULT_QUALITY_THRESHOLD = 3;

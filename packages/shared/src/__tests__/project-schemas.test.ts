@@ -81,6 +81,15 @@ describe('AgentYamlSchema', () => {
     ).toThrow();
   });
 
+  it('accepts underscore-prefixed system agent names', () => {
+    const result = AgentYamlSchema.parse({
+      name: '_evaluator',
+      displayName: 'Task Evaluator',
+      description: 'Validates task completion',
+    });
+    expect(result.name).toBe('_evaluator');
+  });
+
   it('rejects non-kebab-case name', () => {
     expect(() =>
       AgentYamlSchema.parse({
