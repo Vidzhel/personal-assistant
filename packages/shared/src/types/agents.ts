@@ -121,6 +121,8 @@ export interface AgentTask {
   projectContextChain?: string;
   taskBoardContext?: string;
   namedAgentId?: string;
+  treeId?: string;
+  executionTaskId?: string;
   plugins?: Array<{ type: 'local'; path: string }>;
   bashAccess?: BashAccess;
   result?: string;

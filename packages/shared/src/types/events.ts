@@ -60,6 +60,8 @@ export interface AgentTaskRequestEvent extends BaseEvent {
     namedAgentId?: string;
     plugins?: Array<{ type: 'local'; path: string }>;
     bashAccess?: BashAccess;
+    treeId?: string;
+    executionTaskId?: string;
   };
 }
 

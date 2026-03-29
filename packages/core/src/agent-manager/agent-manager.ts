@@ -11,6 +11,7 @@ import type { MessageStore } from '../session-manager/message-store.ts';
 import type { SessionManager } from '../session-manager/session-manager.ts';
 import type { PermissionDeps } from './agent-session.ts';
 import { runAgentTask } from './agent-session.ts';
+import type { RavenMcpDeps } from '../mcp-server/index.ts';
 import { getConfig } from '../config.ts';
 
 const log = createLogger('agent-manager');
@@ -32,6 +33,7 @@ export interface AgentManagerDeps {
   executionLogger?: ExecutionLogger;
   messageStore?: MessageStore;
   sessionManager?: SessionManager;
+  ravenMcpDeps?: RavenMcpDeps;
 }
 
 export interface ApprovedActionParams {
@@ -68,6 +70,7 @@ export class AgentManager {
   private executionLogger?: ExecutionLogger;
   private messageStore?: MessageStore;
   private sessionManager?: SessionManager;
+  private ravenMcpDeps?: RavenMcpDeps;
 
   constructor(deps: AgentManagerDeps) {
     this.eventBus = deps.eventBus;
@@ -76,6 +79,7 @@ export class AgentManager {
     this.executionLogger = deps.executionLogger;
     this.messageStore = deps.messageStore;
     this.sessionManager = deps.sessionManager;
+    this.ravenMcpDeps = deps.ravenMcpDeps;
     if (deps.permissionEngine && deps.auditLog && deps.pendingApprovals) {
       this.permissionDeps = {
         permissionEngine: deps.permissionEngine,
@@ -111,6 +115,8 @@ export class AgentManager {
       projectContextChain: payload.projectContextChain,
       namedAgentId: payload.namedAgentId,
       bashAccess: payload.bashAccess,
+      treeId: payload.treeId,
+      executionTaskId: payload.executionTaskId,
     };
 
     // Insert by priority
@@ -191,6 +197,7 @@ export class AgentManager {
       permissionDeps: this.permissionDeps,
       messageStore: this.messageStore,
       signal: abortController.signal,
+      ravenMcpDeps: this.ravenMcpDeps,
     });
 
     this.abortControllers.delete(task.id);

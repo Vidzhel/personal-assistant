@@ -13,7 +13,7 @@ export interface BackendOptions {
   allowedTools: string[];
   model: string;
   maxTurns: number;
-  mcpServers: Record<string, { command: string; args: string[]; env?: Record<string, string> }>;
+  mcpServers: Record<string, unknown>;
   agents: Record<string, SubAgentDefinition>;
   plugins?: Array<{ type: 'local'; path: string }>;
   onAssistantMessage: (text: string, meta?: ToolUseMeta) => void;

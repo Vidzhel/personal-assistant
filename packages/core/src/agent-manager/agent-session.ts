@@ -18,6 +18,7 @@ import { getConfig, projectRoot } from '../config.ts';
 import type { AgentBackend, ToolUseMeta } from './agent-backend.ts';
 import { createSdkBackend } from './sdk-backend.ts';
 import { createCliBackend } from './cli-backend.ts';
+import { createRavenMcp, type RavenMcpDeps, type ScopeContext } from '../mcp-server/index.ts';
 
 const log = createLogger('agent-session');
 
@@ -67,6 +68,7 @@ export interface RunOptions {
   permissionDeps?: PermissionDeps;
   messageStore?: MessageStore;
   signal?: AbortSignal;
+  ravenMcpDeps?: RavenMcpDeps;
 }
 
 export interface GateResult {
@@ -177,6 +179,13 @@ function formatConversationHistory(messages: StoredMessage[], currentPrompt: str
   return `<conversation-history>\n${transcript}\n</conversation-history>\n\n[User]: ${currentPrompt}`;
 }
 
+function resolveAgentRole(task: AgentTask): ScopeContext['role'] {
+  if (task.executionTaskId) return 'task';
+  if (task.skillName === '_quality-reviewer' || task.skillName === '_evaluator') return 'validation';
+  if (task.skillName === 'knowledge') return 'knowledge';
+  return 'chat';
+}
+
 /**
  * Runs a single agent task using Claude Agent SDK query().
  * This is the core execution unit - each call spawns a fresh agent
@@ -240,16 +249,25 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
 
   try {
     // Build MCP config - transform our config to backend format
-    const sdkMcpServers: Record<
-      string,
-      { command: string; args: string[]; env?: Record<string, string> }
-    > = {};
+    const sdkMcpServers: Record<string, unknown> = {};
     for (const [name, cfg] of Object.entries(mcpServers)) {
       sdkMcpServers[name] = {
         command: cfg.command,
         args: cfg.args,
         env: cfg.env,
       };
+    }
+
+    // Add Raven MCP (in-process, scoped to this task)
+    if (opts.ravenMcpDeps) {
+      const ravenMcp = createRavenMcp(opts.ravenMcpDeps, {
+        role: resolveAgentRole(task),
+        projectId: task.projectId,
+        sessionId: task.sessionId,
+        treeId: task.treeId,
+        taskId: task.executionTaskId,
+      });
+      sdkMcpServers['raven'] = ravenMcp;
     }
 
     const systemPrompt = buildSystemPrompt(task);
@@ -267,6 +285,9 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
     // so the parent must have MCP tools in its allowed list for sub-agents to use them.
     for (const name of Object.keys(sdkMcpServers)) {
       allowedTools.push(buildMcpToolPattern(name));
+    }
+    if (opts.ravenMcpDeps) {
+      allowedTools.push('mcp__raven__*');
     }
     const hasSubAgents = Object.keys(agentDefinitions).length > 0;
     if (hasSubAgents) {

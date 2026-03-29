@@ -281,6 +281,8 @@ async function main(): Promise<void> {
         mcpServers: {},
         priority: 'normal',
         projectId: payload.projectId,
+        treeId: payload.treeId,
+        executionTaskId: payload.taskId,
         taskBoardContext: buildTaskBoardInstructions(payload.parentTaskId, payload.retryFeedback),
       },
     });
