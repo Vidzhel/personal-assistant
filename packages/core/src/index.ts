@@ -61,6 +61,7 @@ import { createKnowledgeConsolidation } from './knowledge-engine/knowledge-conso
 import { TaskExecutionEngine } from './task-execution/task-execution-engine.ts';
 import { buildTaskBoardInstructions } from './task-execution/task-board-protocol.ts';
 import { buildRetryPrompt } from './task-execution/validation-pipeline.ts';
+import { createValidationDeps } from './task-execution/create-validation-deps.ts';
 import { TemplateRegistry } from './template-engine/template-registry.ts';
 import { createTemplateScheduler } from './template-engine/template-scheduler.ts';
 import type { SessionIdleEvent } from '@raven/shared';
@@ -247,6 +248,7 @@ async function main(): Promise<void> {
   const executionEngine = new TaskExecutionEngine({
     db: dbInterface,
     eventBus: baseContext.eventBus,
+    validationDeps: createValidationDeps(baseContext.eventBus),
   });
   log.info('task execution engine initialized');
 

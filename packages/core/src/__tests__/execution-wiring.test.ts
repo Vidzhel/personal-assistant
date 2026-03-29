@@ -12,6 +12,7 @@ import { generateId } from '@raven/shared';
 import { initDatabase, getDb } from '../db/database.ts';
 import { EventBus } from '../event-bus/event-bus.ts';
 import { TaskExecutionEngine } from '../task-execution/task-execution-engine.ts';
+import { createValidationDeps } from '../task-execution/create-validation-deps.ts';
 import type { RavenEvent, TaskTreeNode } from '@raven/shared';
 
 // ── helpers ──────────────────────────────────────────────────────────────
@@ -227,5 +228,91 @@ describe('execution-wiring: agent:task:complete handler', () => {
 
     // Only the first emission should have been processed
     expect(spy).toHaveBeenCalledOnce();
+  });
+});
+
+// ── Helpers for validation deps tests ─────────────────────────────────────
+
+function emitAgentCompleteForTask(
+  bus: EventBus,
+  taskId: string,
+  result: string,
+  success: boolean,
+): void {
+  bus.emit({
+    id: generateId(),
+    timestamp: Date.now(),
+    source: 'agent-manager',
+    type: 'agent:task:complete',
+    payload: { taskId, result, durationMs: 100, success },
+  } as RavenEvent);
+}
+
+function installAgentResponder(bus: EventBus, result: string, success: boolean): void {
+  bus.on('agent:task:request', (event: unknown) => {
+    const payload = (event as { payload: { taskId: string } }).payload;
+    setTimeout(() => {
+      emitAgentCompleteForTask(bus, payload.taskId, result, success);
+    }, 10);
+  });
+}
+
+// ── createValidationDeps ──────────────────────────────────────────────────
+
+describe('createValidationDeps', () => {
+  it('runEvaluator returns passed=true when agent responds PASS', async () => {
+    const bus = new EventBus();
+    installAgentResponder(bus, 'PASS\nLooks good', true);
+
+    const deps = createValidationDeps(bus);
+    const result = await deps.runEvaluator('test prompt', 'test result');
+
+    expect(result.passed).toBe(true);
+    expect(result.reason).toBe('Looks good');
+  });
+
+  it('runEvaluator returns passed=false when agent responds FAIL', async () => {
+    const bus = new EventBus();
+    installAgentResponder(bus, 'FAIL\nMissing artifacts', true);
+
+    const deps = createValidationDeps(bus);
+    const result = await deps.runEvaluator('test prompt', 'test result');
+
+    expect(result.passed).toBe(false);
+    expect(result.reason).toBe('Missing artifacts');
+  });
+
+  it('runQualityReviewer returns score and pass/fail based on threshold', async () => {
+    const bus = new EventBus();
+    installAgentResponder(bus, 'SCORE: 4\nDecent quality', true);
+
+    const deps = createValidationDeps(bus);
+    const passResult = await deps.runQualityReviewer('test prompt', 'test result', 3);
+
+    expect(passResult.passed).toBe(true);
+    expect(passResult.score).toBe(4);
+    expect(passResult.feedback).toBe('Decent quality');
+  });
+
+  it('runQualityReviewer fails when score below threshold', async () => {
+    const bus = new EventBus();
+    installAgentResponder(bus, 'SCORE: 2\nNeeds work', true);
+
+    const deps = createValidationDeps(bus);
+    const result = await deps.runQualityReviewer('test prompt', 'test result', 3);
+
+    expect(result.passed).toBe(false);
+    expect(result.score).toBe(2);
+  });
+
+  it('runEvaluator auto-passes when agent task fails', async () => {
+    const bus = new EventBus();
+    installAgentResponder(bus, '', false);
+
+    const deps = createValidationDeps(bus);
+    const result = await deps.runEvaluator('test prompt', 'test result');
+
+    expect(result.passed).toBe(false);
+    expect(result.reason).toBe('Evaluator agent failed');
   });
 });
