@@ -11,12 +11,11 @@
   {
     "id": "1e8e08f2-a2b1-451c-a870-8a405fb747f7",
     "name": "test-agent-v2",
-    "description": "Test agent for v2",
+    "description": "Updated v2 description",
     "instructions": "You are a test agent.",
     "suite_ids": [],
     "skills": [
-      "calendar-read",
-      "raven-tasks"
+      "calendar-read"
     ],
     "is_default": false
   }
