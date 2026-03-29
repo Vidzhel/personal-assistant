@@ -1,8 +1,20 @@
 import { createLogger, generateId } from '@raven/shared';
 import type { EventBusInterface } from '@raven/shared';
+import { z } from 'zod';
 import type { ValidationDeps } from './validation-pipeline.ts';
 
 const log = createLogger('validation-deps');
+
+const EvaluatorOutputSchema = z.object({
+  passed: z.boolean(),
+  reason: z.string(),
+});
+
+const QualityReviewerOutputSchema = z.object({
+  score: z.number().int().min(1).max(5),
+  feedback: z.string(),
+  pass: z.boolean(),
+});
 
 const VALIDATION_TIMEOUT_MS = 120_000;
 
@@ -54,7 +66,8 @@ export function createValidationDeps(eventBus: EventBusInterface): ValidationDep
         `Task: ${taskPrompt}`,
         `Result: ${result}`,
         ...(criteria ? [`Criteria: ${criteria}`] : []),
-        'Respond with exactly PASS or FAIL on the first line, then your reason.',
+        'Respond with a JSON object only (no markdown, no extra text):',
+        '{"passed": true|false, "reason": "<your reason>"}',
       ].join('\n');
 
       try {
@@ -62,9 +75,14 @@ export function createValidationDeps(eventBus: EventBusInterface): ValidationDep
         if (!response.success) {
           return { passed: false, reason: 'Evaluator agent failed' };
         }
-        const passed = response.result.trim().toUpperCase().startsWith('PASS');
-        const reason = response.result.replace(/^(PASS|FAIL)\s*/i, '').trim();
-        return { passed, reason };
+        const parsed = EvaluatorOutputSchema.safeParse(
+          JSON.parse(response.result.trim()) as unknown,
+        );
+        if (!parsed.success) {
+          log.warn(`Evaluator output invalid: ${parsed.error.message}`);
+          return { passed: false, reason: 'Evaluator returned invalid output' };
+        }
+        return { passed: parsed.data.passed, reason: parsed.data.reason };
       } catch (err) {
         log.error(`Evaluator failed: ${String(err)}`);
         return { passed: true, reason: 'Evaluator unavailable, auto-passing' };
@@ -77,7 +95,8 @@ export function createValidationDeps(eventBus: EventBusInterface): ValidationDep
         `Task: ${taskPrompt}`,
         `Result: ${result}`,
         `Quality threshold: ${String(threshold)}/5`,
-        'Respond with SCORE: N (1-5) on the first line, then your feedback.',
+        'Respond with a JSON object only (no markdown, no extra text):',
+        `{"score": <1-5>, "feedback": "<your feedback>", "pass": <true if score >= ${String(threshold)}, else false>}`,
       ].join('\n');
 
       try {
@@ -85,10 +104,14 @@ export function createValidationDeps(eventBus: EventBusInterface): ValidationDep
         if (!response.success) {
           return { passed: false, score: 0, feedback: 'Quality reviewer agent failed' };
         }
-        const scoreMatch = response.result.match(/SCORE:\s*(\d+)/i);
-        const score = scoreMatch ? Number(scoreMatch[1]) : 0;
-        const feedback = response.result.replace(/SCORE:\s*\d+\s*/i, '').trim();
-        return { passed: score >= threshold, score, feedback };
+        const parsed = QualityReviewerOutputSchema.safeParse(
+          JSON.parse(response.result.trim()) as unknown,
+        );
+        if (!parsed.success) {
+          log.warn(`Quality reviewer output invalid: ${parsed.error.message}`);
+          return { passed: false, score: 0, feedback: 'Quality reviewer returned invalid output' };
+        }
+        return { passed: parsed.data.pass, score: parsed.data.score, feedback: parsed.data.feedback };
       } catch (err) {
         log.error(`Quality reviewer failed: ${String(err)}`);
         return { passed: true, score: 5, feedback: 'Quality reviewer unavailable, auto-passing' };

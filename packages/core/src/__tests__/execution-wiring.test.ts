@@ -260,9 +260,9 @@ function installAgentResponder(bus: EventBus, result: string, success: boolean):
 // ── createValidationDeps ──────────────────────────────────────────────────
 
 describe('createValidationDeps', () => {
-  it('runEvaluator returns passed=true when agent responds PASS', async () => {
+  it('runEvaluator returns passed=true when agent responds with JSON passed:true', async () => {
     const bus = new EventBus();
-    installAgentResponder(bus, 'PASS\nLooks good', true);
+    installAgentResponder(bus, JSON.stringify({ passed: true, reason: 'Looks good' }), true);
 
     const deps = createValidationDeps(bus);
     const result = await deps.runEvaluator('test prompt', 'test result');
@@ -271,9 +271,9 @@ describe('createValidationDeps', () => {
     expect(result.reason).toBe('Looks good');
   });
 
-  it('runEvaluator returns passed=false when agent responds FAIL', async () => {
+  it('runEvaluator returns passed=false when agent responds with JSON passed:false', async () => {
     const bus = new EventBus();
-    installAgentResponder(bus, 'FAIL\nMissing artifacts', true);
+    installAgentResponder(bus, JSON.stringify({ passed: false, reason: 'Missing artifacts' }), true);
 
     const deps = createValidationDeps(bus);
     const result = await deps.runEvaluator('test prompt', 'test result');
@@ -284,7 +284,7 @@ describe('createValidationDeps', () => {
 
   it('runQualityReviewer returns score and pass/fail based on threshold', async () => {
     const bus = new EventBus();
-    installAgentResponder(bus, 'SCORE: 4\nDecent quality', true);
+    installAgentResponder(bus, JSON.stringify({ score: 4, feedback: 'Decent quality', pass: true }), true);
 
     const deps = createValidationDeps(bus);
     const passResult = await deps.runQualityReviewer('test prompt', 'test result', 3);
@@ -296,7 +296,7 @@ describe('createValidationDeps', () => {
 
   it('runQualityReviewer fails when score below threshold', async () => {
     const bus = new EventBus();
-    installAgentResponder(bus, 'SCORE: 2\nNeeds work', true);
+    installAgentResponder(bus, JSON.stringify({ score: 2, feedback: 'Needs work', pass: false }), true);
 
     const deps = createValidationDeps(bus);
     const result = await deps.runQualityReviewer('test prompt', 'test result', 3);
