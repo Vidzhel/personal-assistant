@@ -20,11 +20,41 @@ function okResult(data: unknown): TextContent {
   return { content: [{ type: 'text', text: JSON.stringify(data) }] };
 }
 
-export function buildKnowledgeTools(
+async function handleSearchKnowledge(
   deps: RavenMcpDeps,
-  _scope: ScopeContext,
-): SdkMcpToolDefinition[] {
-  const searchKnowledge = tool(
+  args: { query: string; limit?: number },
+): Promise<TextContent> {
+  const limit = args.limit ?? DEFAULT_SEARCH_LIMIT;
+
+  if (deps.retrievalEngine) {
+    const retrieved = await deps.retrievalEngine.search(args.query, { limit });
+    const results = retrieved.results.map((item) => ({
+      id: item.bubbleId,
+      title: item.title,
+      content: item.chunkText ?? item.contentPreview,
+      tags: item.tags,
+      score: item.score,
+    }));
+    return okResult({ results });
+  }
+
+  if (deps.knowledgeStore) {
+    const summaries = await deps.knowledgeStore.search(args.query, limit, 0);
+    const results = summaries.map((s) => ({
+      id: s.id,
+      title: s.title,
+      content: s.contentPreview,
+      tags: s.tags,
+      score: 0,
+    }));
+    return okResult({ results });
+  }
+
+  return errorResult('No knowledge backend available — retrievalEngine or knowledgeStore required');
+}
+
+function buildSearchKnowledgeTool(deps: RavenMcpDeps): SdkMcpToolDefinition {
+  return tool(
     'search_knowledge',
     'Search the knowledge base for relevant information.',
     {
@@ -39,46 +69,13 @@ export function buildKnowledgeTools(
         .optional()
         .describe('Maximum results (1-50, default 10)'),
     },
-    async (args): Promise<TextContent> => {
-      const limit = args.limit ?? DEFAULT_SEARCH_LIMIT;
-
-      if (deps.retrievalEngine) {
-        const retrieved = await deps.retrievalEngine.search(args.query, { limit });
-        const results = retrieved.results.map((item) => ({
-          id: item.bubbleId,
-          title: item.title,
-          content: item.chunkText ?? item.contentPreview,
-          tags: item.tags,
-          score: item.score,
-        }));
-        return okResult({ results });
-      }
-
-      if (deps.knowledgeStore) {
-        const summaries = await deps.knowledgeStore.search(args.query, limit, 0);
-        const results = summaries.map((s) => ({
-          id: s.id,
-          title: s.title,
-          content: s.contentPreview,
-          tags: s.tags,
-          score: 0,
-        }));
-        return okResult({ results });
-      }
-
-      return errorResult(
-        'No knowledge backend available — retrievalEngine or knowledgeStore required',
-      );
-    },
-    {
-      annotations: {
-        readOnlyHint: true,
-        idempotentHint: true,
-      },
-    },
+    async (args): Promise<TextContent> => handleSearchKnowledge(deps, args),
+    { annotations: { readOnlyHint: true, idempotentHint: true } },
   );
+}
 
-  const saveKnowledge = tool(
+function buildSaveKnowledgeTool(deps: RavenMcpDeps): SdkMcpToolDefinition {
+  return tool(
     'save_knowledge',
     'Save a new piece of knowledge to the knowledge base.',
     {
@@ -109,8 +106,10 @@ export function buildKnowledgeTools(
       return okResult({ id: bubble.id });
     },
   );
+}
 
-  const getKnowledgeContext = tool(
+function buildGetKnowledgeContextTool(deps: RavenMcpDeps): SdkMcpToolDefinition {
+  return tool(
     'get_knowledge_context',
     'Retrieve formatted knowledge context for a query, suitable for injecting into prompts.',
     {
@@ -144,6 +143,15 @@ export function buildKnowledgeTools(
       },
     },
   );
+}
 
-  return [searchKnowledge, saveKnowledge, getKnowledgeContext];
+export function buildKnowledgeTools(
+  deps: RavenMcpDeps,
+  _scope: ScopeContext,
+): SdkMcpToolDefinition[] {
+  return [
+    buildSearchKnowledgeTool(deps),
+    buildSaveKnowledgeTool(deps),
+    buildGetKnowledgeContextTool(deps),
+  ];
 }

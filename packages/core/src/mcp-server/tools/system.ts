@@ -77,7 +77,14 @@ export function buildSystemTools(deps: RavenMcpDeps, _scope: ScopeContext): SdkM
       description: z.string().nullable().optional().describe('New description'),
       instructions: z.string().nullable().optional().describe('New instructions'),
       model: z.enum(['haiku', 'sonnet', 'opus']).nullable().optional().describe('New model'),
-      maxTurns: z.number().int().min(1).max(MAX_TURNS).nullable().optional().describe('New max turns'),
+      maxTurns: z
+        .number()
+        .int()
+        .min(1)
+        .max(MAX_TURNS)
+        .nullable()
+        .optional()
+        .describe('New max turns'),
     },
     async (args) => {
       if (!deps.namedAgentStore) {

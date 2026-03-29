@@ -5,6 +5,8 @@ import { generateId } from '@raven/shared';
 import type { RavenMcpDeps } from '../types.ts';
 import type { ScopeContext } from '../scope.ts';
 
+const MAX_VALIDATION_SCORE = 5;
+
 const okResult = (data: unknown): { content: [{ type: 'text'; text: string }] } => ({
   content: [{ type: 'text', text: JSON.stringify(data) }],
 });
@@ -17,7 +19,12 @@ export function buildValidationTools(
     'submit_validation_score',
     'Submit a validation score for a task. Provide a score (1-5), feedback, and whether the task passed.',
     {
-      score: z.number().int().min(1).max(5).describe('Validation score from 1 (worst) to 5 (best)'),
+      score: z
+        .number()
+        .int()
+        .min(1)
+        .max(MAX_VALIDATION_SCORE)
+        .describe('Validation score from 1 (worst) to 5 (best)'),
       feedback: z.string().describe('Detailed feedback explaining the score'),
       pass: z.boolean().describe('Whether the task passes validation'),
     },
