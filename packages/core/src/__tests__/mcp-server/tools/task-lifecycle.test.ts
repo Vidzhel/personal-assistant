@@ -6,7 +6,11 @@ import type { TaskTree } from '@raven/shared';
 
 function makeExecutionEngine() {
   return {
-    createTree: vi.fn().mockReturnValue({ id: 'tree-1', tasks: new Map(), status: 'pending_approval' } satisfies Partial<TaskTree> as any),
+    createTree: vi.fn().mockReturnValue({
+      id: 'tree-1',
+      tasks: new Map(),
+      status: 'pending_approval',
+    } satisfies Partial<TaskTree> as any),
     startTree: vi.fn().mockResolvedValue(undefined),
     onTaskCompleted: vi.fn().mockResolvedValue(undefined),
     onTaskBlocked: vi.fn(),
@@ -77,10 +81,7 @@ describe('buildTaskLifecycleTools', () => {
         { id: 'task-a', type: 'agent', title: 'Do thing', prompt: 'Do it', blockedBy: [] },
       ];
 
-      const result = await tool.handler(
-        { plan: 'The plan', tasks, autoApprove: true },
-        {},
-      );
+      const result = await tool.handler({ plan: 'The plan', tasks, autoApprove: true }, {});
 
       expect(engine.createTree).toHaveBeenCalledOnce();
       const createArgs = engine.createTree.mock.calls[0][0];
@@ -112,10 +113,7 @@ describe('buildTaskLifecycleTools', () => {
       const tool = tools.find((t) => t.name === 'complete_task')!;
 
       const artifacts = [{ type: 'data' as const, label: 'result', data: { value: 42 } }];
-      const result = await tool.handler(
-        { summary: 'Task done successfully', artifacts },
-        {},
-      );
+      const result = await tool.handler({ summary: 'Task done successfully', artifacts }, {});
 
       expect(engine.onTaskCompleted).toHaveBeenCalledOnce();
       const callArgs = engine.onTaskCompleted.mock.calls[0][0];

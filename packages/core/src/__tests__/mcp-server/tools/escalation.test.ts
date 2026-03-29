@@ -50,7 +50,12 @@ describe('buildEscalationTools', () => {
         plan: 'Do something useful',
         tasks: [
           { id: 'task-1', title: 'First task', prompt: 'Do the first thing' },
-          { id: 'task-2', title: 'Second task', prompt: 'Do the second thing', blockedBy: ['task-1'] },
+          {
+            id: 'task-2',
+            title: 'Second task',
+            prompt: 'Do the second thing',
+            blockedBy: ['task-1'],
+          },
         ],
       };
 
@@ -64,6 +69,7 @@ describe('buildEscalationTools', () => {
       expect(createCall.tasks[0].type).toBe('agent');
       expect(createCall.tasks[1].blockedBy).toEqual(['task-1']);
 
+      // startTree is called with the treeId returned from createTree
       expect(deps.executionEngine!.startTree).toHaveBeenCalledWith('tree-123');
 
       expect(deps.eventBus.emit).toHaveBeenCalledOnce();

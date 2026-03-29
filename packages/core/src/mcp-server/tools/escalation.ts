@@ -67,6 +67,7 @@ async function waitForResolution(
 
 // ── buildEscalationTools ────────────────────────────────────────────────
 
+// eslint-disable-next-line max-lines-per-function -- builds two tool definitions, each with its own handler logic
 export function buildEscalationTools(
   deps: RavenMcpDeps,
   scope: ScopeContext,
@@ -83,7 +84,6 @@ export function buildEscalationTools(
         return errorResult('executionEngine not available — cannot escalate_to_planned');
       }
 
-      const treeId = generateId();
       const tasks = args.tasks.map((t) => ({
         id: t.id,
         title: t.title,
@@ -94,13 +94,13 @@ export function buildEscalationTools(
       }));
 
       const tree = deps.executionEngine.createTree({
-        id: treeId,
+        id: generateId(),
         projectId: scope.projectId,
         plan: args.plan,
         tasks,
       });
 
-      await deps.executionEngine.startTree(treeId);
+      await deps.executionEngine.startTree(tree.id);
 
       deps.eventBus.emit({
         id: generateId(),
@@ -124,16 +124,17 @@ export function buildEscalationTools(
     'Request explicit approval from the user before proceeding with an action.',
     {
       question: z.string().min(1).describe('The question or action to seek approval for'),
-      options: z.array(z.string()).optional().describe('Specific options for the user to choose from'),
+      options: z
+        .array(z.string())
+        .optional()
+        .describe('Specific options for the user to choose from'),
     },
     async (args) => {
       if (!deps.pendingApprovals) {
         return errorResult('pendingApprovals not available — cannot request_approval');
       }
 
-      const details = args.options?.length
-        ? `Options: ${args.options.join(', ')}`
-        : undefined;
+      const details = args.options?.length ? `Options: ${args.options.join(', ')}` : undefined;
 
       const approval = deps.pendingApprovals.insert({
         actionName: args.question,

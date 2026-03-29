@@ -4,6 +4,8 @@ import type { SdkMcpToolDefinition } from '@anthropic-ai/claude-agent-sdk';
 import type { RavenMcpDeps } from '../types.ts';
 import type { ScopeContext } from '../scope.ts';
 
+const MAX_TURNS = 100;
+
 type OkResult = { content: [{ type: 'text'; text: string }] };
 type ErrResult = { content: [{ type: 'text'; text: string }]; isError: true };
 
@@ -47,7 +49,7 @@ export function buildSystemTools(deps: RavenMcpDeps, _scope: ScopeContext): SdkM
       description: z.string().optional().describe('Agent description'),
       instructions: z.string().optional().describe('System instructions for the agent'),
       model: z.enum(['haiku', 'sonnet', 'opus']).optional().describe('Model to use'),
-      maxTurns: z.number().int().min(1).max(100).optional().describe('Max turns (1-100)'),
+      maxTurns: z.number().int().min(1).max(MAX_TURNS).optional().describe('Max turns (1-100)'),
     },
     async (args) => {
       if (!deps.namedAgentStore) {
@@ -75,7 +77,7 @@ export function buildSystemTools(deps: RavenMcpDeps, _scope: ScopeContext): SdkM
       description: z.string().nullable().optional().describe('New description'),
       instructions: z.string().nullable().optional().describe('New instructions'),
       model: z.enum(['haiku', 'sonnet', 'opus']).nullable().optional().describe('New model'),
-      maxTurns: z.number().int().min(1).max(100).nullable().optional().describe('New max turns'),
+      maxTurns: z.number().int().min(1).max(MAX_TURNS).nullable().optional().describe('New max turns'),
     },
     async (args) => {
       if (!deps.namedAgentStore) {
