@@ -353,6 +353,460 @@ Mock Claude SDK, verify MCP tool usage:
 - No agent has WebFetch for localhost calls
 - Grep for removed patterns: `SCORE:\s*`, `EXECUTION_MODE:`, `TASK_TREE:`, `localhost:4001/api` in prompt strings
 
+## Implementation Details
+
+### Dependencies
+
+Add `@modelcontextprotocol/sdk` to `packages/core/package.json` (already in the monorepo root for `@raven/mcp-ticktick`, will dedupe):
+
+```bash
+npm install -w packages/core @modelcontextprotocol/sdk
+```
+
+### MCP SDK Usage Pattern
+
+Use `McpServer` from `@modelcontextprotocol/sdk/server/mcp.js` with `StreamableHTTPServerTransport` for Fastify integration. Each incoming HTTP request gets a stateless transport (no session persistence needed — scope is in the URL params).
+
+### File: `packages/core/src/mcp-server/index.ts`
+
+Fastify plugin that registers the `/mcp` POST route and wires the MCP server:
+
+```typescript
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import type { FastifyInstance } from 'fastify';
+import { parseScopeFromQuery, type ScopeContext } from './scope.ts';
+import { registerTaskLifecycleTools } from './tools/task-lifecycle.ts';
+import { registerSessionTools } from './tools/session.ts';
+import { registerKnowledgeTools } from './tools/knowledge.ts';
+import { registerValidationTools } from './tools/validation.ts';
+import { registerSystemTools } from './tools/system.ts';
+import { registerEscalationTools } from './tools/escalation.ts';
+
+export interface McpServerDeps {
+  executionEngine: TaskExecutionEngine;
+  messageStore: MessageStore;
+  sessionManager: SessionManager;
+  knowledgeStore?: KnowledgeStore;
+  retrievalEngine?: RetrievalEngine;
+  namedAgentStore?: NamedAgentStore;
+  projectRegistry?: ProjectRegistry;
+  scheduler?: Scheduler;
+  pipelineEngine?: PipelineEngine;
+  eventBus: EventBus;
+  db: DatabaseInterface;
+}
+
+export function registerMcpServer(app: FastifyInstance, deps: McpServerDeps): void {
+  app.post('/mcp', async (request, reply) => {
+    const scope = parseScopeFromQuery(request.query);
+
+    // Create a scoped MCP server per request (stateless)
+    const server = new McpServer(
+      { name: 'raven', version: '1.0.0' },
+      {
+        instructions: buildInstructions(scope),
+      },
+    );
+
+    // Register only tools allowed for this scope
+    registerTaskLifecycleTools(server, deps, scope);
+    registerSessionTools(server, deps, scope);
+    registerKnowledgeTools(server, deps, scope);
+    registerValidationTools(server, deps, scope);
+    registerSystemTools(server, deps, scope);
+    registerEscalationTools(server, deps, scope);
+
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined, // stateless
+    });
+
+    reply.raw.on('close', () => transport.close());
+    await server.connect(transport);
+    await transport.handleRequest(request.raw, reply.raw, request.body);
+  });
+}
+```
+
+**Key design decision — server-per-request:** Creating a `McpServer` instance per request means each connection gets only the tools it's allowed. No runtime filtering needed — tools that aren't registered simply don't exist for that agent. This is simpler and more secure than registering all tools and checking scope in each handler.
+
+### File: `packages/core/src/mcp-server/scope.ts`
+
+Parses query params into a typed `ScopeContext` and defines the tool-access matrix:
+
+```typescript
+import { z } from 'zod';
+
+export const ScopeContextSchema = z.object({
+  role: z.enum(['task', 'chat', 'system', 'validation', 'knowledge']),
+  projectId: z.string().optional(),
+  sessionId: z.string().optional(),
+  treeId: z.string().optional(),
+  taskId: z.string().optional(),
+});
+
+export type ScopeContext = z.infer<typeof ScopeContextSchema>;
+
+// Tool access matrix — each scope lists allowed tool names
+export const SCOPE_TOOLS: Record<ScopeContext['role'], Set<string>> = {
+  task: new Set([
+    'get_task_context', 'complete_task', 'fail_task',
+    'update_task_progress', 'save_artifact',
+    'search_knowledge', 'send_message',
+  ]),
+  chat: new Set([
+    'classify_request', 'create_task_tree', 'escalate_to_planned',
+    'send_message', 'get_session_history',
+    'search_knowledge', 'list_agents',
+  ]),
+  system: new Set(['*']), // all tools
+  validation: new Set(['submit_validation_score', 'get_task_context']),
+  knowledge: new Set([
+    'search_knowledge', 'save_knowledge', 'get_knowledge_context',
+  ]),
+};
+
+export function isToolAllowed(scope: ScopeContext, toolName: string): boolean {
+  const allowed = SCOPE_TOOLS[scope.role];
+  return allowed.has('*') || allowed.has(toolName);
+}
+
+export function parseScopeFromQuery(query: unknown): ScopeContext {
+  return ScopeContextSchema.parse(query);
+}
+```
+
+### Tool Registration Pattern
+
+Each tool file exports a function that conditionally registers tools based on scope. Tools use Zod schemas for input validation (SDK-native) and return structured JSON. Every mutating tool validates resource ownership.
+
+```typescript
+// Example: tools/task-lifecycle.ts (pattern for complete_task)
+import { z } from 'zod';
+import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { isToolAllowed, type ScopeContext } from '../scope.ts';
+
+export function registerTaskLifecycleTools(
+  server: McpServer,
+  deps: McpServerDeps,
+  scope: ScopeContext,
+): void {
+  if (isToolAllowed(scope, 'complete_task')) {
+    server.registerTool(
+      'complete_task',
+      {
+        description:
+          'Mark your assigned task as completed with a summary and optional artifacts. ' +
+          'You MUST call this (or fail_task) before finishing. Do not just output text.',
+        inputSchema: {
+          summary: z.string().describe('Concise summary of what was accomplished'),
+          artifacts: z
+            .array(
+              z.object({
+                name: z.string(),
+                content: z.string(),
+                type: z.enum(['text', 'json', 'markdown', 'code']),
+              }),
+            )
+            .optional()
+            .describe('Structured outputs from this task'),
+        },
+        annotations: { destructiveHint: false, idempotentHint: false },
+      },
+      async ({ summary, artifacts }) => {
+        // Resource ownership: task-scoped agents can only complete their own task
+        if (scope.role === 'task' && !scope.taskId) {
+          return {
+            isError: true,
+            content: [{ type: 'text', text: 'No taskId in scope — cannot complete task.' }],
+          };
+        }
+
+        const taskId = scope.taskId!;
+        const treeId = scope.treeId!;
+
+        await deps.executionEngine.onTaskCompleted({
+          treeId,
+          taskId,
+          summary,
+          artifacts: (artifacts ?? []).map((a, i) => ({
+            id: `${taskId}-artifact-${i}`,
+            ...a,
+          })),
+        });
+
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ ack: true }) }],
+        };
+      },
+    );
+  }
+
+  if (isToolAllowed(scope, 'create_task_tree')) {
+    server.registerTool(
+      'create_task_tree',
+      {
+        description:
+          'Create a multi-step task tree for planned execution. ' +
+          'Each task can depend on others via blockedBy. ' +
+          'The tree starts in pending_approval status — use auto-approve for chat-initiated trees.',
+        inputSchema: {
+          plan: z.string().describe('One-sentence description of the overall plan'),
+          tasks: z.array(
+            z.object({
+              id: z.string().describe('Unique step ID (e.g., "step-1")'),
+              title: z.string().describe('Short task title'),
+              type: z.enum(['agent', 'code', 'condition', 'notify', 'delay', 'approval']).default('agent'),
+              agent: z.string().optional().describe('Named agent to execute (for agent type)'),
+              prompt: z.string().describe('Instructions for the agent or code to run'),
+              blockedBy: z.array(z.string()).default([]).describe('Task IDs that must complete first'),
+            }),
+          ),
+          autoApprove: z.boolean().default(true)
+            .describe('If true, tree starts running immediately. If false, waits for user approval.'),
+        },
+        annotations: { destructiveHint: false },
+      },
+      async ({ plan, tasks, autoApprove }) => {
+        const treeId = generateId();
+        deps.executionEngine.createTree({
+          id: treeId,
+          projectId: scope.projectId,
+          plan,
+          tasks,
+        });
+
+        if (autoApprove) {
+          await deps.executionEngine.startTree(treeId);
+        }
+
+        // Emit event for frontend/WebSocket subscribers
+        deps.eventBus.emit({
+          type: 'execution:tree:created',
+          payload: { treeId, projectId: scope.projectId, plan, taskCount: tasks.length },
+        });
+
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ treeId, status: autoApprove ? 'running' : 'pending_approval' }),
+          }],
+        };
+      },
+    );
+  }
+
+  // ... similar pattern for get_task_context, fail_task, update_task_progress, save_artifact
+}
+```
+
+### Tool Annotations
+
+All tools declare annotations per MCP spec:
+
+| Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` |
+|------|------------|---------------|---------------|
+| `classify_request` | false | false | true |
+| `create_task_tree` | false | false | false |
+| `get_task_context` | true | false | true |
+| `complete_task` | false | false | false |
+| `fail_task` | false | false | false |
+| `update_task_progress` | false | false | true |
+| `save_artifact` | false | false | false |
+| `send_message` | false | false | false |
+| `get_session_history` | true | false | true |
+| `search_knowledge` | true | false | true |
+| `save_knowledge` | false | false | false |
+| `get_knowledge_context` | true | false | true |
+| `submit_validation_score` | false | false | false |
+| `list_agents` | true | false | true |
+| `create_agent` | false | false | false |
+| `update_agent` | false | false | true |
+| `list_projects` | true | false | true |
+| `manage_schedule` | false | varies | false |
+| `trigger_pipeline` | false | false | false |
+| `escalate_to_planned` | false | false | false |
+| `request_approval` | false | false | false |
+
+### Server Instructions (per scope)
+
+The MCP server's `instructions` field is scope-dependent — it tells the agent what role it's playing:
+
+```typescript
+function buildInstructions(scope: ScopeContext): string {
+  switch (scope.role) {
+    case 'task':
+      return 'You are executing a task in a Raven task tree. ' +
+        'Call get_task_context first to read your assignment and dependency results. ' +
+        'You MUST call complete_task or fail_task before finishing.';
+    case 'chat':
+      return 'You are Raven\'s orchestrator. ' +
+        'Call classify_request to declare execution mode, then use the appropriate tools. ' +
+        'For PLANNED mode, call create_task_tree. For DIRECT/DELEGATED, call send_message with results.';
+    case 'validation':
+      return 'You are evaluating a task result. ' +
+        'Call submit_validation_score with your assessment when done.';
+    case 'knowledge':
+      return 'You manage Raven\'s knowledge base. ' +
+        'Use search_knowledge, save_knowledge, and get_knowledge_context.';
+    case 'system':
+      return 'You have full access to Raven system management tools.';
+  }
+}
+```
+
+### Error Handling Pattern
+
+All tool handlers return structured MCP errors (not thrown exceptions). Errors include recovery hints:
+
+```typescript
+// Scope violation
+return {
+  isError: true,
+  content: [{
+    type: 'text',
+    text: `Tool 'complete_task' not available in scope '${scope.role}'. ` +
+      `This tool requires 'task' scope.`,
+  }],
+};
+
+// Resource ownership violation
+return {
+  isError: true,
+  content: [{
+    type: 'text',
+    text: `Cannot modify task '${requestedTaskId}' — ` +
+      `only assigned task '${scope.taskId}' is accessible.`,
+  }],
+};
+
+// Upstream failure
+return {
+  isError: true,
+  content: [{
+    type: 'text',
+    text: `Failed to create task tree: ${error.message}. ` +
+      `Check that all blockedBy references point to valid task IDs.`,
+  }],
+};
+```
+
+### Fastify Integration in `server.ts`
+
+Add to `createApiServer()` after existing route registrations:
+
+```typescript
+import { registerMcpServer } from '../mcp-server/index.ts';
+
+// After all REST routes, before app.listen()
+registerMcpServer(app, {
+  executionEngine: deps.executionEngine,
+  messageStore: deps.messageStore,
+  sessionManager: deps.sessionManager,
+  knowledgeStore: deps.knowledgeStore,
+  retrievalEngine: deps.retrievalEngine,
+  namedAgentStore: deps.namedAgentStore,
+  projectRegistry: deps.projectRegistry,
+  scheduler: deps.scheduler,
+  pipelineEngine: deps.pipelineEngine,
+  eventBus: deps.eventBus,
+  db: deps.db,
+});
+```
+
+### Agent-Session Wiring in `agent-session.ts`
+
+The `runAgentTask` function builds the `mcpServers` config for each agent. Add the Raven MCP to every agent:
+
+```typescript
+// Determine role from task context
+function resolveAgentRole(task: AgentTask): ScopeContext['role'] {
+  if (task.executionTaskId) return 'task';
+  if (task.validationContext) return 'validation';
+  if (task.knowledgeTask) return 'knowledge';
+  if (task.isMetaProject) return 'system';
+  return 'chat';
+}
+
+// Build MCP URL with scope params
+const role = resolveAgentRole(task);
+const scopeParams = new URLSearchParams({
+  role,
+  ...(task.projectId && { projectId: task.projectId }),
+  ...(task.sessionId && { sessionId: task.sessionId }),
+  ...(task.executionTaskId && { taskId: task.executionTaskId }),
+  ...(task.treeId && { treeId: task.treeId }),
+});
+
+mcpServers['raven'] = {
+  url: `http://localhost:${port}/mcp?${scopeParams.toString()}`,
+  type: 'streamable-http',
+};
+
+// Add raven MCP to allowed tools
+allowedTools.push('mcp__raven__*');
+```
+
+### Progress Notifications
+
+The `update_task_progress` tool stores progress in the DB and emits an event for real-time frontend updates:
+
+```typescript
+// In task-lifecycle.ts
+server.registerTool('update_task_progress', {
+  description: 'Report progress on a long-running task. Emits to the dashboard in real-time.',
+  inputSchema: {
+    progress: z.number().min(0).max(100).describe('Percentage complete (0-100)'),
+    statusText: z.string().describe('Human-readable status (e.g., "Analyzing 3 of 5 sources...")'),
+  },
+  annotations: { readOnlyHint: false, idempotentHint: true },
+}, async ({ progress, statusText }) => {
+  deps.eventBus.emit({
+    type: 'execution:task:progress',
+    payload: { treeId: scope.treeId, taskId: scope.taskId, progress, statusText },
+  });
+  return { content: [{ type: 'text', text: JSON.stringify({ ack: true }) }] };
+});
+```
+
+### `request_approval` — Async Pattern
+
+`request_approval` is special — the agent calls it, and the tool blocks until the user responds (or a timeout). Implementation uses the existing `PendingApprovals` store:
+
+```typescript
+server.registerTool('request_approval', {
+  description: 'Pause execution and ask the user a question. Blocks until they respond.',
+  inputSchema: {
+    question: z.string().describe('What to ask the user'),
+    options: z.array(z.string()).optional().describe('Choices to present (if omitted, yes/no)'),
+  },
+}, async ({ question, options }, extra) => {
+  const approvalId = generateId();
+  deps.pendingApprovals.create({
+    id: approvalId,
+    taskId: scope.taskId,
+    treeId: scope.treeId,
+    question,
+    options: options ?? ['Yes', 'No'],
+  });
+
+  deps.eventBus.emit({
+    type: 'approval:requested',
+    payload: { approvalId, question, options },
+  });
+
+  // Wait for resolution (respects AbortSignal for cancellation)
+  const result = await deps.pendingApprovals.waitForResolution(approvalId, extra.signal);
+
+  return {
+    content: [{
+      type: 'text',
+      text: JSON.stringify({ approved: result.approved, choice: result.choice }),
+    }],
+  };
+});
+```
+
 ## Other Bug Fixes (from E2E testing)
 
 These were found during the E2E test run and should be fixed alongside the MCP work:
