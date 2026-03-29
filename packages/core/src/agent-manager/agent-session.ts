@@ -1,5 +1,13 @@
 import { createLogger, generateId, buildMcpToolPattern } from '@raven/shared';
-import type { AgentTask, McpServerConfig, PermissionTier, SubAgentDefinition } from '@raven/shared';
+import type {
+  AgentTask,
+  McpServerConfig,
+  PermissionTier,
+  SubAgentDefinition,
+  BashAccess,
+} from '@raven/shared';
+import { checkBashAccess } from '../bash-gate/bash-gate.ts';
+import { parseCommand } from '../bash-gate/command-parser.ts';
 import type { MessageStore, StoredMessage } from '../session-manager/message-store.ts';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { PermissionEngine } from '../permission-engine/permission-engine.ts';
@@ -248,6 +256,13 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
 
     // Compute allowed tools: base tools + MCP wildcards + Agent delegation
     const allowedTools = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'];
+
+    // Conditionally enable Bash tool based on agent's bash access config
+    const bashAccess: BashAccess | undefined = task.bashAccess;
+    if (bashAccess && bashAccess.access !== 'none') {
+      allowedTools.push('Bash');
+    }
+
     // Always include MCP wildcards — sub-agents inherit tools from the parent,
     // so the parent must have MCP tools in its allowed list for sub-agents to use them.
     for (const name of Object.keys(sdkMcpServers)) {
@@ -309,7 +324,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
           },
         });
       },
-      // eslint-disable-next-line complexity -- tool routing with sub-agent tracking and event dispatch
+      // eslint-disable-next-line complexity, max-lines-per-function -- tool routing with sub-agent tracking, bash audit, and event dispatch
       onToolUse: (toolName: string, toolInput: string, meta?: ToolUseMeta) => {
         // Track Agent tool invocations for sub-agent attribution
         if (toolName === 'Agent' && !meta?.parentToolUseId && meta?.toolUseId) {
@@ -318,6 +333,35 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
             const subagentType = (input.subagent_type as string) ?? (input.description as string);
             if (subagentType) {
               agentToolMap.set(meta.toolUseId, subagentType);
+            }
+          } catch {
+            // toolInput may be truncated — ignore parse errors
+          }
+        }
+
+        // Audit Bash commands (observational — SDK already executed the command)
+        if (toolName === 'Bash' && bashAccess) {
+          try {
+            const input = JSON.parse(toolInput) as Record<string, unknown>;
+            const command = (input.command as string) ?? '';
+            if (command) {
+              const chain = parseCommand(command);
+              const gateResult = checkBashAccess(command, bashAccess);
+              const level = gateResult.allowed ? 'info' : 'warn';
+              log[level](
+                `Bash audit [${bashAccess.access}] task=${task.id}: ${gateResult.allowed ? 'OK' : 'VIOLATION'} cmd="${chain.allBinaries.join(' | ')}"${gateResult.reason ? ` reason=${gateResult.reason}` : ''}`,
+              );
+              if (permissionDeps) {
+                permissionDeps.auditLog.insert({
+                  skillName: task.skillName,
+                  actionName: `bash:${chain.allBinaries[0] ?? 'unknown'}`,
+                  permissionTier: gateResult.allowed ? 'green' : 'red',
+                  outcome: gateResult.allowed ? 'executed' : 'executed',
+                  sessionId: task.sessionId,
+                  // eslint-disable-next-line @typescript-eslint/no-magic-numbers -- reasonable truncation limit for audit log
+                  details: `access=${bashAccess.access} cmd="${command.slice(0, 200)}"${gateResult.reason ? ` reason=${gateResult.reason}` : ''}`,
+                });
+              }
             }
           } catch {
             // toolInput may be truncated — ignore parse errors

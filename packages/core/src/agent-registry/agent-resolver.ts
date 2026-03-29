@@ -3,6 +3,7 @@ import {
   type McpServerConfig,
   type SubAgentDefinition,
   type NamedAgent,
+  type BashAccess,
 } from '@raven/shared';
 import type { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 import type { CapabilityLibrary } from '../capability-library/capability-library.ts';
@@ -13,6 +14,7 @@ export interface ResolvedCapabilities {
   mcpServers: Record<string, McpServerConfig>;
   agentDefinitions: Record<string, SubAgentDefinition>;
   plugins: Array<{ type: 'local'; path: string }>;
+  bashAccess?: BashAccess;
 }
 
 export interface AgentResolver {

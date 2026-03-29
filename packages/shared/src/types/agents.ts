@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { McpServerConfig, SubAgentDefinition, Priority } from './events.ts';
+import type { BashAccess } from './project-fs.ts';
 
 export interface NamedAgent {
   id: string;
@@ -110,6 +111,7 @@ export interface AgentTask {
   taskBoardContext?: string;
   namedAgentId?: string;
   plugins?: Array<{ type: 'local'; path: string }>;
+  bashAccess?: BashAccess;
   result?: string;
   durationMs?: number;
   errors?: string[];

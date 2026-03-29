@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { PermissionTier } from './permissions.ts';
 import { PermissionTierSchema } from './permissions.ts';
 import type { TaskTreeNode } from './task-execution.ts';
+import type { BashAccess } from './project-fs.ts';
 
 export interface BaseEvent {
   id: string;
@@ -58,6 +59,7 @@ export interface AgentTaskRequestEvent extends BaseEvent {
     projectId?: string;
     namedAgentId?: string;
     plugins?: Array<{ type: 'local'; path: string }>;
+    bashAccess?: BashAccess;
   };
 }
 

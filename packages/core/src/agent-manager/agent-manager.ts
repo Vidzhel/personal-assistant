@@ -110,6 +110,7 @@ export class AgentManager {
       skillCatalogContext: payload.skillCatalogContext,
       projectContextChain: payload.projectContextChain,
       namedAgentId: payload.namedAgentId,
+      bashAccess: payload.bashAccess,
     };
 
     // Insert by priority

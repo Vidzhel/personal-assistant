@@ -11,6 +11,7 @@ import {
   type UserChatMessageEvent,
   type Project,
   type SystemAccessLevel,
+  type BashAccess,
 } from '@raven/shared';
 import { buildTriageInstructions, parseTriageResponse } from '../task-execution/plan-builder.ts';
 import type { EventBus } from '../event-bus/event-bus.ts';
@@ -337,6 +338,7 @@ export class Orchestrator {
     let plugins: Array<{ type: 'local'; path: string }>;
     let namedAgentInstructions: string | undefined;
     let namedAgentId: string | undefined;
+    let agentName: string | undefined;
 
     if (this.namedAgentStore && this.agentResolver) {
       try {
@@ -346,6 +348,7 @@ export class Orchestrator {
         mcpServers = capabilities.mcpServers;
         plugins = capabilities.plugins;
         namedAgentId = namedAgent.id;
+        agentName = namedAgent.name;
         if (namedAgent.instructions) {
           namedAgentInstructions = namedAgent.instructions;
         }
@@ -359,6 +362,20 @@ export class Orchestrator {
       agentDefinitions = this.suiteRegistry.collectAgentDefinitions();
       mcpServers = this.suiteRegistry.collectMcpServers();
       plugins = this.suiteRegistry.collectVendorPlugins();
+    }
+
+    // Resolve bash access config from project registry agent YAML
+    let bashAccess: BashAccess | undefined;
+    if (this.projectRegistry && agentName) {
+      try {
+        const globalNode = this.projectRegistry.getGlobal();
+        const yamlAgent = globalNode.agents.find((a) => a.name === agentName);
+        if (yamlAgent?.bash) {
+          bashAccess = yamlAgent.bash;
+        }
+      } catch (err) {
+        log.debug(`Bash access resolution skipped: ${err}`);
+      }
     }
 
     // Inject skill catalog from capability library (v2) into agent context
@@ -513,6 +530,7 @@ export class Orchestrator {
         sessionId: session.id,
         projectId,
         namedAgentId,
+        bashAccess,
       },
     });
   }
