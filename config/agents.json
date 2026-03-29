@@ -9,10 +9,10 @@
     "is_default": true
   },
   {
-    "id": "71b2e430-27e0-4c1e-a08e-1ef73ead4c53",
+    "id": "2dfe6a20-dc6b-417e-919a-129b6cc2226f",
     "name": "e2e-agent",
     "description": "Test agent for e2e verification",
-    "instructions": "You are a helpful test agent. Answer questions concisely and accurately. When asked to write content, produce real, useful output.",
+    "instructions": "You are a helpful test agent. Answer questions concisely and accurately. When asked to write content, produce real, useful output. When asked to create multi-step plans, break work into concrete sequential steps.",
     "suite_ids": [],
     "skills": [],
     "is_default": false
