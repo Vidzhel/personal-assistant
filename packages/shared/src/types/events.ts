@@ -803,6 +803,66 @@ export interface TranscriptionFailedEvent extends BaseEvent {
   };
 }
 
+export interface ExecutionTaskRunAgentEvent extends BaseEvent {
+  type: 'execution:task:run-agent';
+  payload: {
+    treeId: string;
+    taskId: string;
+    agent?: string;
+    prompt: string;
+    parentTaskId: string;
+    retryFeedback?: string;
+    retryCount?: number;
+    projectId?: string;
+  };
+}
+
+export interface ExecutionTaskCompletedEvent extends BaseEvent {
+  type: 'execution:task:completed';
+  payload: {
+    treeId: string;
+    taskId: string;
+    summary?: string;
+    artifacts: unknown[];
+  };
+}
+
+export interface ExecutionTaskFailedEvent extends BaseEvent {
+  type: 'execution:task:failed';
+  payload: {
+    treeId: string;
+    taskId: string;
+    reason: string;
+    retryCount?: number;
+  };
+}
+
+export interface ExecutionTaskBlockedEvent extends BaseEvent {
+  type: 'execution:task:blocked';
+  payload: {
+    treeId: string;
+    taskId: string;
+    reason: string;
+  };
+}
+
+export interface ExecutionTaskApprovalNeededEvent extends BaseEvent {
+  type: 'execution:task:approval-needed';
+  payload: {
+    treeId: string;
+    taskId: string;
+    title: string;
+  };
+}
+
+export interface ExecutionTreeCompletedEvent extends BaseEvent {
+  type: 'execution:tree:completed';
+  payload: {
+    treeId: string;
+    status: 'completed' | 'failed' | 'cancelled';
+  };
+}
+
 export interface ExecutionTreeCreateEvent extends BaseEvent {
   type: 'execution:tree:create';
   payload: {
@@ -899,6 +959,12 @@ export type RavenEvent =
   | TranscriptionRequestEvent
   | TranscriptionCompleteEvent
   | TranscriptionFailedEvent
+  | ExecutionTaskRunAgentEvent
+  | ExecutionTaskCompletedEvent
+  | ExecutionTaskFailedEvent
+  | ExecutionTaskBlockedEvent
+  | ExecutionTaskApprovalNeededEvent
+  | ExecutionTreeCompletedEvent
   | ExecutionTreeCreateEvent;
 
 export type RavenEventType = RavenEvent['type'];
