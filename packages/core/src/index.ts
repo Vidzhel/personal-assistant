@@ -40,6 +40,7 @@ import { ProjectRegistry } from './project-registry/project-registry.ts';
 import { createAgentYamlStore } from './project-registry/agent-yaml-store.ts';
 import { createConfigCommitter } from './agent-registry/config-committer.ts';
 import { createSuiteScaffolder } from './suite-registry/suite-scaffolder.ts';
+import { createScaffoldingApi } from './scaffolding/scaffolding-api.ts';
 import { createKnowledgeStore } from './knowledge-engine/knowledge-store.ts';
 import { createIngestionProcessor } from './knowledge-engine/ingestion.ts';
 import { createEmbeddingEngine } from './knowledge-engine/embeddings.ts';
@@ -157,6 +158,9 @@ async function main(): Promise<void> {
 
   // Create agent YAML store (filesystem-backed agent definitions)
   const agentYamlStore = createAgentYamlStore();
+
+  // Create scaffolding API (project domain creation)
+  const scaffoldingApi = createScaffoldingApi({ projectsDir, projectRegistry, agentYamlStore });
 
   // Count configured (enabled) suites
   const configuredSuiteCount = Object.values(suitesConfig).filter((s) => s?.enabled).length;
@@ -601,6 +605,7 @@ async function main(): Promise<void> {
       executionEngine,
       templateRegistry,
       templateScheduler,
+      scaffoldingApi,
     },
     config.RAVEN_PORT,
   );
