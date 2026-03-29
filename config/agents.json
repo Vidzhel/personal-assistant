@@ -7,16 +7,5 @@
     "suite_ids": [],
     "skills": [],
     "is_default": true
-  },
-  {
-    "id": "bcb1e1a1-34cd-4929-b718-d2e4211b52f2",
-    "name": "test-agent-v2",
-    "description": "Updated v2 description",
-    "instructions": "You are a test agent.",
-    "suite_ids": [],
-    "skills": [
-      "calendar-read"
-    ],
-    "is_default": false
   }
 ]
