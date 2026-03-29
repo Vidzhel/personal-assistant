@@ -1,44 +1,58 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { api, type NamedAgentRecord } from '@/lib/api-client';
 import type { ProjectTabProps } from './project-tab-registry';
+import { useAgentStore } from '@/stores/agent-store';
+import { AgentFormModal } from '../agents/AgentFormModal';
 
 // eslint-disable-next-line max-lines-per-function -- project agents tab
 export function ProjectAgentsTab({ projectId }: ProjectTabProps) {
   const [agents, setAgents] = useState<NamedAgentRecord[]>([]);
+  const { showForm, openCreateForm } = useAgentStore();
+
+  const loadAgents = useCallback(() => {
+    void api.getAgents().then(setAgents);
+  }, []);
 
   useEffect(() => {
-    void api.getAgents().then((all) => {
-      setAgents(all);
-    });
-  }, [projectId]);
+    loadAgents();
+  }, [projectId, loadAgents]);
 
-  // Separate agents scoped to this project vs inherited (global/default)
-  const ownAgents = agents.filter((a) => {
-    // Agent is "own" if it has no project scope or matches this project
-    // Since the API doesn't expose projectId on agent yet, we show all agents
-    // and mark default agents as "inherited"
-    return !a.isDefault;
-  });
+  // Reload local agents list when the modal closes after a create
+  useEffect(() => {
+    if (!showForm) {
+      loadAgents();
+    }
+  }, [showForm, loadAgents]);
+
+  const ownAgents = agents.filter((a) => !a.isDefault);
   const inheritedAgents = agents.filter((a) => a.isDefault);
 
   return (
     <div className="p-6 space-y-6 overflow-y-auto h-full">
-      <div>
-        <h2 className="text-sm font-semibold mb-3">Project Agents</h2>
-        {ownAgents.length === 0 ? (
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-            No dedicated agents for this project.
-          </p>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {ownAgents.map((agent) => (
-              <AgentMiniCard key={agent.id} agent={agent} badge="own" />
-            ))}
-          </div>
-        )}
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold">Project Agents</h2>
+        <button
+          onClick={openCreateForm}
+          className="text-xs px-3 py-1.5 rounded-lg font-medium"
+          style={{ background: 'var(--accent)', color: 'white' }}
+        >
+          + Create Agent
+        </button>
       </div>
+
+      {ownAgents.length === 0 ? (
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+          No dedicated agents for this project.
+        </p>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {ownAgents.map((agent) => (
+            <AgentMiniCard key={agent.id} agent={agent} badge="own" />
+          ))}
+        </div>
+      )}
 
       {inheritedAgents.length > 0 && (
         <div>
@@ -50,6 +64,8 @@ export function ProjectAgentsTab({ projectId }: ProjectTabProps) {
           </div>
         </div>
       )}
+
+      {showForm && <AgentFormModal />}
     </div>
   );
 }
