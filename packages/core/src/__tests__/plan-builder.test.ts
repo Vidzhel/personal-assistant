@@ -43,14 +43,39 @@ describe('parseTriageResponse', () => {
   it('parses PLANNED response with valid JSON in code block', () => {
     const response = [
       'EXECUTION_MODE: PLANNED',
-      'PLAN_DESCRIPTION: Prepare for tomorrow\'s exam by gathering materials and creating a study plan',
+      "PLAN_DESCRIPTION: Prepare for tomorrow's exam by gathering materials and creating a study plan",
       'TASK_TREE:',
       '```json',
-      JSON.stringify([
-        { id: 'step-1', title: 'Gather materials', type: 'agent', agent: 'ticktick', prompt: 'Find exam-related tasks', blockedBy: [] },
-        { id: 'step-2', title: 'Create study plan', type: 'agent', agent: 'gmail', prompt: 'Draft study schedule', blockedBy: ['step-1'] },
-        { id: 'notify', title: 'Send summary', type: 'notify', channel: 'telegram', message: 'Study plan ready', blockedBy: ['step-2'] },
-      ], null, 2),
+      JSON.stringify(
+        [
+          {
+            id: 'step-1',
+            title: 'Gather materials',
+            type: 'agent',
+            agent: 'ticktick',
+            prompt: 'Find exam-related tasks',
+            blockedBy: [],
+          },
+          {
+            id: 'step-2',
+            title: 'Create study plan',
+            type: 'agent',
+            agent: 'gmail',
+            prompt: 'Draft study schedule',
+            blockedBy: ['step-1'],
+          },
+          {
+            id: 'notify',
+            title: 'Send summary',
+            type: 'notify',
+            channel: 'telegram',
+            message: 'Study plan ready',
+            blockedBy: ['step-2'],
+          },
+        ],
+        null,
+        2,
+      ),
       '```',
     ].join('\n');
 
@@ -70,7 +95,14 @@ describe('parseTriageResponse', () => {
       'TASK_TREE:',
       '```json',
       JSON.stringify([
-        { id: 'step-1', title: 'Review tasks', type: 'agent', agent: 'ticktick', prompt: 'List all tasks', blockedBy: [] },
+        {
+          id: 'step-1',
+          title: 'Review tasks',
+          type: 'agent',
+          agent: 'ticktick',
+          prompt: 'List all tasks',
+          blockedBy: [],
+        },
       ]),
       '```',
     ].join('\n');
@@ -102,9 +134,7 @@ describe('parseTriageResponse', () => {
       'PLAN_DESCRIPTION: Some plan',
       'TASK_TREE:',
       '```json',
-      JSON.stringify([
-        { id: 'step-1', title: 'Do thing', type: 'unknown_type', blockedBy: [] },
-      ]),
+      JSON.stringify([{ id: 'step-1', title: 'Do thing', type: 'unknown_type', blockedBy: [] }]),
       '```',
     ].join('\n');
 
@@ -119,7 +149,14 @@ describe('parseTriageResponse', () => {
       'PLAN_DESCRIPTION: Quick plan',
       'TASK_TREE:',
       JSON.stringify([
-        { id: 'step-1', title: 'Do it', type: 'agent', agent: 'ticktick', prompt: 'Do the thing', blockedBy: [] },
+        {
+          id: 'step-1',
+          title: 'Do it',
+          type: 'agent',
+          agent: 'ticktick',
+          prompt: 'Do the thing',
+          blockedBy: [],
+        },
       ]),
     ].join('\n');
 
@@ -136,8 +173,22 @@ describe('parseTriageResponse', () => {
       'TASK_TREE:',
       '```json',
       JSON.stringify([
-        { id: 'step-1', title: 'Agent task', type: 'agent', agent: 'gmail', prompt: 'Check inbox', blockedBy: [] },
-        { id: 'step-2', title: 'Notify user', type: 'notify', channel: 'telegram', message: 'Done!', blockedBy: ['step-1'] },
+        {
+          id: 'step-1',
+          title: 'Agent task',
+          type: 'agent',
+          agent: 'gmail',
+          prompt: 'Check inbox',
+          blockedBy: [],
+        },
+        {
+          id: 'step-2',
+          title: 'Notify user',
+          type: 'notify',
+          channel: 'telegram',
+          message: 'Done!',
+          blockedBy: ['step-1'],
+        },
       ]),
       '```',
     ].join('\n');

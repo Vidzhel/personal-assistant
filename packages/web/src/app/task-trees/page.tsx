@@ -1,11 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import {
-  api,
-  type TaskTreeRecord,
-  type TaskTreeDetailRecord,
-} from '@/lib/api-client';
+import { api, type TaskTreeRecord, type TaskTreeDetailRecord } from '@/lib/api-client';
 import { TaskTreeView } from '@/components/task-trees/TaskTreeView';
 
 const POLL_INTERVAL_MS = 5000;
@@ -105,9 +101,7 @@ export default function TaskTreesPage() {
         {trees.map((tree) => {
           const sc = getStatusColor(tree.status);
           const progress =
-            tree.taskCount > 0
-              ? Math.round((tree.completedCount / tree.taskCount) * 100)
-              : 0;
+            tree.taskCount > 0 ? Math.round((tree.completedCount / tree.taskCount) * 100) : 0;
           const isExpanded = expandedId === tree.id;
 
           return (
@@ -119,15 +113,10 @@ export default function TaskTreesPage() {
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <span
-                      className="font-mono text-xs"
-                      style={{ color: 'var(--text-muted)' }}
-                    >
+                    <span className="font-mono text-xs" style={{ color: 'var(--text-muted)' }}>
                       {isExpanded ? 'v' : '>'}
                     </span>
-                    <span className="text-sm font-medium font-mono">
-                      {tree.id.slice(0, 8)}
-                    </span>
+                    <span className="text-sm font-medium font-mono">{tree.id.slice(0, 8)}</span>
                     <span
                       className="text-xs px-2 py-0.5 rounded-full"
                       style={{ background: sc.bg, color: sc.text }}

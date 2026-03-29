@@ -11,7 +11,10 @@ interface SkillDomain {
 
 const DOMAINS: SkillDomain[] = [
   { label: 'File Management', keywords: ['document', 'file', 'media', 'pdf', 'image'] },
-  { label: 'Communication', keywords: ['email', 'gmail', 'messaging', 'telegram', 'slack', 'chat'] },
+  {
+    label: 'Communication',
+    keywords: ['email', 'gmail', 'messaging', 'telegram', 'slack', 'chat'],
+  },
   {
     label: 'Productivity',
     keywords: ['task', 'ticktick', 'schedule', 'calendar', 'briefing', 'digest', 'todo'],

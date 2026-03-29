@@ -64,7 +64,22 @@
       "WebFetch(domain:api.privatbank.ua)",
       "WebFetch(domain:python-privatbank-client.readthedocs.io)",
       "WebFetch(domain:api.ynab.com)",
-      "WebFetch(domain:bvr.ua)"
+      "WebFetch(domain:bvr.ua)",
+      "Bash(npm pack:*)",
+      "WebFetch(domain:docs.claude.com)",
+      "Bash(bash .claude/skills/browser-testing/scripts/start-devserver.sh)",
+      "Bash(npm search:*)",
+      "WebFetch(domain:www.pulsemcp.com)",
+      "WebFetch(domain:glama.ai)",
+      "Bash(for dir:*)",
+      "Bash(do echo:*)",
+      "Read(//home/user/projects/personal-assistant/.worktrees/file-processing/vendor/**)",
+      "Bash(done)",
+      "WebFetch(domain:www.anthropic.com)",
+      "WebFetch(domain:openai.github.io)",
+      "WebFetch(domain:claude.com)",
+      "WebFetch(domain:youtu.be)",
+      "WebFetch(domain:www.youtube.com)"
     ]
   }
 }

@@ -1,11 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import {
-  api,
-  type TemplateRecord,
-  type TemplateDetailRecord,
-} from '@/lib/api-client';
+import { api, type TemplateRecord, type TemplateDetailRecord } from '@/lib/api-client';
 import type { ProjectTabProps } from './project-tab-registry';
 
 // eslint-disable-next-line max-lines-per-function -- project templates tab with trigger dialog

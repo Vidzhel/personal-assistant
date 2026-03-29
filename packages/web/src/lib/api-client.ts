@@ -295,8 +295,7 @@ export const api = {
     request(`/projects/${projectId}/knowledge-links/${bubbleId}`, { method: 'DELETE' }),
 
   // Project children
-  getProjectChildren: (id: string) =>
-    request<ProjectChildRecord[]>(`/projects/${id}/children`),
+  getProjectChildren: (id: string) => request<ProjectChildRecord[]>(`/projects/${id}/children`),
 
   // Templates
   getTemplates: () => request<TemplateRecord[]>('/templates'),
@@ -311,10 +310,8 @@ export const api = {
   // Task trees
   getTaskTrees: () => request<TaskTreeRecord[]>('/task-trees'),
   getTaskTree: (id: string) => request<TaskTreeDetailRecord>(`/task-trees/${id}`),
-  approveTaskTree: (id: string) =>
-    request(`/task-trees/${id}/approve`, { method: 'POST' }),
-  cancelTaskTree: (id: string) =>
-    request(`/task-trees/${id}/cancel`, { method: 'POST' }),
+  approveTaskTree: (id: string) => request(`/task-trees/${id}/approve`, { method: 'POST' }),
+  cancelTaskTree: (id: string) => request(`/task-trees/${id}/cancel`, { method: 'POST' }),
   approveTaskTreeTask: (treeId: string, taskId: string) =>
     request(`/task-trees/${treeId}/tasks/${taskId}/approve`, { method: 'POST' }),
 

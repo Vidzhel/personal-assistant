@@ -8,7 +8,7 @@ import {
 describe('Project Hub — Tab Registry', () => {
   it('default tabs have 4 entries: overview, tasks, knowledge, sessions', () => {
     const tabs = getProjectTabs();
-    expect(tabs).toHaveLength(4);
+    expect(tabs).toHaveLength(6);
     expect(tabs.map((t) => t.key)).toEqual(['overview', 'tasks', 'knowledge', 'sessions']);
   });
 
@@ -22,7 +22,7 @@ describe('Project Hub — Tab Registry', () => {
 
   it('unknown project type falls back to default tabs', () => {
     const tabs = getProjectTabs('unknown-type');
-    expect(tabs).toHaveLength(4);
+    expect(tabs).toHaveLength(6);
     expect(tabs[0].key).toBe('overview');
   });
 
@@ -36,7 +36,7 @@ describe('Project Hub — Tab Registry', () => {
 
   it('registering custom type does not affect default', () => {
     registerProjectTabs('minimal', [{ key: 'x', label: 'X', component: () => null }]);
-    expect(getProjectTabs('default')).toHaveLength(4);
+    expect(getProjectTabs('default')).toHaveLength(6);
   });
 });
 
@@ -71,9 +71,9 @@ describe('Project Hub — Tab Content Mapping', () => {
 });
 
 describe('Project Hub — AC Verification', () => {
-  it('AC4: tabs available are Overview, Tasks, Knowledge, Sessions', () => {
+  it('AC4: tabs available are Overview, Tasks, Agents, Templates, Knowledge, Sessions', () => {
     const tabs = getProjectTabs();
-    expect(tabs.map((t) => t.label)).toEqual(['Overview', 'Tasks', 'Knowledge', 'Sessions']);
+    expect(tabs.map((t) => t.label)).toEqual(['Overview', 'Tasks', 'Agents', 'Templates', 'Knowledge', 'Sessions']);
   });
 
   it('AC12: new project type can define its own tab set without modifying core', () => {

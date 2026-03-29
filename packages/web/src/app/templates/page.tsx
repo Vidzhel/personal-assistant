@@ -1,11 +1,7 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import {
-  api,
-  type TemplateRecord,
-  type TemplateDetailRecord,
-} from '@/lib/api-client';
+import { api, type TemplateRecord, type TemplateDetailRecord } from '@/lib/api-client';
 
 const POLL_INTERVAL_MS = 10000;
 
@@ -156,7 +152,9 @@ export default function TemplatesPage() {
                     )}
                     <input
                       type="text"
-                      value={triggerParams[key] ?? (param.default != null ? String(param.default) : '')}
+                      value={
+                        triggerParams[key] ?? (param.default != null ? String(param.default) : '')
+                      }
                       onChange={(e) =>
                         setTriggerParams((prev) => ({ ...prev, [key]: e.target.value }))
                       }
