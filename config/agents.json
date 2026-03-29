@@ -9,17 +9,6 @@
     "is_default": true
   },
   {
-    "id": "6fc9e1f1-7133-45de-b88b-e81e9ff00219",
-    "name": "bound-agent",
-    "description": "Agent with suites",
-    "instructions": null,
-    "suite_ids": [
-      "email"
-    ],
-    "skills": [],
-    "is_default": false
-  },
-  {
     "id": "94457481-5b90-4850-99e8-f9090e0dc949",
     "name": "ui-test-agent",
     "description": "Created from UI test",
