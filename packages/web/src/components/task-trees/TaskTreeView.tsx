@@ -72,6 +72,14 @@ export function TaskTreeView({ treeId, tasks, onRefresh }: TaskTreeViewProps) {
               >
                 {task.status}
               </span>
+              {task.retryCount > 0 && (
+                <span
+                  className="text-xs px-1.5 py-0.5 rounded"
+                  style={{ background: 'rgba(234,179,8,0.2)', color: 'rgb(250,204,21)' }}
+                >
+                  {task.retryCount} {task.retryCount === 1 ? 'retry' : 'retries'}
+                </span>
+              )}
             </div>
 
             {task.agent && (
