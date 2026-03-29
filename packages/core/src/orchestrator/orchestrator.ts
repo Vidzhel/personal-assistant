@@ -13,12 +13,10 @@ import {
   type SystemAccessLevel,
   type BashAccess,
 } from '@raven/shared';
-import { buildTriageInstructions, parseTriageResponse } from '../task-execution/plan-builder.ts';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 import type { SessionManager } from '../session-manager/session-manager.ts';
 import type { MessageStore } from '../session-manager/message-store.ts';
-import type { ContextInjector } from '../knowledge-engine/context-injector.ts';
 import type { Retrospective } from '../knowledge-engine/retrospective.ts';
 import type { KnowledgeConsolidation } from '../knowledge-engine/knowledge-consolidation.ts';
 import type { SessionCompaction } from '../session-manager/session-compaction.ts';
@@ -30,7 +28,6 @@ import type { CapabilityLibrary } from '../capability-library/capability-library
 import type { ProjectRegistry } from '../project-registry/project-registry.ts';
 import { createKnowledgeAgentDefinition } from '../knowledge-engine/knowledge-agent.ts';
 import { getDb } from '../db/database.ts';
-import { isMetaProject } from '../project-manager/meta-project.ts';
 import {
   resolveSystemAccessInstructions,
   resolveToolUseInstructions,
@@ -48,7 +45,6 @@ export interface OrchestratorDeps {
   suiteRegistry: SuiteRegistry;
   sessionManager: SessionManager;
   messageStore: MessageStore;
-  contextInjector?: ContextInjector;
   retrospective?: Retrospective;
   knowledgeConsolidation?: KnowledgeConsolidation;
   sessionCompaction?: SessionCompaction;
@@ -71,7 +67,6 @@ export class Orchestrator {
   private suiteRegistry: SuiteRegistry;
   private sessionManager: SessionManager;
   private messageStore: MessageStore;
-  private contextInjector?: ContextInjector;
   private retrospective?: Retrospective;
   private knowledgeConsolidation?: KnowledgeConsolidation;
   private sessionCompaction?: SessionCompaction;
@@ -81,15 +76,12 @@ export class Orchestrator {
   private capabilityLibrary?: CapabilityLibrary;
   private projectRegistry?: ProjectRegistry;
   private port: number;
-  /** Task IDs from user chat that may contain PLANNED triage responses */
-  private pendingTriageTasks = new Map<string, { projectId: string; sessionId: string }>();
 
   constructor(deps: OrchestratorDeps) {
     this.eventBus = deps.eventBus;
     this.suiteRegistry = deps.suiteRegistry;
     this.sessionManager = deps.sessionManager;
     this.messageStore = deps.messageStore;
-    this.contextInjector = deps.contextInjector;
     this.retrospective = deps.retrospective;
     this.knowledgeConsolidation = deps.knowledgeConsolidation;
     this.sessionCompaction = deps.sessionCompaction;
@@ -109,7 +101,6 @@ export class Orchestrator {
       this.handleUserChat(e).catch((err: unknown) => log.error(`handleUserChat failed: ${err}`));
     });
     this.eventBus.on<AgentTaskCompleteEvent>('agent:task:complete', (e) => {
-      this.handleTaskCompleteTriage(e);
       this.handleTaskCompleteCompaction(e).catch((err: unknown) =>
         log.error(`handleTaskCompleteCompaction failed: ${err}`),
       );
@@ -126,20 +117,6 @@ export class Orchestrator {
     if (!emailSuite) {
       log.warn('Email suite not available, ignoring email event');
       return;
-    }
-
-    // Pervasive context injection: query from email subject + sender + snippet
-    let knowledgeContext: string | undefined;
-    if (this.contextInjector) {
-      try {
-        const query = `${subject} ${from} ${snippet}`;
-        const ctx = await this.contextInjector.retrieveContext(query);
-        if (ctx) {
-          knowledgeContext = this.contextInjector.formatContext(ctx);
-        }
-      } catch (err) {
-        log.warn(`Knowledge context retrieval failed for email: ${err}`);
-      }
     }
 
     const mcpServers = emailSuite.mcpServers;
@@ -166,7 +143,6 @@ export class Orchestrator {
         skillName: SUITE_EMAIL,
         mcpServers,
         plugins,
-        knowledgeContext,
         priority: 'normal',
         projectId: event.projectId,
       },
@@ -204,20 +180,6 @@ export class Orchestrator {
       return;
     }
 
-    // Pervasive context injection: query from schedule name + task type
-    let knowledgeContext: string | undefined;
-    if (this.contextInjector) {
-      try {
-        const query = `${scheduleName} ${taskType}`;
-        const ctx = await this.contextInjector.retrieveContext(query);
-        if (ctx) {
-          knowledgeContext = this.contextInjector.formatContext(ctx);
-        }
-      } catch (err) {
-        log.warn(`Knowledge context retrieval failed for schedule: ${err}`);
-      }
-    }
-
     // Collect agent definitions, MCPs, and vendor plugins from all enabled suites
     // so the scheduled agent can delegate to other suites' agents
     const agentDefinitions = this.suiteRegistry.collectAgentDefinitions();
@@ -238,7 +200,6 @@ export class Orchestrator {
         mcpServers,
         agentDefinitions,
         plugins,
-        knowledgeContext,
         priority: 'normal',
       },
     });
@@ -319,19 +280,6 @@ export class Orchestrator {
       log.warn(`Project data sources context retrieval failed: ${err}`);
     }
 
-    // Pervasive context injection: query from user message text
-    let knowledgeContext: string | undefined;
-    if (this.contextInjector) {
-      try {
-        const ctx = await this.contextInjector.retrieveContext(message);
-        if (ctx) {
-          knowledgeContext = this.contextInjector.formatContext(ctx);
-        }
-      } catch (err) {
-        log.warn(`Knowledge context retrieval failed, proceeding without: ${err}`);
-      }
-    }
-
     // Resolve capabilities from named agent (if configured) or fall back to all suites
     let agentDefinitions: Record<string, SubAgentDefinition>;
     let mcpServers: Record<string, McpServerConfig>;
@@ -390,15 +338,6 @@ export class Orchestrator {
       } catch (err) {
         log.warn(`Skill catalog generation failed: ${err}`);
       }
-    }
-
-    // Build triage instructions for DIRECT/DELEGATED/PLANNED classification
-    let triageInstructions: string | undefined;
-    try {
-      const agentNames = Object.keys(agentDefinitions);
-      triageInstructions = buildTriageInstructions(agentNames, []);
-    } catch (err) {
-      log.warn(`Triage instructions generation failed: ${err}`);
     }
 
     // Merge knowledge agent into agent definitions
@@ -466,36 +405,21 @@ export class Orchestrator {
       prompt += `\n\n[Media file available on disk: ${mediaAttachment.filePath} (${mediaAttachment.fileName}, ${mediaAttachment.mimeType}, ${mediaAttachment.type})]`;
     }
 
-    // Prepend named agent instructions and config management capability
+    // Prepend named agent instructions
     if (namedAgentInstructions) {
       prompt = `[Agent Instructions: ${namedAgentInstructions}]\n\n${prompt}`;
     }
-    if (this.namedAgentStore) {
-      prompt = `[System: You can manage named agents via the REST API at http://localhost:${this.port}/api/agents (GET, POST, PATCH, DELETE). Use this to create, update, or adjust agent configurations when asked.]\n\n${prompt}`;
-    }
 
-    // Prepend meta-project management instructions (only for meta-project)
-    if (isMetaProject(projectId)) {
-      const metaInstructions = [
-        '[System: You are operating as the Raven System meta-project agent. You can manage the system through these REST APIs:',
-        `- GET/POST http://localhost:${this.port}/api/projects — List and create projects`,
-        `- PUT/DELETE http://localhost:${this.port}/api/projects/:id — Update and delete projects`,
-        `- GET/POST/PATCH/DELETE http://localhost:${this.port}/api/agents — Named agent management`,
-        `- GET http://localhost:${this.port}/api/pipelines — List pipelines`,
-        `- POST http://localhost:${this.port}/api/pipelines/:name/trigger — Trigger a pipeline`,
-        `- GET/POST http://localhost:${this.port}/api/schedules — Schedule management`,
-        `- GET http://localhost:${this.port}/api/suites — List available suites`,
-        `- GET http://localhost:${this.port}/api/skills — List registered skills`,
-        `- GET http://localhost:${this.port}/api/audit-logs — View audit trail`,
-        'Use these APIs to fulfill system management requests.]',
-      ].join('\n');
-      prompt = `${metaInstructions}\n\n${prompt}`;
-    }
-
-    // Prepend triage instructions for execution mode classification
-    if (triageInstructions) {
-      prompt = `[${triageInstructions}]\n\n${prompt}`;
-    }
+    // Prepend MCP tool usage instructions (replaces text-based triage, REST API injection, and meta-project API specs)
+    const mcpInstructions = [
+      'You have access to Raven MCP tools. When you receive a user message:',
+      '1. Assess complexity and call classify_request with the appropriate mode',
+      '2. For DIRECT: do the work, then call send_message with the result',
+      '3. For DELEGATED: delegate to a sub-agent, then call send_message with the result',
+      '4. For PLANNED: call create_task_tree with the plan and tasks, then call send_message to inform the user',
+      'Never output raw JSON task trees. Always use the create_task_tree tool.',
+    ].join('\n');
+    prompt = `[System: ${mcpInstructions}]\n\n${prompt}`;
 
     // Prepend tool use instructions
     prompt = `[System: ${resolveToolUseInstructions()}]\n\n${prompt}`;
@@ -504,9 +428,6 @@ export class Orchestrator {
     prompt = `[System Access Control: ${resolveSystemAccessInstructions(projectForAccess)}]\n\n${prompt}`;
 
     const taskId = generateId();
-
-    // Track this task for triage response parsing
-    this.pendingTriageTasks.set(taskId, { projectId, sessionId: session.id });
 
     this.eventBus.emit({
       id: generateId(),
@@ -521,7 +442,6 @@ export class Orchestrator {
         mcpServers, // Resolved from named agent or all suites
         agentDefinitions, // Sub-agents carry the MCPs + knowledge agent
         plugins,
-        knowledgeContext,
         sessionReferencesContext,
         projectDataSourcesContext,
         skillCatalogContext,
@@ -531,37 +451,6 @@ export class Orchestrator {
         projectId,
         namedAgentId,
         bashAccess,
-      },
-    });
-  }
-
-  private handleTaskCompleteTriage(event: AgentTaskCompleteEvent): void {
-    const { taskId, result } = event.payload;
-
-    const triageContext = this.pendingTriageTasks.get(taskId);
-    if (!triageContext) return; // Not a user-chat task, skip triage
-    this.pendingTriageTasks.delete(taskId);
-
-    const triage = parseTriageResponse(result);
-    if (triage.mode !== 'planned' || !triage.taskTree) return; // DIRECT/DELEGATED — no action needed
-
-    log.info(
-      `PLANNED triage detected for task ${taskId}: ${triage.planDescription ?? 'no description'}`,
-    );
-
-    const treeId = generateId();
-    this.eventBus.emit({
-      id: generateId(),
-      timestamp: Date.now(),
-      source: SOURCE_ORCHESTRATOR,
-      projectId: triageContext.projectId,
-      type: 'execution:tree:create',
-      payload: {
-        treeId,
-        projectId: triageContext.projectId,
-        sessionId: triageContext.sessionId,
-        plan: triage.planDescription,
-        tasks: triage.taskTree,
       },
     });
   }

@@ -6,7 +6,6 @@ import {
   initFileLogging,
   type RavenEvent,
   type RavenEventType,
-  type TaskTreeNode,
 } from '@raven/shared';
 import { loadConfig, loadSuitesConfig, loadSchedulesConfig, projectRoot } from './config.ts';
 import { loadIntegrationsConfig } from './config/integrations-config.ts';
@@ -252,9 +251,6 @@ async function main(): Promise<void> {
   });
   log.info('task execution engine initialized');
 
-  // taskId → treeId mapping for execution-engine agent tasks
-  const executionTaskToTree = new Map<string, string>();
-
   // Wire execution:task:run-agent → agent:task:request
   baseContext.eventBus.on('execution:task:run-agent', (event: unknown) => {
     const payload = (event as RavenEvent & { payload: Record<string, unknown> }).payload as {
@@ -286,7 +282,6 @@ async function main(): Promise<void> {
         taskBoardContext: buildTaskBoardInstructions(payload.parentTaskId, payload.retryFeedback),
       },
     });
-    executionTaskToTree.set(payload.taskId, payload.treeId);
   });
 
   // 7i. Init template engine (registry + scheduler)
@@ -303,56 +298,6 @@ async function main(): Promise<void> {
   });
   templateScheduler.start();
   log.info('Template scheduler started');
-
-  // Wire execution:tree:create → executionEngine.createTree
-  baseContext.eventBus.on('execution:tree:create', (event: unknown) => {
-    const payload = (event as RavenEvent & { payload: Record<string, unknown> }).payload as {
-      treeId: string;
-      projectId: string;
-      plan?: string;
-      tasks: TaskTreeNode[];
-    };
-    executionEngine.createTree({
-      id: payload.treeId,
-      projectId: payload.projectId,
-      plan: payload.plan,
-      tasks: payload.tasks,
-    });
-    log.info(
-      `task tree created from orchestrator triage (treeId=${payload.treeId}, tasks=${String(payload.tasks.length)})`,
-    );
-  });
-
-  // Wire agent:task:complete → executionEngine.onTaskCompleted for execution tasks
-  baseContext.eventBus.on('agent:task:complete', (event: unknown) => {
-    const payload = (event as RavenEvent & { payload: Record<string, unknown> }).payload as {
-      taskId: string;
-      result: string;
-      success: boolean;
-      errors?: string[];
-    };
-    const treeId = executionTaskToTree.get(payload.taskId);
-    if (!treeId) return; // Not an execution-engine task, ignore
-
-    executionTaskToTree.delete(payload.taskId);
-
-    if (payload.success) {
-      executionEngine
-        .onTaskCompleted({
-          treeId,
-          taskId: payload.taskId,
-          summary: payload.result,
-          artifacts: [],
-        })
-        .catch((err: unknown) => log.error(`execution onTaskCompleted failed: ${err}`));
-    } else {
-      executionEngine.onTaskBlocked(
-        treeId,
-        payload.taskId,
-        payload.errors?.join(', ') ?? 'Agent task failed',
-      );
-    }
-  });
 
   // 7i. Task notification handler — post to Telegram agent topic or "Tasks" fallback
   for (const eventType of ['task:created', 'task:completed'] as const) {
@@ -528,7 +473,8 @@ async function main(): Promise<void> {
   log.info('Knowledge retrieval engine initialized (chunking + multi-tier search)');
 
   // 12k. Init context injector for pervasive knowledge injection
-  const contextInjector = createContextInjector({ retrievalEngine });
+  // Context injector kept for retrieval engine; agents now access knowledge via MCP tools
+  const _contextInjector = createContextInjector({ retrievalEngine });
 
   // 12l. Init knowledge lifecycle engine (stale detection, snooze, merge, remove)
   const knowledgeLifecycle = createKnowledgeLifecycle({
@@ -586,7 +532,6 @@ async function main(): Promise<void> {
     suiteRegistry,
     sessionManager,
     messageStore,
-    contextInjector,
     retrospective,
     knowledgeConsolidation,
     sessionCompaction,

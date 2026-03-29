@@ -204,7 +204,7 @@ describe('Orchestrator', () => {
     expect(payload.skillName).toBe('daily-briefing');
   });
 
-  it('meta-project chat includes management API instructions and read-write access', async () => {
+  it('meta-project chat includes MCP tool instructions and read-write access', async () => {
     const suiteRegistry = makeSuiteRegistry();
     _orchestrator = new Orchestrator({
       eventBus,
@@ -232,13 +232,10 @@ describe('Orchestrator', () => {
 
     // System access should be read-write for meta-project
     expect(prompt).toContain('may read and modify system files');
-    // Should include meta-project management instructions
-    expect(prompt).toContain('Raven System meta-project agent');
-    expect(prompt).toContain('/api/projects');
-    expect(prompt).toContain('/api/pipelines');
-    expect(prompt).toContain('/api/agents');
-    expect(prompt).toContain('/api/schedules');
-    expect(prompt).toContain('/api/audit-logs');
+    // MCP tool instructions (replaces REST API injection)
+    expect(prompt).toContain('Raven MCP tools');
+    expect(prompt).toContain('classify_request');
+    expect(prompt).toContain('create_task_tree');
     // Tool use instructions
     expect(prompt).toContain('Use tools purposefully');
     // Original message

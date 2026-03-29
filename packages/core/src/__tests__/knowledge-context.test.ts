@@ -316,24 +316,7 @@ describe('Orchestrator context injection integration', () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  function makeInjector() {
-    const engine = {
-      search: searchMock,
-      retrieveTimeline: vi.fn(),
-      getIndexStatus: vi.fn(),
-      enrichWithSource: vi.fn(),
-    } as unknown as RetrievalEngine;
-    return createContextInjector({ retrievalEngine: engine });
-  }
-
-  it('user:chat:message includes knowledgeContext in agent:task:request when results found', async () => {
-    searchMock.mockResolvedValue(
-      makeRetrievalResult({
-        results: [makeResultItem({ score: 0.9 })],
-        tokenBudgetUsed: 50,
-      }),
-    );
-
+  it('user:chat:message does not include knowledgeContext (agents use MCP tools instead)', async () => {
     const db = getDb();
     const now = Date.now();
     db.prepare(
@@ -345,7 +328,6 @@ describe('Orchestrator context injection integration', () => {
       suiteRegistry: makeSuiteRegistry(),
       sessionManager: new SessionManager(),
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
-      contextInjector: makeInjector(),
       port: 4000,
     });
 
@@ -363,49 +345,12 @@ describe('Orchestrator context injection integration', () => {
 
     const event = await taskRequestPromise;
     const payload = (event as any).payload;
-    expect(payload.knowledgeContext).toBeDefined();
-    expect(payload.knowledgeContext).toContain('Test Bubble');
-    expect(payload.knowledgeContext).toContain('[ref: bubble-1]');
-  });
-
-  it('user:chat:message has no knowledgeContext when retrieval returns empty', async () => {
-    searchMock.mockResolvedValue(makeRetrievalResult({ results: [] }));
-
-    const db = getDb();
-    const now = Date.now();
-    db.prepare(
-      'INSERT INTO projects (id, name, skills, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-    ).run('proj-1', 'Test', '[]', now, now);
-
-    const _orchestrator = new Orchestrator({
-      eventBus,
-      suiteRegistry: makeSuiteRegistry(),
-      sessionManager: new SessionManager(),
-      messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
-      contextInjector: makeInjector(),
-      port: 4000,
-    });
-
-    const taskRequestPromise = new Promise<RavenEvent>((resolve) => {
-      eventBus.on('agent:task:request', (e) => resolve(e));
-    });
-
-    eventBus.emit({
-      id: 'evt-2',
-      timestamp: Date.now(),
-      source: 'test',
-      type: 'user:chat:message',
-      payload: { projectId: 'proj-1', message: 'Hello' },
-    } as RavenEvent);
-
-    const event = await taskRequestPromise;
-    const payload = (event as any).payload;
+    // Knowledge context is no longer injected upfront — agents call search_knowledge via MCP
     expect(payload.knowledgeContext).toBeUndefined();
+    expect(payload.prompt).toContain('What do I know about TypeScript?');
   });
 
   it('user:chat:message merges knowledge-agent into agentDefinitions', async () => {
-    searchMock.mockResolvedValue(makeRetrievalResult({ results: [] }));
-
     const db = getDb();
     const now = Date.now();
     db.prepare(
@@ -417,7 +362,6 @@ describe('Orchestrator context injection integration', () => {
       suiteRegistry: makeSuiteRegistry(),
       sessionManager: new SessionManager(),
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
-      contextInjector: makeInjector(),
       port: 4000,
     });
 
@@ -442,14 +386,7 @@ describe('Orchestrator context injection integration', () => {
     expect(payload.agentDefinitions['knowledge-agent'].tools).toContain('WebFetch');
   });
 
-  it('email:new injects context from subject + sender + snippet', async () => {
-    searchMock.mockResolvedValue(
-      makeRetrievalResult({
-        results: [makeResultItem({ score: 0.8 })],
-        tokenBudgetUsed: 30,
-      }),
-    );
-
+  it('email:new does not inject knowledgeContext (agents use MCP tools instead)', async () => {
     const suiteRegistry = makeSuiteRegistry([
       {
         name: 'email',
@@ -462,7 +399,6 @@ describe('Orchestrator context injection integration', () => {
       suiteRegistry,
       sessionManager: new SessionManager(),
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
-      contextInjector: makeInjector(),
       port: 4000,
     });
 
@@ -486,22 +422,13 @@ describe('Orchestrator context injection integration', () => {
 
     const event = await taskRequestPromise;
     const payload = (event as any).payload;
-    expect(payload.knowledgeContext).toBeDefined();
-    // Verify search was called with concatenated query
-    expect(searchMock).toHaveBeenCalledWith(
-      expect.stringContaining('Q1 Review'),
-      expect.any(Object),
-    );
+    // Knowledge context no longer injected upfront
+    expect(payload.knowledgeContext).toBeUndefined();
+    // Search mock should NOT have been called — no upfront context injection
+    expect(searchMock).not.toHaveBeenCalled();
   });
 
-  it('schedule:triggered injects context from schedule name + task type', async () => {
-    searchMock.mockResolvedValue(
-      makeRetrievalResult({
-        results: [makeResultItem({ score: 0.7 })],
-        tokenBudgetUsed: 20,
-      }),
-    );
-
+  it('schedule:triggered does not inject knowledgeContext (agents use MCP tools instead)', async () => {
     const suiteRegistry = makeSuiteRegistry([
       {
         name: 'digest',
@@ -522,7 +449,6 @@ describe('Orchestrator context injection integration', () => {
       suiteRegistry,
       sessionManager: new SessionManager(),
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
-      contextInjector: makeInjector(),
       port: 4000,
     });
 
@@ -544,49 +470,10 @@ describe('Orchestrator context injection integration', () => {
 
     const event = await taskRequestPromise;
     const payload = (event as any).payload;
-    expect(payload.knowledgeContext).toBeDefined();
-    expect(searchMock).toHaveBeenCalledWith(
-      expect.stringContaining('Morning Digest'),
-      expect.any(Object),
-    );
-  });
-
-  it('context retrieval failure does not block task execution', async () => {
-    searchMock.mockRejectedValue(new Error('Neo4j connection failed'));
-
-    const db = getDb();
-    const now = Date.now();
-    db.prepare(
-      'INSERT INTO projects (id, name, skills, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-    ).run('proj-1', 'Test', '[]', now, now);
-
-    const _orchestrator = new Orchestrator({
-      eventBus,
-      suiteRegistry: makeSuiteRegistry(),
-      sessionManager: new SessionManager(),
-      messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
-      contextInjector: makeInjector(),
-      port: 4000,
-    });
-
-    const taskRequestPromise = new Promise<RavenEvent>((resolve) => {
-      eventBus.on('agent:task:request', (e) => resolve(e));
-    });
-
-    eventBus.emit({
-      id: 'evt-6',
-      timestamp: Date.now(),
-      source: 'test',
-      type: 'user:chat:message',
-      payload: { projectId: 'proj-1', message: 'Hello despite errors' },
-    } as RavenEvent);
-
-    const event = await taskRequestPromise;
-    const payload = (event as any).payload;
-    // Task still fires, just without knowledge context
+    // Knowledge context no longer injected upfront
     expect(payload.knowledgeContext).toBeUndefined();
-    // Orchestrator prepends system instructions to the user message
-    expect(payload.prompt).toContain('Hello despite errors');
+    // Search mock should NOT have been called
+    expect(searchMock).not.toHaveBeenCalled();
   });
 });
 
