@@ -201,6 +201,7 @@ interface ValidateContext {
   projectsDir: string;
   errors: string[];
   warnings: string[];
+  opts?: ValidatorOptions;
 }
 
 async function isProjectDir(dirPath: string, isRoot: boolean): Promise<boolean> {
@@ -357,12 +358,7 @@ async function validateTemplatesDir(templatesDir: string, projectRel: string): P
   return errors;
 }
 
-async function validateDir(
-  dirPath: string,
-  depth: number,
-  ctx: ValidateContext,
-  opts?: ValidatorOptions,
-): Promise<void> {
+async function validateDir(dirPath: string, depth: number, ctx: ValidateContext): Promise<void> {
   const rel = relative(ctx.projectsDir, dirPath);
   const isRoot = rel === '' || rel === '.';
 
@@ -374,7 +370,7 @@ async function validateDir(
   if (!(await isProjectDir(dirPath, isRoot))) return;
 
   const agentNames = new Set<string>();
-  const agentResult = await validateAgentsDir(join(dirPath, 'agents'), rel, agentNames, opts);
+  const agentResult = await validateAgentsDir(join(dirPath, 'agents'), rel, agentNames, ctx.opts);
   ctx.errors.push(...agentResult.errors);
   ctx.warnings.push(...agentResult.warnings);
 
@@ -391,7 +387,7 @@ async function validateDir(
 
   const subdirs = await getSubdirectories(dirPath);
   for (const subdir of subdirs) {
-    await validateDir(subdir, depth + 1, ctx, opts);
+    await validateDir(subdir, depth + 1, ctx);
   }
 }
 
@@ -403,8 +399,9 @@ export async function validateProjects(
     projectsDir,
     errors: [],
     warnings: [],
+    opts,
   };
 
-  await validateDir(projectsDir, 0, ctx, opts);
+  await validateDir(projectsDir, 0, ctx);
   return { errors: ctx.errors, warnings: ctx.warnings };
 }

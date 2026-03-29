@@ -38,7 +38,7 @@ export default function ProjectPage() {
 
   const handleUpdateDescription = useCallback(
     async (description: string) => {
-      const updated = await api.updateProject(id, { description: description || null });
+      const updated = await api.updateProject(id, { description: description || undefined });
       setProject(updated);
     },
     [id],

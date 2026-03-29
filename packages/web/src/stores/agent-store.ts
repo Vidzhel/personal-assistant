@@ -31,6 +31,9 @@ interface AgentState {
     description?: string;
     instructions?: string;
     suiteIds?: string[];
+    skills?: string[];
+    bash?: object;
+    projectScope?: string;
   }) => Promise<void>;
   updateAgent: (
     id: string,
@@ -39,6 +42,8 @@ interface AgentState {
       description?: string | null;
       instructions?: string | null;
       suiteIds?: string[];
+      skills?: string[];
+      bash?: object;
     },
   ) => Promise<void>;
   deleteAgent: (id: string) => Promise<void>;

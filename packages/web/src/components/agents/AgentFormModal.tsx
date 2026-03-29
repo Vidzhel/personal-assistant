@@ -83,35 +83,26 @@ export function AgentFormModal() {
     });
   }
 
+  function buildBashConfig() {
+    if (bashAccess === 'none') return undefined;
+    const splitLines = (s: string) =>
+      s
+        .split('\n')
+        .map((l) => l.trim())
+        .filter(Boolean);
+    return {
+      access: bashAccess,
+      ...(allowedCommands.trim() && { allowedCommands: splitLines(allowedCommands) }),
+      ...(allowedPaths.trim() && { allowedPaths: splitLines(allowedPaths) }),
+      ...(deniedPaths.trim() && { deniedPaths: splitLines(deniedPaths) }),
+    };
+  }
+
   async function handleSubmit() {
     if (!validateName(name)) return;
-
-    const bashConfig =
-      bashAccess !== 'none'
-        ? {
-            access: bashAccess,
-            ...(allowedCommands.trim() && {
-              allowedCommands: allowedCommands
-                .split('\n')
-                .map((s) => s.trim())
-                .filter(Boolean),
-            }),
-            ...(allowedPaths.trim() && {
-              allowedPaths: allowedPaths
-                .split('\n')
-                .map((s) => s.trim())
-                .filter(Boolean),
-            }),
-            ...(deniedPaths.trim() && {
-              deniedPaths: deniedPaths
-                .split('\n')
-                .map((s) => s.trim())
-                .filter(Boolean),
-            }),
-          }
-        : undefined;
-
+    const bashConfig = buildBashConfig();
     const skillsArray = Array.from(selectedSkills);
+    const skills = skillsArray.length > 0 ? skillsArray : undefined;
 
     if (editing) {
       await updateAgent(editing.id, {
@@ -119,7 +110,7 @@ export function AgentFormModal() {
         description,
         instructions,
         suiteIds: Array.from(selectedSuites),
-        skills: skillsArray.length > 0 ? skillsArray : undefined,
+        skills,
         bash: bashConfig,
       });
     } else {
@@ -128,7 +119,7 @@ export function AgentFormModal() {
         description: description || undefined,
         instructions: instructions || undefined,
         suiteIds: Array.from(selectedSuites),
-        skills: skillsArray.length > 0 ? skillsArray : undefined,
+        skills,
         bash: bashConfig,
         projectScope: projectScope || undefined,
       });

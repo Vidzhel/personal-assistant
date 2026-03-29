@@ -6,10 +6,17 @@ import {
 } from '../components/project/project-tab-registry';
 
 describe('Project Hub — Tab Registry', () => {
-  it('default tabs have 4 entries: overview, tasks, knowledge, sessions', () => {
+  it('default tabs have 6 entries: overview, tasks, agents, templates, knowledge, sessions', () => {
     const tabs = getProjectTabs();
     expect(tabs).toHaveLength(6);
-    expect(tabs.map((t) => t.key)).toEqual(['overview', 'tasks', 'knowledge', 'sessions']);
+    expect(tabs.map((t) => t.key)).toEqual([
+      'overview',
+      'tasks',
+      'agents',
+      'templates',
+      'knowledge',
+      'sessions',
+    ]);
   });
 
   it('each default tab has a label and component', () => {
