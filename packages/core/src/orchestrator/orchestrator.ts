@@ -341,7 +341,7 @@ export class Orchestrator {
     }
 
     // Merge knowledge agent into agent definitions
-    agentDefinitions['knowledge-agent'] = createKnowledgeAgentDefinition(this.port);
+    agentDefinitions['knowledge-agent'] = createKnowledgeAgentDefinition();
 
     // Look up project for system access level
     const db = getDb();

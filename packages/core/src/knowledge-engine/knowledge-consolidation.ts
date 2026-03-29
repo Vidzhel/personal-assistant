@@ -1,4 +1,5 @@
 import { createLogger, generateId } from '@raven/shared';
+import { z } from 'zod';
 import type { Neo4jClient } from './neo4j-client.ts';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { AppConfig } from '../config.ts';
@@ -20,11 +21,21 @@ export interface ConsolidationResult {
   digestCreated: boolean;
 }
 
-interface ParsedConsolidation {
-  merges?: Array<{ keepId: string; removeIds: string[]; mergedContent: string }>;
-  prunes?: string[];
-  digest?: string;
-}
+const ConsolidationResultSchema = z.object({
+  merges: z
+    .array(
+      z.object({
+        keepId: z.string(),
+        removeIds: z.array(z.string()),
+        mergedContent: z.string(),
+      }),
+    )
+    .optional(),
+  prunes: z.array(z.string()).optional(),
+  digest: z.string().optional(),
+});
+
+type ParsedConsolidation = z.infer<typeof ConsolidationResultSchema>;
 
 interface ConsolidationDeps {
   neo4j: Neo4jClient;
@@ -146,13 +157,18 @@ export function createKnowledgeConsolidation(deps: ConsolidationDeps): Knowledge
 
       const result = await runAgentTask({ task, eventBus, mcpServers: {}, agentDefinitions: {} });
 
+      const parseResult = ConsolidationResultSchema.safeParse(JSON.parse(result.result));
+      if (!parseResult.success) {
+        log.error(`Invalid consolidation result for project ${pid}: ${parseResult.error.message}`);
+        continue;
+      }
+      const parsed: ParsedConsolidation = parseResult.data;
       try {
-        const parsed = JSON.parse(result.result) as ParsedConsolidation;
         totalMerged += await executeMerges(neo4j, parsed.merges);
         totalPruned += await executePrunes(neo4j, parsed.prunes);
         if (parsed.digest) digestCreated = true;
       } catch (err) {
-        log.error(`Failed to parse consolidation result for project ${pid}: ${err}`);
+        log.error(`Failed to process consolidation result for project ${pid}: ${err}`);
       }
     }
 

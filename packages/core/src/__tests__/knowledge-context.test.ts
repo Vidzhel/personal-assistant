@@ -383,7 +383,8 @@ describe('Orchestrator context injection integration', () => {
     expect(payload.agentDefinitions['knowledge-agent'].description).toContain(
       'Knowledge management',
     );
-    expect(payload.agentDefinitions['knowledge-agent'].tools).toContain('WebFetch');
+    expect(payload.agentDefinitions['knowledge-agent'].tools).toHaveLength(0);
+    expect(payload.agentDefinitions['knowledge-agent'].prompt).toContain('search_knowledge');
   });
 
   it('email:new does not inject knowledgeContext (agents use MCP tools instead)', async () => {
@@ -478,28 +479,20 @@ describe('Orchestrator context injection integration', () => {
 });
 
 describe('Knowledge agent definition', () => {
-  it('creates agent definition with correct description and tools', () => {
-    const def = createKnowledgeAgentDefinition(4001);
+  it('creates agent definition with correct description and MCP-only tools', () => {
+    const def = createKnowledgeAgentDefinition();
 
     expect(def.description).toContain('Knowledge management');
-    expect(def.tools).toContain('WebFetch');
-    expect(def.tools).toContain('Read');
-    expect(def.prompt).toContain('http://localhost:4001');
+    expect(def.tools).toHaveLength(0);
+    expect(def.prompt).toContain('search_knowledge');
+    expect(def.prompt).toContain('save_knowledge');
+    expect(def.prompt).toContain('get_knowledge_context');
   });
 
-  it('includes all API endpoints in the agent prompt', () => {
-    const def = createKnowledgeAgentDefinition(3000);
+  it('instructs agent not to use WebFetch for localhost APIs', () => {
+    const def = createKnowledgeAgentDefinition();
 
-    // Key endpoints
-    expect(def.prompt).toContain('/api/knowledge/search');
-    expect(def.prompt).toContain('/api/knowledge/timeline');
-    expect(def.prompt).toContain('/api/knowledge/links');
-    expect(def.prompt).toContain('/api/knowledge/tags');
-    expect(def.prompt).toContain('/api/knowledge/domains');
-    expect(def.prompt).toContain('/api/knowledge/ingest');
-    expect(def.prompt).toContain('/api/knowledge/merges');
-    expect(def.prompt).toContain('/api/knowledge/clusters');
-    expect(def.prompt).toContain('permanence');
+    expect(def.prompt).toContain('Do not use WebFetch');
   });
 });
 

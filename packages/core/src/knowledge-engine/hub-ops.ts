@@ -1,4 +1,5 @@
 import { generateId, createLogger, type RavenEvent } from '@raven/shared';
+import { z } from 'zod';
 import type { Neo4jClient } from './neo4j-client.ts';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { EmbeddingEngine } from './embeddings.ts';
@@ -154,22 +155,27 @@ export function createHubEngine(deps: HubDeps): HubEngine {
       return;
     }
 
-    try {
-      const parsed = JSON.parse(payload.result) as { title?: string; summary?: string };
-      if (parsed.title) {
-        knowledgeStore
-          .update(synthBubbleId, {
-            title: parsed.title,
-            content: parsed.summary ?? parsed.title,
-          })
-          .then(() => log.info(`Synthesis bubble ${synthBubbleId} updated with LLM content`))
-          .catch((err: unknown) => {
-            const msg = err instanceof Error ? err.message : String(err);
-            log.error(`Failed to update synthesis bubble ${synthBubbleId}: ${msg}`);
-          });
-      }
-    } catch {
-      log.warn(`Failed to parse synthesis LLM response for task ${payload.taskId}`);
+    const SynthesisResultSchema = z.object({
+      title: z.string().optional(),
+      summary: z.string().optional(),
+    });
+    const synthParseResult = SynthesisResultSchema.safeParse(JSON.parse(payload.result));
+    if (!synthParseResult.success) {
+      log.warn(`Invalid synthesis LLM response for task ${payload.taskId}: ${synthParseResult.error.message}`);
+      return;
+    }
+    const parsed = synthParseResult.data;
+    if (parsed.title) {
+      knowledgeStore
+        .update(synthBubbleId, {
+          title: parsed.title,
+          content: parsed.summary ?? parsed.title,
+        })
+        .then(() => log.info(`Synthesis bubble ${synthBubbleId} updated with LLM content`))
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          log.error(`Failed to update synthesis bubble ${synthBubbleId}: ${msg}`);
+        });
     }
   }
 

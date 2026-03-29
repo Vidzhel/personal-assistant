@@ -1,4 +1,5 @@
 import { generateId, createLogger, type KnowledgeCluster, type RavenEvent } from '@raven/shared';
+import { z } from 'zod';
 import type { Neo4jClient } from './neo4j-client.ts';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { EmbeddingEngine } from './embeddings.ts';
@@ -141,28 +142,33 @@ export function createClusteringOps(deps: ClusteringOpsDeps): ClusteringOps {
       return;
     }
 
-    try {
-      const parsed = JSON.parse(payload.result) as { label?: string; description?: string };
-      if (parsed.label) {
-        neo4j
-          .run(
-            `MATCH (c:Cluster {id: $clusterId})
-             SET c.label = $label, c.description = $description, c.updatedAt = $now`,
-            {
-              clusterId,
-              label: parsed.label,
-              description: parsed.description ?? null,
-              now: new Date().toISOString(),
-            },
-          )
-          .then(() => log.info(`Cluster ${clusterId} label updated from LLM`))
-          .catch((err: unknown) => {
-            const msg = err instanceof Error ? err.message : String(err);
-            log.error(`Failed to update cluster ${clusterId} label: ${msg}`);
-          });
-      }
-    } catch {
-      log.warn(`Failed to parse cluster label LLM response for task ${payload.taskId}`);
+    const LabelResultSchema = z.object({
+      label: z.string().optional(),
+      description: z.string().optional(),
+    });
+    const labelParseResult = LabelResultSchema.safeParse(JSON.parse(payload.result));
+    if (!labelParseResult.success) {
+      log.warn(`Invalid cluster label response: ${labelParseResult.error.message}`);
+      return;
+    }
+    const parsed = labelParseResult.data;
+    if (parsed.label) {
+      neo4j
+        .run(
+          `MATCH (c:Cluster {id: $clusterId})
+           SET c.label = $label, c.description = $description, c.updatedAt = $now`,
+          {
+            clusterId,
+            label: parsed.label,
+            description: parsed.description ?? null,
+            now: new Date().toISOString(),
+          },
+        )
+        .then(() => log.info(`Cluster ${clusterId} label updated from LLM`))
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          log.error(`Failed to update cluster ${clusterId} label: ${msg}`);
+        });
     }
   }
 
