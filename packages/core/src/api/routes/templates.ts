@@ -11,9 +11,12 @@ interface TemplateDeps {
 export function registerTemplateRoutes(app: FastifyInstance, deps: TemplateDeps): void {
   const { templateRegistry, templateScheduler } = deps;
 
-  // GET /api/templates — list all templates
-  app.get('/api/templates', async () => {
-    const templates = templateRegistry.getAllTemplates();
+  // GET /api/templates — list templates (optionally filtered by projectId)
+  app.get('/api/templates', async (req) => {
+    const { projectId } = req.query as { projectId?: string };
+    const templates = projectId
+      ? templateRegistry.listTemplates(projectId)
+      : templateRegistry.getAllTemplates();
     return templates.map((t) => ({
       name: t.name,
       displayName: t.displayName,
