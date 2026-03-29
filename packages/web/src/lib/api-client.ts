@@ -293,6 +293,37 @@ export const api = {
     }),
   unlinkKnowledgeFromProject: (projectId: string, bubbleId: string) =>
     request(`/projects/${projectId}/knowledge-links/${bubbleId}`, { method: 'DELETE' }),
+
+  // Project children
+  getProjectChildren: (id: string) =>
+    request<ProjectChildRecord[]>(`/projects/${id}/children`),
+
+  // Templates
+  getTemplates: () => request<TemplateRecord[]>('/templates'),
+  getTemplate: (name: string) =>
+    request<TemplateDetailRecord>(`/templates/${encodeURIComponent(name)}`),
+  triggerTemplate: (name: string, params?: Record<string, unknown>) =>
+    request<{ treeId: string }>(`/templates/${encodeURIComponent(name)}/trigger`, {
+      method: 'POST',
+      body: JSON.stringify({ params }),
+    }),
+
+  // Task trees
+  getTaskTrees: () => request<TaskTreeRecord[]>('/task-trees'),
+  getTaskTree: (id: string) => request<TaskTreeDetailRecord>(`/task-trees/${id}`),
+  approveTaskTree: (id: string) =>
+    request(`/task-trees/${id}/approve`, { method: 'POST' }),
+  cancelTaskTree: (id: string) =>
+    request(`/task-trees/${id}/cancel`, { method: 'POST' }),
+  approveTaskTreeTask: (treeId: string, taskId: string) =>
+    request(`/task-trees/${treeId}/tasks/${taskId}/approve`, { method: 'POST' }),
+
+  // Scaffolding
+  scaffoldDomain: (plan: ScaffoldDomainPlan) =>
+    request<ScaffoldResult>('/scaffold/domain', {
+      method: 'POST',
+      body: JSON.stringify(plan),
+    }),
 };
 
 export interface Project {
@@ -619,4 +650,84 @@ export interface LinkedBubbleSummary {
   source: string;
   linkedBy: string | null;
   createdAt: string;
+}
+
+export interface ProjectChildRecord {
+  id: string;
+  name: string;
+  displayName?: string;
+  description?: string;
+  hasContextMd: boolean;
+  childCount: number;
+}
+
+export interface TemplateRecord {
+  name: string;
+  displayName: string;
+  description?: string;
+  taskCount: number;
+  triggers: Array<{ type: string }>;
+}
+
+export interface TemplateDetailRecord extends TemplateRecord {
+  params: Record<
+    string,
+    { type: string; required: boolean; default?: unknown; description?: string }
+  >;
+  tasks: Array<{
+    id: string;
+    title: string;
+    type: string;
+    blockedBy: string[];
+    agent?: string;
+  }>;
+  plan: { approval: string; parallel: boolean };
+}
+
+export interface TaskTreeRecord {
+  id: string;
+  status: string;
+  plan?: string;
+  taskCount: number;
+  completedCount: number;
+  createdAt: string;
+}
+
+export interface ExecutionTaskRecord {
+  id: string;
+  title: string;
+  type: string;
+  status: string;
+  agent?: string;
+  blockedBy: string[];
+  summary?: string;
+  artifacts: Array<{ type: string; label: string; filePath?: string }>;
+  retryCount: number;
+  lastError?: string;
+  validationResult?: {
+    gate1Passed?: boolean;
+    gate2Passed?: boolean;
+    gate3Passed?: boolean;
+    gate3Score?: number;
+  };
+}
+
+export interface TaskTreeDetailRecord extends TaskTreeRecord {
+  projectId?: string;
+  tasks: ExecutionTaskRecord[];
+}
+
+export interface ScaffoldDomainPlan {
+  projects: Array<{ path: string; displayName?: string; description?: string }>;
+  agents: Array<{ projectPath: string; agent: Record<string, unknown> }>;
+  templates: Array<{ projectPath: string; template: Record<string, unknown> }>;
+  schedules: Array<{ projectPath: string; schedule: Record<string, unknown> }>;
+}
+
+export interface ScaffoldResult {
+  projectsCreated: string[];
+  agentsCreated: string[];
+  templatesCreated: string[];
+  schedulesCreated: string[];
+  errors: string[];
 }
