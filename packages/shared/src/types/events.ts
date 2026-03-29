@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { PermissionTier } from './permissions.ts';
 import { PermissionTierSchema } from './permissions.ts';
+import type { TaskTreeNode } from './task-execution.ts';
 
 export interface BaseEvent {
   id: string;
@@ -800,6 +801,17 @@ export interface TranscriptionFailedEvent extends BaseEvent {
   };
 }
 
+export interface ExecutionTreeCreateEvent extends BaseEvent {
+  type: 'execution:tree:create';
+  payload: {
+    treeId: string;
+    projectId: string;
+    sessionId: string;
+    plan?: string;
+    tasks: TaskTreeNode[];
+  };
+}
+
 export type RavenEvent =
   | NewEmailEvent
   | ScheduleTriggeredEvent
@@ -884,7 +896,8 @@ export type RavenEvent =
   | SessionCompactedEvent
   | TranscriptionRequestEvent
   | TranscriptionCompleteEvent
-  | TranscriptionFailedEvent;
+  | TranscriptionFailedEvent
+  | ExecutionTreeCreateEvent;
 
 export type RavenEventType = RavenEvent['type'];
 

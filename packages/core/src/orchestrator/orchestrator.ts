@@ -12,6 +12,7 @@ import {
   type Project,
   type SystemAccessLevel,
 } from '@raven/shared';
+import { buildTriageInstructions, parseTriageResponse } from '../task-execution/plan-builder.ts';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 import type { SessionManager } from '../session-manager/session-manager.ts';
@@ -79,6 +80,8 @@ export class Orchestrator {
   private capabilityLibrary?: CapabilityLibrary;
   private projectRegistry?: ProjectRegistry;
   private port: number;
+  /** Task IDs from user chat that may contain PLANNED triage responses */
+  private pendingTriageTasks = new Map<string, { projectId: string; sessionId: string }>();
 
   constructor(deps: OrchestratorDeps) {
     this.eventBus = deps.eventBus;
@@ -105,6 +108,7 @@ export class Orchestrator {
       this.handleUserChat(e).catch((err: unknown) => log.error(`handleUserChat failed: ${err}`));
     });
     this.eventBus.on<AgentTaskCompleteEvent>('agent:task:complete', (e) => {
+      this.handleTaskCompleteTriage(e);
       this.handleTaskCompleteCompaction(e).catch((err: unknown) =>
         log.error(`handleTaskCompleteCompaction failed: ${err}`),
       );
@@ -371,6 +375,15 @@ export class Orchestrator {
       }
     }
 
+    // Build triage instructions for DIRECT/DELEGATED/PLANNED classification
+    let triageInstructions: string | undefined;
+    try {
+      const agentNames = Object.keys(agentDefinitions);
+      triageInstructions = buildTriageInstructions(agentNames, []);
+    } catch (err) {
+      log.warn(`Triage instructions generation failed: ${err}`);
+    }
+
     // Merge knowledge agent into agent definitions
     agentDefinitions['knowledge-agent'] = createKnowledgeAgentDefinition(this.port);
 
@@ -462,6 +475,11 @@ export class Orchestrator {
       prompt = `${metaInstructions}\n\n${prompt}`;
     }
 
+    // Prepend triage instructions for execution mode classification
+    if (triageInstructions) {
+      prompt = `[${triageInstructions}]\n\n${prompt}`;
+    }
+
     // Prepend tool use instructions
     prompt = `[System: ${resolveToolUseInstructions()}]\n\n${prompt}`;
 
@@ -469,6 +487,9 @@ export class Orchestrator {
     prompt = `[System Access Control: ${resolveSystemAccessInstructions(projectForAccess)}]\n\n${prompt}`;
 
     const taskId = generateId();
+
+    // Track this task for triage response parsing
+    this.pendingTriageTasks.set(taskId, { projectId, sessionId: session.id });
 
     this.eventBus.emit({
       id: generateId(),
@@ -492,6 +513,37 @@ export class Orchestrator {
         sessionId: session.id,
         projectId,
         namedAgentId,
+      },
+    });
+  }
+
+  private handleTaskCompleteTriage(event: AgentTaskCompleteEvent): void {
+    const { taskId, result } = event.payload;
+
+    const triageContext = this.pendingTriageTasks.get(taskId);
+    if (!triageContext) return; // Not a user-chat task, skip triage
+    this.pendingTriageTasks.delete(taskId);
+
+    const triage = parseTriageResponse(result);
+    if (triage.mode !== 'planned' || !triage.taskTree) return; // DIRECT/DELEGATED — no action needed
+
+    log.info(
+      `PLANNED triage detected for task ${taskId}: ${triage.planDescription ?? 'no description'}`,
+    );
+
+    const treeId = generateId();
+    this.eventBus.emit({
+      id: generateId(),
+      timestamp: Date.now(),
+      source: SOURCE_ORCHESTRATOR,
+      projectId: triageContext.projectId,
+      type: 'execution:tree:create',
+      payload: {
+        treeId,
+        projectId: triageContext.projectId,
+        sessionId: triageContext.sessionId,
+        plan: triage.planDescription,
+        tasks: triage.taskTree,
       },
     });
   }
