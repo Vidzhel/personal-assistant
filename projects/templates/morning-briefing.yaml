@@ -1,0 +1,44 @@
+name: morning-briefing
+displayName: Morning Briefing
+description: Compile and send daily morning briefing
+
+trigger:
+  - type: schedule
+    cron: "0 6 * * *"
+    timezone: UTC
+
+plan:
+  approval: auto
+  parallel: true
+
+tasks:
+  - id: fetch-emails
+    type: agent
+    title: Fetch recent emails
+    agent: gmail
+    prompt: "Search for unread emails from the last 12 hours and provide a summary of important messages, including sender, subject, and urgency level."
+    blockedBy: []
+
+  - id: fetch-tasks
+    type: agent
+    title: Fetch overdue tasks
+    agent: ticktick
+    prompt: "Get all overdue tasks and tasks due today. List each with its title, due date, and priority."
+    blockedBy: []
+
+  - id: compile-briefing
+    type: agent
+    title: Compile morning briefing
+    agent: digest
+    prompt: "Compile a concise morning briefing from the email summary and overdue tasks. Include sections for urgent emails, task reminders, and a prioritized action list for the day."
+    blockedBy:
+      - fetch-emails
+      - fetch-tasks
+
+  - id: send-message
+    type: notify
+    title: Send briefing via Telegram
+    channel: telegram
+    message: "Morning briefing compiled — check the digest for today's priorities."
+    blockedBy:
+      - compile-briefing

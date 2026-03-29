@@ -1,0 +1,22 @@
+name: system-maintenance
+displayName: System Maintenance
+description: Periodic system health inspection, dependency audit, and improvement recommendations
+
+trigger:
+  - type: schedule
+    cron: "0 2 * * 0"
+    timezone: UTC
+
+plan:
+  approval: manual
+  parallel: false
+
+tasks:
+  - id: run-maintenance
+    type: agent
+    title: Run system maintenance
+    prompt: "Perform a full system health inspection: check service status, review error logs from the past week, audit dependencies for updates or vulnerabilities, and produce a report with improvement recommendations."
+    blockedBy: []
+    validation:
+      maxRetries: 2
+      onMaxRetriesFailed: escalate

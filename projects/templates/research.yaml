@@ -1,5 +1,23 @@
 name: research
-title: Research Topic
+displayName: Research Topic
 description: Research a topic and produce a summary report
-prompt: Research the given topic thoroughly and produce a concise summary with key findings, sources, and recommendations.
-defaultAgentId: orchestrator
+
+params:
+  topic:
+    type: string
+    required: true
+    description: The topic to research
+
+trigger:
+  - type: manual
+
+plan:
+  approval: auto
+  parallel: false
+
+tasks:
+  - id: research-topic
+    type: agent
+    title: "Research: {{ topic }}"
+    prompt: "Research the topic '{{ topic }}' thoroughly and produce a concise summary with key findings, sources, and recommendations."
+    blockedBy: []
