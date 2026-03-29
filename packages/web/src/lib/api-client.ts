@@ -234,6 +234,9 @@ export const api = {
     description?: string;
     instructions?: string;
     suiteIds?: string[];
+    skills?: string[];
+    bash?: object;
+    projectScope?: string;
   }) => request<NamedAgentRecord>('/agents', { method: 'POST', body: JSON.stringify(data) }),
   updateAgent: (
     id: string,
@@ -242,6 +245,8 @@ export const api = {
       description?: string | null;
       instructions?: string | null;
       suiteIds?: string[];
+      skills?: string[];
+      bash?: object;
     },
   ) => request<NamedAgentRecord>(`/agents/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteAgent: (id: string) => request(`/agents/${id}`, { method: 'DELETE' }),

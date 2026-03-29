@@ -85,12 +85,42 @@ export function AgentFormModal() {
 
   async function handleSubmit() {
     if (!validateName(name)) return;
+
+    const bashConfig =
+      bashAccess !== 'none'
+        ? {
+            access: bashAccess,
+            ...(allowedCommands.trim() && {
+              allowedCommands: allowedCommands
+                .split('\n')
+                .map((s) => s.trim())
+                .filter(Boolean),
+            }),
+            ...(allowedPaths.trim() && {
+              allowedPaths: allowedPaths
+                .split('\n')
+                .map((s) => s.trim())
+                .filter(Boolean),
+            }),
+            ...(deniedPaths.trim() && {
+              deniedPaths: deniedPaths
+                .split('\n')
+                .map((s) => s.trim())
+                .filter(Boolean),
+            }),
+          }
+        : undefined;
+
+    const skillsArray = Array.from(selectedSkills);
+
     if (editing) {
       await updateAgent(editing.id, {
         name,
         description,
         instructions,
         suiteIds: Array.from(selectedSuites),
+        skills: skillsArray.length > 0 ? skillsArray : undefined,
+        bash: bashConfig,
       });
     } else {
       await createAgent({
@@ -98,6 +128,9 @@ export function AgentFormModal() {
         description: description || undefined,
         instructions: instructions || undefined,
         suiteIds: Array.from(selectedSuites),
+        skills: skillsArray.length > 0 ? skillsArray : undefined,
+        bash: bashConfig,
+        projectScope: projectScope || undefined,
       });
     }
   }

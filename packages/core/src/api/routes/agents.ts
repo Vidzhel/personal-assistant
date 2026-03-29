@@ -5,6 +5,7 @@ import {
   createLogger,
   NamedAgentCreateInputSchema,
   NamedAgentUpdateInputSchema,
+  BashAccessSchema,
 } from '@raven/shared';
 import type { AgentYaml } from '@raven/shared';
 import type { NamedAgentStore } from '../../agent-registry/named-agent-store.ts';
@@ -44,6 +45,7 @@ async function syncYamlCreate(
     description: string | null;
     skills: string[];
     instructions: string | null;
+    bash?: z.infer<typeof BashAccessSchema>;
   },
   projectScope?: string,
 ): Promise<void> {
@@ -56,6 +58,7 @@ async function syncYamlCreate(
     description: agent.description ?? '',
     skills: agent.skills,
     instructions: agent.instructions ?? undefined,
+    ...(agent.bash && { bash: agent.bash }),
   } as AgentYaml);
   if (projectRegistry) await projectRegistry.load(projectsDir);
 }
@@ -68,6 +71,7 @@ async function syncYamlUpdate(
     description: string | null;
     skills: string[];
     instructions: string | null;
+    bash?: z.infer<typeof BashAccessSchema>;
   },
 ): Promise<void> {
   const { agentYamlStore, projectRegistry, projectsDir } = deps;
@@ -78,6 +82,7 @@ async function syncYamlUpdate(
     description: agent.description ?? '',
     skills: agent.skills,
     instructions: agent.instructions ?? undefined,
+    ...(agent.bash && { bash: agent.bash }),
   });
   await projectRegistry.load(projectsDir);
 }
@@ -181,7 +186,11 @@ export function registerAgentRoutes(app: FastifyInstance, deps: AgentRouteDeps):
 
       // Also write YAML file if filesystem backing is available
       try {
-        await syncYamlCreate(deps, agent, projectScope);
+        await syncYamlCreate(
+          deps,
+          { ...agent, bash: result.data.bash },
+          projectScope,
+        );
       } catch (yamlErr) {
         log.warn(`Failed to write agent YAML for "${agent.name}": ${yamlErr}`);
       }
@@ -212,7 +221,7 @@ export function registerAgentRoutes(app: FastifyInstance, deps: AgentRouteDeps):
 
       // Also update YAML file if filesystem backing is available
       try {
-        await syncYamlUpdate(deps, agent);
+        await syncYamlUpdate(deps, { ...agent, bash: result.data.bash });
       } catch (yamlErr) {
         log.warn(`Failed to update agent YAML for "${agent.name}": ${yamlErr}`);
       }

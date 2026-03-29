@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { McpServerConfig, SubAgentDefinition, Priority } from './events.ts';
 import type { BashAccess } from './project-fs.ts';
+import { BashAccessSchema } from '../project/schemas.ts';
 
 export interface NamedAgent {
   id: string;
@@ -23,6 +24,7 @@ export const NamedAgentCreateInputSchema = z.object({
   instructions: z.string().optional(),
   suiteIds: z.array(z.string()).default([]),
   skills: z.array(z.string()).default([]),
+  bash: BashAccessSchema.optional(),
 });
 
 export type NamedAgentCreateInput = z.infer<typeof NamedAgentCreateInputSchema>;
@@ -37,6 +39,7 @@ export const NamedAgentUpdateInputSchema = z.object({
   instructions: z.string().nullable().optional(),
   suiteIds: z.array(z.string()).optional(),
   skills: z.array(z.string()).optional(),
+  bash: BashAccessSchema.optional(),
 });
 
 export type NamedAgentUpdateInput = z.infer<typeof NamedAgentUpdateInputSchema>;
