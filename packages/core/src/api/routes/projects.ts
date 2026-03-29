@@ -7,12 +7,14 @@ import {
   ProjectUpdateInput,
 } from '@raven/shared';
 import type { EventBus } from '../../event-bus/event-bus.ts';
+import type { ProjectRegistry } from '../../project-registry/project-registry.ts';
 import { getDb } from '../../db/database.ts';
 
 const BAD_REQUEST = 400;
 
 interface ProjectRouteDeps {
   eventBus: EventBus;
+  projectRegistry?: ProjectRegistry;
 }
 
 // eslint-disable-next-line max-lines-per-function -- route registration for all project CRUD endpoints
@@ -20,14 +22,48 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
   app.get('/api/projects', async () => {
     const db = getDb();
     const rows = db.prepare('SELECT * FROM projects ORDER BY updated_at DESC').all();
-    return rows.map(parseProjectRow);
+    return rows.map((row) => enrichWithRegistry(parseProjectRow(row), deps.projectRegistry));
   });
 
   app.get<{ Params: { id: string } }>('/api/projects/:id', async (req, reply) => {
     const db = getDb();
     const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
     if (!row) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
-    return parseProjectRow(row);
+    return enrichWithRegistry(parseProjectRow(row), deps.projectRegistry);
+  });
+
+  // GET /api/projects/:id/children — list sub-projects from the filesystem registry
+  app.get<{ Params: { id: string } }>('/api/projects/:id/children', async (req, reply) => {
+    if (!deps.projectRegistry) {
+      return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project registry not available' });
+    }
+
+    const { id } = req.params;
+
+    // Try to find by name match (DB project name → registry project name)
+    const db = getDb();
+    const dbRow = db.prepare('SELECT name FROM projects WHERE id = ?').get(id) as
+      | { name: string }
+      | undefined;
+
+    const registryNode = dbRow
+      ? deps.projectRegistry.findByName(dbRow.name)
+      : deps.projectRegistry.getProject(id);
+
+    if (!registryNode) {
+      return [];
+    }
+
+    const children = deps.projectRegistry.getProjectChildren(registryNode.id);
+    return children.map((child) => ({
+      id: child.id,
+      name: child.name,
+      displayName: child.displayName,
+      description: child.description,
+      path: child.relativePath,
+      hasContextMd: child.contextMd.length > 0,
+      childCount: child.children.length,
+    }));
   });
 
   app.post('/api/projects', async (req, reply) => {
@@ -139,6 +175,27 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
 
     return { success: true };
   });
+}
+
+interface EnrichedProject extends Project {
+  parentId?: string;
+  children?: string[];
+  hasContextMd?: boolean;
+}
+
+function enrichWithRegistry(project: Project, registry?: ProjectRegistry): EnrichedProject {
+  if (!registry) return project;
+
+  // Match DB project to registry by name (case-insensitive)
+  const node = registry.findByName(project.name);
+  if (!node) return project;
+
+  return {
+    ...project,
+    parentId: node.parentId ?? undefined,
+    children: node.children,
+    hasContextMd: node.contextMd.length > 0,
+  };
 }
 
 function parseProjectRow(row: unknown): Project {

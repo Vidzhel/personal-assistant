@@ -47,6 +47,8 @@ import type { TaskStore } from '../task-manager/task-store.ts';
 import type { TemplateLoader } from '../task-manager/template-loader.ts';
 import type { NamedAgentStore } from '../agent-registry/named-agent-store.ts';
 import type { SuiteScaffolder } from '../suite-registry/suite-scaffolder.ts';
+import type { ProjectRegistry } from '../project-registry/project-registry.ts';
+import type { AgentYamlStore } from '../project-registry/agent-yaml-store.ts';
 import { registerSSERoutes } from './sse/stream.ts';
 import { registerWebSocketHandler } from './ws/handler.ts';
 import { registerConfigChangesRoutes, type ConfigChangeResolver } from './routes/config-changes.ts';
@@ -89,6 +91,9 @@ export interface ApiDeps {
   configChangeResolver?: ConfigChangeResolver;
   sessionRetrospective?: SessionRetrospective;
   dataDir?: string;
+  projectRegistry?: ProjectRegistry;
+  agentYamlStore?: AgentYamlStore;
+  projectsDir?: string;
 }
 
 // eslint-disable-next-line max-lines-per-function -- server setup registers all route groups
@@ -107,7 +112,7 @@ export async function createApiServer(
 
   // REST routes
   registerHealthRoute(app, deps);
-  registerProjectRoutes(app, { eventBus: deps.eventBus });
+  registerProjectRoutes(app, { eventBus: deps.eventBus, projectRegistry: deps.projectRegistry });
   registerSessionRoutes(app, deps);
   registerChatRoute(app, deps);
   registerSuiteRoutes(app, { ...deps, suiteScaffolder: deps.suiteScaffolder });
@@ -165,6 +170,9 @@ export async function createApiServer(
       agentManager: deps.agentManager,
       suiteRegistry: deps.suiteRegistry,
       taskStore: deps.taskStore,
+      agentYamlStore: deps.agentYamlStore,
+      projectRegistry: deps.projectRegistry,
+      projectsDir: deps.projectsDir,
     });
   }
 
