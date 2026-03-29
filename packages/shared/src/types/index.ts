@@ -14,3 +14,4 @@ export * from './task-execution.ts';
 export * from './config-history.ts';
 export * from './library.ts';
 export * from './project-fs.ts';
+export * from './templates.ts';

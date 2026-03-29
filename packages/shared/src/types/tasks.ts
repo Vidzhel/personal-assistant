@@ -32,7 +32,8 @@ export interface RavenTask {
   completedAt?: string;
 }
 
-export interface TaskTemplate {
+/** Simple task template (see templates.ts for the unified pipeline template format) */
+export interface SimpleTaskTemplate {
   name: string;
   title: string;
   description?: string;
@@ -73,7 +74,8 @@ export const TaskUpdateInputSchema = z.object({
 
 export type TaskUpdateInput = z.infer<typeof TaskUpdateInputSchema>;
 
-export const TaskTemplateSchema = z.object({
+/** Simple task template schema (see templates.ts for the unified pipeline template format) */
+export const SimpleTaskTemplateSchema = z.object({
   name: z.string().min(1),
   title: z.string().min(1),
   description: z.string().optional(),

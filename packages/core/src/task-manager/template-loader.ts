@@ -1,14 +1,19 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import { createLogger, type TaskTemplate, type RavenTask, TaskTemplateSchema } from '@raven/shared';
+import {
+  createLogger,
+  type SimpleTaskTemplate,
+  type RavenTask,
+  SimpleTaskTemplateSchema,
+} from '@raven/shared';
 import type { TaskStore } from './task-store.ts';
 
 const log = createLogger('template-loader');
 
 export interface TemplateLoader {
-  getTemplate: (name: string) => TaskTemplate | undefined;
-  listTemplates: () => TaskTemplate[];
+  getTemplate: (name: string) => SimpleTaskTemplate | undefined;
+  listTemplates: () => SimpleTaskTemplate[];
   createTaskFromTemplate: (
     templateName: string,
     overrides?: Partial<{
@@ -27,7 +32,7 @@ export function createTemplateLoader(deps: {
   taskStore: TaskStore;
 }): TemplateLoader {
   const { templatesDir, taskStore } = deps;
-  const templates = new Map<string, TaskTemplate>();
+  const templates = new Map<string, SimpleTaskTemplate>();
 
   function loadTemplates(): void {
     if (!existsSync(templatesDir)) {
@@ -43,7 +48,7 @@ export function createTemplateLoader(deps: {
       try {
         const content = readFileSync(join(templatesDir, file), 'utf-8');
         const raw: unknown = parseYaml(content);
-        const result = TaskTemplateSchema.safeParse(raw);
+        const result = SimpleTaskTemplateSchema.safeParse(raw);
 
         if (!result.success) {
           log.warn(`Invalid template ${file}: ${result.error.message}`);
@@ -62,11 +67,11 @@ export function createTemplateLoader(deps: {
   loadTemplates();
 
   return {
-    getTemplate(name: string): TaskTemplate | undefined {
+    getTemplate(name: string): SimpleTaskTemplate | undefined {
       return templates.get(name);
     },
 
-    listTemplates(): TaskTemplate[] {
+    listTemplates(): SimpleTaskTemplate[] {
       return [...templates.values()];
     },
 
