@@ -31,6 +31,8 @@ export function AgentFormModal() {
     new Set(editing?.suiteIds ?? []),
   );
   const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set());
+  const [model, setModel] = useState(editing?.model ?? '');
+  const [maxTurns, setMaxTurns] = useState(editing?.maxTurns?.toString() ?? '');
   const [bashAccess, setBashAccess] = useState<BashAccess>('none');
   const [allowedCommands, setAllowedCommands] = useState('');
   const [allowedPaths, setAllowedPaths] = useState('');
@@ -48,6 +50,8 @@ export function AgentFormModal() {
       setName(editing.name);
       setDescription(editing.description ?? '');
       setInstructions(editing.instructions ?? '');
+      setModel(editing.model ?? '');
+      setMaxTurns(editing.maxTurns?.toString() ?? '');
       setSelectedSuites(new Set(editing.suiteIds));
     }
   }, [editing]);
@@ -98,11 +102,14 @@ export function AgentFormModal() {
     };
   }
 
+  // eslint-disable-next-line complexity -- form submission with create/edit branches
   async function handleSubmit() {
     if (!validateName(name)) return;
     const bashConfig = buildBashConfig();
     const skillsArray = Array.from(selectedSkills);
     const skills = skillsArray.length > 0 ? skillsArray : undefined;
+
+    const parsedMaxTurns = maxTurns ? parseInt(maxTurns, 10) : undefined;
 
     if (editing) {
       await updateAgent(editing.id, {
@@ -111,6 +118,8 @@ export function AgentFormModal() {
         instructions,
         suiteIds: Array.from(selectedSuites),
         skills,
+        model: model || null,
+        maxTurns: parsedMaxTurns ?? null,
         bash: bashConfig,
       });
     } else {
@@ -120,6 +129,8 @@ export function AgentFormModal() {
         instructions: instructions || undefined,
         suiteIds: Array.from(selectedSuites),
         skills,
+        model: model || undefined,
+        maxTurns: parsedMaxTurns,
         bash: bashConfig,
         projectScope: projectScope || undefined,
       });
@@ -192,6 +203,37 @@ export function AgentFormModal() {
               className="w-full px-3 py-2 rounded border text-sm resize-y"
               style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}
             />
+          </div>
+
+          {/* Model and Max Turns */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Model</label>
+              <select
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                className="w-full px-3 py-2 rounded border text-sm"
+                style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}
+              >
+                <option value="">Default (sonnet)</option>
+                <option value="haiku">Haiku</option>
+                <option value="sonnet">Sonnet</option>
+                <option value="opus">Opus</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Max Turns</label>
+              <input
+                type="number"
+                value={maxTurns}
+                onChange={(e) => setMaxTurns(e.target.value)}
+                placeholder="10"
+                min={1}
+                max={100}
+                className="w-full px-3 py-2 rounded border text-sm"
+                style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}
+              />
+            </div>
           </div>
 
           {/* Skills multi-select */}

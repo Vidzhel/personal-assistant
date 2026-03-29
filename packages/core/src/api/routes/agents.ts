@@ -186,11 +186,7 @@ export function registerAgentRoutes(app: FastifyInstance, deps: AgentRouteDeps):
 
       // Also write YAML file if filesystem backing is available
       try {
-        await syncYamlCreate(
-          deps,
-          { ...agent, bash: result.data.bash },
-          projectScope,
-        );
+        await syncYamlCreate(deps, { ...agent, bash: result.data.bash }, projectScope);
       } catch (yamlErr) {
         log.warn(`Failed to write agent YAML for "${agent.name}": ${yamlErr}`);
       }

@@ -23,46 +23,60 @@ const nav = [
   { href: '/settings', label: 'Settings', icon: '&' },
 ];
 
-// eslint-disable-next-line max-lines-per-function -- sidebar with meta-project pinned section
-export function Sidebar() {
+interface SidebarProps {
+  collapsed?: boolean;
+  onNavigate?: () => void;
+}
+
+// eslint-disable-next-line max-lines-per-function, complexity -- sidebar with collapsed/expanded modes
+export function Sidebar({ collapsed, onNavigate }: SidebarProps) {
   const pathname = usePathname() ?? '/';
   const metaHref = `/projects/${META_PROJECT_ID}`;
   const metaActive = pathname === metaHref;
 
+  const widthClass = collapsed ? 'w-14' : 'w-56';
+
   return (
     <aside
-      className="w-56 h-screen flex flex-col border-r"
+      className={`${widthClass} h-screen flex flex-col border-r flex-shrink-0`}
       style={{ borderColor: 'var(--border)', background: 'var(--bg)' }}
     >
       <div className="p-4 border-b" style={{ borderColor: 'var(--border)' }}>
-        <h1 className="text-lg font-bold tracking-tight" style={{ color: 'var(--accent)' }}>
-          RAVEN
+        <h1
+          className={`font-bold tracking-tight ${collapsed ? 'text-sm text-center' : 'text-lg'}`}
+          style={{ color: 'var(--accent)' }}
+        >
+          {collapsed ? 'R' : 'RAVEN'}
         </h1>
-        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-          Personal Assistant
-        </p>
+        {!collapsed && (
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            Personal Assistant
+          </p>
+        )}
       </div>
 
       {/* Meta-project pinned at top */}
       <div className="px-2 pt-2">
         <Link
           href={metaHref}
+          onClick={onNavigate}
           aria-current={metaActive ? 'page' : undefined}
-          className="flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors"
+          className={`flex items-center ${collapsed ? 'justify-center' : 'gap-3'} px-3 py-2 rounded-md text-sm transition-colors`}
           style={{
             background: metaActive ? 'var(--bg-hover)' : 'transparent',
             color: metaActive ? 'var(--accent)' : 'var(--text-muted)',
           }}
+          title={collapsed ? 'Raven System' : undefined}
         >
           <span className="w-4 text-center font-mono" title="System">
             {'$'}
           </span>
-          Raven System
+          {!collapsed && 'Raven System'}
         </Link>
       </div>
       <div className="mx-3 border-b" style={{ borderColor: 'var(--border)' }} />
 
-      <nav className="flex-1 p-2 space-y-1">
+      <nav className="flex-1 p-2 space-y-1 overflow-y-auto">
         {nav.map((item) => {
           const active =
             pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
@@ -70,15 +84,17 @@ export function Sidebar() {
             <Link
               key={item.href}
               href={item.href}
+              onClick={onNavigate}
               aria-current={active ? 'page' : undefined}
-              className="flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors"
+              className={`flex items-center ${collapsed ? 'justify-center' : 'gap-3'} px-3 py-2 rounded-md text-sm transition-colors`}
               style={{
                 background: active ? 'var(--bg-hover)' : 'transparent',
                 color: active ? 'var(--text)' : 'var(--text-muted)',
               }}
+              title={collapsed ? item.label : undefined}
             >
               <span className="w-4 text-center font-mono">{item.icon}</span>
-              {item.label}
+              {!collapsed && item.label}
             </Link>
           );
         })}

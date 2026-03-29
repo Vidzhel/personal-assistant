@@ -235,6 +235,8 @@ export const api = {
     instructions?: string;
     suiteIds?: string[];
     skills?: string[];
+    model?: string;
+    maxTurns?: number;
     bash?: object;
     projectScope?: string;
   }) => request<NamedAgentRecord>('/agents', { method: 'POST', body: JSON.stringify(data) }),
@@ -246,6 +248,8 @@ export const api = {
       instructions?: string | null;
       suiteIds?: string[];
       skills?: string[];
+      model?: string | null;
+      maxTurns?: number | null;
       bash?: object;
     },
   ) => request<NamedAgentRecord>(`/agents/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
@@ -618,6 +622,8 @@ export interface NamedAgentRecord {
   description: string | null;
   instructions: string | null;
   suiteIds: string[];
+  model: string | null;
+  maxTurns: number | null;
   isDefault: boolean;
   createdAt: string;
   updatedAt: string;
@@ -670,7 +676,7 @@ export interface TemplateRecord {
   displayName: string;
   description?: string;
   taskCount: number;
-  triggers: Array<{ type: string }>;
+  trigger: Array<{ type: string }>;
 }
 
 export interface TemplateDetailRecord extends TemplateRecord {

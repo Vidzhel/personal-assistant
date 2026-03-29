@@ -24,8 +24,17 @@ interface HealthResponse {
 
 // eslint-disable-next-line max-lines-per-function -- life dashboard page with multiple data sources
 export default function DashboardPage() {
-  const { health, projects, schedules, loading, fetchAll, fetchProjects, fetchSchedules } =
-    useAppStore();
+  const {
+    health,
+    projects,
+    schedules,
+    templates,
+    loading,
+    fetchAll,
+    fetchProjects,
+    fetchSchedules,
+    fetchTemplates,
+  } = useAppStore();
 
   useEffect(() => {
     fetchAll();
@@ -56,8 +65,9 @@ export default function DashboardPage() {
     if (healthData) {
       void fetchProjects();
       void fetchSchedules();
+      void fetchTemplates();
     }
-  }, [healthData, fetchProjects, fetchSchedules]);
+  }, [healthData, fetchProjects, fetchSchedules, fetchTemplates]);
 
   if (loading && !health) {
     return (
@@ -106,6 +116,7 @@ export default function DashboardPage() {
       <StatusCards
         health={health}
         projectCount={projects.length}
+        templateCount={templates.length}
         scheduleCount={schedules.length}
       />
 

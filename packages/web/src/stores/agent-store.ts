@@ -32,6 +32,8 @@ interface AgentState {
     instructions?: string;
     suiteIds?: string[];
     skills?: string[];
+    model?: string;
+    maxTurns?: number;
     bash?: object;
     projectScope?: string;
   }) => Promise<void>;
@@ -43,6 +45,8 @@ interface AgentState {
       instructions?: string | null;
       suiteIds?: string[];
       skills?: string[];
+      model?: string | null;
+      maxTurns?: number | null;
       bash?: object;
     },
   ) => Promise<void>;

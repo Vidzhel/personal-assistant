@@ -1,7 +1,8 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { dump } from 'js-yaml';
+import yaml from 'js-yaml';
+const { dump } = yaml;
 
 import {
   createLogger,

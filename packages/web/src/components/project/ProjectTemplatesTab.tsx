@@ -84,7 +84,7 @@ export function ProjectTemplatesTab({ projectId }: ProjectTabProps) {
                 >
                   {t.taskCount} tasks
                 </span>
-                {t.triggers.map((tr, i) => (
+                {t.trigger.map((tr, i) => (
                   <span
                     key={i}
                     className="text-xs px-2 py-0.5 rounded-full"
@@ -94,7 +94,7 @@ export function ProjectTemplatesTab({ projectId }: ProjectTabProps) {
                   </span>
                 ))}
               </div>
-              {t.triggers.some((tr) => tr.type === 'manual') && (
+              {t.trigger.some((tr) => tr.type === 'manual') && (
                 <button
                   onClick={() => void openTrigger(t.name)}
                   className="w-full px-3 py-1 rounded text-xs font-medium"

@@ -1,7 +1,8 @@
 import { readFile, writeFile, unlink, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { dump, load as yamlLoad } from 'js-yaml';
+import yaml from 'js-yaml';
+const { dump, load: yamlLoad } = yaml;
 
 import { createLogger, AgentYamlSchema } from '@raven/shared';
 import type { AgentYaml } from '@raven/shared';

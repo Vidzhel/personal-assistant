@@ -1,10 +1,17 @@
 import { create } from 'zustand';
-import { api, type Project, type Skill, type Schedule } from '@/lib/api-client';
+import {
+  api,
+  type Project,
+  type Skill,
+  type Schedule,
+  type TemplateRecord,
+} from '@/lib/api-client';
 
 interface AppState {
   projects: Project[];
   skills: Skill[];
   schedules: Schedule[];
+  templates: TemplateRecord[];
   health: {
     status: string;
     uptime: number;
@@ -16,6 +23,7 @@ interface AppState {
   fetchProjects: () => Promise<void>;
   fetchSkills: () => Promise<void>;
   fetchSchedules: () => Promise<void>;
+  fetchTemplates: () => Promise<void>;
   fetchHealth: () => Promise<void>;
   fetchAll: () => Promise<void>;
 }
@@ -24,6 +32,7 @@ export const useAppStore = create<AppState>((set) => ({
   projects: [],
   skills: [],
   schedules: [],
+  templates: [],
   health: null,
   loading: false,
 
@@ -42,6 +51,11 @@ export const useAppStore = create<AppState>((set) => ({
     set({ schedules });
   },
 
+  fetchTemplates: async () => {
+    const templates = await api.getTemplates();
+    set({ templates });
+  },
+
   fetchHealth: async () => {
     const health = await api.getHealth();
     set({ health });
@@ -50,13 +64,14 @@ export const useAppStore = create<AppState>((set) => ({
   fetchAll: async () => {
     set({ loading: true });
     try {
-      const [projects, skills, schedules, health] = await Promise.all([
+      const [projects, skills, schedules, templates, health] = await Promise.all([
         api.getProjects(),
         api.getSkills(),
         api.getSchedules(),
+        api.getTemplates(),
         api.getHealth(),
       ]);
-      set({ projects, skills, schedules, health, loading: false });
+      set({ projects, skills, schedules, templates, health, loading: false });
     } catch {
       set({ loading: false });
     }

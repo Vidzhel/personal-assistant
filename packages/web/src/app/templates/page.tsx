@@ -94,7 +94,7 @@ export default function TemplatesPage() {
               >
                 {t.taskCount} tasks
               </span>
-              {t.triggers.map((tr, i) => (
+              {t.trigger.map((tr, i) => (
                 <span
                   key={i}
                   className="text-xs px-2 py-0.5 rounded-full"

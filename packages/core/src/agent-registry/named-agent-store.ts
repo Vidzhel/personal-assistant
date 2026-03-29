@@ -20,6 +20,8 @@ interface NamedAgentRow {
   instructions: string | null;
   suite_ids: string;
   skills: string;
+  model: string | null;
+  max_turns: number | null;
   is_default: number;
   created_at: string;
   updated_at: string;
@@ -41,6 +43,8 @@ function rowToAgent(row: NamedAgentRow): NamedAgent {
     instructions: row.instructions,
     suiteIds: safeParseJsonArray(row.suite_ids),
     skills: safeParseJsonArray(row.skills),
+    model: row.model,
+    maxTurns: row.max_turns,
     isDefault: row.is_default === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -76,6 +80,8 @@ function buildUpdateFields(input: NamedAgentUpdateInput): UpdateFields {
     ['instructions', 'instructions', false],
     ['suiteIds', 'suite_ids', true],
     ['skills', 'skills', true],
+    ['model', 'model', false],
+    ['maxTurns', 'max_turns', false],
   ];
 
   for (const [key, column, isJson] of fieldMap) {
@@ -124,14 +130,16 @@ export function createNamedAgentStore(deps: {
       const now = new Date().toISOString();
 
       db.run(
-        `INSERT INTO named_agents (id, name, description, instructions, suite_ids, skills, is_default, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+        `INSERT INTO named_agents (id, name, description, instructions, suite_ids, skills, model, max_turns, is_default, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
         id,
         input.name,
         input.description ?? null,
         input.instructions ?? null,
         JSON.stringify(input.suiteIds),
         JSON.stringify(input.skills),
+        input.model ?? null,
+        input.maxTurns ?? null,
         now,
         now,
       );

@@ -3,6 +3,8 @@ import type { McpServerConfig, SubAgentDefinition, Priority } from './events.ts'
 import type { BashAccess } from './project-fs.ts';
 import { BashAccessSchema } from '../project/schemas.ts';
 
+const MAX_AGENT_TURNS = 100;
+
 export interface NamedAgent {
   id: string;
   name: string;
@@ -10,6 +12,8 @@ export interface NamedAgent {
   instructions: string | null;
   suiteIds: string[]; // DEPRECATED — kept for migration
   skills: string[]; // references library skill names
+  model: string | null;
+  maxTurns: number | null;
   isDefault: boolean;
   createdAt: string;
   updatedAt: string;
@@ -24,6 +28,8 @@ export const NamedAgentCreateInputSchema = z.object({
   instructions: z.string().optional(),
   suiteIds: z.array(z.string()).default([]),
   skills: z.array(z.string()).default([]),
+  model: z.enum(['haiku', 'sonnet', 'opus']).optional(),
+  maxTurns: z.number().int().min(1).max(MAX_AGENT_TURNS).optional(),
   bash: BashAccessSchema.optional(),
 });
 
@@ -39,6 +45,8 @@ export const NamedAgentUpdateInputSchema = z.object({
   instructions: z.string().nullable().optional(),
   suiteIds: z.array(z.string()).optional(),
   skills: z.array(z.string()).optional(),
+  model: z.enum(['haiku', 'sonnet', 'opus']).nullable().optional(),
+  maxTurns: z.number().int().min(1).max(MAX_AGENT_TURNS).nullable().optional(),
   bash: BashAccessSchema.optional(),
 });
 

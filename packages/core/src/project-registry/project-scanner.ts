@@ -1,7 +1,8 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
-import { load as yamlLoad } from 'js-yaml';
+import yaml from 'js-yaml';
+const { load: yamlLoad } = yaml;
 
 import { createLogger, AgentYamlSchema, ScheduleYamlSchema } from '@raven/shared';
 import type { AgentYaml, ScheduleYaml, ProjectNode, ProjectIndex } from '@raven/shared';
