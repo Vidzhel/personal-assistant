@@ -58,51 +58,16 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('Project Context');
   });
 
-  it('includes knowledge context section when knowledgeContext is provided', () => {
+  it('does not include knowledge section (agents use MCP get_knowledge_context instead)', () => {
     const prompt = buildSystemPrompt(makeTask({ knowledgeContext: 'Some knowledge content' }));
-    expect(prompt).toContain('## Relevant Knowledge');
-    expect(prompt).toContain('Some knowledge content');
+    expect(prompt).not.toContain('## Relevant Knowledge');
   });
 
-  it('does not include knowledge section when knowledgeContext is undefined', () => {
-    const prompt = buildSystemPrompt(makeTask());
-    expect(prompt).not.toContain('Relevant Knowledge');
-  });
-
-  it('does not include knowledge section when knowledgeContext is empty string', () => {
-    const prompt = buildSystemPrompt(makeTask({ knowledgeContext: '' }));
-    expect(prompt).not.toContain('Relevant Knowledge');
-  });
-
-  it('places knowledge section before project context section', () => {
-    const project: Project = {
-      id: 'p1',
-      name: 'Test',
-      skills: [],
-      systemPrompt: 'Project info',
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-
-    const prompt = buildSystemPrompt(makeTask({ knowledgeContext: 'Knowledge info' }), project);
-    const knowledgeIdx = prompt.indexOf('## Relevant Knowledge');
-    const projectIdx = prompt.indexOf('## Project Context');
-    expect(knowledgeIdx).toBeGreaterThan(-1);
-    expect(projectIdx).toBeGreaterThan(-1);
-    expect(knowledgeIdx).toBeLessThan(projectIdx);
-  });
-
-  it('includes session references context when provided', () => {
+  it('does not include session references (agents use MCP get_session_history instead)', () => {
     const prompt = buildSystemPrompt(
       makeTask({ sessionReferencesContext: '- **Session A**: Summary here' }),
     );
-    expect(prompt).toContain('## Related Sessions');
-    expect(prompt).toContain('Session A');
-  });
-
-  it('does not include session references when not provided', () => {
-    const prompt = buildSystemPrompt(makeTask());
-    expect(prompt).not.toContain('Related Sessions');
+    expect(prompt).not.toContain('## Related Sessions');
   });
 });
 

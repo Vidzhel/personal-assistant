@@ -8,7 +8,7 @@ import type {
 } from '@raven/shared';
 import { checkBashAccess } from '../bash-gate/bash-gate.ts';
 import { parseCommand } from '../bash-gate/command-parser.ts';
-import type { MessageStore, StoredMessage } from '../session-manager/message-store.ts';
+import type { MessageStore } from '../session-manager/message-store.ts';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { PermissionEngine } from '../permission-engine/permission-engine.ts';
 import type { AuditLog } from '../permission-engine/audit-log.ts';
@@ -149,36 +149,6 @@ export function enforcePermissionGate(
   return { allowed: false, tier, reason: 'queued-for-approval' };
 }
 
-const MAX_HISTORY_MESSAGES = 50;
-
-function formatConversationHistory(messages: StoredMessage[], currentPrompt: string): string {
-  const history = messages
-    .filter(
-      (m) =>
-        m.role === 'user' ||
-        m.role === 'assistant' ||
-        m.role === 'action' ||
-        m.role === 'tool-result',
-    )
-    .slice(-MAX_HISTORY_MESSAGES);
-  // Last user message IS the current prompt (already appended by orchestrator), strip it
-  const prior = history.slice(0, -1);
-  if (prior.length === 0) return currentPrompt;
-
-  const transcript = prior
-    .map((m) => {
-      if (m.role === 'action') return `[Tool Call]: ${m.content}`;
-      if (m.role === 'tool-result') {
-        const status = m.toolSummary === 'error' ? 'ERROR' : 'OK';
-        return `[Tool Result ${status}]: ${m.content}`;
-      }
-      return `[${m.role === 'user' ? 'User' : 'Assistant'}]: ${m.content}`;
-    })
-    .join('\n\n');
-
-  return `<conversation-history>\n${transcript}\n</conversation-history>\n\n[User]: ${currentPrompt}`;
-}
-
 function resolveAgentRole(task: AgentTask): ScopeContext['role'] {
   if (task.executionTaskId) return 'task';
   if (task.skillName === '_quality-reviewer' || task.skillName === '_evaluator') return 'validation';
@@ -294,11 +264,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       allowedTools.push('Agent');
     }
 
-    let prompt = task.prompt;
-    if (task.sessionId && messageStore) {
-      const history = messageStore.getMessages(task.sessionId);
-      prompt = formatConversationHistory(history, task.prompt);
-    }
+    const prompt = task.prompt;
 
     // Track Agent tool_use IDs → sub-agent type for attribution
     const agentToolMap = new Map<string, string>();

@@ -28,32 +28,6 @@ export function buildSystemPrompt(task: AgentTask, project?: Project): string {
     parts.push('', '## Project Context (Inherited)', task.projectContextChain);
   }
 
-  if (task.knowledgeContext) {
-    parts.push(
-      '',
-      '## Relevant Knowledge',
-      'The following information from your knowledge base may be relevant:',
-      '',
-      task.knowledgeContext,
-    );
-  }
-
-  if (task.sessionReferencesContext) {
-    parts.push('', '## Related Sessions', task.sessionReferencesContext);
-  }
-
-  if (task.projectDataSourcesContext) {
-    parts.push('', '## Project Data Sources', task.projectDataSourcesContext);
-  }
-
-  if (task.taskBoardContext) {
-    parts.push('', task.taskBoardContext);
-  }
-
-  if (task.skillCatalogContext) {
-    parts.push('', task.skillCatalogContext);
-  }
-
   if (project?.systemPrompt) {
     parts.push('', '## Project Context', project.systemPrompt);
   }

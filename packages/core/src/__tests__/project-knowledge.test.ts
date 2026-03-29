@@ -259,25 +259,6 @@ describe('Project Knowledge (10.9)', () => {
   });
 
   describe('Context Injection', () => {
-    it('buildSystemPrompt includes projectDataSourcesContext', () => {
-      const task: AgentTask = {
-        id: 'test-task',
-        skillName: SKILL_ORCHESTRATOR,
-        prompt: 'test',
-        status: 'running',
-        priority: 'normal',
-        mcpServers: {},
-        agentDefinitions: {},
-        projectDataSourcesContext: '- **Docs** (gdrive): https://drive.google.com/abc',
-        projectId: PROJECT_ID,
-        createdAt: Date.now(),
-      };
-
-      const prompt = buildSystemPrompt(task);
-      expect(prompt).toContain('## Project Data Sources');
-      expect(prompt).toContain('**Docs** (gdrive)');
-    });
-
     it('buildSystemPrompt includes knowledge discovery instruction for project sessions', () => {
       const task: AgentTask = {
         id: 'test-task',
