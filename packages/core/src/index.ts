@@ -60,6 +60,8 @@ import { createKnowledgeConsolidation } from './knowledge-engine/knowledge-conso
 import { TaskExecutionEngine } from './task-execution/task-execution-engine.ts';
 import { buildTaskBoardInstructions } from './task-execution/task-board-protocol.ts';
 import { buildRetryPrompt } from './task-execution/validation-pipeline.ts';
+import { TemplateRegistry } from './template-engine/template-registry.ts';
+import { createTemplateScheduler } from './template-engine/template-scheduler.ts';
 import type { SessionIdleEvent } from '@raven/shared';
 
 const log = createLogger('raven');
@@ -274,6 +276,21 @@ async function main(): Promise<void> {
       },
     });
   });
+
+  // 7i. Init template engine (registry + scheduler)
+  const templateRegistry = new TemplateRegistry();
+  await templateRegistry.load(projectsDir);
+  log.info(
+    `Template registry loaded (${String(templateRegistry.getAllTemplates().length)} templates)`,
+  );
+
+  const templateScheduler = createTemplateScheduler({
+    templateRegistry,
+    executionEngine,
+    eventBus: baseContext.eventBus,
+  });
+  templateScheduler.start();
+  log.info('Template scheduler started');
 
   // Wire execution:tree:create → executionEngine.createTree
   baseContext.eventBus.on('execution:tree:create', (event: unknown) => {
@@ -582,6 +599,8 @@ async function main(): Promise<void> {
       agentYamlStore,
       projectsDir,
       executionEngine,
+      templateRegistry,
+      templateScheduler,
     },
     config.RAVEN_PORT,
   );
@@ -592,6 +611,7 @@ async function main(): Promise<void> {
   const shutdown = async (): Promise<void> => {
     log.info('Shutting down...');
     idleDetector.stop();
+    templateScheduler.stop();
     pipelineScheduler.shutdown();
     pipelineEventTrigger.shutdown();
     pipelineEngine.shutdown();

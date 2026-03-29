@@ -57,7 +57,10 @@ import { registerDashboardRoutes } from './routes/dashboard.ts';
 import { registerProjectKnowledgeRoutes } from './routes/project-knowledge.ts';
 import { registerFileRoutes } from './routes/files.ts';
 import { registerTaskTreeRoutes } from './routes/task-trees.ts';
+import { registerTemplateRoutes } from './routes/templates.ts';
 import type { TaskExecutionEngine } from '../task-execution/task-execution-engine.ts';
+import type { TemplateRegistry } from '../template-engine/template-registry.ts';
+import type { TemplateScheduler } from '../template-engine/template-scheduler.ts';
 
 const log = createLogger('api');
 
@@ -97,6 +100,8 @@ export interface ApiDeps {
   agentYamlStore?: AgentYamlStore;
   projectsDir?: string;
   executionEngine?: TaskExecutionEngine;
+  templateRegistry?: TemplateRegistry;
+  templateScheduler?: TemplateScheduler;
 }
 
 // eslint-disable-next-line max-lines-per-function, complexity -- server setup registers all route groups
@@ -169,6 +174,14 @@ export async function createApiServer(
   // Task execution trees
   if (deps.executionEngine) {
     registerTaskTreeRoutes(app, { executionEngine: deps.executionEngine });
+  }
+
+  // Template management
+  if (deps.templateRegistry && deps.templateScheduler) {
+    registerTemplateRoutes(app, {
+      templateRegistry: deps.templateRegistry,
+      templateScheduler: deps.templateScheduler,
+    });
   }
 
   // Named agents management
