@@ -10,6 +10,7 @@ export * from './knowledge.ts';
 export * from './insights.ts';
 export * from './integrations-config.ts';
 export * from './tasks.ts';
+export * from './task-execution.ts';
 export * from './config-history.ts';
 export * from './library.ts';
 export * from './project-fs.ts';

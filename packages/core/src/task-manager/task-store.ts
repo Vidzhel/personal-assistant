@@ -322,9 +322,11 @@ export function createTaskStore(deps: {
       );
 
       const counts: Record<TaskStatus, number> = {
+        pending_approval: 0,
         todo: 0,
         in_progress: 0,
         completed: 0,
+        blocked: 0,
         archived: 0,
       };
 

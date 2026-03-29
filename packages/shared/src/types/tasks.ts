@@ -1,6 +1,13 @@
 import { z } from 'zod';
 
-export const TaskStatusValues = ['todo', 'in_progress', 'completed', 'archived'] as const;
+export const TaskStatusValues = [
+  'pending_approval',
+  'todo',
+  'in_progress',
+  'completed',
+  'blocked',
+  'archived',
+] as const;
 export type TaskStatus = (typeof TaskStatusValues)[number];
 
 export const TaskSourceValues = ['manual', 'agent', 'template', 'ticktick', 'pipeline'] as const;
