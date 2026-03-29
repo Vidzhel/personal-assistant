@@ -9,14 +9,12 @@
     "is_default": true
   },
   {
-    "id": "d7f05610-1e25-479b-ad34-1edf26f31288",
-    "name": "resolver-test",
-    "description": "Resolver test agent",
+    "id": "173576ba-fd09-4dbd-8733-ef3109addb85",
+    "name": "model-test",
+    "description": "test model field",
     "instructions": null,
     "suite_ids": [],
-    "skills": [
-      "email-triage"
-    ],
+    "skills": [],
     "is_default": false
   }
 ]
