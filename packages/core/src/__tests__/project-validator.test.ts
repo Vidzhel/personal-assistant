@@ -93,8 +93,8 @@ describe('validateProjects', () => {
     mkAgent('work', { ...VALID_AGENT, name: 'work-agent' });
     mkSchedule('', VALID_SCHEDULE);
 
-    const errors = await validateProjects(tmpDir);
-    expect(errors).toEqual([]);
+    const result = await validateProjects(tmpDir);
+    expect(result.errors).toEqual([]);
   });
 
   it('reports invalid agent YAML', async () => {
@@ -106,9 +106,9 @@ describe('validateProjects', () => {
     mkdirSync(agentsDir, { recursive: true });
     writeFileSync(join(agentsDir, 'bad.yaml'), yamlDump({ name: 'BAD NAME!!' }));
 
-    const errors = await validateProjects(tmpDir);
-    expect(errors.length).toBeGreaterThan(0);
-    expect(errors.some((e) => e.includes('Invalid agent YAML'))).toBe(true);
+    const result = await validateProjects(tmpDir);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors.some((e) => e.includes('Invalid agent YAML'))).toBe(true);
   });
 
   it('reports invalid schedule YAML', async () => {
@@ -120,9 +120,9 @@ describe('validateProjects', () => {
     mkdirSync(schedulesDir, { recursive: true });
     writeFileSync(join(schedulesDir, 'bad.yaml'), yamlDump({ name: 'bad' }));
 
-    const errors = await validateProjects(tmpDir);
-    expect(errors.length).toBeGreaterThan(0);
-    expect(errors.some((e) => e.includes('Invalid schedule YAML'))).toBe(true);
+    const result = await validateProjects(tmpDir);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors.some((e) => e.includes('Invalid schedule YAML'))).toBe(true);
   });
 
   it('reports bash.access: full outside global/system', async () => {
@@ -134,9 +134,9 @@ describe('validateProjects', () => {
       bash: { access: 'full' },
     });
 
-    const errors = await validateProjects(tmpDir);
-    expect(errors.length).toBeGreaterThan(0);
-    expect(errors.some((e) => e.includes('bash.access: full not allowed'))).toBe(true);
+    const result = await validateProjects(tmpDir);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors.some((e) => e.includes('bash.access: full not allowed'))).toBe(true);
   });
 
   it('allows bash.access: full in global agents', async () => {
@@ -147,8 +147,8 @@ describe('validateProjects', () => {
       bash: { access: 'full' },
     });
 
-    const errors = await validateProjects(tmpDir);
-    expect(errors).toEqual([]);
+    const result = await validateProjects(tmpDir);
+    expect(result.errors).toEqual([]);
   });
 
   it('allows bash.access: full in system agents', async () => {
@@ -160,8 +160,8 @@ describe('validateProjects', () => {
       bash: { access: 'full' },
     });
 
-    const errors = await validateProjects(tmpDir);
-    expect(errors).toEqual([]);
+    const result = await validateProjects(tmpDir);
+    expect(result.errors).toEqual([]);
   });
 
   it('reports projects nested too deep (>3 levels)', async () => {
@@ -171,9 +171,9 @@ describe('validateProjects', () => {
     mkProject('a/b/c', 'Level 3');
     mkProject('a/b/c/d', 'Level 4 - too deep');
 
-    const errors = await validateProjects(tmpDir);
-    expect(errors.length).toBeGreaterThan(0);
-    expect(errors.some((e) => e.includes('nested too deep'))).toBe(true);
+    const result = await validateProjects(tmpDir);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors.some((e) => e.includes('nested too deep'))).toBe(true);
   });
 
   it('reports duplicate agent names in same scope', async () => {
@@ -189,17 +189,17 @@ describe('validateProjects', () => {
       yamlDump({ ...VALID_AGENT, displayName: 'Duplicate' }),
     );
 
-    const errors = await validateProjects(tmpDir);
-    expect(errors.length).toBeGreaterThan(0);
-    expect(errors.some((e) => e.includes('Duplicate agent name'))).toBe(true);
+    const result = await validateProjects(tmpDir);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors.some((e) => e.includes('Duplicate agent name'))).toBe(true);
   });
 
   it('passes for valid template', async () => {
     mkProject('', 'Global');
     mkTemplate('', VALID_TEMPLATE);
 
-    const errors = await validateProjects(tmpDir);
-    expect(errors).toEqual([]);
+    const result = await validateProjects(tmpDir);
+    expect(result.errors).toEqual([]);
   });
 
   it('reports invalid template YAML', async () => {
@@ -209,9 +209,9 @@ describe('validateProjects', () => {
     // Missing required fields (no tasks, no displayName)
     writeFileSync(join(templatesDir, 'bad.yaml'), yamlDump({ name: 'bad' }));
 
-    const errors = await validateProjects(tmpDir);
-    expect(errors.length).toBeGreaterThan(0);
-    expect(errors.some((e) => e.includes('Invalid template YAML'))).toBe(true);
+    const result = await validateProjects(tmpDir);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors.some((e) => e.includes('Invalid template YAML'))).toBe(true);
   });
 
   it('reports template with circular blockedBy', async () => {
@@ -237,8 +237,106 @@ describe('validateProjects', () => {
       ],
     });
 
-    const errors = await validateProjects(tmpDir);
-    expect(errors.length).toBeGreaterThan(0);
-    expect(errors.some((e) => e.includes('circular dependency'))).toBe(true);
+    const result = await validateProjects(tmpDir);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors.some((e) => e.includes('circular dependency'))).toBe(true);
+  });
+
+  it('warns when bash config deniedPaths is missing .env', async () => {
+    mkProject('', 'Global');
+    mkAgent('', {
+      ...VALID_AGENT,
+      name: 'bash-agent',
+      bash: { access: 'sandboxed', deniedPaths: ['.git'] },
+    });
+
+    const result = await validateProjects(tmpDir);
+    expect(result.errors).toEqual([]);
+    expect(result.warnings.some((w) => w.includes('.env'))).toBe(true);
+    expect(result.warnings.some((w) => w.includes('.git'))).toBe(false);
+  });
+
+  it('warns when bash config deniedPaths is missing .git', async () => {
+    mkProject('', 'Global');
+    mkAgent('', {
+      ...VALID_AGENT,
+      name: 'bash-agent',
+      bash: { access: 'sandboxed', deniedPaths: ['.env'] },
+    });
+
+    const result = await validateProjects(tmpDir);
+    expect(result.errors).toEqual([]);
+    expect(result.warnings.some((w) => w.includes('.git'))).toBe(true);
+    expect(result.warnings.some((w) => w.includes('.env'))).toBe(false);
+  });
+
+  it('warns for both .env and .git when deniedPaths is empty', async () => {
+    mkProject('', 'Global');
+    mkProject('work', 'Work');
+    mkAgent('work', {
+      ...VALID_AGENT,
+      name: 'bash-agent',
+      bash: { access: 'sandboxed', deniedPaths: [] },
+    });
+
+    const result = await validateProjects(tmpDir);
+    expect(result.errors).toEqual([]);
+    expect(result.warnings.some((w) => w.includes('.env'))).toBe(true);
+    expect(result.warnings.some((w) => w.includes('.git'))).toBe(true);
+  });
+
+  it('does not warn for deniedPaths when bash.access is none', async () => {
+    mkProject('', 'Global');
+    mkAgent('', {
+      ...VALID_AGENT,
+      name: 'no-bash-agent',
+      bash: { access: 'none' },
+    });
+
+    const result = await validateProjects(tmpDir);
+    expect(result.errors).toEqual([]);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('errors when agent references an unknown skill', async () => {
+    mkProject('', 'Global');
+    mkProject('work', 'Work');
+    mkAgent('work', {
+      ...VALID_AGENT,
+      name: 'skilled-agent',
+      skills: ['nonexistent-skill'],
+    });
+
+    const result = await validateProjects(tmpDir, {
+      knownSkills: new Set(['ticktick', 'gmail']),
+    });
+    expect(result.errors.some((e) => e.includes('unknown skill "nonexistent-skill"'))).toBe(true);
+  });
+
+  it('does not error when all skills match known skills', async () => {
+    mkProject('', 'Global');
+    mkProject('work', 'Work');
+    mkAgent('work', {
+      ...VALID_AGENT,
+      name: 'skilled-agent',
+      skills: ['ticktick', 'gmail'],
+    });
+
+    const result = await validateProjects(tmpDir, {
+      knownSkills: new Set(['ticktick', 'gmail']),
+    });
+    expect(result.errors).toEqual([]);
+  });
+
+  it('skips skill validation when knownSkills is not provided', async () => {
+    mkProject('', 'Global');
+    mkAgent('', {
+      ...VALID_AGENT,
+      name: 'skilled-agent',
+      skills: ['any-skill-name'],
+    });
+
+    const result = await validateProjects(tmpDir);
+    expect(result.errors).toEqual([]);
   });
 });

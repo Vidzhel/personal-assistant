@@ -48,8 +48,8 @@ describe('bash access integration', () => {
     });
 
     it('project validation passes for all agent bash configs', async () => {
-      const errors = await validateProjects(REAL_PROJECTS_DIR);
-      expect(errors).toEqual([]);
+      const result = await validateProjects(REAL_PROJECTS_DIR);
+      expect(result.errors).toEqual([]);
     });
   });
 
@@ -82,10 +82,10 @@ describe('bash access integration', () => {
         bash: { access: 'full' },
       });
 
-      const errors = await validateProjects(tmpDir);
-      expect(errors).toHaveLength(1);
-      expect(errors[0]).toContain('bash.access: full not allowed');
-      expect(errors[0]).toContain('risky-agent');
+      const result = await validateProjects(tmpDir);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('bash.access: full not allowed');
+      expect(result.errors[0]).toContain('risky-agent');
     });
 
     it('allows full bash access for global agents', async () => {
@@ -96,8 +96,8 @@ describe('bash access integration', () => {
         bash: { access: 'full' },
       });
 
-      const errors = await validateProjects(tmpDir);
-      expect(errors).toEqual([]);
+      const result = await validateProjects(tmpDir);
+      expect(result.errors).toEqual([]);
     });
 
     it('allows full bash access for system project agents', async () => {
@@ -108,8 +108,8 @@ describe('bash access integration', () => {
         bash: { access: 'full' },
       });
 
-      const errors = await validateProjects(tmpDir);
-      expect(errors).toEqual([]);
+      const result = await validateProjects(tmpDir);
+      expect(result.errors).toEqual([]);
     });
 
     it('flags path traversal in allowedPaths', async () => {
@@ -123,10 +123,10 @@ describe('bash access integration', () => {
         },
       });
 
-      const errors = await validateProjects(tmpDir);
-      expect(errors).toHaveLength(1);
-      expect(errors[0]).toContain('..');
-      expect(errors[0]).toContain('allowedPaths');
+      const result = await validateProjects(tmpDir);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('..');
+      expect(result.errors[0]).toContain('allowedPaths');
     });
 
     it('flags path traversal in deniedPaths', async () => {
@@ -140,10 +140,10 @@ describe('bash access integration', () => {
         },
       });
 
-      const errors = await validateProjects(tmpDir);
-      expect(errors).toHaveLength(1);
-      expect(errors[0]).toContain('..');
-      expect(errors[0]).toContain('deniedPaths');
+      const result = await validateProjects(tmpDir);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toContain('..');
+      expect(result.errors[0]).toContain('deniedPaths');
     });
 
     it('accepts valid scoped bash config without issues', async () => {
@@ -158,8 +158,8 @@ describe('bash access integration', () => {
         },
       });
 
-      const errors = await validateProjects(tmpDir);
-      expect(errors).toEqual([]);
+      const result = await validateProjects(tmpDir);
+      expect(result.errors).toEqual([]);
     });
   });
 });

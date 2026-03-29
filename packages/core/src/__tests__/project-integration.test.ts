@@ -15,8 +15,8 @@ describe('project integration', () => {
   });
 
   it('validates the real project structure', async () => {
-    const errors = await validateProjects(PROJECTS_DIR);
-    expect(errors).toEqual([]);
+    const result = await validateProjects(PROJECTS_DIR);
+    expect(result.errors).toEqual([]);
   });
 
   it('finds default agent in global scope', async () => {

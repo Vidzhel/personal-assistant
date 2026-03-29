@@ -158,8 +158,8 @@ describe('scaffolding integration', () => {
     const plan = buildUniversityPlan();
     await api.scaffoldDomain(plan);
 
-    const errors = await validateProjects(tmpDir);
-    expect(errors).toEqual([]);
+    const result = await validateProjects(tmpDir);
+    expect(result.errors).toEqual([]);
   });
 
   it('project registry resolves inheritance after scaffolding', async () => {

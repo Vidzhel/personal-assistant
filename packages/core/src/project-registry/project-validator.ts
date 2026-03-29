@@ -15,6 +15,10 @@ function shouldSkipDir(name: string): boolean {
   return name.startsWith('.') || SKIP_DIRS.has(name);
 }
 
+export interface ValidatorOptions {
+  knownSkills?: Set<string>;
+}
+
 interface YamlValidateOpts {
   dir: string;
   schema: typeof AgentYamlSchema | typeof ScheduleYamlSchema;
@@ -68,15 +72,45 @@ function checkBashPathTraversal(paths: string[], ctx: PathTraversalContext): str
   return errors;
 }
 
+function checkDeniedPathsWarnings(
+  bash: Record<string, unknown>,
+  agentName: string,
+  projectRel: string,
+): string[] {
+  const warnings: string[] = [];
+  if (bash.access === 'none') return warnings;
+
+  const deniedPaths = Array.isArray(bash.deniedPaths) ? (bash.deniedPaths as string[]) : [];
+
+  if (!deniedPaths.some((p) => p.includes('.env'))) {
+    warnings.push(
+      `bash.deniedPaths for agent "${agentName}" in "${projectRel || '_global'}" does not include .env (mandatory denies cover this at runtime, but explicit denial is recommended)`,
+    );
+  }
+  if (!deniedPaths.some((p) => p.includes('.git'))) {
+    warnings.push(
+      `bash.deniedPaths for agent "${agentName}" in "${projectRel || '_global'}" does not include .git (mandatory denies cover this at runtime, but explicit denial is recommended)`,
+    );
+  }
+
+  return warnings;
+}
+
+interface BashCheckResult {
+  errors: string[];
+  warnings: string[];
+}
+
 function checkBashAccess(
   agentRaw: Record<string, unknown>,
   agentName: string,
   projectRel: string,
-): string[] {
+): BashCheckResult {
   const bash = agentRaw.bash as Record<string, unknown> | undefined;
-  if (!bash) return [];
+  if (!bash) return { errors: [], warnings: [] };
 
   const errors: string[] = [];
+  const warnings: string[] = [];
 
   // Full access restricted to global/system agents
   if (bash.access === 'full') {
@@ -96,20 +130,29 @@ function checkBashAccess(
   errors.push(...checkBashPathTraversal(allowedPaths, { ...ctx, fieldName: 'allowedPaths' }));
   errors.push(...checkBashPathTraversal(deniedPaths, { ...ctx, fieldName: 'deniedPaths' }));
 
-  return errors;
+  warnings.push(...checkDeniedPathsWarnings(bash, agentName, projectRel));
+
+  return { errors, warnings };
+}
+
+interface AgentsDirResult {
+  errors: string[];
+  warnings: string[];
 }
 
 async function validateAgentsDir(
   agentsDir: string,
   projectRel: string,
   seenAgentNames: Set<string>,
-): Promise<string[]> {
+  opts?: ValidatorOptions,
+): Promise<AgentsDirResult> {
   const errors: string[] = [];
+  const warnings: string[] = [];
   let entries;
   try {
     entries = await readdir(agentsDir, { withFileTypes: true });
   } catch {
-    return errors;
+    return { errors, warnings };
   }
 
   const yamlFiles = entries.filter(
@@ -131,19 +174,33 @@ async function validateAgentsDir(
         seenAgentNames.add(parsed.name);
       }
 
-      errors.push(...checkBashAccess(raw, parsed.name, projectRel));
+      const bashResult = checkBashAccess(raw, parsed.name, projectRel);
+      errors.push(...bashResult.errors);
+      warnings.push(...bashResult.warnings);
+
+      if (opts?.knownSkills) {
+        const skills = Array.isArray(raw.skills) ? (raw.skills as string[]) : [];
+        for (const skill of skills) {
+          if (!opts.knownSkills.has(skill)) {
+            errors.push(
+              `Agent "${parsed.name}" in "${projectRel || '_global'}" references unknown skill "${skill}"`,
+            );
+          }
+        }
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       errors.push(`Invalid agent YAML in ${projectRel || '_global'}/${entry.name}: ${msg}`);
     }
   }
 
-  return errors;
+  return { errors, warnings };
 }
 
 interface ValidateContext {
   projectsDir: string;
   errors: string[];
+  warnings: string[];
 }
 
 async function isProjectDir(dirPath: string, isRoot: boolean): Promise<boolean> {
@@ -300,7 +357,12 @@ async function validateTemplatesDir(templatesDir: string, projectRel: string): P
   return errors;
 }
 
-async function validateDir(dirPath: string, depth: number, ctx: ValidateContext): Promise<void> {
+async function validateDir(
+  dirPath: string,
+  depth: number,
+  ctx: ValidateContext,
+  opts?: ValidatorOptions,
+): Promise<void> {
   const rel = relative(ctx.projectsDir, dirPath);
   const isRoot = rel === '' || rel === '.';
 
@@ -312,8 +374,9 @@ async function validateDir(dirPath: string, depth: number, ctx: ValidateContext)
   if (!(await isProjectDir(dirPath, isRoot))) return;
 
   const agentNames = new Set<string>();
-  const agentErrors = await validateAgentsDir(join(dirPath, 'agents'), rel, agentNames);
-  ctx.errors.push(...agentErrors);
+  const agentResult = await validateAgentsDir(join(dirPath, 'agents'), rel, agentNames, opts);
+  ctx.errors.push(...agentResult.errors);
+  ctx.warnings.push(...agentResult.warnings);
 
   const scheduleErrors = await validateYamlFiles({
     dir: join(dirPath, 'schedules'),
@@ -328,16 +391,20 @@ async function validateDir(dirPath: string, depth: number, ctx: ValidateContext)
 
   const subdirs = await getSubdirectories(dirPath);
   for (const subdir of subdirs) {
-    await validateDir(subdir, depth + 1, ctx);
+    await validateDir(subdir, depth + 1, ctx, opts);
   }
 }
 
-export async function validateProjects(projectsDir: string): Promise<string[]> {
+export async function validateProjects(
+  projectsDir: string,
+  opts?: ValidatorOptions,
+): Promise<{ errors: string[]; warnings: string[] }> {
   const ctx: ValidateContext = {
     projectsDir,
     errors: [],
+    warnings: [],
   };
 
-  await validateDir(projectsDir, 0, ctx);
-  return ctx.errors;
+  await validateDir(projectsDir, 0, ctx, opts);
+  return { errors: ctx.errors, warnings: ctx.warnings };
 }
