@@ -4,11 +4,14 @@ import { useState, useEffect } from 'react';
 import { useAgentStore } from '@/stores/agent-store';
 import { CreateSuiteForm } from './CreateSuiteForm';
 
-// eslint-disable-next-line max-lines-per-function, complexity -- React form component
+type BashAccess = 'none' | 'sandboxed' | 'scoped' | 'full';
+
+// eslint-disable-next-line max-lines-per-function, complexity -- React form component with multiple config sections
 export function AgentFormModal() {
   const {
     agents,
     availableSuites,
+    availableProjects,
     editingAgentId,
     loading,
     error,
@@ -16,6 +19,7 @@ export function AgentFormModal() {
     createAgent,
     updateAgent,
     fetchSuites,
+    fetchProjects,
   } = useAgentStore();
 
   const editing = editingAgentId ? agents.find((a) => a.id === editingAgentId) : null;
@@ -26,8 +30,18 @@ export function AgentFormModal() {
   const [selectedSuites, setSelectedSuites] = useState<Set<string>>(
     new Set(editing?.suiteIds ?? []),
   );
+  const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set());
+  const [bashAccess, setBashAccess] = useState<BashAccess>('none');
+  const [allowedCommands, setAllowedCommands] = useState('');
+  const [allowedPaths, setAllowedPaths] = useState('');
+  const [deniedPaths, setDeniedPaths] = useState('');
+  const [projectScope, setProjectScope] = useState('');
   const [showCreateSuite, setShowCreateSuite] = useState(false);
   const [nameError, setNameError] = useState('');
+
+  useEffect(() => {
+    void fetchProjects();
+  }, [fetchProjects]);
 
   useEffect(() => {
     if (editing) {
@@ -54,11 +68,17 @@ export function AgentFormModal() {
   function toggleSuite(suiteName: string) {
     setSelectedSuites((prev) => {
       const next = new Set(prev);
-      if (next.has(suiteName)) {
-        next.delete(suiteName);
-      } else {
-        next.add(suiteName);
-      }
+      if (next.has(suiteName)) next.delete(suiteName);
+      else next.add(suiteName);
+      return next;
+    });
+  }
+
+  function toggleSkill(skillName: string) {
+    setSelectedSkills((prev) => {
+      const next = new Set(prev);
+      if (next.has(skillName)) next.delete(skillName);
+      else next.add(skillName);
       return next;
     });
   }
@@ -86,6 +106,8 @@ export function AgentFormModal() {
     setShowCreateSuite(false);
     void fetchSuites();
   }
+
+  const showBashDetails = bashAccess === 'sandboxed' || bashAccess === 'scoped';
 
   return (
     <div
@@ -148,6 +170,30 @@ export function AgentFormModal() {
             />
           </div>
 
+          {/* Skills multi-select */}
+          <div>
+            <label className="block text-sm font-medium mb-1">Skills</label>
+            <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
+              Skills this agent can use. Leave empty for unrestricted access.
+            </p>
+            <div className="space-y-1 max-h-32 overflow-y-auto">
+              {availableSuites.map((skill) => (
+                <label key={skill.name} className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedSkills.has(skill.name)}
+                    onChange={() => toggleSkill(skill.name)}
+                  />
+                  <span>{skill.displayName}</span>
+                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                    ({skill.name})
+                  </span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Suite bindings */}
           <div>
             <label className="block text-sm font-medium mb-1">Suite Bindings</label>
             <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
@@ -182,6 +228,83 @@ export function AgentFormModal() {
               onCreated={handleSuiteCreated}
               onCancel={() => setShowCreateSuite(false)}
             />
+          )}
+
+          {/* Bash access */}
+          <div>
+            <label className="block text-sm font-medium mb-1">Bash Access</label>
+            <select
+              value={bashAccess}
+              onChange={(e) => setBashAccess(e.target.value as BashAccess)}
+              className="w-full px-3 py-2 rounded border text-sm"
+              style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}
+            >
+              <option value="none">None</option>
+              <option value="sandboxed">Sandboxed</option>
+              <option value="scoped">Scoped</option>
+              <option value="full">Full</option>
+            </select>
+          </div>
+
+          {showBashDetails && (
+            <div className="space-y-3 pl-3 border-l-2" style={{ borderColor: 'var(--accent)' }}>
+              <div>
+                <label className="block text-xs font-medium mb-1">Allowed Commands</label>
+                <textarea
+                  value={allowedCommands}
+                  onChange={(e) => setAllowedCommands(e.target.value)}
+                  placeholder="One command per line: git, npm, node ..."
+                  rows={3}
+                  className="w-full px-3 py-1.5 rounded border text-xs resize-y font-mono"
+                  style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1">Allowed Paths</label>
+                <textarea
+                  value={allowedPaths}
+                  onChange={(e) => setAllowedPaths(e.target.value)}
+                  placeholder="One path per line: /home/user/projects ..."
+                  rows={2}
+                  className="w-full px-3 py-1.5 rounded border text-xs resize-y font-mono"
+                  style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1">Denied Paths</label>
+                <textarea
+                  value={deniedPaths}
+                  onChange={(e) => setDeniedPaths(e.target.value)}
+                  placeholder="One path per line: /etc, /root ..."
+                  rows={2}
+                  className="w-full px-3 py-1.5 rounded border text-xs resize-y font-mono"
+                  style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Project scope (only on create) */}
+          {!editing && (
+            <div>
+              <label className="block text-sm font-medium mb-1">Project Scope</label>
+              <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
+                Save this agent to a specific project directory.
+              </p>
+              <select
+                value={projectScope}
+                onChange={(e) => setProjectScope(e.target.value)}
+                className="w-full px-3 py-2 rounded border text-sm"
+                style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}
+              >
+                <option value="">Global (no project scope)</option>
+                {availableProjects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           )}
         </div>
 

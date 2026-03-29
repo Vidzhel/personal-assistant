@@ -1,9 +1,16 @@
 import { create } from 'zustand';
-import { api, type NamedAgentRecord, type RavenTaskRecord, type Skill } from '@/lib/api-client';
+import {
+  api,
+  type NamedAgentRecord,
+  type RavenTaskRecord,
+  type Skill,
+  type Project,
+} from '@/lib/api-client';
 
 interface AgentState {
   agents: NamedAgentRecord[];
   availableSuites: Skill[];
+  availableProjects: Project[];
   selectedAgentTasks: RavenTaskRecord[];
   showForm: boolean;
   editingAgentId: string | null;
@@ -13,6 +20,7 @@ interface AgentState {
 
   fetchAgents: () => Promise<void>;
   fetchSuites: () => Promise<void>;
+  fetchProjects: () => Promise<void>;
   openCreateForm: () => void;
   openEditForm: (id: string) => void;
   closeForm: () => void;
@@ -40,6 +48,7 @@ interface AgentState {
 export const useAgentStore = create<AgentState>((set, get) => ({
   agents: [],
   availableSuites: [],
+  availableProjects: [],
   selectedAgentTasks: [],
   showForm: false,
   editingAgentId: null,
@@ -60,6 +69,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     try {
       const suites = await api.getSkills();
       set({ availableSuites: suites });
+    } catch {
+      /* */
+    }
+  },
+
+  fetchProjects: async () => {
+    try {
+      const projects = await api.getProjects();
+      set({ availableProjects: projects });
     } catch {
       /* */
     }

@@ -9,16 +9,24 @@ import { AgentTaskHistory } from '@/components/agents/AgentTaskHistory';
 const POLL_INTERVAL_MS = 5000;
 
 export default function AgentsPage() {
-  const { agents, showForm, showTaskHistory, fetchAgents, fetchSuites, openCreateForm } =
-    useAgentStore();
+  const {
+    agents,
+    showForm,
+    showTaskHistory,
+    fetchAgents,
+    fetchSuites,
+    fetchProjects,
+    openCreateForm,
+  } = useAgentStore();
   const timerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   useEffect(() => {
     void fetchAgents();
     void fetchSuites();
+    void fetchProjects();
     timerRef.current = setInterval(() => void fetchAgents(), POLL_INTERVAL_MS);
     return () => clearInterval(timerRef.current);
-  }, [fetchAgents, fetchSuites]);
+  }, [fetchAgents, fetchSuites, fetchProjects]);
 
   return (
     <div className="p-8 space-y-6">
