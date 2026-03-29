@@ -7,14 +7,5 @@
     "suite_ids": [],
     "skills": [],
     "is_default": true
-  },
-  {
-    "id": "1ed8cb17-eb8d-497b-afb6-1994363ff0fb",
-    "name": "unique-agent",
-    "description": "Unique agent",
-    "instructions": null,
-    "suite_ids": [],
-    "skills": [],
-    "is_default": false
   }
 ]
