@@ -151,7 +151,8 @@ export function enforcePermissionGate(
 
 function resolveAgentRole(task: AgentTask): ScopeContext['role'] {
   if (task.executionTaskId) return 'task';
-  if (task.skillName === '_quality-reviewer' || task.skillName === '_evaluator') return 'validation';
+  if (task.skillName === '_quality-reviewer' || task.skillName === '_evaluator')
+    return 'validation';
   if (task.skillName === 'knowledge') return 'knowledge';
   return 'chat';
 }

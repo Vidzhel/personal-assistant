@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { tool } from '@anthropic-ai/claude-agent-sdk';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- SDK generic requires any for heterogeneous tool arrays
 import type { SdkMcpToolDefinition } from '@anthropic-ai/claude-agent-sdk';
 import { generateId } from '@raven/shared';
 import type { RavenMcpDeps } from '../types.ts';
@@ -40,7 +41,7 @@ const ArtifactSchema = z.object({
   referenceId: z.string().optional(),
 });
 
-function buildClassifyRequest(): SdkMcpToolDefinition {
+function buildClassifyRequest(): SdkMcpToolDefinition<any> {
   return tool(
     'classify_request',
     'Classify a user request as direct, delegated, or planned execution mode.',
@@ -49,7 +50,7 @@ function buildClassifyRequest(): SdkMcpToolDefinition {
   );
 }
 
-function buildCreateTaskTree(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDefinition {
+function buildCreateTaskTree(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDefinition<any> {
   return tool(
     'create_task_tree',
     'Create a task tree from a plan with optional auto-approval to start execution immediately.',
@@ -69,7 +70,7 @@ function buildCreateTaskTree(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToo
   );
 }
 
-function buildGetTaskContext(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDefinition {
+function buildGetTaskContext(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDefinition<any> {
   return tool(
     'get_task_context',
     'Get current task details including optional parent, dependencies, and sibling context.',
@@ -94,7 +95,7 @@ function buildGetTaskContext(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToo
   );
 }
 
-function buildCompleteTask(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDefinition {
+function buildCompleteTask(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDefinition<any> {
   return tool(
     'complete_task',
     'Mark the current task as completed with a summary and optional artifacts.',
@@ -116,7 +117,7 @@ function buildCompleteTask(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolD
   );
 }
 
-function buildFailTask(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDefinition {
+function buildFailTask(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDefinition<any> {
   return tool(
     'fail_task',
     'Mark the current task as failed/blocked with an error message.',
@@ -131,7 +132,7 @@ function buildFailTask(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDefin
   );
 }
 
-function buildUpdateTaskProgress(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDefinition {
+function buildUpdateTaskProgress(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDefinition<any> {
   return tool(
     'update_task_progress',
     'Emit a progress update for the current task (0-100).',
@@ -149,7 +150,7 @@ function buildUpdateTaskProgress(deps: RavenMcpDeps, scope: ScopeContext): SdkMc
   );
 }
 
-function buildSaveArtifact(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDefinition {
+function buildSaveArtifact(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDefinition<any> {
   return tool(
     'save_artifact',
     'Save an artifact produced during task execution.',
@@ -160,8 +161,8 @@ function buildSaveArtifact(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolD
         id: generateId(),
         timestamp: Date.now(),
         source: 'mcp-server',
-        type: 'execution:task:artifact-saved',
-        payload: { artifactId, taskId: scope.taskId, treeId: scope.treeId, ...args },
+        type: 'execution:task:progress',
+        payload: { artifactId, taskId: scope.taskId, treeId: scope.treeId, artifact: args },
       });
       return ok({ artifactId });
     },
@@ -171,7 +172,7 @@ function buildSaveArtifact(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolD
 export function buildTaskLifecycleTools(
   deps: RavenMcpDeps,
   scope: ScopeContext,
-): SdkMcpToolDefinition[] {
+): Array<SdkMcpToolDefinition<any>> {
   return [
     buildClassifyRequest(),
     buildCreateTaskTree(deps, scope),

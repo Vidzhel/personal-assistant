@@ -79,7 +79,8 @@
       "WebFetch(domain:openai.github.io)",
       "WebFetch(domain:claude.com)",
       "WebFetch(domain:youtu.be)",
-      "WebFetch(domain:www.youtube.com)"
+      "WebFetch(domain:www.youtube.com)",
+      "Bash(python3 -m json.tool)"
     ]
   }
 }

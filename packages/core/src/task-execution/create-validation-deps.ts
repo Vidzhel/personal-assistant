@@ -111,7 +111,11 @@ export function createValidationDeps(eventBus: EventBusInterface): ValidationDep
           log.warn(`Quality reviewer output invalid: ${parsed.error.message}`);
           return { passed: false, score: 0, feedback: 'Quality reviewer returned invalid output' };
         }
-        return { passed: parsed.data.pass, score: parsed.data.score, feedback: parsed.data.feedback };
+        return {
+          passed: parsed.data.pass,
+          score: parsed.data.score,
+          feedback: parsed.data.feedback,
+        };
       } catch (err) {
         log.error(`Quality reviewer failed: ${String(err)}`);
         return { passed: true, score: 5, feedback: 'Quality reviewer unavailable, auto-passing' };

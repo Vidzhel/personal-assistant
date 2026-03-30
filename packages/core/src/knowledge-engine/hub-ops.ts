@@ -161,7 +161,9 @@ export function createHubEngine(deps: HubDeps): HubEngine {
     });
     const synthParseResult = SynthesisResultSchema.safeParse(JSON.parse(payload.result));
     if (!synthParseResult.success) {
-      log.warn(`Invalid synthesis LLM response for task ${payload.taskId}: ${synthParseResult.error.message}`);
+      log.warn(
+        `Invalid synthesis LLM response for task ${payload.taskId}: ${synthParseResult.error.message}`,
+      );
       return;
     }
     const parsed = synthParseResult.data;

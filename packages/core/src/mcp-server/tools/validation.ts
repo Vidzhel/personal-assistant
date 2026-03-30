@@ -14,7 +14,7 @@ const okResult = (data: unknown): { content: [{ type: 'text'; text: string }] } 
 export function buildValidationTools(
   deps: RavenMcpDeps,
   scope: ScopeContext,
-): SdkMcpToolDefinition[] {
+): Array<SdkMcpToolDefinition<any>> {
   const submitValidationScore = tool(
     'submit_validation_score',
     'Submit a validation score for a task. Provide a score (1-5), feedback, and whether the task passed.',
