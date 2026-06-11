@@ -20,7 +20,7 @@ import {
 } from '@raven/shared';
 import type { ServiceContext, SuiteService } from '@raven/core/suite-registry/service-runner.ts';
 import { markDelivered } from '@raven/core/notification-engine/notification-queue.ts';
-import { getStoredTopic, saveStoredTopic } from './topic-store.ts';
+import { getStoredTopic, saveStoredTopic, deleteStoredTopic } from './topic-store.ts';
 import {
   parseCallbackData,
   handleCallback,
@@ -1009,9 +1009,20 @@ export async function ensureProjectTopic(
   // Meta-project uses the System topic
   if (projectId === META_PROJECT_ID) return topicConfig.systemTopicId;
 
-  // Check if already tracked
+  // Check if already tracked in this process
   const existing = projectTopicMap.get(projectId);
   if (existing !== undefined) return existing;
+
+  // Check the persistent store (survives restarts)
+  if (dbRef) {
+    const storedId = getStoredTopic(dbRef, { scope: 'project', key: projectId, groupId });
+    if (storedId !== undefined) {
+      projectTopicMap.set(projectId, storedId);
+      topicConfig.topicToProject[projectName] = projectId;
+      topicConfig.reverseMap[storedId] = projectName;
+      return storedId;
+    }
+  }
 
   try {
     const result = await bot.api.createForumTopic(groupId, projectName);
@@ -1019,6 +1030,13 @@ export async function ensureProjectTopic(
     // Also update topicToProject mapping for incoming message routing
     topicConfig.topicToProject[projectName] = projectId;
     topicConfig.reverseMap[result.message_thread_id] = projectName;
+    if (dbRef) {
+      saveStoredTopic(
+        dbRef,
+        { scope: 'project', key: projectId, groupId },
+        result.message_thread_id,
+      );
+    }
     logger.info(
       `Created Telegram topic for project "${projectName}" (thread: ${result.message_thread_id})`,
     );
@@ -1032,12 +1050,17 @@ export async function ensureProjectTopic(
 export async function closeProjectTopic(projectId: string): Promise<void> {
   if (operatingMode !== 'group' || !bot) return;
 
-  const threadId = projectTopicMap.get(projectId);
+  const threadId =
+    projectTopicMap.get(projectId) ??
+    (dbRef ? getStoredTopic(dbRef, { scope: 'project', key: projectId, groupId }) : undefined);
   if (threadId === undefined) return;
 
   try {
     await bot.api.closeForumTopic(groupId, threadId);
     projectTopicMap.delete(projectId);
+    if (dbRef) {
+      deleteStoredTopic(dbRef, { scope: 'project', key: projectId, groupId });
+    }
     logger.info(`Closed Telegram topic for deleted project "${projectId}" (thread: ${threadId})`);
   } catch (err) {
     logger.warn(`Failed to close Telegram topic for project "${projectId}": ${err}`);

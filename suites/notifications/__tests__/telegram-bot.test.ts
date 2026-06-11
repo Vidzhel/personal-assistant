@@ -1496,5 +1496,37 @@ describe('telegram-bot service', () => {
       await new Promise((r) => setTimeout(r, 10));
       expect(mockCreateForumTopic).not.toHaveBeenCalled();
     });
+
+    it('reuses a persisted project topic across restarts', async () => {
+      const { createTestDb } = await import('./helpers/test-db.ts');
+      const db = createTestDb();
+      const mod = await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db, config: {} });
+      await mod.ensureProjectTopic('proj-1', 'My Project');
+      expect(mockCreateForumTopic).toHaveBeenCalledTimes(1);
+
+      await service.stop();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db, config: {} });
+
+      const threadId = await mod.ensureProjectTopic('proj-1', 'My Project');
+      expect(threadId).toBe(42);
+      expect(mockCreateForumTopic).toHaveBeenCalledTimes(1);
+    });
+
+    it('deletes the persisted mapping when a project topic is closed', async () => {
+      const { createTestDb } = await import('./helpers/test-db.ts');
+      const { getStoredTopic } = await import('../services/topic-store.ts');
+      const db = createTestDb();
+      const mod = await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db, config: {} });
+      await mod.ensureProjectTopic('proj-1', 'My Project');
+
+      await mod.closeProjectTopic('proj-1');
+
+      expect(mockCloseForumTopic).toHaveBeenCalledTimes(1);
+      expect(
+        getStoredTopic(db, { scope: 'project', key: 'proj-1', groupId: '-1001234567890' }),
+      ).toBeUndefined();
+    });
   });
 });
