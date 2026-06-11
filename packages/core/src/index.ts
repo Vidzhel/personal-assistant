@@ -64,6 +64,7 @@ import { createValidationDeps } from './task-execution/create-validation-deps.ts
 import { TemplateRegistry } from './template-engine/template-registry.ts';
 import { createTemplateScheduler } from './template-engine/template-scheduler.ts';
 import type { SessionIdleEvent } from '@raven/shared';
+import { createMemoryStore } from './agent-memory/memory-store.ts';
 
 const log = createLogger('raven');
 
@@ -344,6 +345,7 @@ async function main(): Promise<void> {
   const messageStore = createMessageStore({ basePath: sessionPath });
 
   // 10. Init agent manager
+  const memoryStore = createMemoryStore({ projectsDir });
   const agentManager = new AgentManager({
     eventBus,
     mcpManager,
@@ -354,6 +356,7 @@ async function main(): Promise<void> {
     executionLogger,
     messageStore,
     sessionManager,
+    memoryStore,
   });
 
   // 10b. Inject agentManager into service context for callback handler

@@ -68,7 +68,8 @@ describe('directory-per-agent layout', () => {
       skills: [],
       model: 'sonnet',
       maxTurns: 20,
-    } as AgentYaml;
+      memory: { maxFiles: 30, maxTotalKb: 64 },
+    };
 
     it('creates agents in the directory layout', async () => {
       await store.createAgent(projectsDir, agent);

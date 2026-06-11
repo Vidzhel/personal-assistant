@@ -19,6 +19,9 @@ import type { AgentBackend, ToolUseMeta } from './agent-backend.ts';
 import { createSdkBackend } from './sdk-backend.ts';
 import { createCliBackend } from './cli-backend.ts';
 import { createRavenMcp, type RavenMcpDeps, type ScopeContext } from '../mcp-server/index.ts';
+import type { MemoryStore } from '../agent-memory/memory-store.ts';
+import { createMemoryMcp } from '../mcp-server/memory-mcp.ts';
+import { formatMemoryBlock } from '../agent-memory/memory-store.ts';
 
 const log = createLogger('agent-session');
 
@@ -69,6 +72,7 @@ export interface RunOptions {
   messageStore?: MessageStore;
   signal?: AbortSignal;
   ravenMcpDeps?: RavenMcpDeps;
+  memoryStore?: MemoryStore;
 }
 
 export interface GateResult {
@@ -229,6 +233,9 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       };
     }
 
+    // Per-agent identity used for memory MCP and system prompt injection.
+    const memoryAgentName = task.namedAgentId;
+
     // Add Raven MCP (in-process, scoped to this task)
     if (opts.ravenMcpDeps) {
       const ravenMcp = createRavenMcp(opts.ravenMcpDeps, {
@@ -241,7 +248,22 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       sdkMcpServers['raven'] = ravenMcp;
     }
 
-    const systemPrompt = buildSystemPrompt(task);
+    // Per-agent memory MCP: in-process, scoped to this agent's own directory.
+    // Identity is the named agent id, which equals the agent's YAML name (id === name).
+    if (opts.memoryStore && memoryAgentName) {
+      sdkMcpServers['memory'] = createMemoryMcp({
+        memoryStore: opts.memoryStore,
+        agentName: memoryAgentName,
+      });
+    }
+
+    let systemPrompt = buildSystemPrompt(task);
+    if (opts.memoryStore && memoryAgentName) {
+      const memoryIndex = await opts.memoryStore.readIndex(memoryAgentName);
+      if (memoryIndex) {
+        systemPrompt = `${systemPrompt}\n\n${formatMemoryBlock(memoryIndex)}`;
+      }
+    }
 
     // Compute allowed tools: base tools + MCP wildcards + Agent delegation
     const allowedTools = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'];

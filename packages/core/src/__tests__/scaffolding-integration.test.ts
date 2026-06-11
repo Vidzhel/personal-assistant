@@ -23,6 +23,7 @@ const coordinatorAgent: AgentYaml = {
   isDefault: true,
   model: 'sonnet',
   maxTurns: 20,
+  memory: { maxFiles: 30, maxTotalKb: 64 },
 };
 
 const calcHelperAgent: AgentYaml = {
@@ -33,6 +34,7 @@ const calcHelperAgent: AgentYaml = {
   isDefault: false,
   model: 'sonnet',
   maxTurns: 10,
+  memory: { maxFiles: 30, maxTotalKb: 64 },
 };
 
 function makeExamPrepTemplate(): TaskTemplate {
