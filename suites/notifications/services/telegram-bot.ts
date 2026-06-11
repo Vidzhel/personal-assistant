@@ -83,6 +83,7 @@ export function escapeMarkdown(text: string): string {
 }
 
 const MAX_TELEGRAM_LENGTH = 4000;
+const THREAD_NOT_FOUND_RE = /thread not found/i;
 
 // Unicode Private Use Area placeholders — Telegram preserves these but never displays them
 const PUA_BOLD_START = '\uE000';
@@ -207,6 +208,9 @@ async function sendMessageWithFallback(
     await sendMessage(text, parseMode, messageThreadId, replyMarkup);
   } catch (err) {
     if (messageThreadId !== undefined) {
+      if (THREAD_NOT_FOUND_RE.test(String(err))) {
+        invalidateTopicByThreadId(messageThreadId);
+      }
       logger.warn(`Topic send failed (thread ${messageThreadId}), falling back to non-topic send`);
       try {
         await sendMessage(text, parseMode, undefined, replyMarkup);
@@ -941,6 +945,23 @@ const agentTopicInflight = new Map<string, Promise<number | undefined>>();
 
 // Inflight ensures concurrent calls for the same project return the same create-promise
 const projectTopicInflight = new Map<string, Promise<number | undefined>>();
+
+function invalidateTopicByThreadId(threadId: number): void {
+  for (const [agentName, id] of agentTopicMap) {
+    if (id === threadId) {
+      agentTopicMap.delete(agentName);
+      if (dbRef) deleteStoredTopic(dbRef, { scope: 'agent', key: agentName, groupId });
+      logger.warn(`Invalidated stale Telegram topic ${threadId} for agent "${agentName}"`);
+    }
+  }
+  for (const [projectId, id] of projectTopicMap) {
+    if (id === threadId) {
+      projectTopicMap.delete(projectId);
+      if (dbRef) deleteStoredTopic(dbRef, { scope: 'project', key: projectId, groupId });
+      logger.warn(`Invalidated stale Telegram topic ${threadId} for project "${projectId}"`);
+    }
+  }
+}
 
 export async function ensureAgentTopic(agentName: string): Promise<number | undefined> {
   if (operatingMode !== 'group' || !bot) return undefined;

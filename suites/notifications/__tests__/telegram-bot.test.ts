@@ -1528,5 +1528,43 @@ describe('telegram-bot service', () => {
         getStoredTopic(db, { scope: 'project', key: 'proj-1', groupId: '-1001234567890' }),
       ).toBeUndefined();
     });
+
+    it('invalidates a stale topic mapping when Telegram reports thread not found', async () => {
+      const { createTestDb } = await import('./helpers/test-db.ts');
+      const { getStoredTopic, saveStoredTopic } = await import('../services/topic-store.ts');
+      const db = createTestDb();
+      saveStoredTopic(db, { scope: 'agent', key: 'raven', groupId: '-1001234567890' }, 42);
+
+      const mod = await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db, config: {} });
+      await mod.ensureAgentTopic('raven'); // loads stale id 42 from store
+
+      // Topic 42 was deleted in Telegram: sends to it fail, fallback (no thread) succeeds
+      mockSendMessage.mockImplementation((_chat: string, _text: string, opts: any) => {
+        if (opts?.message_thread_id === 42) {
+          return Promise.reject(new Error('Bad Request: message thread not found'));
+        }
+        return Promise.resolve({});
+      });
+
+      const handler = eventHandlers['notification:deliver']?.[0];
+      handler({
+        type: 'notification',
+        payload: { channel: 'telegram', title: 'Alert', body: 'Content', topicName: 'raven' },
+      });
+
+      await vi.waitFor(() => {
+        // stale mapping removed from the persistent store
+        expect(
+          getStoredTopic(db, { scope: 'agent', key: 'raven', groupId: '-1001234567890' }),
+        ).toBeUndefined();
+      });
+
+      // Next ensure recreates the topic exactly once
+      mockCreateForumTopic.mockResolvedValue({ message_thread_id: 77 });
+      const newId = await mod.ensureAgentTopic('raven');
+      expect(newId).toBe(77);
+      expect(mockCreateForumTopic).toHaveBeenCalledTimes(1);
+    });
   });
 });
