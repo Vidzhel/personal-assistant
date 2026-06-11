@@ -1042,6 +1042,7 @@ export async function ensureProjectTopic(
   const inflight = projectTopicInflight.get(projectId);
   if (inflight !== undefined) return inflight;
 
+  const currentBot = bot;
   const createPromise = (async (): Promise<number | undefined> => {
     // Check the persistent store (survives restarts)
     if (dbRef) {
@@ -1055,7 +1056,6 @@ export async function ensureProjectTopic(
     }
 
     try {
-      const currentBot = bot!;
       const result = await currentBot.api.createForumTopic(groupId, projectName);
       projectTopicMap.set(projectId, result.message_thread_id);
       topicConfig.topicToProject[projectName] = projectId;
