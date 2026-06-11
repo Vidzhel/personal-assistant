@@ -66,6 +66,20 @@ describe('memory MCP tools', () => {
     expect(res.isError).toBe(true);
   });
 
+  it('memory_update surfaces a budget rejection as an error result', async () => {
+    const write = findTool(tools, 'memory_write');
+    // Fill up most of the 1 KB budget with a different file
+    await write.handler({ path: 'other.md', content: 'x'.repeat(900) }, {});
+    // Write a small existing file
+    await write.handler({ path: 'existing.md', content: 'tiny' }, {});
+    // Update existing.md with large content that would exceed total budget
+    const update = findTool(tools, 'memory_update');
+    const res = (await update.handler({ path: 'existing.md', content: 'y'.repeat(900) }, {})) as ToolResult;
+    // projected: 900 (other.md) + 900 (new content) = 1800 > 1024 limit
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toMatch(/budget/i);
+  });
+
   it('memory_update on a missing file returns an error result', async () => {
     const update = findTool(tools, 'memory_update');
     const res = (await update.handler({ path: 'ghost.md', content: 'x' }, {})) as ToolResult;

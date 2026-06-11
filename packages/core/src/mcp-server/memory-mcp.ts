@@ -76,7 +76,6 @@ export function buildMemoryTools(deps: MemoryToolDeps): Array<SdkMcpToolDefiniti
         return errorResult((err as Error).message);
       }
     },
-    { annotations: { idempotentHint: true } },
   );
 
   return [memoryRead, memoryWrite, memoryUpdate];
