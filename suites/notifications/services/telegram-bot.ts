@@ -1,5 +1,5 @@
 import { Bot, InlineKeyboard, InputFile } from 'grammy';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, statSync, readdirSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { z } from 'zod';
@@ -873,18 +873,13 @@ const service: SuiteService = {
       }
     }
 
-    // Bootstrap agent topics from DB and listen for new agent creation
-    if (operatingMode === 'group' && dbRef) {
-      try {
-        const rows = dbRef.all<{ name: string }>('SELECT name FROM named_agents');
-        const agentNames = rows.map((r) => r.name);
-        if (agentNames.length > 0) {
-          ensureAllAgentTopics(agentNames).catch((err: unknown) => {
-            logger.warn(`Failed to bootstrap agent topics: ${err}`);
-          });
-        }
-      } catch (err) {
-        logger.warn(`Failed to query named agents for topic bootstrap: ${err}`);
+    // Bootstrap agent topics from the filesystem and listen for new agent creation
+    if (operatingMode === 'group') {
+      const agentNames = listAgentNamesFromFs(context.projectRoot);
+      if (agentNames.length > 0) {
+        ensureAllAgentTopics(agentNames).catch((err: unknown) => {
+          logger.warn(`Failed to bootstrap agent topics: ${err}`);
+        });
       }
 
       context.eventBus.on('agent:config:created', (event: unknown) => {
@@ -1114,6 +1109,36 @@ export async function closeProjectTopic(projectId: string): Promise<void> {
 
 export function getAgentTopicThreadId(agentName: string): number | undefined {
   return agentTopicMap.get(agentName) ?? topicConfig.topicMap[agentName];
+}
+
+// Agent names come from the filesystem (projects/agents/) — the single source
+// of truth for agent definitions. Supports both flat <name>.yaml files and
+// directory-per-agent <name>/agent.yaml layouts. System agents (_-prefixed)
+// never get Telegram topics.
+export function listAgentNamesFromFs(projectRoot: string | undefined): string[] {
+  if (!projectRoot) return [];
+  const agentsDir = join(projectRoot, 'projects', 'agents');
+  let entries: import('node:fs').Dirent[];
+  try {
+    entries = readdirSync(agentsDir, { withFileTypes: true }) as import('node:fs').Dirent[];
+  } catch {
+    return [];
+  }
+
+  const names: string[] = [];
+  for (const entry of entries) {
+    if (entry.isFile() && /\.ya?ml$/.test(entry.name)) {
+      names.push(entry.name.replace(/\.ya?ml$/, ''));
+    } else if (entry.isDirectory()) {
+      try {
+        const inner = readdirSync(join(agentsDir, entry.name)) as string[];
+        if (inner.includes('agent.yaml')) names.push(entry.name);
+      } catch {
+        // unreadable dir — skip
+      }
+    }
+  }
+  return names.filter((n) => !n.startsWith('_'));
 }
 
 export async function ensureAllAgentTopics(agentNames: string[]): Promise<void> {

@@ -9,11 +9,9 @@ const MIGRATION_PATH = join(
 );
 
 // In-memory DatabaseInterface with the telegram_topics migration applied.
-// Also creates a minimal named_agents table so the bot's bootstrap query works.
 export function createTestDb(): DatabaseInterface {
   const raw = new Database(':memory:');
   raw.exec(readFileSync(MIGRATION_PATH, 'utf8'));
-  raw.exec('CREATE TABLE IF NOT EXISTS named_agents (name TEXT PRIMARY KEY)');
   return {
     run: (sql: string, ...params: unknown[]): void => {
       raw.prepare(sql).run(...params);

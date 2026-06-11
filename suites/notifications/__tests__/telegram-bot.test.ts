@@ -1482,15 +1482,47 @@ describe('telegram-bot service', () => {
       expect(mockCreateForumTopic).toHaveBeenCalledTimes(1); // still 1 — no duplicate
     });
 
+    it('bootstrap creates topics for filesystem agents, skipping _system agents', async () => {
+      const { createTestDb } = await import('./helpers/test-db.ts');
+      const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs');
+      const { join } = await import('node:path');
+      const { tmpdir } = await import('node:os');
+
+      const projectRoot = mkdtempSync(join(tmpdir(), 'raven-tg-boot-'));
+      mkdirSync(join(projectRoot, 'projects', 'agents', 'raven'), { recursive: true });
+      writeFileSync(join(projectRoot, 'projects', 'agents', 'raven', 'agent.yaml'), 'name: raven\n');
+      mkdirSync(join(projectRoot, 'projects', 'agents', '_evaluator'), { recursive: true });
+      writeFileSync(
+        join(projectRoot, 'projects', 'agents', '_evaluator', 'agent.yaml'),
+        'name: _evaluator\n',
+      );
+
+      const db = createTestDb();
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db, config: {}, projectRoot });
+
+      await vi.waitFor(() => {
+        expect(mockCreateForumTopic).toHaveBeenCalledTimes(1);
+      });
+      expect(mockCreateForumTopic).toHaveBeenCalledWith('-1001234567890', 'Agent: Raven');
+    });
+
     it('bootstrap does not re-create topics that are already persisted', async () => {
       const { createTestDb } = await import('./helpers/test-db.ts');
       const { saveStoredTopic } = await import('../services/topic-store.ts');
+      const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs');
+      const { join } = await import('node:path');
+      const { tmpdir } = await import('node:os');
+
+      const projectRoot = mkdtempSync(join(tmpdir(), 'raven-tg-boot2-'));
+      mkdirSync(join(projectRoot, 'projects', 'agents', 'raven'), { recursive: true });
+      writeFileSync(join(projectRoot, 'projects', 'agents', 'raven', 'agent.yaml'), 'name: raven\n');
+
       const db = createTestDb();
-      db.run('INSERT INTO named_agents (name) VALUES (?)', 'raven');
       saveStoredTopic(db, { scope: 'agent', key: 'raven', groupId: '-1001234567890' }, 42);
 
       await loadService();
-      await service.start({ eventBus: mockEventBus, logger: mockLogger, db, config: {} });
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db, config: {}, projectRoot });
 
       // bootstrap runs fire-and-forget; give microtasks a chance
       await new Promise((r) => setTimeout(r, 10));
