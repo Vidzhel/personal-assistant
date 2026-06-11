@@ -78,9 +78,9 @@ function resolveAgentYamlPath(projectsDir: string, agentName: string): string {
 
 async function readBudget(projectsDir: string, agentName: string): Promise<Budget> {
   try {
-    const raw = yamlLoad(
-      await readFile(resolveAgentYamlPath(projectsDir, agentName), 'utf-8'),
-    ) as { memory?: { maxFiles?: number; maxTotalKb?: number } };
+    const raw = yamlLoad(await readFile(resolveAgentYamlPath(projectsDir, agentName), 'utf-8')) as {
+      memory?: { maxFiles?: number; maxTotalKb?: number };
+    };
     return {
       maxFiles: raw?.memory?.maxFiles ?? DEFAULT_MAX_FILES,
       maxTotalBytes: (raw?.memory?.maxTotalKb ?? DEFAULT_MAX_TOTAL_KB) * BYTES_PER_KB,
@@ -97,6 +97,9 @@ function safePath(projectsDir: string, agentName: string, relPath: string): stri
   const rel = relative(dir, resolved);
   if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
     throw new Error(`invalid path: ${relPath}`);
+  }
+  if (rel.includes('/') || rel.includes('\\')) {
+    throw new Error(`invalid path: nested paths are not allowed: ${relPath}`);
   }
   return resolved;
 }

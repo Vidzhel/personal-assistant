@@ -60,6 +60,11 @@ describe('MemoryStore', () => {
     await expect(store.read(AGENT, '/etc/passwd')).rejects.toThrow(/invalid path/i);
   });
 
+  it('rejects subdirectory paths', async () => {
+    await expect(store.write(AGENT, 'sub/note.md', 'x')).rejects.toThrow(/invalid path/i);
+    await expect(store.read(AGENT, 'sub/note.md')).rejects.toThrow(/invalid path/i);
+  });
+
   it('enforces the maxFiles budget', async () => {
     await store.write(AGENT, 'a.md', 'a');
     await store.write(AGENT, 'b.md', 'b');
