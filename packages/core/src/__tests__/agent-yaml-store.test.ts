@@ -38,7 +38,7 @@ describe('AgentYamlStore', () => {
     const agent = makeAgent();
     await store.createAgent(tmpDir, agent);
 
-    const filePath = join(tmpDir, 'agents', 'test-agent.yaml');
+    const filePath = join(tmpDir, 'agents', 'test-agent', 'agent.yaml');
     const content = await readFile(filePath, 'utf-8');
     expect(content).toBeTruthy();
   });
@@ -47,7 +47,7 @@ describe('AgentYamlStore', () => {
     const agent = makeAgent();
     await store.createAgent(tmpDir, agent);
 
-    const content = await readFile(join(tmpDir, 'agents', 'test-agent.yaml'), 'utf-8');
+    const content = await readFile(join(tmpDir, 'agents', 'test-agent', 'agent.yaml'), 'utf-8');
     expect(content).toBeTruthy();
   });
 
@@ -55,7 +55,7 @@ describe('AgentYamlStore', () => {
     const agent = makeAgent({ name: 'my-agent', displayName: 'My Agent' });
     await store.createAgent(tmpDir, agent);
 
-    const content = await readFile(join(tmpDir, 'agents', 'my-agent.yaml'), 'utf-8');
+    const content = await readFile(join(tmpDir, 'agents', 'my-agent', 'agent.yaml'), 'utf-8');
     const parsed = yamlLoad(content) as Record<string, unknown>;
     expect(parsed.name).toBe('my-agent');
     expect(parsed.displayName).toBe('My Agent');
@@ -96,7 +96,9 @@ describe('AgentYamlStore', () => {
 
     await store.deleteAgent(tmpDir, 'to-delete');
 
-    await expect(readFile(join(tmpDir, 'agents', 'to-delete.yaml'), 'utf-8')).rejects.toThrow();
+    await expect(
+      readFile(join(tmpDir, 'agents', 'to-delete', 'agent.yaml'), 'utf-8'),
+    ).rejects.toThrow();
   });
 
   it('create validates with schema — rejects invalid agent', async () => {

@@ -25,24 +25,34 @@ async function readTextFile(path: string): Promise<string | null> {
 
 async function loadAgentYamls(agentsDir: string): Promise<AgentYaml[]> {
   const agents: AgentYaml[] = [];
-  let entries: string[];
+  let candidates: string[];
   try {
     const dirEntries = await readdir(agentsDir, { withFileTypes: true });
-    entries = dirEntries
-      .filter((e) => e.isFile() && (e.name.endsWith('.yaml') || e.name.endsWith('.yml')))
-      .map((e) => e.name);
+    candidates = [];
+    for (const entry of dirEntries) {
+      if (entry.isFile() && (entry.name.endsWith('.yaml') || entry.name.endsWith('.yml'))) {
+        candidates.push(entry.name);
+      } else if (entry.isDirectory()) {
+        // Directory-per-agent layout: agents/<name>/agent.yaml
+        candidates.push(join(entry.name, 'agent.yaml'));
+      }
+    }
   } catch {
     return agents;
   }
 
-  for (const name of entries) {
+  for (const name of candidates) {
     try {
       const content = await readFile(join(agentsDir, name), 'utf-8');
       const raw = yamlLoad(content);
       const parsed = AgentYamlSchema.parse(raw);
       agents.push(parsed);
     } catch {
-      log.warn(`Skipping invalid agent YAML: ${name}`);
+      // Flat files that fail are invalid; directories without agent.yaml are
+      // silently skipped (they may hold only memory/ or other agent data).
+      if (!name.endsWith('/agent.yaml')) {
+        log.warn(`Skipping invalid agent YAML: ${name}`);
+      }
     }
   }
   return agents;

@@ -39,7 +39,7 @@ export const ValidationConfigSchema = z.object({
 export const AgentYamlSchema = z.object({
   name: z.string().regex(KEBAB_CASE_RE, 'Agent name must be lowercase kebab-case'),
   displayName: z.string().min(1),
-  description: z.string().min(1),
+  description: z.string().default(''),
   isDefault: z.boolean().default(false),
   skills: z.array(z.string()).default([]),
   instructions: z.string().optional(),
