@@ -41,11 +41,18 @@ describe('MemoryStore', () => {
   });
 
   it('update requires an existing file', async () => {
-    await expect(store.update(AGENT, 'ghost.md', 'x')).rejects.toThrow(/does not exist/);
+    const res = await store.update(AGENT, 'ghost.md', 'x');
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/does not exist/);
     await store.write(AGENT, 'real.md', 'v1');
-    const res = await store.update(AGENT, 'real.md', 'v2');
-    expect(res.ok).toBe(true);
+    const updated = await store.update(AGENT, 'real.md', 'v2');
+    expect(updated.ok).toBe(true);
     expect(await store.read(AGENT, 'real.md')).toBe('v2');
+  });
+
+  it('rejects an agentName with path traversal', async () => {
+    await expect(store.read('../evil', 'fact.md')).rejects.toThrow(/invalid/i);
+    await expect(store.write('../evil', 'fact.md', 'x')).rejects.toThrow(/invalid/i);
   });
 
   it('rejects path escaping the memory dir', async () => {

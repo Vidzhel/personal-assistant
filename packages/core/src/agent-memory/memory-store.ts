@@ -60,6 +60,12 @@ export function formatMemoryBlock(index: string): string {
   ].join('\n');
 }
 
+function validateAgentName(agentName: string): void {
+  if (agentName.includes('/') || agentName.includes('\\') || agentName === '..') {
+    throw new Error(`invalid agentName: ${agentName}`);
+  }
+}
+
 function resolveMemoryDir(projectsDir: string, agentName: string): string {
   return join(projectsDir, 'agents', agentName, 'memory');
 }
@@ -142,7 +148,7 @@ async function checkAndWrite(opts: WriteOpts): Promise<MemoryWriteResult> {
   const absPath = safePath(projectsDir, agentName, relPath);
   const fileExists = existsSync(absPath);
   if (mustExist && !fileExists) {
-    throw new Error(`memory file does not exist: ${relPath}`);
+    return { ok: false, error: `memory file does not exist: ${relPath}` };
   }
 
   const budget = await readBudget(projectsDir, agentName);
@@ -180,11 +186,13 @@ export function createMemoryStore(deps: { projectsDir: string }): MemoryStore {
 
   return {
     async read(agentName: string, relPath: string): Promise<string> {
+      validateAgentName(agentName);
       const absPath = safePath(projectsDir, agentName, relPath);
       return readFile(absPath, 'utf-8');
     },
 
     async readIndex(agentName: string): Promise<string | null> {
+      validateAgentName(agentName);
       try {
         return await readFile(join(resolveMemoryDir(projectsDir, agentName), INDEX_FILE), 'utf-8');
       } catch {
@@ -192,15 +200,18 @@ export function createMemoryStore(deps: { projectsDir: string }): MemoryStore {
       }
     },
 
-    write(agentName: string, relPath: string, content: string): Promise<MemoryWriteResult> {
+    async write(agentName: string, relPath: string, content: string): Promise<MemoryWriteResult> {
+      validateAgentName(agentName);
       return checkAndWrite({ agentName, relPath, content, mustExist: false, projectsDir });
     },
 
-    update(agentName: string, relPath: string, content: string): Promise<MemoryWriteResult> {
+    async update(agentName: string, relPath: string, content: string): Promise<MemoryWriteResult> {
+      validateAgentName(agentName);
       return checkAndWrite({ agentName, relPath, content, mustExist: true, projectsDir });
     },
 
     async usage(agentName: string): Promise<MemoryUsage> {
+      validateAgentName(agentName);
       return computeUsage(projectsDir, agentName, await readBudget(projectsDir, agentName));
     },
   };
