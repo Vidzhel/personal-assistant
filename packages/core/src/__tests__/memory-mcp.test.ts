@@ -1,0 +1,75 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { createMemoryStore } from '../agent-memory/memory-store.ts';
+import { buildMemoryTools } from '../mcp-server/memory-mcp.ts';
+
+const AGENT = 'mem-agent';
+
+interface ToolResult {
+  content: Array<{ type: string; text: string }>;
+  isError?: boolean;
+}
+
+function findTool(tools: ReturnType<typeof buildMemoryTools>, name: string) {
+  const t = tools.find((x) => x.name === name);
+  if (!t) throw new Error(`tool not found: ${name}`);
+  return t;
+}
+
+describe('memory MCP tools', () => {
+  let projectsDir: string;
+  let tools: ReturnType<typeof buildMemoryTools>;
+
+  beforeEach(() => {
+    projectsDir = mkdtempSync(join(tmpdir(), 'raven-memmcp-'));
+    mkdirSync(join(projectsDir, 'agents', AGENT), { recursive: true });
+    writeFileSync(
+      join(projectsDir, 'agents', AGENT, 'agent.yaml'),
+      `name: ${AGENT}\ndisplayName: Mem\ndescription: x\nmemory:\n  maxFiles: 2\n  maxTotalKb: 1\n`,
+    );
+    const store = createMemoryStore({ projectsDir });
+    tools = buildMemoryTools({ memoryStore: store, agentName: AGENT });
+  });
+
+  afterEach(() => {
+    rmSync(projectsDir, { recursive: true, force: true });
+  });
+
+  it('exposes exactly the three memory tools', () => {
+    expect(tools.map((t) => t.name).sort()).toEqual(['memory_read', 'memory_update', 'memory_write']);
+  });
+
+  it('memory_write then memory_read round-trips', async () => {
+    const write = findTool(tools, 'memory_write');
+    const wrote = (await write.handler({ path: 'note.md', content: 'hi' }, {})) as ToolResult;
+    expect(wrote.isError).toBeFalsy();
+
+    const read = findTool(tools, 'memory_read');
+    const got = (await read.handler({ path: 'note.md' }, {})) as ToolResult;
+    expect(got.content[0].text).toContain('hi');
+  });
+
+  it('memory_write surfaces a budget rejection as an error result', async () => {
+    const write = findTool(tools, 'memory_write');
+    await write.handler({ path: 'a.md', content: 'a' }, {});
+    await write.handler({ path: 'b.md', content: 'b' }, {});
+    const third = (await write.handler({ path: 'c.md', content: 'c' }, {})) as ToolResult;
+    expect(third.isError).toBe(true);
+    expect(third.content[0].text).toMatch(/budget/i);
+  });
+
+  it('memory_read rejects a path escape as an error result', async () => {
+    const read = findTool(tools, 'memory_read');
+    const res = (await read.handler({ path: '../../etc/passwd' }, {})) as ToolResult;
+    expect(res.isError).toBe(true);
+  });
+
+  it('memory_update on a missing file returns an error result', async () => {
+    const update = findTool(tools, 'memory_update');
+    const res = (await update.handler({ path: 'ghost.md', content: 'x' }, {})) as ToolResult;
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toMatch(/does not exist/);
+  });
+});
