@@ -20,6 +20,7 @@ import {
 } from '@raven/shared';
 import type { ServiceContext, SuiteService } from '@raven/core/suite-registry/service-runner.ts';
 import { markDelivered } from '@raven/core/notification-engine/notification-queue.ts';
+import { getStoredTopic, saveStoredTopic } from './topic-store.ts';
 import {
   parseCallbackData,
   handleCallback,
@@ -936,7 +937,7 @@ const agentTopicMap = new Map<string, number>(); // agentName → threadId
 export async function ensureAgentTopic(agentName: string): Promise<number | undefined> {
   if (operatingMode !== 'group' || !bot) return undefined;
 
-  // Check if already mapped
+  // Check if already mapped in this process
   const existing = agentTopicMap.get(agentName);
   if (existing !== undefined) return existing;
 
@@ -947,12 +948,30 @@ export async function ensureAgentTopic(agentName: string): Promise<number | unde
     return staticId;
   }
 
+  // Check the persistent store (survives restarts)
+  if (dbRef) {
+    const storedId = getStoredTopic(dbRef, { scope: 'agent', key: agentName, groupId });
+    if (storedId !== undefined) {
+      agentTopicMap.set(agentName, storedId);
+      return storedId;
+    }
+  }
+
   // Create a new forum topic for this agent
   try {
     const displayName = agentName.charAt(0).toUpperCase() + agentName.slice(1);
     const result = await bot.api.createForumTopic(groupId, `Agent: ${displayName}`);
     agentTopicMap.set(agentName, result.message_thread_id);
-    logger.info(`Created Telegram topic for agent "${agentName}" (thread: ${result.message_thread_id})`);
+    if (dbRef) {
+      saveStoredTopic(
+        dbRef,
+        { scope: 'agent', key: agentName, groupId },
+        result.message_thread_id,
+      );
+    }
+    logger.info(
+      `Created Telegram topic for agent "${agentName}" (thread: ${result.message_thread_id})`,
+    );
     return result.message_thread_id;
   } catch (err) {
     logger.warn(`Failed to create Telegram topic for agent "${agentName}": ${err}`);

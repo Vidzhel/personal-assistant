@@ -6,6 +6,8 @@ const mockGetChat = vi.fn().mockResolvedValue({});
 const mockEditMessageReplyMarkup = vi.fn().mockResolvedValue({});
 const mockEditMessageText = vi.fn().mockResolvedValue({});
 const mockDeleteMessage = vi.fn().mockResolvedValue({});
+const mockCreateForumTopic = vi.fn().mockResolvedValue({ message_thread_id: 42 });
+const mockCloseForumTopic = vi.fn().mockResolvedValue(true);
 const mockStart = vi.fn().mockReturnValue(new Promise(() => {}));
 const mockStop = vi.fn().mockResolvedValue(undefined);
 const messageHandlers: Array<(ctx: any) => Promise<void>> = [];
@@ -24,7 +26,7 @@ class MockBot {
     if (filter === 'message:photo') photoHandlers.push(handler);
     if (filter === 'message:document') documentHandlers.push(handler);
   }
-  api = { sendMessage: mockSendMessage, sendDocument: mockSendDocument, getChat: mockGetChat, editMessageReplyMarkup: mockEditMessageReplyMarkup, editMessageText: mockEditMessageText, deleteMessage: mockDeleteMessage };
+  api = { sendMessage: mockSendMessage, sendDocument: mockSendDocument, getChat: mockGetChat, editMessageReplyMarkup: mockEditMessageReplyMarkup, editMessageText: mockEditMessageText, deleteMessage: mockDeleteMessage, createForumTopic: mockCreateForumTopic, closeForumTopic: mockCloseForumTopic };
   catch = vi.fn();
   start = mockStart;
   stop = mockStop;
@@ -50,10 +52,14 @@ vi.mock('grammy', () => ({ Bot: MockBot, InlineKeyboard: MockInlineKeyboard, Inp
 
 const mockExistsSync = vi.fn().mockReturnValue(false);
 const mockStatSync = vi.fn().mockReturnValue({ size: 0 });
-vi.mock('node:fs', () => ({
-  existsSync: (...args: any[]) => mockExistsSync(...args),
-  statSync: (...args: any[]) => mockStatSync(...args),
-}));
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...actual,
+    existsSync: (...args: any[]) => mockExistsSync(...args),
+    statSync: (...args: any[]) => mockStatSync(...args),
+  };
+});
 
 vi.mock('@raven/shared', () => ({
   generateId: vi.fn(() => 'test-id'),
@@ -103,6 +109,8 @@ describe('telegram-bot service', () => {
     mockStop.mockResolvedValue(undefined);
     mockExistsSync.mockReturnValue(false);
     mockStatSync.mockReturnValue({ size: 0 });
+    mockCreateForumTopic.mockResolvedValue({ message_thread_id: 42 });
+    mockCloseForumTopic.mockResolvedValue(true);
 
     eventHandlers = {};
     mockEventBus = {
@@ -1428,6 +1436,65 @@ describe('telegram-bot service', () => {
         expect.stringMatching(/data\/media\/\d+-secret_\.pdf$/),
         expect.any(Buffer),
       );
+    });
+  });
+
+  describe('topic persistence', () => {
+    beforeEach(() => {
+      process.env.TELEGRAM_BOT_TOKEN = 'test-token';
+      process.env.TELEGRAM_CHAT_ID = '123';
+      process.env.TELEGRAM_GROUP_ID = '-1001234567890';
+      delete process.env.TELEGRAM_TOPIC_GENERAL;
+      delete process.env.TELEGRAM_TOPIC_SYSTEM;
+      delete process.env.TELEGRAM_TOPIC_MAP;
+    });
+
+    it('creates and persists a new agent topic', async () => {
+      const { createTestDb } = await import('./helpers/test-db.ts');
+      const { getStoredTopic } = await import('../services/topic-store.ts');
+      const db = createTestDb();
+      const mod = await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db, config: {} });
+
+      const threadId = await mod.ensureAgentTopic('raven');
+
+      expect(threadId).toBe(42);
+      expect(mockCreateForumTopic).toHaveBeenCalledTimes(1);
+      expect(
+        getStoredTopic(db, { scope: 'agent', key: 'raven', groupId: '-1001234567890' }),
+      ).toBe(42);
+    });
+
+    it('reuses a persisted agent topic across restarts (no duplicate creation)', async () => {
+      const { createTestDb } = await import('./helpers/test-db.ts');
+      const db = createTestDb();
+      const mod = await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db, config: {} });
+      await mod.ensureAgentTopic('raven');
+      expect(mockCreateForumTopic).toHaveBeenCalledTimes(1);
+
+      // Simulate restart: stop clears in-memory maps, same DB persists
+      await service.stop();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db, config: {} });
+
+      const threadId = await mod.ensureAgentTopic('raven');
+      expect(threadId).toBe(42);
+      expect(mockCreateForumTopic).toHaveBeenCalledTimes(1); // still 1 — no duplicate
+    });
+
+    it('bootstrap does not re-create topics that are already persisted', async () => {
+      const { createTestDb } = await import('./helpers/test-db.ts');
+      const { saveStoredTopic } = await import('../services/topic-store.ts');
+      const db = createTestDb();
+      db.run('INSERT INTO named_agents (name) VALUES (?)', 'raven');
+      saveStoredTopic(db, { scope: 'agent', key: 'raven', groupId: '-1001234567890' }, 42);
+
+      await loadService();
+      await service.start({ eventBus: mockEventBus, logger: mockLogger, db, config: {} });
+
+      // bootstrap runs fire-and-forget; give microtasks a chance
+      await new Promise((r) => setTimeout(r, 10));
+      expect(mockCreateForumTopic).not.toHaveBeenCalled();
     });
   });
 });
