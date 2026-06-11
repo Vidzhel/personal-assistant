@@ -45,7 +45,7 @@ import { registerTaskRoutes } from './routes/tasks.ts';
 import { registerAgentRoutes } from './routes/agents.ts';
 import type { TaskStore } from '../task-manager/task-store.ts';
 import type { TemplateLoader } from '../task-manager/template-loader.ts';
-import type { NamedAgentStore } from '../agent-registry/named-agent-store.ts';
+import type { NamedAgentStore } from '../agent-registry/yaml-named-agent-store.ts';
 import type { SuiteScaffolder } from '../suite-registry/suite-scaffolder.ts';
 import type { ProjectRegistry } from '../project-registry/project-registry.ts';
 import type { AgentYamlStore } from '../project-registry/agent-yaml-store.ts';
@@ -203,9 +203,6 @@ export async function createApiServer(
       agentManager: deps.agentManager,
       suiteRegistry: deps.suiteRegistry,
       taskStore: deps.taskStore,
-      agentYamlStore: deps.agentYamlStore,
-      projectRegistry: deps.projectRegistry,
-      projectsDir: deps.projectsDir,
     });
   }
 

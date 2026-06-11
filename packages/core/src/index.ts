@@ -32,7 +32,7 @@ import { createPipelineEngine } from './pipeline-engine/pipeline-engine.ts';
 import { createPipelineStore } from './pipeline-engine/pipeline-store.ts';
 import { createPipelineScheduler } from './pipeline-engine/pipeline-scheduler.ts';
 import { createPipelineEventTrigger } from './pipeline-engine/pipeline-event-trigger.ts';
-import { createNamedAgentStore } from './agent-registry/named-agent-store.ts';
+import { createYamlNamedAgentStore } from './agent-registry/yaml-named-agent-store.ts';
 import { createAgentResolver } from './agent-registry/agent-resolver.ts';
 import { CapabilityLibrary } from './capability-library/capability-library.ts';
 import { ProjectRegistry } from './project-registry/project-registry.ts';
@@ -212,18 +212,15 @@ async function main(): Promise<void> {
   // Expose task store globally for suite services
   (globalThis as unknown as Record<string, unknown>).__raven_task_store__ = taskStore;
 
-  // 7f. Init named agent registry
-  const namedAgentStore = createNamedAgentStore({
-    db: dbInterface,
+  // 7f. Init named agent registry (filesystem YAML is the source of truth)
+  const namedAgentStore = createYamlNamedAgentStore({
+    projectRegistry,
+    agentYamlStore,
+    projectsDir,
     eventBus: baseContext.eventBus,
-    configDir: configDir,
   });
-  namedAgentStore.loadFromConfigFile();
   const agentResolver = createAgentResolver({ capabilityLibrary, suiteRegistry });
-  const configCommitter = createConfigCommitter({
-    eventBus,
-    configFilePath: resolve(configDir, 'agents.json'),
-  });
+  const configCommitter = createConfigCommitter({ eventBus });
   configCommitter.start();
   const suiteScaffolder = createSuiteScaffolder({ suitesDir, configDir });
   log.info(`Named agent registry initialized (${namedAgentStore.listAgents().length} agents)`);

@@ -189,7 +189,7 @@ describe('buildSystemTools', () => {
   describe('create_agent', () => {
     it('calls createAgent and returns agentId', async () => {
       const created = makeAgent({ id: 'new-agent-id', name: 'my-bot' });
-      (deps.namedAgentStore!.createAgent as any).mockReturnValue(created);
+      (deps.namedAgentStore!.createAgent as any).mockResolvedValue(created);
 
       const tools = buildSystemTools(deps, scope);
       const tool = tools.find((t) => t.name === 'create_agent');
@@ -225,7 +225,7 @@ describe('buildSystemTools', () => {
 
   describe('update_agent', () => {
     it('calls updateAgent and returns ack', async () => {
-      (deps.namedAgentStore!.updateAgent as any).mockReturnValue(makeAgent());
+      (deps.namedAgentStore!.updateAgent as any).mockResolvedValue(makeAgent());
 
       const tools = buildSystemTools(deps, scope);
       const tool = tools.find((t) => t.name === 'update_agent');

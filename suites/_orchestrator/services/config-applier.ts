@@ -14,9 +14,9 @@ export interface ConfigApplierDeps {
     scaffoldSuite: (input: { name: string; displayName: string; description: string; mcpServers?: Record<string, unknown> }) => { suitePath: string };
   };
   namedAgentStore: {
-    createAgent: (input: { name: string; description?: string; instructions?: string; suiteIds: string[] }) => { id: string; name: string };
-    updateAgent: (id: string, input: { name?: string; description?: string; instructions?: string; suiteIds?: string[] }) => { id: string; name: string };
-    deleteAgent: (id: string) => void;
+    createAgent: (input: { name: string; description?: string; instructions?: string; suiteIds: string[] }) => Promise<{ id: string; name: string }>;
+    updateAgent: (id: string, input: { name?: string; description?: string; instructions?: string; suiteIds?: string[] }) => Promise<{ id: string; name: string }>;
+    deleteAgent: (id: string) => Promise<void>;
     getAgentByName: (name: string) => { id: string; name: string } | undefined;
   };
   scheduler: {
@@ -115,7 +115,7 @@ export function validateConfigChange(
  * Each resource type delegates to its native engine/store.
  * Validates content before applying.
  */
-export function applyConfigChange(
+export async function applyConfigChange(
   deps: ConfigApplierDeps,
   change: {
     changeId: string;
@@ -124,7 +124,7 @@ export function applyConfigChange(
     resourceName: string;
     content?: string;
   },
-): ApplyResult {
+): Promise<ApplyResult> {
   const { action, resourceType, resourceName, content, changeId } = change;
 
   log.info(`Applying config change ${changeId}: ${action} ${resourceType} "${resourceName}"`);
@@ -143,7 +143,7 @@ export function applyConfigChange(
       case 'suite':
         return applySuiteChange(deps, action, resourceName, content);
       case 'agent':
-        return applyAgentChange(deps, action, resourceName, content);
+        return await applyAgentChange(deps, action, resourceName, content);
       case 'schedule':
         return applyScheduleChange(deps, action, resourceName, content);
       default:
@@ -227,12 +227,12 @@ function applySuiteChange(
   return { success: false, message: `Unsupported suite action: ${action}` };
 }
 
-function applyAgentChange(
+async function applyAgentChange(
   deps: ConfigApplierDeps,
   action: ConfigChangeAction,
   name: string,
   content?: string,
-): ApplyResult {
+): Promise<ApplyResult> {
   if (action === 'create') {
     if (!content) {
       return { success: false, message: 'Agent definition content is required' };
@@ -243,7 +243,7 @@ function applyAgentChange(
       instructions?: string;
       suite_ids?: string[];
     };
-    const agent = deps.namedAgentStore.createAgent({
+    const agent = await deps.namedAgentStore.createAgent({
       name: parsed.name || name,
       description: parsed.description,
       instructions: parsed.instructions,
@@ -266,7 +266,7 @@ function applyAgentChange(
       instructions?: string;
       suite_ids?: string[];
     };
-    const agent = deps.namedAgentStore.updateAgent(existing.id, {
+    const agent = await deps.namedAgentStore.updateAgent(existing.id, {
       name: parsed.name,
       description: parsed.description,
       instructions: parsed.instructions,
@@ -280,7 +280,7 @@ function applyAgentChange(
     if (!existing) {
       return { success: false, message: `Agent "${name}" not found` };
     }
-    deps.namedAgentStore.deleteAgent(existing.id);
+    await deps.namedAgentStore.deleteAgent(existing.id);
     return { success: true, message: `Agent "${name}" deleted` };
   }
 

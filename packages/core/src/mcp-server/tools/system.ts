@@ -58,7 +58,7 @@ export function buildSystemTools(
       if (!deps.namedAgentStore) {
         return errorResult('namedAgentStore not available');
       }
-      const agent = deps.namedAgentStore.createAgent({
+      const agent = await deps.namedAgentStore.createAgent({
         name: args.name,
         description: args.description,
         instructions: args.instructions,
@@ -94,7 +94,7 @@ export function buildSystemTools(
         return errorResult('namedAgentStore not available');
       }
       const { agentId, ...updates } = args;
-      deps.namedAgentStore.updateAgent(agentId, updates);
+      await deps.namedAgentStore.updateAgent(agentId, updates);
       return okResult({ ack: true });
     },
     {

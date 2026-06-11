@@ -1,12 +1,25 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
-import { initDatabase, getDb } from '../db/database.ts';
-import { createNamedAgentStore } from '../agent-registry/named-agent-store.ts';
+import { ProjectRegistry } from '../project-registry/project-registry.ts';
+import { createAgentYamlStore } from '../project-registry/agent-yaml-store.ts';
+import {
+  createYamlNamedAgentStore,
+  type NamedAgentStore,
+} from '../agent-registry/yaml-named-agent-store.ts';
 import { registerAgentRoutes } from '../api/routes/agents.ts';
+
+const RAVEN_YAML = `name: raven
+displayName: Raven
+description: Default assistant
+isDefault: true
+skills: []
+model: sonnet
+maxTurns: 20
+`;
 
 function makeMockEventBus() {
   return {
@@ -33,31 +46,23 @@ function makeMockSuiteRegistry() {
 }
 
 describe('Agents API', () => {
-  let tmpDir: string;
+  let projectsDir: string;
   let app: FastifyInstance;
-  let store: ReturnType<typeof createNamedAgentStore>;
+  let store: NamedAgentStore;
 
   beforeAll(async () => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'raven-agentsapi-'));
-    initDatabase(join(tmpDir, 'test.db'));
+    projectsDir = mkdtempSync(join(tmpdir(), 'raven-agentsapi-'));
+    writeFileSync(join(projectsDir, 'context.md'), '# Global\n');
+    mkdirSync(join(projectsDir, 'agents', 'raven'), { recursive: true });
+    writeFileSync(join(projectsDir, 'agents', 'raven', 'agent.yaml'), RAVEN_YAML);
 
-    store = createNamedAgentStore({
-      db: {
-        run: (sql: string, ...params: unknown[]) =>
-          getDb()
-            .prepare(sql)
-            .run(...params),
-        get: <T>(sql: string, ...params: unknown[]) =>
-          getDb()
-            .prepare(sql)
-            .get(...params) as T | undefined,
-        all: <T>(sql: string, ...params: unknown[]) =>
-          getDb()
-            .prepare(sql)
-            .all(...params) as T[],
-      },
-      eventBus: makeMockEventBus(),
-      configDir: tmpDir,
+    const projectRegistry = new ProjectRegistry();
+    await projectRegistry.load(projectsDir);
+    store = createYamlNamedAgentStore({
+      projectRegistry,
+      agentYamlStore: createAgentYamlStore(),
+      projectsDir,
+      eventBus: makeMockEventBus() as any,
     });
 
     app = Fastify({ logger: false });
@@ -71,12 +76,7 @@ describe('Agents API', () => {
 
   afterAll(async () => {
     await app.close();
-    try {
-      getDb().close();
-    } catch {
-      /* */
-    }
-    rmSync(tmpDir, { recursive: true, force: true });
+    rmSync(projectsDir, { recursive: true, force: true });
   });
 
   describe('GET /api/agents', () => {
@@ -102,7 +102,18 @@ describe('Agents API', () => {
       expect(res.statusCode).toBe(201);
       const body = JSON.parse(res.payload);
       expect(body.name).toBe('api-test');
+      expect(body.id).toBe('api-test');
       expect(body.description).toBe('API test agent');
+    });
+
+    it('rejects duplicate agent names', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/agents',
+        payload: { name: 'raven', suiteIds: [] },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.payload).error).toContain('already exists');
     });
 
     it('validates kebab-case name', async () => {
@@ -125,8 +136,8 @@ describe('Agents API', () => {
   });
 
   describe('GET /api/agents/:id', () => {
-    it('returns agent by id', async () => {
-      const created = store.createAgent({ name: 'get-api-test', suiteIds: [], skills: [] });
+    it('returns agent by id (= name)', async () => {
+      const created = await store.createAgent({ name: 'get-api-test', suiteIds: [], skills: [] });
       const res = await app.inject({ method: 'GET', url: `/api/agents/${created.id}` });
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.payload);
@@ -141,7 +152,7 @@ describe('Agents API', () => {
 
   describe('PATCH /api/agents/:id', () => {
     it('updates agent fields', async () => {
-      const created = store.createAgent({ name: 'patch-test', suiteIds: [], skills: [] });
+      const created = await store.createAgent({ name: 'patch-test', suiteIds: [], skills: [] });
       const res = await app.inject({
         method: 'PATCH',
         url: `/api/agents/${created.id}`,
@@ -164,7 +175,11 @@ describe('Agents API', () => {
 
   describe('DELETE /api/agents/:id', () => {
     it('deletes a non-default agent', async () => {
-      const created = store.createAgent({ name: 'delete-api-test', suiteIds: [], skills: [] });
+      const created = await store.createAgent({
+        name: 'delete-api-test',
+        suiteIds: [],
+        skills: [],
+      });
       const res = await app.inject({ method: 'DELETE', url: `/api/agents/${created.id}` });
       expect(res.statusCode).toBe(200);
       expect(store.getAgent(created.id)).toBeUndefined();
@@ -179,7 +194,11 @@ describe('Agents API', () => {
 
   describe('GET /api/agents/:id/tasks', () => {
     it('returns empty array when no task store', async () => {
-      const created = store.createAgent({ name: 'tasks-api-test', suiteIds: [], skills: [] });
+      const created = await store.createAgent({
+        name: 'tasks-api-test',
+        suiteIds: [],
+        skills: [],
+      });
       const res = await app.inject({
         method: 'GET',
         url: `/api/agents/${created.id}/tasks`,

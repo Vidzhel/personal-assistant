@@ -98,13 +98,13 @@ export function proposeConfigChange(
 /**
  * Resolves a pending config change (apply or discard).
  */
-export function resolveConfigChange(
+export async function resolveConfigChange(
   db: DatabaseInterface,
   eventBus: EventBusInterface,
   applierDeps: ConfigApplierDeps,
   changeId: string,
   resolution: 'apply' | 'discard',
-): { success: boolean; message: string } {
+): Promise<{ success: boolean; message: string }> {
   const change = getConfigChangeById(db, changeId);
   if (!change) {
     return { success: false, message: 'Config change not found' };
@@ -116,7 +116,7 @@ export function resolveConfigChange(
   const now = new Date().toISOString();
 
   if (resolution === 'apply') {
-    const result = applyConfigChange(applierDeps, {
+    const result = await applyConfigChange(applierDeps, {
       changeId: change.id,
       action: change.action,
       resourceType: change.resourceType,

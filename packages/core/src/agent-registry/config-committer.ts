@@ -7,11 +7,8 @@ export interface ConfigCommitter {
   start: () => void;
 }
 
-export function createConfigCommitter(deps: {
-  eventBus: EventBus;
-  configFilePath: string;
-}): ConfigCommitter {
-  const { eventBus, configFilePath } = deps;
+export function createConfigCommitter(deps: { eventBus: EventBus }): ConfigCommitter {
+  const { eventBus } = deps;
 
   return {
     start(): void {
@@ -24,8 +21,9 @@ export function createConfigCommitter(deps: {
           return;
         }
 
-        const payload = event.payload as { name: string };
-        gitAutoCommit([configFilePath], `chore: update agent config — ${payload.name}`).catch(
+        const payload = event.payload as { name: string; filePath?: string };
+        if (!payload.filePath) return;
+        gitAutoCommit([payload.filePath], `chore: update agent config — ${payload.name}`).catch(
           (err: unknown) => {
             log.warn(`Git auto-commit failed: ${err}`);
           },

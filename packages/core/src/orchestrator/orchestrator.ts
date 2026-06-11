@@ -22,7 +22,7 @@ import type { KnowledgeConsolidation } from '../knowledge-engine/knowledge-conso
 import type { SessionCompaction } from '../session-manager/session-compaction.ts';
 import type { SessionRetrospective } from '../session-manager/session-retrospective.ts';
 import type { AgentTaskCompleteEvent } from '@raven/shared';
-import type { NamedAgentStore } from '../agent-registry/named-agent-store.ts';
+import type { NamedAgentStore } from '../agent-registry/yaml-named-agent-store.ts';
 import type { AgentResolver } from '../agent-registry/agent-resolver.ts';
 import type { CapabilityLibrary } from '../capability-library/capability-library.ts';
 import type { ProjectRegistry } from '../project-registry/project-registry.ts';

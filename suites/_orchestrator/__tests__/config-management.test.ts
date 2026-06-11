@@ -150,7 +150,7 @@ nodes:
 connections: []
 enabled: true`;
 
-    const result = applyConfigChange(deps, {
+    const result = await applyConfigChange(deps, {
       changeId: 'test-1',
       action: 'create',
       resourceType: 'pipeline',
@@ -174,7 +174,7 @@ enabled: true`;
 
     const { applyConfigChange } = await import('../services/config-applier.ts');
 
-    const result = applyConfigChange(deps, {
+    const result = await applyConfigChange(deps, {
       changeId: 'test-2',
       action: 'delete',
       resourceType: 'pipeline',
@@ -197,7 +197,7 @@ enabled: true`;
 
     const { applyConfigChange } = await import('../services/config-applier.ts');
 
-    const result = applyConfigChange(deps, {
+    const result = await applyConfigChange(deps, {
       changeId: 'test-3',
       action: 'create',
       resourceType: 'suite',
@@ -210,7 +210,7 @@ enabled: true`;
   });
 
   it('should call createAgent for agent create', async () => {
-    const createAgent = vi.fn().mockReturnValue({ id: 'a1', name: 'test-agent' });
+    const createAgent = vi.fn().mockResolvedValue({ id: 'a1', name: 'test-agent' });
     const deps = {
       eventBus: { emit: vi.fn(), on: vi.fn(), off: vi.fn() },
       pipelineEngine: { savePipeline: vi.fn(), deletePipeline: vi.fn() },
@@ -221,7 +221,7 @@ enabled: true`;
 
     const { applyConfigChange } = await import('../services/config-applier.ts');
 
-    const result = applyConfigChange(deps, {
+    const result = await applyConfigChange(deps, {
       changeId: 'test-4',
       action: 'create',
       resourceType: 'agent',
@@ -245,7 +245,7 @@ enabled: true`;
 
     const { applyConfigChange } = await import('../services/config-applier.ts');
 
-    const result = applyConfigChange(deps, {
+    const result = await applyConfigChange(deps, {
       changeId: 'test-5',
       action: 'create',
       resourceType: 'schedule',
@@ -268,7 +268,7 @@ enabled: true`;
 
     const { applyConfigChange } = await import('../services/config-applier.ts');
 
-    const result = applyConfigChange(deps, {
+    const result = await applyConfigChange(deps, {
       changeId: 'test-6',
       action: 'create',
       resourceType: 'pipeline',
