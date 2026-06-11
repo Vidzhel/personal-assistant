@@ -927,12 +927,16 @@ const service: SuiteService = {
     }
     projectTopicMap.clear();
     agentTopicMap.clear();
+    agentTopicInflight.clear();
     logger.info('Telegram bot stopped');
   },
 };
 
 // Agent topic thread management — dynamically create and track topics per named agent
 const agentTopicMap = new Map<string, number>(); // agentName → threadId
+
+// Inflight ensures concurrent calls for the same agent return the same create-promise
+const agentTopicInflight = new Map<string, Promise<number | undefined>>();
 
 export async function ensureAgentTopic(agentName: string): Promise<number | undefined> {
   if (operatingMode !== 'group' || !bot) return undefined;
@@ -948,35 +952,51 @@ export async function ensureAgentTopic(agentName: string): Promise<number | unde
     return staticId;
   }
 
-  // Check the persistent store (survives restarts)
-  if (dbRef) {
-    const storedId = getStoredTopic(dbRef, { scope: 'agent', key: agentName, groupId });
-    if (storedId !== undefined) {
-      agentTopicMap.set(agentName, storedId);
-      return storedId;
-    }
-  }
+  // Deduplicate concurrent create attempts for the same agent
+  const inflight = agentTopicInflight.get(agentName);
+  if (inflight !== undefined) return inflight;
 
-  // Create a new forum topic for this agent
-  try {
-    const displayName = agentName.charAt(0).toUpperCase() + agentName.slice(1);
-    const result = await bot.api.createForumTopic(groupId, `Agent: ${displayName}`);
-    agentTopicMap.set(agentName, result.message_thread_id);
+  const currentBot = bot;
+  const createPromise = (async (): Promise<number | undefined> => {
+    // Check the persistent store (survives restarts)
     if (dbRef) {
-      saveStoredTopic(
-        dbRef,
-        { scope: 'agent', key: agentName, groupId },
-        result.message_thread_id,
-      );
+      const storedId = getStoredTopic(dbRef, { scope: 'agent', key: agentName, groupId });
+      if (storedId !== undefined) {
+        agentTopicMap.set(agentName, storedId);
+        return storedId;
+      }
     }
-    logger.info(
-      `Created Telegram topic for agent "${agentName}" (thread: ${result.message_thread_id})`,
-    );
-    return result.message_thread_id;
-  } catch (err) {
-    logger.warn(`Failed to create Telegram topic for agent "${agentName}": ${err}`);
-    return undefined;
-  }
+
+    // Create a new forum topic for this agent
+    try {
+      const displayName = agentName.charAt(0).toUpperCase() + agentName.slice(1);
+      const result = await currentBot.api.createForumTopic(groupId, `Agent: ${displayName}`);
+      agentTopicMap.set(agentName, result.message_thread_id);
+      if (dbRef) {
+        saveStoredTopic(
+          dbRef,
+          { scope: 'agent', key: agentName, groupId },
+          result.message_thread_id,
+        );
+      }
+      logger.info(
+        `Created Telegram topic for agent "${agentName}" (thread: ${result.message_thread_id})`,
+      );
+      return result.message_thread_id;
+    } catch (err) {
+      logger.warn(`Failed to create Telegram topic for agent "${agentName}": ${err}`);
+      return undefined;
+    }
+  })();
+
+  agentTopicInflight.set(agentName, createPromise);
+  createPromise.finally(() => {
+    agentTopicInflight.delete(agentName);
+  }).catch(() => {
+    // already handled inside createPromise
+  });
+
+  return createPromise;
 }
 
 // Project topic thread management — create topics for newly created projects
