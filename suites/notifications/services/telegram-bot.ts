@@ -1100,9 +1100,9 @@ export async function closeProjectTopic(projectId: string): Promise<void> {
     projectTopicMap.delete(projectId);
     const projectName = topicConfig.reverseMap[threadId];
     if (projectName !== undefined) {
-      delete topicConfig.topicToProject[projectName];
+      Reflect.deleteProperty(topicConfig.topicToProject, projectName);
     }
-    delete topicConfig.reverseMap[threadId];
+    Reflect.deleteProperty(topicConfig.reverseMap, threadId);
     if (dbRef) {
       deleteStoredTopic(dbRef, { scope: 'project', key: projectId, groupId });
     }

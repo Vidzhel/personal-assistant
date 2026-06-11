@@ -132,7 +132,10 @@ function buildFailTask(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDefin
   );
 }
 
-function buildUpdateTaskProgress(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDefinition<any> {
+function buildUpdateTaskProgress(
+  deps: RavenMcpDeps,
+  scope: ScopeContext,
+): SdkMcpToolDefinition<any> {
   return tool(
     'update_task_progress',
     'Emit a progress update for the current task (0-100).',

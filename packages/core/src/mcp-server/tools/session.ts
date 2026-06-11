@@ -56,7 +56,10 @@ function buildSendMessage(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDe
   );
 }
 
-function buildGetSessionHistory(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDefinition<any> {
+function buildGetSessionHistory(
+  deps: RavenMcpDeps,
+  scope: ScopeContext,
+): SdkMcpToolDefinition<any> {
   return tool(
     'get_session_history',
     'Retrieve the message history for the current session.',
@@ -95,6 +98,9 @@ function buildGetSessionHistory(deps: RavenMcpDeps, scope: ScopeContext): SdkMcp
   );
 }
 
-export function buildSessionTools(deps: RavenMcpDeps, scope: ScopeContext): Array<SdkMcpToolDefinition<any>> {
+export function buildSessionTools(
+  deps: RavenMcpDeps,
+  scope: ScopeContext,
+): Array<SdkMcpToolDefinition<any>> {
   return [buildSendMessage(deps, scope), buildGetSessionHistory(deps, scope)];
 }

@@ -19,7 +19,10 @@ const errorResult = (message: string): ErrResult => ({
 });
 
 // eslint-disable-next-line max-lines-per-function -- builds five system management tools
-export function buildSystemTools(deps: RavenMcpDeps, _scope: ScopeContext): Array<SdkMcpToolDefinition<any>> {
+export function buildSystemTools(
+  deps: RavenMcpDeps,
+  _scope: ScopeContext,
+): Array<SdkMcpToolDefinition<any>> {
   const listAgents = tool(
     'list_agents',
     'List all named agents, optionally filtered by project.',
