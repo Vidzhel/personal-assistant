@@ -6,6 +6,8 @@ const MAX_QUALITY_THRESHOLD = 5;
 const DEFAULT_QUALITY_THRESHOLD = 3;
 const DEFAULT_MAX_RETRIES = 2;
 const DEFAULT_MAX_TURNS = 15;
+const DEFAULT_MEMORY_MAX_FILES = 30;
+const DEFAULT_MEMORY_MAX_TOTAL_KB = 64;
 
 // --- Bash Access ---
 
@@ -34,6 +36,13 @@ export const ValidationConfigSchema = z.object({
   maxRetries: z.number().int().min(0).default(DEFAULT_MAX_RETRIES),
 });
 
+// --- Agent Memory Budget ---
+
+export const MemoryBudgetSchema = z.object({
+  maxFiles: z.number().int().positive().default(DEFAULT_MEMORY_MAX_FILES),
+  maxTotalKb: z.number().int().positive().default(DEFAULT_MEMORY_MAX_TOTAL_KB),
+});
+
 // --- Agent YAML ---
 
 export const AgentYamlSchema = z.object({
@@ -46,6 +55,7 @@ export const AgentYamlSchema = z.object({
   model: z.enum(['haiku', 'sonnet', 'opus']).default('sonnet'),
   maxTurns: z.number().int().positive().default(DEFAULT_MAX_TURNS),
   bash: BashAccessSchema.optional(),
+  memory: MemoryBudgetSchema.default({ maxFiles: DEFAULT_MEMORY_MAX_FILES, maxTotalKb: DEFAULT_MEMORY_MAX_TOTAL_KB }),
   validation: ValidationConfigSchema.optional(),
 });
 
