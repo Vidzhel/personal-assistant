@@ -87,9 +87,9 @@ describe('YamlNamedAgentStore', () => {
   });
 
   it('rejects duplicate names', async () => {
-    await expect(
-      store.createAgent({ name: 'raven', suiteIds: [], skills: [] }),
-    ).rejects.toThrow(/already exists/);
+    await expect(store.createAgent({ name: 'raven', suiteIds: [], skills: [] })).rejects.toThrow(
+      /already exists/,
+    );
   });
 
   it('updates fields and persists to YAML', async () => {

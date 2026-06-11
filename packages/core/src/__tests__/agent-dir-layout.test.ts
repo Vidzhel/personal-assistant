@@ -81,10 +81,7 @@ describe('directory-per-agent layout', () => {
         description: 'Updated',
       });
       expect(updated.description).toBe('Updated');
-      const content = readFileSync(
-        join(projectsDir, 'agents', 'new-agent', 'agent.yaml'),
-        'utf-8',
-      );
+      const content = readFileSync(join(projectsDir, 'agents', 'new-agent', 'agent.yaml'), 'utf-8');
       expect(content).toContain('Updated');
     });
 

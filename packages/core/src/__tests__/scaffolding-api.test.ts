@@ -71,9 +71,10 @@ function makeMockProjectRegistry(): ProjectRegistry {
 
 function makeMockAgentYamlStore(): AgentYamlStore {
   return {
-    createAgent: vi.fn().mockResolvedValue(undefined),
+    createAgent: vi.fn().mockResolvedValue('/tmp/agent.yaml'),
     updateAgent: vi.fn(),
     deleteAgent: vi.fn(),
+    resolveAgentFile: vi.fn().mockReturnValue('/tmp/agent.yaml'),
   };
 }
 
