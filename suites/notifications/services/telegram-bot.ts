@@ -926,6 +926,7 @@ const service: SuiteService = {
       bot = null;
     }
     projectTopicMap.clear();
+    projectTopicInflight.clear();
     agentTopicMap.clear();
     agentTopicInflight.clear();
     logger.info('Telegram bot stopped');
@@ -937,6 +938,9 @@ const agentTopicMap = new Map<string, number>(); // agentName → threadId
 
 // Inflight ensures concurrent calls for the same agent return the same create-promise
 const agentTopicInflight = new Map<string, Promise<number | undefined>>();
+
+// Inflight ensures concurrent calls for the same project return the same create-promise
+const projectTopicInflight = new Map<string, Promise<number | undefined>>();
 
 export async function ensureAgentTopic(agentName: string): Promise<number | undefined> {
   if (operatingMode !== 'group' || !bot) return undefined;
@@ -1013,38 +1017,53 @@ export async function ensureProjectTopic(
   const existing = projectTopicMap.get(projectId);
   if (existing !== undefined) return existing;
 
-  // Check the persistent store (survives restarts)
-  if (dbRef) {
-    const storedId = getStoredTopic(dbRef, { scope: 'project', key: projectId, groupId });
-    if (storedId !== undefined) {
-      projectTopicMap.set(projectId, storedId);
-      topicConfig.topicToProject[projectName] = projectId;
-      topicConfig.reverseMap[storedId] = projectName;
-      return storedId;
-    }
-  }
+  // Deduplicate concurrent create attempts for the same project
+  const inflight = projectTopicInflight.get(projectId);
+  if (inflight !== undefined) return inflight;
 
-  try {
-    const result = await bot.api.createForumTopic(groupId, projectName);
-    projectTopicMap.set(projectId, result.message_thread_id);
-    // Also update topicToProject mapping for incoming message routing
-    topicConfig.topicToProject[projectName] = projectId;
-    topicConfig.reverseMap[result.message_thread_id] = projectName;
+  const createPromise = (async (): Promise<number | undefined> => {
+    // Check the persistent store (survives restarts)
     if (dbRef) {
-      saveStoredTopic(
-        dbRef,
-        { scope: 'project', key: projectId, groupId },
-        result.message_thread_id,
-      );
+      const storedId = getStoredTopic(dbRef, { scope: 'project', key: projectId, groupId });
+      if (storedId !== undefined) {
+        projectTopicMap.set(projectId, storedId);
+        topicConfig.topicToProject[projectName] = projectId;
+        topicConfig.reverseMap[storedId] = projectName;
+        return storedId;
+      }
     }
-    logger.info(
-      `Created Telegram topic for project "${projectName}" (thread: ${result.message_thread_id})`,
-    );
-    return result.message_thread_id;
-  } catch (err) {
-    logger.warn(`Failed to create Telegram topic for project "${projectName}": ${err}`);
-    return undefined;
-  }
+
+    try {
+      const currentBot = bot!;
+      const result = await currentBot.api.createForumTopic(groupId, projectName);
+      projectTopicMap.set(projectId, result.message_thread_id);
+      topicConfig.topicToProject[projectName] = projectId;
+      topicConfig.reverseMap[result.message_thread_id] = projectName;
+      if (dbRef) {
+        saveStoredTopic(
+          dbRef,
+          { scope: 'project', key: projectId, groupId },
+          result.message_thread_id,
+        );
+      }
+      logger.info(
+        `Created Telegram topic for project "${projectName}" (thread: ${result.message_thread_id})`,
+      );
+      return result.message_thread_id;
+    } catch (err) {
+      logger.warn(`Failed to create Telegram topic for project "${projectName}": ${err}`);
+      return undefined;
+    }
+  })();
+
+  projectTopicInflight.set(projectId, createPromise);
+  createPromise.finally(() => {
+    projectTopicInflight.delete(projectId);
+  }).catch(() => {
+    // already handled inside createPromise
+  });
+
+  return createPromise;
 }
 
 export async function closeProjectTopic(projectId: string): Promise<void> {
@@ -1058,6 +1077,11 @@ export async function closeProjectTopic(projectId: string): Promise<void> {
   try {
     await bot.api.closeForumTopic(groupId, threadId);
     projectTopicMap.delete(projectId);
+    const projectName = topicConfig.reverseMap[threadId];
+    if (projectName !== undefined) {
+      delete topicConfig.topicToProject[projectName];
+    }
+    delete topicConfig.reverseMap[threadId];
     if (dbRef) {
       deleteStoredTopic(dbRef, { scope: 'project', key: projectId, groupId });
     }
