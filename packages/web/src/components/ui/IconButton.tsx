@@ -18,7 +18,7 @@ export function IconButton({ children, disabled, ...rest }: IconButtonProps) {
         if (disabled !== true) e.currentTarget.style.background = 'var(--bg-hover)';
       }}
       onMouseLeave={(e) => {
-        e.currentTarget.style.background = 'transparent';
+        if (disabled !== true) e.currentTarget.style.background = 'transparent';
       }}
     >
       {children}

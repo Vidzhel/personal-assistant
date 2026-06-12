@@ -17,7 +17,7 @@ const SIZE: Record<Size, string> = {
   md: 'text-sm px-3 py-1.5',
 };
 
-interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className'> {
+interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'className' | 'onMouseEnter' | 'onMouseLeave'> {
   variant?: Variant;
   size?: Size;
   loading?: boolean;

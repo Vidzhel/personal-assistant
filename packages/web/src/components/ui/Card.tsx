@@ -22,6 +22,12 @@ export function Card({ children, interactive, selected, onClick, className = '' 
       tabIndex={interactive === true ? 0 : undefined}
       className={`rounded-lg border p-3 ${interactive === true ? 'transition-colors' : ''} ${className}`}
       style={style}
+      onKeyDown={(e) => {
+        if (interactive === true && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          onClick?.();
+        }
+      }}
       onMouseEnter={(e) => {
         if (interactive === true) e.currentTarget.style.background = 'var(--bg-hover)';
       }}

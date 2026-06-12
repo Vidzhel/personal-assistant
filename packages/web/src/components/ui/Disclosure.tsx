@@ -19,6 +19,7 @@ export function Disclosure({ open, onToggle, header, children }: DisclosureProps
         style={{ color: 'var(--text-muted)' }}
       >
         <span
+          aria-hidden="true"
           className="text-xs inline-block transition-transform"
           style={{ transform: open ? 'rotate(90deg)' : 'none' }}
         >
