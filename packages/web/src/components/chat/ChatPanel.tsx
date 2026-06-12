@@ -1,9 +1,8 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { useChat, type ChatMessage } from '@/hooks/useChat';
+import { Markdown } from '@/components/ui/Markdown';
 import { PipelinePreview } from './PipelinePreview';
 
 const PIPELINE_KEYS = ['name:', 'trigger:', 'nodes:', 'connections:'];
@@ -166,14 +165,14 @@ function ThinkingBubble({ content }: { content: string }) {
 function MarkdownBlock({ content }: { content: string }) {
   return (
     <div
-      className="max-w-[80%] px-4 py-2 rounded-lg text-sm markdown-content"
+      className="max-w-[80%] px-4 py-2 rounded-lg text-sm"
       style={{
         background: 'var(--bg-card)',
         color: 'var(--text)',
         border: '1px solid var(--border)',
       }}
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      <Markdown content={content} />
     </div>
   );
 }
@@ -195,18 +194,14 @@ function ContentBubble({ message }: { message: ChatMessage }) {
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={`max-w-[80%] px-4 py-2 rounded-lg text-sm${isUser ? ' whitespace-pre-wrap' : ' markdown-content'}`}
+        className={`max-w-[80%] px-4 py-2 rounded-lg text-sm${isUser ? ' whitespace-pre-wrap' : ''}`}
         style={{
           background: isUser ? 'var(--accent)' : 'var(--bg-card)',
           color: 'var(--text)',
           border: isUser ? 'none' : '1px solid var(--border)',
         }}
       >
-        {isUser ? (
-          message.content
-        ) : (
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
-        )}
+        {isUser ? message.content : <Markdown content={message.content} />}
       </div>
     </div>
   );
