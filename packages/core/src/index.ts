@@ -65,6 +65,9 @@ import { TemplateRegistry } from './template-engine/template-registry.ts';
 import { createTemplateScheduler } from './template-engine/template-scheduler.ts';
 import type { SessionIdleEvent } from '@raven/shared';
 import { createMemoryStore } from './agent-memory/memory-store.ts';
+import { createJobRegistry } from './scheduler/job-registry.ts';
+import { registerCoreJobs } from './scheduler/core-jobs.ts';
+import { createScheduleEngine } from './scheduler/schedule-engine.ts';
 
 const log = createLogger('raven');
 
@@ -225,17 +228,6 @@ async function main(): Promise<void> {
   configCommitter.start();
   const suiteScaffolder = createSuiteScaffolder({ suitesDir, configDir });
   log.info(`Named agent registry initialized (${namedAgentStore.listAgents().length} agents)`);
-
-  // 7g. Archival schedule handler
-  eventBus.on('schedule:triggered', (event: RavenEvent) => {
-    if (event.type === 'schedule:triggered' && 'payload' in event) {
-      const payload = event.payload as { scheduleName?: string };
-      if (payload.scheduleName === 'Task Archival') {
-        const count = taskStore.archiveCompletedTasks();
-        if (count > 0) log.info(`Archived ${count} completed tasks`);
-      }
-    }
-  });
 
   // 7g. Task lifecycle bridge — connects agent events to RavenTask lifecycle
   const taskLifecycle = createTaskLifecycle({ eventBus: baseContext.eventBus, taskStore });
@@ -516,6 +508,17 @@ async function main(): Promise<void> {
     config,
   });
 
+  // Unified schedule engine (job-kind schedules; template/agent kinds land in Plan 1b)
+  const jobRegistry = createJobRegistry();
+  registerCoreJobs(jobRegistry, { taskStore, retrospective, knowledgeConsolidation });
+  const scheduleEngine = createScheduleEngine({
+    schedules: projectRegistry.getGlobal().schedules,
+    jobRegistry,
+    taskStore,
+    timezone: config.RAVEN_TIMEZONE,
+  });
+  scheduleEngine.start();
+
   // 11b. Init idle detector + register session:idle handler
   const idleDetector = createIdleDetector({ eventBus, config });
   eventBus.on<SessionIdleEvent>('session:idle', (e) => {
@@ -606,6 +609,7 @@ async function main(): Promise<void> {
     pipelineEngine.shutdown();
     permissionEngine.shutdown();
     scheduler.shutdown();
+    scheduleEngine.stop();
     await serviceRunner.stopAll();
     await neo4jClient.close();
     await server.close();
