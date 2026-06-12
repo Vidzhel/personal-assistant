@@ -127,18 +127,58 @@ Filters/search (from the rails and a board search box) narrow the board by agent
 
 Every panel has a **Logs** section that calls the existing `GET /api/logs` filtered to the item's task id / session / agent (read-only tail). Agent output is rendered with `<Markdown>`. Built on Part 0 primitives. The transparent-background bug is resolved by the Part 0 tokens.
 
-### 1f — Schedule unification (Plan 1a, backend — ships before the UI)
+### 1f — Schedule unification (Plans 1a + 1b, backend — ship before the UI)
 
-**Verified state:** the converged model was scaffolded but never wired. `projects/schedules/*.yaml` exists (7 files, each `{name, cron, timezone, template, params?, enabled}` per `ScheduleYamlSchema`) — but **nothing consumes them**: no loader registers their crons, and 5 of the 7 referenced templates don't exist (`projects/templates/` has only email-triage, morning-briefing, research, system-maintenance). What actually runs today is the legacy DB path: `schedules` table (8 seeded rows) → `Scheduler` → `schedule:triggered` → orchestrator `handleSchedule()` → agent task. Two entries (`knowledge:retrospective`, `knowledge-consolidation`) are handled **inline** by the orchestrator (pure code, no agent).
+**Verified state (three competing mechanisms):**
+- **Legacy DB scheduler** (`scheduler.ts`): DB `schedules` table (8 seeded rows) → `schedule:triggered` event → either `orchestrator.handleSchedule()` (routes to a suite via `findSuiteForTaskType`, or runs `knowledge:retrospective`/`knowledge-consolidation` inline) **or** a suite service listening to the event directly (ticktick-sync, autonomous-manager, pattern-analysis data-collector), **or** an inline listener in `index.ts` (task-archival). **This is what actually runs today.**
+- **Template scheduler** (`template-scheduler.ts`, live in boot): iterates templates' OWN `trigger.type==='schedule'` and creates a TaskTree per fire — independent of the DB scheduler. This causes **double-firing** (e.g. `system-maintenance` runs both as a DB-scheduled maintenance service AND as a pending-approval template tree; `morning-briefing` template at 6am overlaps `morning-digest` DB schedule at 8am).
+- **`projects/schedules/*.yaml`** (7 files, `{name, cron, timezone, template, params?, enabled}`): loaded into the ProjectRegistry (`resolveProjectContext().schedules`) but **never consumed** — dead data.
 
-**Design — finish the v2 migration (all schedules at once, approved):**
-- **Wire the YAML path:** a schedule loader reads `ScheduleYaml` definitions from the project registry and registers their crons; each fire executes the referenced **template** → spawning the work the board shows (badged `scheduled`, stamped with the schedule name).
-- **Write the missing templates** for the user-facing schedules (morning-digest, ticktick-task-sync, task-archival, pattern-analysis, autonomous-task-management) so every YAML schedule references a real template.
-- **System jobs stay internal:** the two inline knowledge jobs (and any pure-code maintenance) remain on the internal scheduler, marked `system`, hidden from the Schedules rail by default.
-- **Retire the legacy DB-spawn path** for user-facing schedules. The DB keeps **runtime state only** (pause/resume override; the YAML `enabled` is the definition default) — consistent with the filesystem-defines / DB-runtime philosophy.
-- **Run history:** stamp the schedule identity onto spawned work (e.g. `scheduleId` on the created tasks/trees) so a schedule's "recent runs" is queryable; expose it on the existing task/tree list endpoints via a filter param.
-- **API:** `GET /api/schedules` lists the unified concept (from YAML defs + runtime state + computed next-run via croner `nextRun()`); `PATCH /api/schedules/:id { enabled }` toggles runtime state; `POST /api/schedules/:id/trigger` = run-now (executes the template).
-- **Out of scope:** a from-scratch schedule *author* UI (define in YAML, or via the Part 2 chat).
+The 8 jobs are heterogeneous: **3 pure code** (task-archival, knowledge-retrospective, knowledge-consolidation), **3 suite services with imperative logic** (ticktick-sync, autonomous-task-management, pattern-analysis), **≈2 agent/template-shaped** (morning-digest, system-maintenance). "Convert all to agent templates" would degrade the services and doesn't match how code nodes execute — rejected.
+
+**Unified design: a schedule is `cron + a polymorphic handler`.** One definition shape, one engine, three handler kinds.
+
+```yaml
+# projects/schedules/<name>.yaml — the single source of truth
+name: morning-digest
+cron: "0 8 * * *"
+timezone: UTC
+enabled: true
+run:
+  kind: template        # template | job | agent
+  ref: morning-digest
+params: {}
+```
+
+**One schedule engine** loads every def, registers crons (croner), and on each fire:
+1. produces a **board-visible work item stamped with `scheduleId`** (RavenTask for `job`/`agent`; TaskTree for `template`), then
+2. dispatches by `kind`:
+   - **`template`** → instantiate + run a TaskTree (shown as a grouped task with step-subtasks).
+   - **`job`** → invoke a handler in a new **Job Registry** (`jobId → async (ctx) => void`). Pure-code and service logic live here **unchanged** — registered, not raw-event-listening.
+   - **`agent`** → one agent run (skill/action) → RavenTask.
+
+**Handler mapping (faithful, not lossy):**
+
+| Schedule | kind | handler |
+|---|---|---|
+| `task-archival` | job | `taskStore.archiveCompletedTasks()` |
+| `knowledge-retrospective` | job | `retrospective.runFullRetrospective()` |
+| `knowledge-consolidation` | job | `knowledgeConsolidation.runConsolidation()` |
+| `ticktick-task-sync` | job | existing ticktick-sync logic |
+| `autonomous-task-management` | job | existing autonomous-manager logic |
+| `pattern-analysis` | job | existing data-collector logic |
+| `morning-digest` | template | new `morning-digest` template |
+| `system-maintenance` | job | existing maintenance-runner |
+
+**Retired at the end:** legacy DB `schedules` as a *definition* store (DB keeps runtime state only: enabled-override + history); `orchestrator.handleSchedule`; templates' embedded `schedule` triggers (cron lives only in `projects/schedules/` → kills double-fire); the dead schedules loader is finally consumed.
+
+**Run history:** add `schedule_id` to `task_trees`; reuse `tasks.schedule_id`; expose a `?scheduleId=` filter on the task/tree list endpoints.
+
+**API:** `GET /api/schedules` lists the unified concept (YAML defs + runtime state + computed next-run via croner `nextRun()`); `PATCH /api/schedules/:id { enabled }` toggles runtime state; `POST /api/schedules/:id/trigger` = run-now (fires the handler).
+
+**Migration safety:** new engine and legacy run **side-by-side, guarded** (a schedule migrated to a YAML def is removed from the legacy DB-seed set so it fires once), proven on the 3 pure-code jobs first (Plan 1a), then services + template + legacy retirement (Plan 1b).
+
+**Out of scope:** a from-scratch schedule *author* UI (define in YAML, or via the Part 2 chat).
 
 ---
 
@@ -172,12 +212,13 @@ The board and rails are a **presentation-layer composition** of existing endpoin
 ## Decomposition — five independently-shippable plans
 
 - **Plan 0 — UI primitives + global token/cursor fix.** Foundation; independently fixes the transparent sidebar. Ships first.
-- **Plan 1a — Schedule unification (backend, § 1f).** Wire YAML schedules → templates, write missing templates, retire the legacy DB-spawn path, runtime pause/resume, run-history stamping. Independent of Plan 0.
-- **Plan 1 — Control Center UI.** Rails (agents/plans/schedules) + kanban board (status mapping table, source badges, plan-as-grouped-task-with-steps, filter/search, board-always-visible) + polymorphic sidebar (detail/config/logs). Depends on Plan 0 (primitives) and Plan 1a (unified schedule API).
+- **Plan 1a — Schedule engine + Job Registry (backend, § 1f).** New unified loader/dispatcher (cron + polymorphic handler), task-per-fire + `scheduleId` stamping, Job Registry; migrate the 3 pure-code jobs first; new engine runs side-by-side with legacy (guarded). Independent of Plan 0.
+- **Plan 1b — Migrate remaining jobs + retire legacy (backend, § 1f).** Move the 3 services to jobs, write the `morning-digest` template, remove template self-triggers, delete the legacy scheduler path + `handleSchedule`, unified `GET /api/schedules` + pause/resume/run-now. Depends on Plan 1a.
+- **Plan 1 — Control Center UI.** Rails (agents/plans/schedules) + kanban board (status mapping table, source badges, plan-as-grouped-task-with-steps, filter/search, board-always-visible) + polymorphic sidebar (detail/config/logs). Depends on Plan 0 (primitives) and Plan 1b (unified schedule API).
 - **Plan 2 — System copilot.** Wire Raven MCP to the meta agent with read/control tools (through the permission gate) + dock the chat. Depends on Plan 1's endpoints.
 - **Plan 3 — Gmail watcher hardening.** Fully independent; ships anytime.
 
-Build order: 0 → 1a → 1 → 2; 3 in parallel.
+Build order: 0 → 1a → 1b → 1 → 2; 3 in parallel.
 
 ## Non-goals (YAGNI)
 
