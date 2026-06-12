@@ -10,7 +10,14 @@ export const TaskStatusValues = [
 ] as const;
 export type TaskStatus = (typeof TaskStatusValues)[number];
 
-export const TaskSourceValues = ['manual', 'agent', 'template', 'ticktick', 'pipeline'] as const;
+export const TaskSourceValues = [
+  'manual',
+  'agent',
+  'template',
+  'ticktick',
+  'pipeline',
+  'scheduled',
+] as const;
 export type TaskSource = (typeof TaskSourceValues)[number];
 
 export interface RavenTask {

@@ -55,17 +55,39 @@ export const AgentYamlSchema = z.object({
   model: z.enum(['haiku', 'sonnet', 'opus']).default('sonnet'),
   maxTurns: z.number().int().positive().default(DEFAULT_MAX_TURNS),
   bash: BashAccessSchema.optional(),
-  memory: MemoryBudgetSchema.default({ maxFiles: DEFAULT_MEMORY_MAX_FILES, maxTotalKb: DEFAULT_MEMORY_MAX_TOTAL_KB }),
+  memory: MemoryBudgetSchema.default({
+    maxFiles: DEFAULT_MEMORY_MAX_FILES,
+    maxTotalKb: DEFAULT_MEMORY_MAX_TOTAL_KB,
+  }),
   validation: ValidationConfigSchema.optional(),
 });
 
 // --- Schedule YAML ---
 
-export const ScheduleYamlSchema = z.object({
-  name: z.string().regex(KEBAB_CASE_RE, 'Schedule name must be lowercase kebab-case'),
-  cron: z.string().min(1),
-  timezone: z.string().default('UTC'),
-  template: z.string().min(1),
-  params: z.record(z.string(), z.unknown()).optional(),
-  enabled: z.boolean().default(true),
+export const ScheduleRunSchema = z.object({
+  kind: z.enum(['template', 'job', 'agent']),
+  ref: z.string().min(1),
 });
+
+export const ScheduleYamlSchema = z
+  .object({
+    name: z.string().regex(KEBAB_CASE_RE, 'Schedule name must be lowercase kebab-case'),
+    cron: z.string().min(1),
+    timezone: z.string().default('UTC'),
+    enabled: z.boolean().default(true),
+    params: z.record(z.string(), z.unknown()).optional(),
+    run: ScheduleRunSchema.optional(),
+    // Legacy: a bare template reference, normalized into `run` below.
+    template: z.string().min(1).optional(),
+  })
+  .refine((s) => s.run !== undefined || s.template !== undefined, {
+    message: 'schedule must define either run:{kind,ref} or a legacy template:',
+  })
+  .transform((s) => ({
+    name: s.name,
+    cron: s.cron,
+    timezone: s.timezone,
+    enabled: s.enabled,
+    params: s.params,
+    run: s.run ?? { kind: 'template' as const, ref: s.template as string },
+  }));

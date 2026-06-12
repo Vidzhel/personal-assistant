@@ -150,7 +150,7 @@ describe('ScheduleYamlSchema', () => {
     expect(result.name).toBe('daily-digest');
     expect(result.cron).toBe('0 9 * * *');
     expect(result.timezone).toBe('America/New_York');
-    expect(result.template).toBe('Generate a daily summary of tasks.');
+    expect(result.run).toEqual({ kind: 'template', ref: 'Generate a daily summary of tasks.' });
     expect(result.params).toEqual({ includeDone: true, limit: 10 });
   });
 
