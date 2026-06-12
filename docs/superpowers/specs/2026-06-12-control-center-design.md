@@ -40,7 +40,7 @@ The three rails are **overviews + filters**; the **board is the work surface**.
 - **Task** — one unit of work: a prompt + status, optionally a flat list of subtasks. Driven by an agent or done manually. Lifecycle: To Do → In Progress → Done (or Blocked). The atom of the board.
 - **Execution plan** (*TaskTree*, `task-execution/`) — a structured multi-step plan: typed nodes (agent / code / condition / notify / delay / **approval**) with `blockedBy` dependencies, retries, validation, approval gates; usually built from a Template; driven by the task-execution engine. **Rendered as a grouped task whose subtasks are its steps.**
 - **Pipeline** (`pipeline-engine/`, `PipelineConfig`) — an older automation-flow engine: named `nodes` wired by explicit `connections` (with conditions/error paths), triggered by cron/event/webhook/manual. Overlaps heavily with execution plans (parallel v1 vs v2 engines). **Not a first-class section in v1**; pipeline-spawned work shows as `pipeline`-badged tasks. Unifying the two engines is a noted future cleanup.
-- **Schedule** — a **recurring task spawner**: "stamp out *this* task on a cron." Each fire creates a fresh task instance that flows To Do → Done; the next fire creates another. The schedule itself = a task template + a cron. No perpetual "schedule card" on the board — you see the spawned instances, badged `scheduled`.
+- **Schedule** — a **recurring task spawner**: "stamp out *this* task on a cron." Each fire creates a fresh task instance that flows To Do → Done; the next fire creates another. The schedule itself = **a template reference + a cron** (`ScheduleYaml`), unified in Plan 1a — the legacy DB `task_type`/`skill_name` spawn path is retired. No perpetual "schedule card" on the board — you see the spawned instances, badged `scheduled`.
 - **Agent** — a named worker (from `projects/agents/<name>/agent.yaml`). **Active** = currently has a running/queued agent task; **idle** otherwise (with "last active").
 - **Source badge** — every board card shows where it came from: `manual` / `agent` / `scheduled` / `plan` / `pipeline`.
 
@@ -88,7 +88,7 @@ New `packages/web/src/components/ui/`, one concern per file:
 
 **New page:** the Control Center becomes the home view (e.g. `app/page.tsx` or `app/control/page.tsx`), composed of a reusable `<ControlCenter projectId?>` so the same surface can be embedded in a project. Removes the separate **Task Tree**, **Schedules**, and (folded-in) **Agent Monitor** nav entries; **Agents** nav may remain for config/CRUD but its live status now lives here.
 
-**Compactness contract:** the page itself does not scroll. Rails are single-row, collapsible, short. The board fills remaining viewport height; each kanban column scrolls internally. Opening the sidebar/chat overlays, it does not push the board into scroll.
+**Compactness contract:** the **board is always visible** with a guaranteed minimum height; each kanban column scrolls internally (the board itself never collapses below its minimum). Rails are compact single rows by default; expanding a rail ("show all") may grow the page, but the board stays visible. Opening the sidebar/chat overlays; it does not push the board out of view.
 
 ### 1a — Agents rail
 Horizontal tiles via `Rail`. Default: all **active** agents + a few idle to fill the row; "show all" expands; search filters by name. Tile: name, status dot (active/idle), current task title (if active) or "last active Xh ago". Click a tile → **filters the board** to that agent's tasks and selects the agent in the sidebar. Data: named-agent roster (filesystem/`/api/agents`) joined with `GET /api/agent-tasks/active` (running + queued) for liveness; live updates via the existing WebSocket if present, else poll.
@@ -100,7 +100,16 @@ Compact chips via `Rail`. Default: **running** plans; toggle "all"; search by na
 Compact chips via `Rail`. Default: **enabled/active** schedules; search/filter. Chip: name, human-readable cron + computed next-run, on/off toggle, "Run now". Click → filters the board to tasks spawned by that schedule. Data: `GET /api/schedules`. Backend additions (see Part 1f).
 
 ### 1d — Task board (kanban by status)
-Reusable `<TaskBoard projectId? filters?>`. Columns by status: **To Do / In Progress / Done** (+ **Blocked**). Composes sources client-side into one card view-model with a `source` discriminator:
+Reusable `<TaskBoard projectId? filters?>`. Columns by status: **To Do / In Progress / Done / Blocked**. Status → column mapping (approved, unit-tested in the board view-model):
+
+| Column | Statuses | Notes |
+|---|---|---|
+| **To Do** | `todo`, `pending`, `ready`, `pending_approval`/`waiting-approval` | approval items show a "Needs Approval" badge + Approve button (actionable, not buried) |
+| **In Progress** | `in_progress`, `running`, `validating` | |
+| **Done** | `completed`, `skipped`, `cancelled` | skipped/cancelled rendered muted. **Done shows only recent items (last 48h) by default**; older items reachable via search/filter |
+| **Blocked** | `blocked`, `failed` | failed needs attention — never buried in Done |
+
+Composes sources client-side into one card view-model with a `source` discriminator:
 - **manual / agent task** → card; expand (`Disclosure`) → flat subtasks. Draggable between columns (existing `PATCH /api/tasks/:id` status update).
 - **scheduled task** → a normal task card badged `scheduled`; one card per fire.
 - **execution plan** → a **grouped parent task** placed in the column matching the plan's status; expand → its **steps as subtasks** (reusing the `TaskTreeView` step renderer restyled onto `Card`/`Badge`), each step showing its own status. Steps reflect real engine status (a step In Progress while others wait); the group moves to Done when the run completes; the next run spawns a fresh group. **Plan cards/steps are not manually draggable** (status is engine-driven); approval gates surface an Approve `Button` on the relevant step.
@@ -118,12 +127,18 @@ Filters/search (from the rails and a board search box) narrow the board by agent
 
 Every panel has a **Logs** section that calls the existing `GET /api/logs` filtered to the item's task id / session / agent (read-only tail). Agent output is rendered with `<Markdown>`. Built on Part 0 primitives. The transparent-background bug is resolved by the Part 0 tokens.
 
-### 1f — Schedule backend slice (small)
-- **Run-history link:** the `schedule:triggered` event already carries `scheduleId`, but the orchestrator drops it and `agent_tasks` has no `schedule_id` column. Add the column (migration), thread `scheduleId` from `handleSchedule()` into the `agent:task:request` payload and onto the created agent task, and expose `GET /api/agent-tasks?scheduleId=` (and/or surface on RavenTasks via the existing `tasks.schedule_id`). Enables a schedule's "recent runs" and the `scheduled` badge.
-- **Pause/resume:** add `Scheduler.setEnabled(id, enabled)` (updates the DB row and registers/stops the Cron job at runtime — today only boot loads `enabled=1`, and only `add`/`remove` exist) + `PATCH /api/schedules/:id { enabled }`. Toggling DB `enabled` is runtime state and is **not** overwritten on boot (`initialize` only inserts when missing) — consistent with the filesystem-defines / DB-runtime philosophy.
-- **Run-now:** existing `POST /api/schedules/:id/trigger`.
-- **Next-run:** computed from the cron (croner `nextRun()` for enabled; computed for disabled).
-- **Out of scope:** a from-scratch schedule *author* in the UI (define in YAML, or via the Part 2 chat).
+### 1f — Schedule unification (Plan 1a, backend — ships before the UI)
+
+**Verified state:** the converged model was scaffolded but never wired. `projects/schedules/*.yaml` exists (7 files, each `{name, cron, timezone, template, params?, enabled}` per `ScheduleYamlSchema`) — but **nothing consumes them**: no loader registers their crons, and 5 of the 7 referenced templates don't exist (`projects/templates/` has only email-triage, morning-briefing, research, system-maintenance). What actually runs today is the legacy DB path: `schedules` table (8 seeded rows) → `Scheduler` → `schedule:triggered` → orchestrator `handleSchedule()` → agent task. Two entries (`knowledge:retrospective`, `knowledge-consolidation`) are handled **inline** by the orchestrator (pure code, no agent).
+
+**Design — finish the v2 migration (all schedules at once, approved):**
+- **Wire the YAML path:** a schedule loader reads `ScheduleYaml` definitions from the project registry and registers their crons; each fire executes the referenced **template** → spawning the work the board shows (badged `scheduled`, stamped with the schedule name).
+- **Write the missing templates** for the user-facing schedules (morning-digest, ticktick-task-sync, task-archival, pattern-analysis, autonomous-task-management) so every YAML schedule references a real template.
+- **System jobs stay internal:** the two inline knowledge jobs (and any pure-code maintenance) remain on the internal scheduler, marked `system`, hidden from the Schedules rail by default.
+- **Retire the legacy DB-spawn path** for user-facing schedules. The DB keeps **runtime state only** (pause/resume override; the YAML `enabled` is the definition default) — consistent with the filesystem-defines / DB-runtime philosophy.
+- **Run history:** stamp the schedule identity onto spawned work (e.g. `scheduleId` on the created tasks/trees) so a schedule's "recent runs" is queryable; expose it on the existing task/tree list endpoints via a filter param.
+- **API:** `GET /api/schedules` lists the unified concept (from YAML defs + runtime state + computed next-run via croner `nextRun()`); `PATCH /api/schedules/:id { enabled }` toggles runtime state; `POST /api/schedules/:id/trigger` = run-now (executes the template).
+- **Out of scope:** a from-scratch schedule *author* UI (define in YAML, or via the Part 2 chat).
 
 ---
 
@@ -154,14 +169,15 @@ Out of scope: the actual re-auth (interactive, user-run).
 
 The board and rails are a **presentation-layer composition** of existing endpoints (`/api/tasks`, `/api/task-trees`, `/api/schedules`, `/api/agents`, `/api/agent-tasks/active`, `/api/logs`) into common view-models with a `source` discriminator — no DB-level merge of the task/tree/pipeline models. The only backend changes are the small schedule slice (1f), the system-agent tools (Part 2), and the gmail fix (Part 3).
 
-## Decomposition — four independently-shippable plans
+## Decomposition — five independently-shippable plans
 
 - **Plan 0 — UI primitives + global token/cursor fix.** Foundation; independently fixes the transparent sidebar. Ships first.
-- **Plan 1 — Control Center.** Rails (agents/plans/schedules) + kanban board (source badges, plan-as-grouped-task-with-steps, filter/search, compact no-scroll) + polymorphic sidebar (detail/config/logs) + schedule backend slice (1f). Depends on Plan 0.
+- **Plan 1a — Schedule unification (backend, § 1f).** Wire YAML schedules → templates, write missing templates, retire the legacy DB-spawn path, runtime pause/resume, run-history stamping. Independent of Plan 0.
+- **Plan 1 — Control Center UI.** Rails (agents/plans/schedules) + kanban board (status mapping table, source badges, plan-as-grouped-task-with-steps, filter/search, board-always-visible) + polymorphic sidebar (detail/config/logs). Depends on Plan 0 (primitives) and Plan 1a (unified schedule API).
 - **Plan 2 — System copilot.** Wire Raven MCP to the meta agent with read/control tools (through the permission gate) + dock the chat. Depends on Plan 1's endpoints.
 - **Plan 3 — Gmail watcher hardening.** Fully independent; ships anytime.
 
-Build order: 0 → 1 → 2; 3 in parallel.
+Build order: 0 → 1a → 1 → 2; 3 in parallel.
 
 ## Non-goals (YAGNI)
 

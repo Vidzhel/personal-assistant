@@ -12,12 +12,32 @@
   --success: #22c55e;
   --warning: #eab308;
   --error: #ef4444;
+
+  /* Additions: referenced across the app but previously undefined */
+  --bg-primary: #141414;
+  --bg-secondary: #141414;
+  --accent-bg: rgba(109, 40, 217, 0.15);
+  --text-primary: #e5e5e5;
+  --text-secondary: #737373;
 }
 
 body {
   background: var(--bg);
   color: var(--text);
   font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* Clickable elements always show a pointer + disabled cue */
+button,
+[role='button'],
+a[href],
+summary {
+  cursor: pointer;
+}
+
+button:disabled,
+[role='button'][aria-disabled='true'] {
+  cursor: not-allowed;
 }
 
 /* Scrollbar */
