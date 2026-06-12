@@ -516,6 +516,7 @@ async function main(): Promise<void> {
     jobRegistry,
     taskStore,
     timezone: config.RAVEN_TIMEZONE,
+    fireTemplate: (ref, options) => templateScheduler.triggerTemplate(ref, options),
   });
   scheduleEngine.start();
 

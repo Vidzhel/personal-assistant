@@ -1,0 +1,39 @@
+name: morning-digest
+displayName: Morning Digest
+description: Compile and send the morning digest (tasks + emails)
+
+plan:
+  approval: auto
+  parallel: true
+
+tasks:
+  - id: fetch-tasks
+    type: agent
+    title: Gather today's tasks
+    agent: ticktick
+    prompt: "Get all overdue tasks and tasks due today. List each with title, due date, and priority."
+    blockedBy: []
+
+  - id: fetch-emails
+    type: agent
+    title: Summarize recent emails
+    agent: gmail
+    prompt: "Summarize unread emails from the last 12 hours. Include sender, subject, and urgency (urgent/normal/low)."
+    blockedBy: []
+
+  - id: compile-digest
+    type: agent
+    title: Compile the digest
+    agent: digest
+    prompt: "Compile a concise morning digest from the gathered tasks and email summaries. Group by urgent emails, task reminders, and a prioritized action list for the day."
+    blockedBy:
+      - fetch-tasks
+      - fetch-emails
+
+  - id: send-digest
+    type: notify
+    title: Send digest via Telegram
+    channel: telegram
+    message: "Morning digest ready — check today's priorities."
+    blockedBy:
+      - compile-digest
