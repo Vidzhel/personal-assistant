@@ -52,8 +52,9 @@ function makeSchedule(overrides: Partial<ScheduleYaml> = {}): ScheduleYaml {
     name: 'test-schedule',
     cron: '0 9 * * *',
     timezone: 'UTC',
-    template: 'test-template',
     enabled: true,
+    params: undefined,
+    run: { kind: 'template', ref: 'test-template' },
     ...overrides,
   };
 }

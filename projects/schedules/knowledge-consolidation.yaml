@@ -1,5 +1,7 @@
 name: knowledge-consolidation
 cron: "0 3 * * 0"
 timezone: UTC
-template: knowledge-consolidation
 enabled: true
+run:
+  kind: job
+  ref: knowledge-consolidation

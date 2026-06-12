@@ -72,8 +72,9 @@ const dailyCheckSchedule: ScheduleYaml = {
   name: 'daily-check',
   cron: '0 8 * * 1-5',
   timezone: 'America/New_York',
-  template: 'exam-prep',
   enabled: true,
+  params: undefined,
+  run: { kind: 'template', ref: 'exam-prep' },
 };
 
 function buildUniversityPlan(): ScaffoldPlan {
