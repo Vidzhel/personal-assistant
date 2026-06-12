@@ -44,7 +44,7 @@ export function registerTemplateRoutes(app: FastifyInstance, deps: TemplateDeps)
     const params = body.params ?? {};
 
     try {
-      const treeId = await templateScheduler.triggerTemplate(name, params);
+      const treeId = await templateScheduler.triggerTemplate(name, { params });
       return reply.code(HTTP_STATUS.ACCEPTED).send({ treeId });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
