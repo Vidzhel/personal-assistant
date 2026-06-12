@@ -55,6 +55,7 @@ function parseDuration(duration: string): number {
 interface TaskTreeRow {
   id: string;
   project_id: string | null;
+  schedule_id: string | null;
   status: string;
   plan: string | null;
   created_at: string;
@@ -109,6 +110,7 @@ function rowToTaskTree(treeRow: TaskTreeRow, taskRows: ExecutionTaskRow[]): Task
   return {
     id: treeRow.id,
     ...(treeRow.project_id !== null && { projectId: treeRow.project_id }),
+    ...(treeRow.schedule_id !== null && { scheduleId: treeRow.schedule_id }),
     status: treeRow.status as TaskTreeStatus,
     tasks,
     ...(treeRow.plan !== null && { plan: treeRow.plan }),
@@ -122,6 +124,7 @@ function rowToTaskTree(treeRow: TaskTreeRow, taskRows: ExecutionTaskRow[]): Task
 export interface CreateTreeOptions {
   id: string;
   projectId?: string;
+  scheduleId?: string;
   plan?: string;
   tasks: TaskTreeNode[];
 }
@@ -242,10 +245,11 @@ export class TaskExecutionEngine {
     const now = new Date().toISOString();
 
     this.db.run(
-      `INSERT INTO task_trees (id, project_id, status, plan, created_at, updated_at)
-       VALUES (?, ?, 'pending_approval', ?, ?, ?)`,
+      `INSERT INTO task_trees (id, project_id, schedule_id, status, plan, created_at, updated_at)
+       VALUES (?, ?, ?, 'pending_approval', ?, ?, ?)`,
       opts.id,
       opts.projectId ?? null,
+      opts.scheduleId ?? null,
       opts.plan ?? null,
       now,
       now,
@@ -267,6 +271,7 @@ export class TaskExecutionEngine {
     const tree: TaskTree = {
       id: opts.id,
       ...(opts.projectId !== undefined && { projectId: opts.projectId }),
+      ...(opts.scheduleId !== undefined && { scheduleId: opts.scheduleId }),
       status: 'pending_approval',
       tasks,
       ...(opts.plan !== undefined && { plan: opts.plan }),

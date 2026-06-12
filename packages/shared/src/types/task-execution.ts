@@ -156,6 +156,7 @@ export type TaskTreeStatus = (typeof TaskTreeStatusValues)[number];
 export interface TaskTree {
   id: string;
   projectId?: string;
+  scheduleId?: string;
   status: TaskTreeStatus;
   tasks: Map<string, ExecutionTask>;
   plan?: string;
