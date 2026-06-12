@@ -20,6 +20,11 @@ export interface TaskStoreLike {
   ): RavenTask;
 }
 
+export type FireTemplate = (
+  ref: string,
+  options: { scheduleId: string; params?: Record<string, unknown> },
+) => string | Promise<string>;
+
 export interface RunJobDeps {
   jobRegistry: JobRegistry;
   taskStore: TaskStoreLike;
@@ -59,11 +64,29 @@ export async function runScheduledJob(def: ScheduleYaml, deps: RunJobDeps): Prom
   }
 }
 
+export interface RunTemplateDeps {
+  fireTemplate: FireTemplate;
+}
+
+/** Fire a template-kind schedule. The resulting tree is the board-visible, scheduleId-stamped item. */
+export async function runScheduledTemplate(def: ScheduleYaml, deps: RunTemplateDeps): Promise<void> {
+  try {
+    const treeId = await deps.fireTemplate(def.run.ref, {
+      scheduleId: def.name,
+      params: def.params ?? {},
+    });
+    log.info(`Schedule "${def.name}" fired template "${def.run.ref}" → tree ${treeId}`);
+  } catch (err) {
+    log.error(`Schedule "${def.name}" template fire failed: ${String(err)}`);
+  }
+}
+
 export interface ScheduleEngineDeps {
   schedules: ScheduleYaml[];
   jobRegistry: JobRegistry;
   taskStore: TaskStoreLike;
   timezone: string;
+  fireTemplate?: FireTemplate;
 }
 
 export interface ScheduleEngine {
@@ -83,22 +106,46 @@ function registerJobSchedule(def: ScheduleYaml, deps: RunJobDeps): Cron {
   return job;
 }
 
+function registerTemplateSchedule(def: ScheduleYaml, fireTemplate: FireTemplate): Cron {
+  const job = new Cron(def.cron, { timezone: def.timezone }, () => {
+    runScheduledTemplate(def, { fireTemplate }).catch((err: unknown) =>
+      log.error(`runScheduledTemplate(${def.name}) failed: ${String(err)}`),
+    );
+  });
+  log.info(
+    `Registered template schedule "${def.name}" (${def.cron}) → next ${job.nextRun()?.toISOString() ?? 'n/a'}`,
+  );
+  return job;
+}
+
+function registerScheduleDef(def: ScheduleYaml, deps: ScheduleEngineDeps): Cron | null {
+  if (def.enabled === false) {
+    log.info(`Schedule "${def.name}" disabled — not registered`);
+    return null;
+  }
+  if (def.run.kind === 'job') {
+    return registerJobSchedule(def, { jobRegistry: deps.jobRegistry, taskStore: deps.taskStore });
+  }
+  if (def.run.kind === 'template') {
+    if (!deps.fireTemplate) {
+      log.warn(`Schedule "${def.name}" is template-kind but no fireTemplate dep — skipping`);
+      return null;
+    }
+    return registerTemplateSchedule(def, deps.fireTemplate);
+  }
+  log.info(`Skipping schedule "${def.name}" (kind=${def.run.kind}) — unrecognised kind`);
+  return null;
+}
+
 export function createScheduleEngine(deps: ScheduleEngineDeps): ScheduleEngine {
   const jobs: Cron[] = [];
 
   function start(): void {
     for (const def of deps.schedules) {
-      if (def.run.kind !== 'job') {
-        log.info(`Skipping schedule "${def.name}" (kind=${def.run.kind}) — handled elsewhere`);
-        continue;
-      }
-      if (def.enabled === false) {
-        log.info(`Schedule "${def.name}" disabled — not registered`);
-        continue;
-      }
-      jobs.push(registerJobSchedule(def, { jobRegistry: deps.jobRegistry, taskStore: deps.taskStore }));
+      const job = registerScheduleDef(def, deps);
+      if (job) jobs.push(job);
     }
-    log.info(`Schedule engine started with ${jobs.length} job schedules`);
+    log.info(`Schedule engine started with ${jobs.length} schedules`);
   }
 
   function stop(): void {
