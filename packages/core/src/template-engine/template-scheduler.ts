@@ -14,10 +14,20 @@ export interface TemplateSchedulerDeps {
   eventBus: EventBusInterface;
 }
 
+function pickDefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
+  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined)) as Partial<T>;
+}
+
+export interface TriggerOptions {
+  params?: Record<string, unknown>;
+  scheduleId?: string;
+  projectId?: string;
+}
+
 export interface TemplateScheduler {
   start: () => void;
   stop: () => void;
-  triggerTemplate: (name: string, params?: Record<string, unknown>) => Promise<string>;
+  triggerTemplate: (name: string, options?: TriggerOptions) => Promise<string>;
 }
 
 // eslint-disable-next-line max-lines-per-function -- factory function with start/stop/trigger
@@ -27,9 +37,9 @@ export function createTemplateScheduler(deps: TemplateSchedulerDeps): TemplateSc
   const cronJobs: Cron[] = [];
   const eventHandlers: Array<{ eventType: string; handler: (event: unknown) => void }> = [];
 
-  function triggerFromTemplate(template: TaskTemplate, params: Record<string, unknown>): string {
+  function triggerFromTemplate(template: TaskTemplate, options: TriggerOptions = {}): string {
     const treeId = generateId();
-    const { nodes, errors } = instantiateTemplate(template, params);
+    const { nodes, errors } = instantiateTemplate(template, options.params ?? {});
 
     if (errors.length > 0) {
       logger.warn(`Template "${template.name}" instantiation had errors: ${errors.join(', ')}`);
@@ -63,6 +73,7 @@ export function createTemplateScheduler(deps: TemplateSchedulerDeps): TemplateSc
       id: treeId,
       plan: template.description,
       tasks: nodes,
+      ...pickDefined({ scheduleId: options.scheduleId, projectId: options.projectId }),
     });
 
     if (template.plan.approval === 'auto') {
@@ -87,7 +98,7 @@ export function createTemplateScheduler(deps: TemplateSchedulerDeps): TemplateSc
           const job = new Cron(trigger.cron, { timezone: trigger.timezone }, () => {
             logger.info(`Cron triggered template: ${template.name}`);
             try {
-              triggerFromTemplate(template, {});
+              triggerFromTemplate(template);
             } catch (err) {
               logger.error(`Cron trigger failed for "${template.name}": ${err}`);
             }
@@ -99,7 +110,7 @@ export function createTemplateScheduler(deps: TemplateSchedulerDeps): TemplateSc
           const handler = (event: unknown): void => {
             logger.info(`Event "${eventType}" triggered template: ${template.name}`);
             try {
-              triggerFromTemplate(template, { event });
+              triggerFromTemplate(template, { params: { event } });
             } catch (err) {
               logger.error(`Event trigger failed for "${template.name}": ${err}`);
             }
@@ -133,12 +144,12 @@ export function createTemplateScheduler(deps: TemplateSchedulerDeps): TemplateSc
     logger.info('Template scheduler stopped');
   }
 
-  async function triggerTemplate(name: string, params?: Record<string, unknown>): Promise<string> {
+  async function triggerTemplate(name: string, options: TriggerOptions = {}): Promise<string> {
     const template = templateRegistry.getTemplate(name);
     if (!template) {
       throw new Error(`Template not found: "${name}"`);
     }
-    return triggerFromTemplate(template, params ?? {});
+    return triggerFromTemplate(template, options);
   }
 
   return { start, stop, triggerTemplate };
