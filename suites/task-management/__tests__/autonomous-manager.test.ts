@@ -2,9 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   parseRecommendations,
   buildAnalysisPrompt,
-  handleScheduleTrigger,
-  handleManageRequest,
 } from '../services/autonomous-manager.ts';
+import { createJobRegistry } from '@raven/core/scheduler/job-registry.ts';
 
 vi.mock('@raven/shared', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@raven/shared')>();
@@ -76,14 +75,14 @@ const RECOMMENDATIONS_JSON = JSON.stringify([
 ]);
 
 describe('autonomous-manager service', () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let mockEventBus: any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let mockAgentManager: any;
   let eventHandlers: Record<string, ((event: unknown) => void)[]>;
+  let jobRegistry: ReturnType<typeof createJobRegistry>;
 
   beforeEach(() => {
     eventHandlers = {};
+    jobRegistry = createJobRegistry();
 
     mockAgentManager = {
       executeApprovedAction: vi.fn().mockResolvedValue({ success: true, result: '{}' }),
@@ -113,7 +112,13 @@ describe('autonomous-manager service', () => {
       db: {},
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
       config: { agentManager: mockAgentManager },
+      jobRegistry,
     });
+  }
+
+  async function runAutonomousJob(): Promise<void> {
+    const handler = jobRegistry.get('autonomous-task-management');
+    await handler!({ scheduleName: 'autonomous-task-management', params: {} });
   }
 
   async function emitEventAsync(type: string, payload: unknown): Promise<void> {
@@ -132,40 +137,22 @@ describe('autonomous-manager service', () => {
   // ─── Task 1: Service skeleton ───
 
   describe('Task 1: service skeleton', () => {
-    it('subscribes to schedule:triggered and manage-request on start', async () => {
+    it('registers autonomous-task-management job and subscribes to manage-request on start', async () => {
       await startService();
-      expect(mockEventBus.on).toHaveBeenCalledWith(
-        'schedule:triggered',
-        expect.any(Function),
-      );
+      expect(jobRegistry.has('autonomous-task-management')).toBe(true);
       expect(mockEventBus.on).toHaveBeenCalledWith(
         'task-management:manage-request',
         expect.any(Function),
       );
     });
 
-    it('unsubscribes on stop', async () => {
+    it('unsubscribes manage-request on stop', async () => {
       await startService();
       await service.stop();
       expect(mockEventBus.off).toHaveBeenCalledWith(
-        'schedule:triggered',
-        expect.any(Function),
-      );
-      expect(mockEventBus.off).toHaveBeenCalledWith(
         'task-management:manage-request',
         expect.any(Function),
       );
-    });
-
-    it('filters schedule events — only responds to taskType: autonomous-task-management', async () => {
-      await startService();
-      // Trigger with wrong taskType
-      await emitEventAsync('schedule:triggered', {
-        scheduleId: 's1',
-        scheduleName: 'Morning Digest',
-        taskType: 'morning-digest',
-      });
-      expect(mockAgentManager.executeApprovedAction).not.toHaveBeenCalled();
     });
 
     it('nulls out references on stop — double stop does not throw', async () => {
@@ -178,17 +165,13 @@ describe('autonomous-manager service', () => {
   // ─── Task 2: Fetch and analyze tasks ───
 
   describe('Task 2: fetch and analyze tasks', () => {
-    it('fetches all open tasks via ticktick:get-tasks on schedule trigger', async () => {
+    it('fetches all open tasks via ticktick:get-tasks on job invocation', async () => {
       mockAgentManager.executeApprovedAction
         .mockResolvedValueOnce({ success: true, result: TASK_LIST_JSON }) // fetch
         .mockResolvedValueOnce({ success: true, result: '[]' }); // analysis returns empty
 
       await startService();
-      await emitEventAsync('schedule:triggered', {
-        scheduleId: 's1',
-        scheduleName: 'Autonomous Task Management',
-        taskType: 'autonomous-task-management',
-      });
+      await runAutonomousJob();
 
       expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -206,11 +189,7 @@ describe('autonomous-manager service', () => {
       });
 
       await startService();
-      await emitEventAsync('schedule:triggered', {
-        scheduleId: 's1',
-        scheduleName: 'Autonomous Task Management',
-        taskType: 'autonomous-task-management',
-      });
+      await runAutonomousJob();
 
       const failedEvents = getEmittedEvents('task-management:autonomous:failed');
       expect(failedEvents).toHaveLength(1);
@@ -228,11 +207,7 @@ describe('autonomous-manager service', () => {
       });
 
       await startService();
-      await emitEventAsync('schedule:triggered', {
-        scheduleId: 's1',
-        scheduleName: 'Autonomous Task Management',
-        taskType: 'autonomous-task-management',
-      });
+      await runAutonomousJob();
 
       const completedEvents = getEmittedEvents('task-management:autonomous:completed');
       expect(completedEvents).toHaveLength(1);
@@ -258,11 +233,7 @@ describe('autonomous-manager service', () => {
         .mockResolvedValueOnce({ success: true, result: 'I cannot produce valid JSON' });
 
       await startService();
-      await emitEventAsync('schedule:triggered', {
-        scheduleId: 's1',
-        scheduleName: 'Autonomous Task Management',
-        taskType: 'autonomous-task-management',
-      });
+      await runAutonomousJob();
 
       // Invalid JSON → failure event emitted
       const failedEvents = getEmittedEvents('task-management:autonomous:failed');
@@ -280,11 +251,7 @@ describe('autonomous-manager service', () => {
       );
 
       await startService();
-      await emitEventAsync('schedule:triggered', {
-        scheduleId: 's1',
-        scheduleName: 'Autonomous Task Management',
-        taskType: 'autonomous-task-management',
-      });
+      await runAutonomousJob();
 
       const failedEvents = getEmittedEvents('task-management:autonomous:failed');
       expect(failedEvents).toHaveLength(1);
@@ -321,11 +288,7 @@ describe('autonomous-manager service', () => {
       mockAgentManager.executeApprovedAction.mockResolvedValueOnce({ success: true }); // update
 
       await startService();
-      await emitEventAsync('schedule:triggered', {
-        scheduleId: 's1',
-        scheduleName: 'Autonomous Task Management',
-        taskType: 'autonomous-task-management',
-      });
+      await runAutonomousJob();
 
       // Verify ticktick:update-task was called
       const updateCall = mockAgentManager.executeApprovedAction.mock.calls[2];
@@ -368,11 +331,7 @@ describe('autonomous-manager service', () => {
       });
 
       await startService();
-      await emitEventAsync('schedule:triggered', {
-        scheduleId: 's1',
-        scheduleName: 'Autonomous Task Management',
-        taskType: 'autonomous-task-management',
-      });
+      await runAutonomousJob();
 
       const completedEvents = getEmittedEvents('task-management:autonomous:completed');
       expect(completedEvents).toHaveLength(1);
@@ -434,11 +393,7 @@ describe('autonomous-manager service', () => {
         .mockResolvedValueOnce({ success: true }); // task-3 succeeds
 
       await startService();
-      await emitEventAsync('schedule:triggered', {
-        scheduleId: 's1',
-        scheduleName: 'Autonomous Task Management',
-        taskType: 'autonomous-task-management',
-      });
+      await runAutonomousJob();
 
       const completedEvents = getEmittedEvents('task-management:autonomous:completed');
       expect(completedEvents).toHaveLength(1);
@@ -462,11 +417,7 @@ describe('autonomous-manager service', () => {
       // delete-task (low) should be filtered out — no 3rd action call
 
       await startService();
-      await emitEventAsync('schedule:triggered', {
-        scheduleId: 's1',
-        scheduleName: 'Autonomous Task Management',
-        taskType: 'autonomous-task-management',
-      });
+      await runAutonomousJob();
 
       // 2 fetch/analysis + 2 actions = 4 total calls (not 5)
       expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledTimes(4);
@@ -504,11 +455,7 @@ describe('autonomous-manager service', () => {
         .mockResolvedValueOnce({ success: true });
 
       await startService();
-      await emitEventAsync('schedule:triggered', {
-        scheduleId: 's1',
-        scheduleName: 'Autonomous Task Management',
-        taskType: 'autonomous-task-management',
-      });
+      await runAutonomousJob();
 
       const notifications = getEmittedEvents('notification');
       expect(notifications).toHaveLength(1);
@@ -527,11 +474,7 @@ describe('autonomous-manager service', () => {
         .mockResolvedValueOnce({ success: true, result: '[]' });
 
       await startService();
-      await emitEventAsync('schedule:triggered', {
-        scheduleId: 's1',
-        scheduleName: 'Autonomous Task Management',
-        taskType: 'autonomous-task-management',
-      });
+      await runAutonomousJob();
 
       const notifications = getEmittedEvents('notification');
       expect(notifications).toHaveLength(0);
@@ -555,11 +498,7 @@ describe('autonomous-manager service', () => {
         .mockResolvedValueOnce({ success: true });
 
       await startService();
-      await emitEventAsync('schedule:triggered', {
-        scheduleId: 's1',
-        scheduleName: 'Autonomous Task Management',
-        taskType: 'autonomous-task-management',
-      });
+      await runAutonomousJob();
 
       const completedEvents = getEmittedEvents('task-management:autonomous:completed');
       expect(completedEvents).toHaveLength(1);
@@ -586,20 +525,13 @@ describe('autonomous-manager service', () => {
       mockAgentManager.executeApprovedAction.mockReturnValueOnce(slowPromise);
 
       await startService();
+      const handler = jobRegistry.get('autonomous-task-management')!;
 
       // Start first run (won't complete yet)
-      const firstRun = emitEventAsync('schedule:triggered', {
-        scheduleId: 's1',
-        scheduleName: 'Autonomous Task Management',
-        taskType: 'autonomous-task-management',
-      });
+      const firstRun = handler({ scheduleName: 'autonomous-task-management', params: {} });
 
       // Immediately trigger second run
-      await emitEventAsync('schedule:triggered', {
-        scheduleId: 's2',
-        scheduleName: 'Autonomous Task Management',
-        taskType: 'autonomous-task-management',
-      });
+      await handler({ scheduleName: 'autonomous-task-management', params: {} });
 
       // Complete first run
       resolveFirst!({ success: true, result: '[]' });
@@ -719,11 +651,7 @@ describe('autonomous-manager service', () => {
       });
 
       await startService();
-      await emitEventAsync('schedule:triggered', {
-        scheduleId: 's1',
-        scheduleName: 'Autonomous Task Management',
-        taskType: 'autonomous-task-management',
-      });
+      await runAutonomousJob();
 
       // Verify get-tasks was called
       expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith(
@@ -748,13 +676,10 @@ describe('autonomous-manager service', () => {
         db: {},
         logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
         config: {}, // No agent manager
+        jobRegistry,
       });
 
-      await emitEventAsync('schedule:triggered', {
-        scheduleId: 's1',
-        scheduleName: 'Autonomous Task Management',
-        taskType: 'autonomous-task-management',
-      });
+      await runAutonomousJob();
 
       expect(mockEventBus.emit).not.toHaveBeenCalled();
     });

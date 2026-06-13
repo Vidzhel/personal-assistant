@@ -347,28 +347,6 @@ function emitCompletionEvent(
   });
 }
 
-const ScheduleTriggerPayloadSchema = z.object({
-  taskType: z.string(),
-});
-
-async function handleScheduleTrigger(event: unknown): Promise<void> {
-  const e = event as { payload?: unknown };
-  const parsed = ScheduleTriggerPayloadSchema.safeParse(e.payload);
-  if (!parsed.success || parsed.data.taskType !== 'autonomous-task-management') return;
-
-  if (isRunning) {
-    log.warn('Autonomous management already running — skipping');
-    return;
-  }
-
-  isRunning = true;
-  try {
-    await runAutonomousManagement();
-  } finally {
-    isRunning = false;
-  }
-}
-
 async function handleManageRequest(event: unknown): Promise<void> {
   const e = event as { payload: unknown };
   const parsed = TaskManagementManageRequestPayloadSchema.safeParse(e.payload);
@@ -395,7 +373,16 @@ const service: SuiteService = {
     eventBus = context.eventBus;
     serviceConfig = context.config;
 
-    eventBus.on('schedule:triggered', handleScheduleTrigger as (event: unknown) => void);
+    context.jobRegistry.register('autonomous-task-management', async () => {
+      if (isRunning) return { summary: 'Already running — skipped' };
+      isRunning = true;
+      try {
+        await runAutonomousManagement();
+        return { summary: 'Autonomous task management complete' };
+      } finally {
+        isRunning = false;
+      }
+    });
     eventBus.on(EVENT_TASK_MGMT_MANAGE_REQUEST, handleManageRequest as (event: unknown) => void);
 
     log.info('Autonomous manager service started');
@@ -403,7 +390,6 @@ const service: SuiteService = {
 
   async stop(): Promise<void> {
     if (eventBus) {
-      eventBus.off('schedule:triggered', handleScheduleTrigger as (event: unknown) => void);
       eventBus.off(EVENT_TASK_MGMT_MANAGE_REQUEST, handleManageRequest as (event: unknown) => void);
     }
     eventBus = null;
@@ -417,7 +403,6 @@ export default service;
 
 // Export for testing
 export {
-  handleScheduleTrigger,
   handleManageRequest,
   runAutonomousManagement,
   parseRecommendations,
