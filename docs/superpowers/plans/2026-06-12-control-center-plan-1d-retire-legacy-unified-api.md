@@ -564,6 +564,7 @@ git commit -m "feat(schedules): remove orchestrator.handleSchedule (schedules ru
 **Files:**
 - Modify: `packages/core/src/template-engine/template-scheduler.ts` (remove the `schedule` branch in `start()`)
 - Modify: `projects/templates/morning-briefing.yaml`, `projects/templates/system-maintenance.yaml` (remove `trigger:` blocks)
+- Create: `projects/schedules/morning-briefing.yaml` (keep morning-briefing running, at 9am, via the engine)
 
 - [ ] **Step 1: Remove the schedule branch from `start()`**
 
@@ -575,6 +576,22 @@ In `projects/templates/morning-briefing.yaml`, delete the `trigger:` block (the 
 
 In `projects/templates/system-maintenance.yaml`, delete the `trigger:` block likewise.
 
+- [ ] **Step 2b: Keep morning-briefing running via the engine (9am)**
+
+Create `projects/schedules/morning-briefing.yaml` so morning-briefing fires through the engine (template kind) instead of its removed self-trigger:
+
+```yaml
+name: morning-briefing
+cron: "0 9 * * *"
+timezone: UTC
+enabled: true
+run:
+  kind: template
+  ref: morning-briefing
+```
+
+(This is the user's decision: morning-briefing keeps running, now at 9am, one hour after the 8am morning-digest. No legacy DB row exists for it — it was only ever a template self-trigger — so no migration delete is needed.)
+
 - [ ] **Step 3: Build + template-scheduler test**
 
 Run: `npm run build -w packages/shared -w packages/core`
@@ -585,13 +602,11 @@ Expected: the file is baseline-failing (1 pre-existing failure); confirm no NEW 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add packages/core/src/template-engine/template-scheduler.ts projects/templates/morning-briefing.yaml projects/templates/system-maintenance.yaml
+git add packages/core/src/template-engine/template-scheduler.ts projects/templates/morning-briefing.yaml projects/templates/system-maintenance.yaml projects/schedules/morning-briefing.yaml
 ```
 ```bash
-git commit -m "feat(schedules): remove template self-triggers (cron lives only in projects/schedules)"
+git commit -m "feat(schedules): remove template self-triggers; morning-briefing runs via engine at 9am"
 ```
-
-> **FLAG for the human:** `morning-briefing` (6am) had only a self-trigger and no schedule YAML — after this it no longer auto-fires. It overlaps `morning-digest` (8am). Decide: delete `morning-briefing.yaml`, or add `projects/schedules/morning-briefing.yaml` (`run:{kind:template, ref:morning-briefing}`) if you want it back. Left as-is (manual-only) pending your call.
 
 ---
 
@@ -744,4 +759,4 @@ git push
 
 The schedule subsystem is fully converged: one engine, one definition source (`projects/schedules/*.yaml`), one API. **Plan 1 (Control Center UI)** can now build the Schedules rail on `GET /api/schedules` + `PATCH`/`trigger`, and the board's `scheduled` badge + run-history on `?scheduleId=`.
 
-Open human-decisions carried out of this plan: (1) whether `morning-briefing` should be deleted or given a schedule YAML; (2) confirm morning-digest content delivery (briefing-formatter follow-up if the digest agent can't self-send).
+Open human-decision carried out of this plan: confirm morning-digest content delivery (briefing-formatter follow-up if the digest agent can't self-send). (`morning-briefing` decision resolved: kept, runs via the engine at 9am.)
