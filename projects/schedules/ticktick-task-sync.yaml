@@ -1,0 +1,7 @@
+name: ticktick-task-sync
+cron: "*/15 * * * *"
+timezone: UTC
+enabled: true
+run:
+  kind: job
+  ref: ticktick-task-sync

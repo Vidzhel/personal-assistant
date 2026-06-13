@@ -1,0 +1,7 @@
+name: pattern-analysis
+cron: "0 */6 * * *"
+timezone: UTC
+enabled: true
+run:
+  kind: job
+  ref: pattern-analysis

@@ -1,0 +1,7 @@
+name: system-maintenance
+cron: "0 2 * * 0"
+timezone: UTC
+enabled: true
+run:
+  kind: job
+  ref: system-maintenance
