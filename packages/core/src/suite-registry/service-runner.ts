@@ -8,6 +8,7 @@ import {
   type IntegrationsConfig,
 } from '@raven/shared';
 import type { LoadedSuite } from './suite-loader.ts';
+import type { JobRegistry } from '../scheduler/job-registry.ts';
 
 const log = createLogger('service-runner');
 
@@ -18,6 +19,7 @@ export interface ServiceContext {
   config: Record<string, unknown>;
   projectRoot: string;
   integrationsConfig: IntegrationsConfig;
+  jobRegistry: JobRegistry;
 }
 
 export interface SuiteService {

@@ -171,6 +171,7 @@ async function main(): Promise<void> {
 
   // 6. Start suite services (IMAP watcher, Telegram bot, etc.)
   const serviceRunner = new ServiceRunner();
+  const jobRegistry = createJobRegistry();
   const baseContext = {
     eventBus: {
       emit: (event: unknown) => eventBus.emit(event as RavenEvent),
@@ -184,6 +185,7 @@ async function main(): Promise<void> {
     config: {},
     projectRoot,
     integrationsConfig,
+    jobRegistry,
   };
 
   await serviceRunner.startServices(suiteRegistry.getAllSuites(), baseContext);
@@ -509,7 +511,6 @@ async function main(): Promise<void> {
   });
 
   // Unified schedule engine (job-kind schedules; template/agent kinds land in Plan 1b)
-  const jobRegistry = createJobRegistry();
   registerCoreJobs(jobRegistry, { taskStore, retrospective, knowledgeConsolidation });
   const scheduleEngine = createScheduleEngine({
     schedules: projectRegistry.getGlobal().schedules,
