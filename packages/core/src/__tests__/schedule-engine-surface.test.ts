@@ -77,4 +77,12 @@ describe('schedule engine surface', () => {
     expect(ran).toContain('has-job');
     engine.stop();
   });
+
+  it('start() is idempotent (no orphaned crons on double start)', () => {
+    const { engine } = makeEngine();
+    engine.start();
+    engine.start();
+    expect(engine.getActiveCount()).toBe(1);
+    engine.stop();
+  });
 });

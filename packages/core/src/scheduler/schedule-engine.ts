@@ -198,6 +198,8 @@ export function createScheduleEngine(deps: ScheduleEngineDeps): ScheduleEngine {
 
   return {
     start(): void {
+      for (const name of entries.keys()) stopEntry(name, entries);
+      entries.clear();
       for (const def of deps.schedules) entries.set(def.name, { def, job: null });
       for (const name of entries.keys()) startEntry(name, entries, deps);
       const active = [...entries.values()].filter((e) => e.job).length;
