@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { createJobRegistry } from '@raven/core/scheduler/job-registry.ts';
 
 vi.mock('@raven/shared', async () => {
   const actual = await vi.importActual<typeof import('@raven/shared')>('@raven/shared');
@@ -658,6 +659,7 @@ describe('maintenance-runner service (integration)', () => {
     const mod = await import('../services/maintenance-runner.ts');
     const service = mod.default;
 
+    const jobRegistry = createJobRegistry();
     await service.start({
       eventBus: mockEventBus,
       db: {} as any,
@@ -665,10 +667,13 @@ describe('maintenance-runner service (integration)', () => {
       config: { port: 4001 },
       projectRoot: '/tmp/test',
       integrationsConfig: {} as any,
+      jobRegistry,
     });
 
     // Should have registered a handler for agent:task:request
     expect(mockEventBus.on).toHaveBeenCalledWith('agent:task:request', expect.any(Function));
+    // Should have registered the system-maintenance job
+    expect(jobRegistry.has('system-maintenance')).toBe(true);
 
     await service.stop();
   });
