@@ -159,51 +159,6 @@ describe('Orchestrator', () => {
     expect(payload.mcpServers).toHaveProperty('email_gmail');
   });
 
-  it('schedule:triggered emits agent:task:request for matching suite', async () => {
-    const suiteRegistry = makeSuiteRegistry([
-      {
-        name: 'daily-briefing',
-        schedules: [
-          {
-            id: 'morning-digest',
-            name: 'Morning Digest',
-            cron: '0 8 * * *',
-            taskType: 'morning-digest',
-            enabled: true,
-          },
-        ],
-      },
-    ]);
-
-    _orchestrator = new Orchestrator({
-      eventBus,
-      suiteRegistry,
-      sessionManager: new SessionManager(),
-      messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
-      port: 4000,
-    });
-
-    const taskRequestPromise = new Promise<RavenEvent>((resolve) => {
-      eventBus.on('agent:task:request', (e) => resolve(e));
-    });
-
-    eventBus.emit({
-      id: 'evt-3',
-      timestamp: Date.now(),
-      source: 'scheduler',
-      type: 'schedule:triggered',
-      payload: {
-        scheduleId: 'morning-digest',
-        scheduleName: 'Morning Digest',
-        taskType: 'morning-digest',
-      },
-    } as RavenEvent);
-
-    const event = await taskRequestPromise;
-    const payload = (event as unknown as { payload: Record<string, unknown> }).payload;
-    expect(payload.skillName).toBe('daily-briefing');
-  });
-
   it('meta-project chat includes MCP tool instructions and read-write access', async () => {
     const suiteRegistry = makeSuiteRegistry();
     _orchestrator = new Orchestrator({
@@ -242,33 +197,4 @@ describe('Orchestrator', () => {
     expect(prompt).toContain('Show me all projects');
   });
 
-  it('schedule:triggered with unknown taskType logs warning and does not emit', async () => {
-    const suiteRegistry = makeSuiteRegistry();
-
-    _orchestrator = new Orchestrator({
-      eventBus,
-      suiteRegistry,
-      sessionManager: new SessionManager(),
-      messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
-      port: 4000,
-    });
-
-    const handler = vi.fn();
-    eventBus.on('agent:task:request', handler);
-
-    eventBus.emit({
-      id: 'evt-4',
-      timestamp: Date.now(),
-      source: 'scheduler',
-      type: 'schedule:triggered',
-      payload: {
-        scheduleId: 'unknown-sched',
-        scheduleName: 'unknown',
-        taskType: 'nonexistent-task',
-      },
-    } as RavenEvent);
-
-    await new Promise((r) => setTimeout(r, 50));
-    expect(handler).not.toHaveBeenCalled();
-  });
 });

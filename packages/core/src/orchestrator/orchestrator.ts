@@ -7,7 +7,6 @@ import {
   type McpServerConfig,
   type SubAgentDefinition,
   type NewEmailEvent,
-  type ScheduleTriggeredEvent,
   type UserChatMessageEvent,
   type Project,
   type SystemAccessLevel,
@@ -17,8 +16,6 @@ import type { EventBus } from '../event-bus/event-bus.ts';
 import type { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 import type { SessionManager } from '../session-manager/session-manager.ts';
 import type { MessageStore } from '../session-manager/message-store.ts';
-import type { Retrospective } from '../knowledge-engine/retrospective.ts';
-import type { KnowledgeConsolidation } from '../knowledge-engine/knowledge-consolidation.ts';
 import type { SessionCompaction } from '../session-manager/session-compaction.ts';
 import type { SessionRetrospective } from '../session-manager/session-retrospective.ts';
 import type { AgentTaskCompleteEvent } from '@raven/shared';
@@ -45,8 +42,6 @@ export interface OrchestratorDeps {
   suiteRegistry: SuiteRegistry;
   sessionManager: SessionManager;
   messageStore: MessageStore;
-  retrospective?: Retrospective;
-  knowledgeConsolidation?: KnowledgeConsolidation;
   sessionCompaction?: SessionCompaction;
   sessionRetrospective?: SessionRetrospective;
   namedAgentStore?: NamedAgentStore;
@@ -67,8 +62,6 @@ export class Orchestrator {
   private suiteRegistry: SuiteRegistry;
   private sessionManager: SessionManager;
   private messageStore: MessageStore;
-  private retrospective?: Retrospective;
-  private knowledgeConsolidation?: KnowledgeConsolidation;
   private sessionCompaction?: SessionCompaction;
   private sessionRetrospective?: SessionRetrospective;
   private namedAgentStore?: NamedAgentStore;
@@ -82,8 +75,6 @@ export class Orchestrator {
     this.suiteRegistry = deps.suiteRegistry;
     this.sessionManager = deps.sessionManager;
     this.messageStore = deps.messageStore;
-    this.retrospective = deps.retrospective;
-    this.knowledgeConsolidation = deps.knowledgeConsolidation;
     this.sessionCompaction = deps.sessionCompaction;
     this.sessionRetrospective = deps.sessionRetrospective;
     this.namedAgentStore = deps.namedAgentStore;
@@ -93,9 +84,6 @@ export class Orchestrator {
     this.port = deps.port;
     this.eventBus.on<NewEmailEvent>('email:new', (e) => {
       this.handleNewEmail(e).catch((err: unknown) => log.error(`handleNewEmail failed: ${err}`));
-    });
-    this.eventBus.on<ScheduleTriggeredEvent>('schedule:triggered', (e) => {
-      this.handleSchedule(e).catch((err: unknown) => log.error(`handleSchedule failed: ${err}`));
     });
     this.eventBus.on<UserChatMessageEvent>('user:chat:message', (e) => {
       this.handleUserChat(e).catch((err: unknown) => log.error(`handleUserChat failed: ${err}`));
@@ -145,62 +133,6 @@ export class Orchestrator {
         plugins,
         priority: 'normal',
         projectId: event.projectId,
-      },
-    });
-  }
-
-  // eslint-disable-next-line max-lines-per-function -- handles multiple schedule types with context injection
-  private async handleSchedule(event: ScheduleTriggeredEvent): Promise<void> {
-    const { taskType, scheduleName } = event.payload;
-    log.info(`Schedule triggered: ${scheduleName} (${taskType})`);
-
-    // Handle knowledge:retrospective inline — no agent needed, just run summary + stale detection
-    if (taskType === 'knowledge:retrospective') {
-      if (!this.retrospective) {
-        log.warn('Retrospective not available, ignoring schedule trigger');
-        return;
-      }
-      await this.retrospective.runFullRetrospective();
-      return;
-    }
-
-    // Handle knowledge-consolidation inline
-    if (taskType === 'knowledge-consolidation') {
-      if (!this.knowledgeConsolidation) {
-        log.warn('Knowledge consolidation not available, ignoring schedule trigger');
-        return;
-      }
-      await this.knowledgeConsolidation.runConsolidation();
-      return;
-    }
-
-    const suite = this.suiteRegistry.findSuiteForTaskType(taskType);
-    if (!suite) {
-      log.warn(`No suite found for task type: ${taskType}`);
-      return;
-    }
-
-    // Collect agent definitions, MCPs, and vendor plugins from all enabled suites
-    // so the scheduled agent can delegate to other suites' agents
-    const agentDefinitions = this.suiteRegistry.collectAgentDefinitions();
-    const mcpServers = this.suiteRegistry.collectMcpServers();
-    const plugins = this.suiteRegistry.collectVendorPlugins();
-
-    const taskId = generateId();
-
-    this.eventBus.emit({
-      id: generateId(),
-      timestamp: Date.now(),
-      source: SOURCE_ORCHESTRATOR,
-      type: 'agent:task:request',
-      payload: {
-        taskId,
-        prompt: `Execute the scheduled task: ${scheduleName} (type: ${taskType}).`,
-        skillName: suite.manifest.name,
-        mcpServers,
-        agentDefinitions,
-        plugins,
-        priority: 'normal',
       },
     });
   }

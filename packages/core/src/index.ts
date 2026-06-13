@@ -526,8 +526,6 @@ async function main(): Promise<void> {
     suiteRegistry,
     sessionManager,
     messageStore,
-    retrospective,
-    knowledgeConsolidation,
     sessionCompaction,
     sessionRetrospective,
     namedAgentStore,

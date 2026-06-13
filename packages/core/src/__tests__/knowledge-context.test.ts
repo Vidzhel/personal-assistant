@@ -429,53 +429,6 @@ describe('Orchestrator context injection integration', () => {
     expect(searchMock).not.toHaveBeenCalled();
   });
 
-  it('schedule:triggered does not inject knowledgeContext (agents use MCP tools instead)', async () => {
-    const suiteRegistry = makeSuiteRegistry([
-      {
-        name: 'digest',
-        schedules: [
-          {
-            id: 's1',
-            name: 'Morning Digest',
-            cron: '0 8 * * *',
-            taskType: 'morning-digest',
-            enabled: true,
-          },
-        ],
-      },
-    ]);
-
-    const _orchestrator = new Orchestrator({
-      eventBus,
-      suiteRegistry,
-      sessionManager: new SessionManager(),
-      messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
-      port: 4000,
-    });
-
-    const taskRequestPromise = new Promise<RavenEvent>((resolve) => {
-      eventBus.on('agent:task:request', (e) => resolve(e));
-    });
-
-    eventBus.emit({
-      id: 'evt-5',
-      timestamp: Date.now(),
-      source: 'scheduler',
-      type: 'schedule:triggered',
-      payload: {
-        scheduleId: 's1',
-        scheduleName: 'Morning Digest',
-        taskType: 'morning-digest',
-      },
-    } as RavenEvent);
-
-    const event = await taskRequestPromise;
-    const payload = (event as any).payload;
-    // Knowledge context no longer injected upfront
-    expect(payload.knowledgeContext).toBeUndefined();
-    // Search mock should NOT have been called
-    expect(searchMock).not.toHaveBeenCalled();
-  });
 });
 
 describe('Knowledge agent definition', () => {
