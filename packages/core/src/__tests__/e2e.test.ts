@@ -56,7 +56,7 @@ import { McpManager } from '../mcp-manager/mcp-manager.ts';
 import { AgentManager } from '../agent-manager/agent-manager.ts';
 import { SessionManager } from '../session-manager/session-manager.ts';
 import { Orchestrator } from '../orchestrator/orchestrator.ts';
-import { Scheduler } from '../scheduler/scheduler.ts';
+import type { ScheduleEngine } from '../scheduler/schedule-engine.ts';
 import { createApiServer } from '../api/server.ts';
 import { loadConfig } from '../config.ts';
 import type { RavenEvent } from '@raven/shared';
@@ -67,7 +67,7 @@ describe('E2E: Full boot → chat → events flow', () => {
   let server: Awaited<ReturnType<typeof createApiServer>>;
   let port: number;
   let canListen = true;
-  let scheduler: Scheduler;
+  let scheduleEngine: ScheduleEngine;
   let agentManager: AgentManager;
   let executionLogger: ReturnType<typeof createExecutionLogger>;
 
@@ -98,8 +98,15 @@ describe('E2E: Full boot → chat → events flow', () => {
       messageStore,
       port: 4000,
     });
-    scheduler = new Scheduler(eventBus, 'UTC');
-    await scheduler.initialize([]);
+    scheduleEngine = {
+      list: () => [],
+      setEnabled: () => true,
+      runNow: async () => true,
+      start: () => {},
+      stop: () => {},
+      getActiveCount: () => 0,
+      getUpcoming: () => [],
+    } as unknown as ScheduleEngine;
 
     // Start API server on random port
     const auditLog = createAuditLog(getDb());
@@ -115,7 +122,7 @@ describe('E2E: Full boot → chat → events flow', () => {
           eventBus,
           suiteRegistry,
           sessionManager,
-          scheduler,
+          scheduleEngine,
           agentManager,
           auditLog,
           pendingApprovals,
@@ -149,7 +156,7 @@ describe('E2E: Full boot → chat → events flow', () => {
   });
 
   afterAll(async () => {
-    scheduler.shutdown();
+    scheduleEngine.stop();
     if (server) {
       await server.close();
     }

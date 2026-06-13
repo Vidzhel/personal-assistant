@@ -7,7 +7,7 @@ import {
   type RavenEvent,
   type RavenEventType,
 } from '@raven/shared';
-import { loadConfig, loadSuitesConfig, loadSchedulesConfig, projectRoot } from './config.ts';
+import { loadConfig, loadSuitesConfig, projectRoot } from './config.ts';
 import { loadIntegrationsConfig } from './config/integrations-config.ts';
 import { initDatabase, createDbInterface, getDb } from './db/database.ts';
 import { EventBus } from './event-bus/event-bus.ts';
@@ -18,7 +18,6 @@ import { AgentManager } from './agent-manager/agent-manager.ts';
 import { SessionManager } from './session-manager/session-manager.ts';
 import { Orchestrator } from './orchestrator/orchestrator.ts';
 import { createMessageStore } from './session-manager/message-store.ts';
-import { Scheduler } from './scheduler/scheduler.ts';
 import { createApiServer } from './api/server.ts';
 import { createPermissionEngine } from './permission-engine/permission-engine.ts';
 import { createAuditLog } from './permission-engine/audit-log.ts';
@@ -362,19 +361,6 @@ async function main(): Promise<void> {
 
   // 11. Orchestrator — initialized after knowledge engine (step 12j) for context injection
 
-  // 12. Init scheduler (merge config schedules + suite-level schedules)
-  const schedulesConfig = loadSchedulesConfig(configDir);
-  const suiteSchedules = suiteRegistry.collectSchedules().map((s) => ({
-    id: s.id,
-    name: s.name,
-    cron: s.cron,
-    taskType: s.taskType,
-    skillName: s.suiteName,
-    enabled: s.enabled,
-  }));
-  const scheduler = new Scheduler(eventBus, config.RAVEN_TIMEZONE);
-  await scheduler.initialize([...schedulesConfig, ...suiteSchedules]);
-
   // 12b. Init pipeline engine
   const pipelineStore = createPipelineStore({ db: dbInterface });
   const pipelineEngine = createPipelineEngine({
@@ -563,7 +549,7 @@ async function main(): Promise<void> {
       eventBus,
       suiteRegistry,
       sessionManager,
-      scheduler,
+      scheduleEngine,
       agentManager,
       auditLog,
       pendingApprovals,
@@ -613,7 +599,6 @@ async function main(): Promise<void> {
     pipelineEventTrigger.shutdown();
     pipelineEngine.shutdown();
     permissionEngine.shutdown();
-    scheduler.shutdown();
     scheduleEngine.stop();
     await serviceRunner.stopAll();
     await neo4jClient.close();

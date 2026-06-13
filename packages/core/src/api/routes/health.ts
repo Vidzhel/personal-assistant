@@ -46,7 +46,7 @@ export function registerHealthRoute(app: FastifyInstance, deps: ApiDeps): void {
           configured: configuredCount,
           names: suiteNames,
         },
-        scheduler: { status: 'ok', activeJobs: deps.scheduler.getActiveJobCount() },
+        scheduler: { status: 'ok', activeJobs: deps.scheduleEngine.getActiveCount() },
         agentManager: {
           status: 'ok',
           queueLength: deps.agentManager.getQueueLength(),

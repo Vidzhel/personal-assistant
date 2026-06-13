@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import type { Scheduler } from '../../scheduler/scheduler.ts';
+import type { ScheduleEngine } from '../../scheduler/schedule-engine.ts';
 import type { AgentManager } from '../../agent-manager/agent-manager.ts';
 import type { PendingApprovals } from '../../permission-engine/pending-approvals.ts';
 import type { PipelineStore } from '../../pipeline-engine/pipeline-store.ts';
@@ -10,7 +10,7 @@ const INSIGHTS_LIMIT = 5;
 const UPCOMING_LIMIT = 5;
 
 interface DashboardDeps {
-  scheduler: Scheduler;
+  scheduleEngine: ScheduleEngine;
   agentManager: AgentManager;
   pendingApprovals: PendingApprovals;
   pipelineStore?: PipelineStore;
@@ -57,7 +57,7 @@ export function registerDashboardRoutes(app: FastifyInstance, deps: DashboardDep
 
     // Active pipelines
     const globalStats = deps.pipelineStore?.getGlobalStats(todayMs);
-    const activeCount = deps.scheduler.getActiveJobCount();
+    const activeCount = deps.scheduleEngine.getActiveCount();
 
     // Pending approvals — query() already filters WHERE resolution IS NULL
     const pendingApprovalsCount = deps.pendingApprovals.query().length;
@@ -86,8 +86,12 @@ export function registerDashboardRoutes(app: FastifyInstance, deps: DashboardDep
       queueLength: deps.agentManager.getQueueLength(),
     };
 
-    // Upcoming events from scheduler
-    const upcomingEvents = deps.scheduler.getUpcomingRuns(UPCOMING_LIMIT);
+    // Upcoming events from the schedule engine.
+    // The engine yields `{name,scheduledAt,kind}`; the shared LifeDashboardData
+    // wire contract expects `type`, so map kind→type to keep the web contract unchanged.
+    const upcomingEvents = deps.scheduleEngine
+      .getUpcoming(UPCOMING_LIMIT)
+      .map((e) => ({ name: e.name, scheduledAt: e.scheduledAt, type: e.kind }));
 
     return {
       today: {

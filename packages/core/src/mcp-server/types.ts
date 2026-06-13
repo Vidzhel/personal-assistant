@@ -5,7 +5,6 @@ import type { KnowledgeStore } from '../knowledge-engine/knowledge-store.ts';
 import type { RetrievalEngine } from '../knowledge-engine/retrieval.ts';
 import type { NamedAgentStore } from '../agent-registry/yaml-named-agent-store.ts';
 import type { ProjectRegistry } from '../project-registry/project-registry.ts';
-import type { Scheduler } from '../scheduler/scheduler.ts';
 import type { PipelineEngine } from '../pipeline-engine/pipeline-engine.ts';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { DatabaseInterface } from '@raven/shared';
@@ -19,7 +18,6 @@ export interface RavenMcpDeps {
   retrievalEngine?: RetrievalEngine;
   namedAgentStore?: NamedAgentStore;
   projectRegistry?: ProjectRegistry;
-  scheduler?: Scheduler;
   pipelineEngine?: PipelineEngine;
   eventBus: EventBus;
   db?: DatabaseInterface;

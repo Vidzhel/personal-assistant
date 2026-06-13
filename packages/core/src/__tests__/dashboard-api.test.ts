@@ -5,27 +5,24 @@ import { tmpdir } from 'node:os';
 import Fastify from 'fastify';
 import { initDatabase, getDb, createDbInterface } from '../db/database.ts';
 import { registerDashboardRoutes } from '../api/routes/dashboard.ts';
-import type { Scheduler } from '../scheduler/scheduler.ts';
+import type { ScheduleEngine } from '../scheduler/schedule-engine.ts';
 import type { AgentManager } from '../agent-manager/agent-manager.ts';
 import type { PendingApprovals } from '../permission-engine/pending-approvals.ts';
 
-function createMockScheduler(): Scheduler {
+function createMockScheduleEngine(): ScheduleEngine {
   return {
-    getActiveJobCount: () => 3,
-    getUpcomingRuns: (limit: number) =>
+    list: () => [],
+    setEnabled: () => true,
+    runNow: async () => true,
+    start: () => {},
+    stop: () => {},
+    getActiveCount: () => 3,
+    getUpcoming: (limit: number) =>
       [
-        {
-          name: 'morning-digest',
-          scheduledAt: '2026-03-24T07:00:00.000Z',
-          type: 'digest',
-        },
-        {
-          name: 'email-check',
-          scheduledAt: '2026-03-24T08:00:00.000Z',
-          type: 'email',
-        },
+        { name: 'morning-digest', scheduledAt: '2026-03-24T07:00:00.000Z', kind: 'template' },
+        { name: 'email-check', scheduledAt: '2026-03-24T08:00:00.000Z', kind: 'job' },
       ].slice(0, limit),
-  } as unknown as Scheduler;
+  } as unknown as ScheduleEngine;
 }
 
 function createMockAgentManager(): AgentManager {
@@ -53,7 +50,7 @@ describe('GET /api/dashboard/life', () => {
     app = Fastify({ logger: false });
 
     registerDashboardRoutes(app, {
-      scheduler: createMockScheduler(),
+      scheduleEngine: createMockScheduleEngine(),
       agentManager: createMockAgentManager(),
       pendingApprovals: createMockPendingApprovals(),
       db: createDbInterface(),

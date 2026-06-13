@@ -5,7 +5,7 @@ import { createLogger } from '@raven/shared';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 import type { SessionManager } from '../session-manager/session-manager.ts';
-import type { Scheduler } from '../scheduler/scheduler.ts';
+import type { ScheduleEngine } from '../scheduler/schedule-engine.ts';
 import type { AgentManager } from '../agent-manager/agent-manager.ts';
 import type { AuditLog } from '../permission-engine/audit-log.ts';
 import type { PendingApprovals } from '../permission-engine/pending-approvals.ts';
@@ -70,7 +70,7 @@ export interface ApiDeps {
   eventBus: EventBus;
   suiteRegistry: SuiteRegistry;
   sessionManager: SessionManager;
-  scheduler: Scheduler;
+  scheduleEngine: ScheduleEngine;
   agentManager: AgentManager;
   auditLog: AuditLog;
   pendingApprovals: PendingApprovals;
@@ -245,7 +245,7 @@ export async function createApiServer(
 
   // Life dashboard aggregation
   registerDashboardRoutes(app, {
-    scheduler: deps.scheduler,
+    scheduleEngine: deps.scheduleEngine,
     agentManager: deps.agentManager,
     pendingApprovals: deps.pendingApprovals,
     pipelineStore: deps.pipelineStore,

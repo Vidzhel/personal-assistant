@@ -4,7 +4,7 @@ import cors from '@fastify/cors';
 import { EventBus } from '../event-bus/event-bus.ts';
 import { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 import { SessionManager } from '../session-manager/session-manager.ts';
-import { Scheduler } from '../scheduler/scheduler.ts';
+import type { ScheduleEngine } from '../scheduler/schedule-engine.ts';
 import { initDatabase, getDb } from '../db/database.ts';
 import { registerHealthRoute } from '../api/routes/health.ts';
 import { registerProjectRoutes } from '../api/routes/projects.ts';
@@ -40,7 +40,7 @@ describe('API routes', () => {
   let app: ReturnType<typeof Fastify>;
   let eventBus: EventBus;
   let suiteRegistry: SuiteRegistry;
-  let scheduler: Scheduler;
+  let scheduleEngine: ScheduleEngine;
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-api-'));
@@ -49,8 +49,15 @@ describe('API routes', () => {
     eventBus = new EventBus();
     suiteRegistry = new SuiteRegistry();
     const sessionManager = new SessionManager();
-    scheduler = new Scheduler(eventBus, 'UTC');
-    await scheduler.initialize([]);
+    scheduleEngine = {
+      list: () => [],
+      setEnabled: () => true,
+      runNow: async () => true,
+      start: () => {},
+      stop: () => {},
+      getActiveCount: () => 0,
+      getUpcoming: () => [],
+    } as unknown as ScheduleEngine;
 
     app = Fastify({ logger: false });
     await app.register(cors, { origin: true });
@@ -67,7 +74,7 @@ describe('API routes', () => {
       eventBus,
       suiteRegistry,
       sessionManager,
-      scheduler,
+      scheduleEngine,
       agentManager: makeMockAgentManager() as any,
       auditLog,
       pendingApprovals,
@@ -173,7 +180,6 @@ describe('API routes', () => {
   });
 
   afterAll(async () => {
-    scheduler.shutdown();
     await app.close();
     try {
       getDb().close();
@@ -293,25 +299,6 @@ describe('API routes', () => {
       const res = await app.inject({ method: 'GET', url: '/api/schedules' });
       expect(res.statusCode).toBe(200);
       expect(Array.isArray(JSON.parse(res.payload))).toBe(true);
-    });
-  });
-
-  describe('POST /api/schedules', () => {
-    it('creates a new schedule', async () => {
-      const res = await app.inject({
-        method: 'POST',
-        url: '/api/schedules',
-        payload: {
-          name: 'Test Schedule',
-          cron: '0 9 * * *',
-          taskType: 'test-task',
-          skillName: 'test-skill',
-        },
-      });
-      expect(res.statusCode).toBe(200);
-      const body = JSON.parse(res.payload);
-      expect(body.id).toBeDefined();
-      expect(body.name).toBe('Test Schedule');
     });
   });
 
