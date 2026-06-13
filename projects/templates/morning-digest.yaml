@@ -25,7 +25,7 @@ tasks:
     type: agent
     title: Compile the digest
     agent: digest
-    prompt: "Compile a concise morning digest from the gathered tasks and email summaries. Group by urgent emails, task reminders, and a prioritized action list for the day."
+    prompt: "Compile a concise morning digest from the gathered tasks and email summaries. Group by urgent emails, task reminders, and a prioritized action list for the day. Then send the compiled digest to the user via Telegram."
     blockedBy:
       - fetch-tasks
       - fetch-emails

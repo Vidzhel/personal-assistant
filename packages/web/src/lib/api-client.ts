@@ -37,6 +37,15 @@ export const api = {
   deleteProject: (id: string) => request(`/projects/${id}`, { method: 'DELETE' }),
   getSkills: () => request<Skill[]>('/skills'),
   getSchedules: () => request<Schedule[]>('/schedules'),
+  setScheduleEnabled: (name: string, enabled: boolean) =>
+    request<{ id: string; enabled: boolean }>(`/schedules/${encodeURIComponent(name)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    }),
+  triggerSchedule: (name: string) =>
+    request<{ triggered: boolean }>(`/schedules/${encodeURIComponent(name)}/trigger`, {
+      method: 'POST',
+    }),
   getEvents: (params?: { since?: number; type?: string; source?: string; limit?: number }) => {
     const qs = new URLSearchParams();
     if (params?.since) qs.set('since', String(params.since));
@@ -357,13 +366,14 @@ export interface Skill {
 }
 
 export interface Schedule {
-  id: string;
   name: string;
   cron: string;
   timezone: string;
-  taskType: string;
-  skillName: string;
+  kind: 'job' | 'template' | 'agent';
+  ref: string;
   enabled: boolean;
+  registered: boolean;
+  nextRun: string | null;
 }
 
 export interface Session {
