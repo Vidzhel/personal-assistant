@@ -205,49 +205,36 @@ export function buildSnapshot(database: DatabaseInterface): string {
   return snapshot;
 }
 
-function handleScheduleTriggered(event: unknown): void {
-  try {
-    const e = event as Record<string, unknown>;
-    const payload = e.payload as Record<string, unknown>;
-
-    if (payload.taskType !== 'pattern-analysis') return;
-
-    log.info('Pattern analysis triggered — collecting data snapshot');
-
-    const snapshot = buildSnapshot(db);
-
-    log.info(`Data snapshot collected (${snapshot.length} chars)`);
-
-    eventBus.emit({
-      id: generateId(),
-      timestamp: Date.now(),
-      source: SUITE_PROACTIVE_INTELLIGENCE,
-      type: 'agent:task:request',
-      payload: {
-        taskId: generateId(),
-        prompt: `Analyze the following data snapshot and identify actionable patterns:\n\n${snapshot}`,
-        skillName: SUITE_PROACTIVE_INTELLIGENCE,
-        actionName: 'intelligence:generate-insight',
-        mcpServers: {},
-        agentDefinitions: { [AGENT_PATTERN_ANALYZER]: undefined },
-        priority: 'low' as const,
-      },
-    });
-  } catch (err) {
-    log.error(`Data collection failed: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
 const service: SuiteService = {
   async start(context: ServiceContext): Promise<void> {
     eventBus = context.eventBus;
     db = context.db;
-    eventBus.on('schedule:triggered', handleScheduleTriggered);
+
+    context.jobRegistry.register('pattern-analysis', async () => {
+      const snapshot = buildSnapshot(db);
+      log.info(`Data snapshot collected (${snapshot.length} chars)`);
+      eventBus.emit({
+        id: generateId(),
+        timestamp: Date.now(),
+        source: SUITE_PROACTIVE_INTELLIGENCE,
+        type: 'agent:task:request',
+        payload: {
+          taskId: generateId(),
+          prompt: `Analyze the following data snapshot and identify actionable patterns:\n\n${snapshot}`,
+          skillName: SUITE_PROACTIVE_INTELLIGENCE,
+          actionName: 'intelligence:generate-insight',
+          mcpServers: {},
+          agentDefinitions: { [AGENT_PATTERN_ANALYZER]: undefined },
+          priority: 'low' as const,
+        },
+      });
+      return { summary: `Pattern analysis dispatched (${snapshot.length} char snapshot)` };
+    });
+
     log.info('Data collector service started');
   },
 
   async stop(): Promise<void> {
-    eventBus.off('schedule:triggered', handleScheduleTriggered);
     log.info('Data collector service stopped');
   },
 };
