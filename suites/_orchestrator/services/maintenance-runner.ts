@@ -54,6 +54,11 @@ const service: SuiteService = {
       }
     });
 
+    context.jobRegistry.register('system-maintenance', async () => {
+      await runMaintenance(generateId());
+      return { summary: 'System maintenance complete' };
+    });
+
     log.info('Maintenance runner service started');
   },
 
