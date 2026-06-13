@@ -13,7 +13,7 @@ CREATE TABLE tasks_new (
   project_id TEXT,
   pipeline_id TEXT,
   schedule_id TEXT,
-  parent_task_id TEXT,
+  parent_task_id TEXT REFERENCES tasks(id),
   source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'agent', 'template', 'ticktick', 'pipeline', 'scheduled')),
   external_id TEXT,
   artifacts TEXT,
