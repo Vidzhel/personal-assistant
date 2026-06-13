@@ -68,6 +68,7 @@ import { createMemoryStore } from './agent-memory/memory-store.ts';
 import { createJobRegistry } from './scheduler/job-registry.ts';
 import { registerCoreJobs } from './scheduler/core-jobs.ts';
 import { createScheduleEngine } from './scheduler/schedule-engine.ts';
+import { createSchedulePrefs } from './scheduler/schedule-prefs.ts';
 
 const log = createLogger('raven');
 
@@ -512,12 +513,14 @@ async function main(): Promise<void> {
 
   // Unified schedule engine (job-kind schedules; template/agent kinds land in Plan 1b)
   registerCoreJobs(jobRegistry, { taskStore, retrospective, knowledgeConsolidation });
+  const schedulePrefs = createSchedulePrefs(getDb());
   const scheduleEngine = createScheduleEngine({
     schedules: projectRegistry.getGlobal().schedules,
     jobRegistry,
     taskStore,
     timezone: config.RAVEN_TIMEZONE,
     fireTemplate: (ref, options) => templateScheduler.triggerTemplate(ref, options),
+    schedulePrefs,
   });
   scheduleEngine.start();
 
