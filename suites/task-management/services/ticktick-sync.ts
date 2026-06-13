@@ -3,9 +3,7 @@ import {
   createLogger,
   SUITE_TASK_MANAGEMENT,
   type EventBusInterface,
-  type DatabaseInterface,
   type RavenTask,
-  type ScheduleTriggeredEvent,
 } from '@raven/shared';
 import type { ServiceContext, SuiteService } from '@raven/core/suite-registry/service-runner.ts';
 
@@ -40,8 +38,6 @@ interface TaskStoreLike {
 }
 
 let eventBus: EventBusInterface | null = null;
-let db: DatabaseInterface | null = null;
-let scheduleHandler: ((event: unknown) => void) | null = null;
 
 function getTaskStore(): TaskStoreLike | null {
   try {
@@ -61,7 +57,6 @@ function getAgentManager(): AgentManagerLike | null {
   }
 }
 
-// eslint-disable-next-line max-lines-per-function -- service lifecycle with inbound/outbound sync
 async function runSync(): Promise<void> {
   const taskStore = getTaskStore();
   const agentManager = getAgentManager();
@@ -167,26 +162,16 @@ async function runSync(): Promise<void> {
 export const ticktickSync: SuiteService = {
   async start(context: ServiceContext): Promise<void> {
     eventBus = context.eventBus;
-    db = context.db;
+    context.jobRegistry.register(SYNC_SCHEDULE_NAME, async () => {
+      await runSync();
+      return { summary: 'TickTick sync complete' };
+    });
 
-    scheduleHandler = (event: unknown): void => {
-      const e = event as ScheduleTriggeredEvent;
-      if (e.payload.scheduleName === SYNC_SCHEDULE_NAME) {
-        void runSync();
-      }
-    };
-
-    eventBus.on('schedule:triggered', scheduleHandler);
-    log.info('TickTick sync service started — listening for schedule triggers');
+    log.info('TickTick sync service started — job registered');
   },
 
   async stop(): Promise<void> {
-    if (eventBus && scheduleHandler) {
-      eventBus.off('schedule:triggered', scheduleHandler);
-    }
     eventBus = null;
-    db = null;
-    scheduleHandler = null;
     log.info('TickTick sync service stopped');
   },
 };
