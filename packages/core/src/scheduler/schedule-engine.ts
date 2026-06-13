@@ -70,7 +70,10 @@ export interface RunTemplateDeps {
 }
 
 /** Fire a template-kind schedule. The resulting tree is the board-visible, scheduleId-stamped item. */
-export async function runScheduledTemplate(def: ScheduleYaml, deps: RunTemplateDeps): Promise<void> {
+export async function runScheduledTemplate(
+  def: ScheduleYaml,
+  deps: RunTemplateDeps,
+): Promise<void> {
   try {
     const treeId = await deps.fireTemplate(def.run.ref, {
       scheduleId: def.name,
@@ -152,7 +155,9 @@ function startEntry(name: string, entries: EntryMap, deps: ScheduleEngineDeps): 
   entry.job = new Cron(entry.def.cron, { timezone: entry.def.timezone }, () => {
     void fireDef(entry.def, deps);
   });
-  log.info(`Scheduled "${name}" (${entry.def.cron}) → next ${entry.job.nextRun()?.toISOString() ?? 'n/a'}`);
+  log.info(
+    `Scheduled "${name}" (${entry.def.cron}) → next ${entry.job.nextRun()?.toISOString() ?? 'n/a'}`,
+  );
 }
 
 function stopEntry(name: string, entries: EntryMap): void {

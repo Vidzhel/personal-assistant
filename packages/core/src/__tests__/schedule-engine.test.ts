@@ -59,7 +59,10 @@ describe('runScheduledJob', () => {
 
   it('marks the task blocked when no handler is registered', async () => {
     const taskStore = fakeTaskStore();
-    await runScheduledJob(jobDef, { jobRegistry: createJobRegistry(), taskStore: taskStore as any });
+    await runScheduledJob(jobDef, {
+      jobRegistry: createJobRegistry(),
+      taskStore: taskStore as any,
+    });
     const update = taskStore.calls.find((c) => c.kind === 'update');
     expect(update?.arg.patch.status).toBe('blocked');
   });

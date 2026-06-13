@@ -10,9 +10,9 @@ export interface SchedulePrefs {
 export function createSchedulePrefs(db: Database): SchedulePrefs {
   return {
     getEnabledOverride(name: string): boolean | undefined {
-      const row = db.prepare('SELECT value FROM preferences WHERE key = ?').get(`${PREFIX}${name}`) as
-        | { value: string }
-        | undefined;
+      const row = db
+        .prepare('SELECT value FROM preferences WHERE key = ?')
+        .get(`${PREFIX}${name}`) as { value: string } | undefined;
       if (!row) return undefined;
       return row.value === 'true';
     },

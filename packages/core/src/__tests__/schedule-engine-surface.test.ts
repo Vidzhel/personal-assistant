@@ -5,8 +5,22 @@ import type { ScheduleYaml } from '@raven/shared';
 
 function defs(): ScheduleYaml[] {
   return [
-    { name: 'has-job', cron: '0 * * * *', timezone: 'UTC', enabled: true, params: {}, run: { kind: 'job', ref: 'has-job' } },
-    { name: 'no-job', cron: '0 * * * *', timezone: 'UTC', enabled: true, params: {}, run: { kind: 'job', ref: 'missing' } },
+    {
+      name: 'has-job',
+      cron: '0 * * * *',
+      timezone: 'UTC',
+      enabled: true,
+      params: {},
+      run: { kind: 'job', ref: 'has-job' },
+    },
+    {
+      name: 'no-job',
+      cron: '0 * * * *',
+      timezone: 'UTC',
+      enabled: true,
+      params: {},
+      run: { kind: 'job', ref: 'missing' },
+    },
   ];
 }
 
@@ -25,7 +39,10 @@ function makeEngine() {
     ran.push('has-job');
     return { summary: 'ok' };
   });
-  const taskStore = { createTask: vi.fn(() => ({ id: 't' })), updateTask: vi.fn(() => ({ id: 't' })) };
+  const taskStore = {
+    createTask: vi.fn(() => ({ id: 't' })),
+    updateTask: vi.fn(() => ({ id: 't' })),
+  };
   const engine = createScheduleEngine({
     schedules: defs(),
     jobRegistry,
