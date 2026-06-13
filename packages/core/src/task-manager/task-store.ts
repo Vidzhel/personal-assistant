@@ -24,6 +24,7 @@ export interface TaskQueryFilters {
   assignedAgentId?: string;
   parentTaskId?: string;
   source?: string;
+  scheduleId?: string;
   search?: string;
   includeArchived?: boolean;
   limit?: number;
@@ -290,6 +291,11 @@ export function createTaskStore(deps: {
       if (filters.source) {
         conditions.push('source = ?');
         params.push(filters.source);
+      }
+
+      if (filters.scheduleId) {
+        conditions.push('schedule_id = ?');
+        params.push(filters.scheduleId);
       }
 
       if (filters.search) {

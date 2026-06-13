@@ -19,6 +19,7 @@ const TaskQuerySchema = z.object({
   assignedAgentId: z.string().optional(),
   parentTaskId: z.string().optional(),
   source: z.enum(TaskSourceValues).optional(),
+  scheduleId: z.string().optional(),
   search: z.string().optional(),
   includeArchived: z
     .string()

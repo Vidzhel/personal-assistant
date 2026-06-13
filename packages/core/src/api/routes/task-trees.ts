@@ -15,6 +15,7 @@ export function registerTaskTreeRoutes(
     return trees.map((tree) => ({
       id: tree.id,
       projectId: tree.projectId,
+      scheduleId: tree.scheduleId,
       status: tree.status,
       plan: tree.plan,
       taskCount: tree.tasks.size,
