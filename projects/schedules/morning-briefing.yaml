@@ -1,0 +1,7 @@
+name: morning-briefing
+cron: "0 9 * * *"
+timezone: UTC
+enabled: true
+run:
+  kind: template
+  ref: morning-briefing

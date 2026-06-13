@@ -2,11 +2,6 @@ name: system-maintenance
 displayName: System Maintenance
 description: Periodic system health inspection, dependency audit, and improvement recommendations
 
-trigger:
-  - type: schedule
-    cron: "0 2 * * 0"
-    timezone: UTC
-
 plan:
   approval: manual
   parallel: false

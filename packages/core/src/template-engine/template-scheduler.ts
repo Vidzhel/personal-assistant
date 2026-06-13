@@ -1,4 +1,3 @@
-import { Cron } from 'croner';
 import { createLogger, generateId } from '@raven/shared';
 import type { EventBusInterface, TaskTemplate } from '@raven/shared';
 
@@ -34,7 +33,6 @@ export interface TemplateScheduler {
 export function createTemplateScheduler(deps: TemplateSchedulerDeps): TemplateScheduler {
   const { templateRegistry, executionEngine, eventBus } = deps;
 
-  const cronJobs: Cron[] = [];
   const eventHandlers: Array<{ eventType: string; handler: (event: unknown) => void }> = [];
 
   function triggerFromTemplate(template: TaskTemplate, options: TriggerOptions = {}): string {
@@ -94,18 +92,7 @@ export function createTemplateScheduler(deps: TemplateSchedulerDeps): TemplateSc
 
     for (const template of templates) {
       for (const trigger of template.trigger) {
-        if (trigger.type === 'schedule') {
-          const job = new Cron(trigger.cron, { timezone: trigger.timezone }, () => {
-            logger.info(`Cron triggered template: ${template.name}`);
-            try {
-              triggerFromTemplate(template);
-            } catch (err) {
-              logger.error(`Cron trigger failed for "${template.name}": ${err}`);
-            }
-          });
-          cronJobs.push(job);
-          logger.info(`Registered cron job for template "${template.name}": ${trigger.cron}`);
-        } else if (trigger.type === 'event') {
+        if (trigger.type === 'event') {
           const eventType = trigger.eventType;
           const handler = (event: unknown): void => {
             logger.info(`Event "${eventType}" triggered template: ${template.name}`);
@@ -123,19 +110,11 @@ export function createTemplateScheduler(deps: TemplateSchedulerDeps): TemplateSc
       }
     }
 
-    const scheduleCount = cronJobs.length;
     const eventCount = eventHandlers.length;
-    logger.info(
-      `Template scheduler started: ${String(scheduleCount)} cron, ${String(eventCount)} event triggers`,
-    );
+    logger.info(`Template scheduler started: ${String(eventCount)} event triggers`);
   }
 
   function stop(): void {
-    for (const job of cronJobs) {
-      job.stop();
-    }
-    cronJobs.length = 0;
-
     for (const { eventType, handler } of eventHandlers) {
       eventBus.off(eventType, handler);
     }

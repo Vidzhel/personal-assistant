@@ -2,11 +2,6 @@ name: morning-briefing
 displayName: Morning Briefing
 description: Compile and send daily morning briefing
 
-trigger:
-  - type: schedule
-    cron: "0 6 * * *"
-    timezone: UTC
-
 plan:
   approval: auto
   parallel: true
