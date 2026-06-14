@@ -28,13 +28,7 @@ const COLUMN_TARGET_STATUS: Partial<Record<ColKey, string>> = {
   blocked: 'blocked',
 };
 
-function DraggableCard({
-  card,
-  onOpen,
-}: {
-  card: BoardCard;
-  onOpen: (card: BoardCard) => void;
-}) {
+function DraggableCard({ card, onOpen }: { card: BoardCard; onOpen: (card: BoardCard) => void }) {
   return (
     <div
       draggable={card.draggable}

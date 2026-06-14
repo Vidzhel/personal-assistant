@@ -18,7 +18,11 @@ interface ChildItem {
 async function loadChildren(card: BoardCard): Promise<ChildItem[]> {
   if (card.kind === 'task') {
     const detail = await api.getTask(card.id);
-    return detail.subtasks.map((s: RavenTaskRecord) => ({ id: s.id, title: s.title, status: s.status }));
+    return detail.subtasks.map((s: RavenTaskRecord) => ({
+      id: s.id,
+      title: s.title,
+      status: s.status,
+    }));
   }
   const tree = await api.getTaskTree(card.id);
   return tree.tasks.map((s) => ({ id: s.id, title: s.title, status: s.status }));
@@ -29,7 +33,10 @@ function ProgressBar({ completed, total }: { completed: number; total: number })
   return (
     <div className="mt-2 flex items-center gap-2">
       <div className="flex-1 h-1.5 rounded-full" style={{ background: 'var(--bg-hover)' }}>
-        <div className="h-1.5 rounded-full" style={{ width: `${pct}%`, background: 'var(--accent)' }} />
+        <div
+          className="h-1.5 rounded-full"
+          style={{ width: `${pct}%`, background: 'var(--accent)' }}
+        />
       </div>
       <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
         {completed}/{total}
@@ -39,9 +46,18 @@ function ProgressBar({ completed, total }: { completed: number; total: number })
 }
 
 function ChildList({ loading, items }: { loading: boolean; items: ChildItem[] | null }) {
-  if (loading) return <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</p>;
+  if (loading)
+    return (
+      <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+        Loading…
+      </p>
+    );
   if (items && items.length === 0)
-    return <p className="text-xs" style={{ color: 'var(--text-muted)' }}>None</p>;
+    return (
+      <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+        None
+      </p>
+    );
   return (
     <>
       {items?.map((c) => (
@@ -83,13 +99,19 @@ export function TaskCard({ card, onOpen }: { card: BoardCard; onOpen: (card: Boa
         <SourceBadge source={card.source} />
       </div>
 
-      {card.progress && <ProgressBar completed={card.progress.completed} total={card.progress.total} />}
+      {card.progress && (
+        <ProgressBar completed={card.progress.completed} total={card.progress.total} />
+      )}
 
       <div className="mt-1.5" onClick={(e) => e.stopPropagation()}>
         <Disclosure
           open={open}
           onToggle={toggle}
-          header={<span className="text-xs" style={{ color: 'var(--text-muted)' }}>{childLabel}</span>}
+          header={
+            <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              {childLabel}
+            </span>
+          }
         >
           <ChildList loading={loading} items={items} />
         </Disclosure>

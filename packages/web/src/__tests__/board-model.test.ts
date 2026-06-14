@@ -4,12 +4,25 @@ import type { RavenTaskRecord, TaskTreeRecord } from '@/lib/api-client';
 
 function task(over: Partial<RavenTaskRecord> = {}): RavenTaskRecord {
   return {
-    id: 't1', title: 'Task', status: 'todo', source: 'manual', artifacts: [],
-    createdAt: '2026-06-13T00:00:00.000Z', updatedAt: '2026-06-13T00:00:00.000Z', ...over,
+    id: 't1',
+    title: 'Task',
+    status: 'todo',
+    source: 'manual',
+    artifacts: [],
+    createdAt: '2026-06-13T00:00:00.000Z',
+    updatedAt: '2026-06-13T00:00:00.000Z',
+    ...over,
   } as RavenTaskRecord;
 }
 function tree(over: Partial<TaskTreeRecord> = {}): TaskTreeRecord {
-  return { id: 'tree1', status: 'running', taskCount: 5, completedCount: 3, createdAt: '2026-06-13T00:00:00.000Z', ...over } as TaskTreeRecord;
+  return {
+    id: 'tree1',
+    status: 'running',
+    taskCount: 5,
+    completedCount: 3,
+    createdAt: '2026-06-13T00:00:00.000Z',
+    ...over,
+  } as TaskTreeRecord;
 }
 
 describe('statusToColumn', () => {
@@ -36,7 +49,10 @@ describe('statusToColumn', () => {
 describe('buildBoard', () => {
   it('places tasks and plans into columns with source/kind', () => {
     const board = buildBoard(
-      [task({ id: 'a', status: 'todo', source: 'manual' }), task({ id: 'b', status: 'in_progress', source: 'scheduled' })],
+      [
+        task({ id: 'a', status: 'todo', source: 'manual' }),
+        task({ id: 'b', status: 'in_progress', source: 'scheduled' }),
+      ],
       [tree({ id: 'p', status: 'running' })],
     );
     const todo = board.todo.map((c) => c.id);
@@ -66,8 +82,14 @@ describe('buildBoard', () => {
 
   it('trims Done to recent items when a cutoff is given', () => {
     const old = task({ id: 'old', status: 'completed', updatedAt: '2026-01-01T00:00:00.000Z' });
-    const recent = task({ id: 'recent', status: 'completed', updatedAt: '2026-06-13T00:00:00.000Z' });
-    const board = buildBoard([old, recent], [], { doneSinceMs: Date.parse('2026-06-12T00:00:00.000Z') });
+    const recent = task({
+      id: 'recent',
+      status: 'completed',
+      updatedAt: '2026-06-13T00:00:00.000Z',
+    });
+    const board = buildBoard([old, recent], [], {
+      doneSinceMs: Date.parse('2026-06-12T00:00:00.000Z'),
+    });
     const doneIds = board.done.map((c) => c.id);
     expect(doneIds).toContain('recent');
     expect(doneIds).not.toContain('old');
