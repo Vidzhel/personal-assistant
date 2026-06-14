@@ -196,5 +196,4 @@ describe('Orchestrator', () => {
     // Original message
     expect(prompt).toContain('Show me all projects');
   });
-
 });

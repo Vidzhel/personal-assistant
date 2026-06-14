@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
-import type { SdkMcpToolDefinition, McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-sdk';
+import type {
+  SdkMcpToolDefinition,
+  McpSdkServerConfigWithInstance,
+} from '@anthropic-ai/claude-agent-sdk';
 import type { MemoryStore } from '../agent-memory/memory-store.ts';
 
 type OkResult = { content: [{ type: 'text'; text: string }] };
@@ -54,7 +57,9 @@ export function buildMemoryTools(deps: MemoryToolDeps): Array<SdkMcpToolDefiniti
     async (args) => {
       try {
         const res = await memoryStore.write(agentName, args.path, args.content);
-        return res.ok ? okResult(res) : errorResult(`${res.error} (usage: ${JSON.stringify(res.usage)})`);
+        return res.ok
+          ? okResult(res)
+          : errorResult(`${res.error} (usage: ${JSON.stringify(res.usage)})`);
       } catch (err) {
         return errorResult((err as Error).message);
       }
@@ -71,7 +76,9 @@ export function buildMemoryTools(deps: MemoryToolDeps): Array<SdkMcpToolDefiniti
     async (args) => {
       try {
         const res = await memoryStore.update(agentName, args.path, args.content);
-        return res.ok ? okResult(res) : errorResult(`${res.error} (usage: ${JSON.stringify(res.usage)})`);
+        return res.ok
+          ? okResult(res)
+          : errorResult(`${res.error} (usage: ${JSON.stringify(res.usage)})`);
       } catch (err) {
         return errorResult((err as Error).message);
       }

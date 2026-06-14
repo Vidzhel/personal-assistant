@@ -38,7 +38,11 @@ describe('memory MCP tools', () => {
   });
 
   it('exposes exactly the three memory tools', () => {
-    expect(tools.map((t) => t.name).sort()).toEqual(['memory_read', 'memory_update', 'memory_write']);
+    expect(tools.map((t) => t.name).sort()).toEqual([
+      'memory_read',
+      'memory_update',
+      'memory_write',
+    ]);
   });
 
   it('memory_write then memory_read round-trips', async () => {
@@ -74,7 +78,10 @@ describe('memory MCP tools', () => {
     await write.handler({ path: 'existing.md', content: 'tiny' }, {});
     // Update existing.md with large content that would exceed total budget
     const update = findTool(tools, 'memory_update');
-    const res = (await update.handler({ path: 'existing.md', content: 'y'.repeat(900) }, {})) as ToolResult;
+    const res = (await update.handler(
+      { path: 'existing.md', content: 'y'.repeat(900) },
+      {},
+    )) as ToolResult;
     // projected: 900 (other.md) + 900 (new content) = 1800 > 1024 limit
     expect(res.isError).toBe(true);
     expect(res.content[0].text).toMatch(/budget/i);

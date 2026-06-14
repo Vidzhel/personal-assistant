@@ -428,7 +428,6 @@ describe('Orchestrator context injection integration', () => {
     // Search mock should NOT have been called — no upfront context injection
     expect(searchMock).not.toHaveBeenCalled();
   });
-
 });
 
 describe('Knowledge agent definition', () => {
