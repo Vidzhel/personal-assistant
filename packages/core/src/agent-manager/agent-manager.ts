@@ -122,6 +122,7 @@ export class AgentManager {
       treeId: payload.treeId,
       executionTaskId: payload.executionTaskId,
       taskBoardContext: payload.taskBoardContext,
+      internal: payload.internal,
     };
 
     // Insert by priority
@@ -140,7 +141,7 @@ export class AgentManager {
   }
 
   private static isValidatorTask(task: AgentTask): boolean {
-    return task.namedAgentId === '_evaluator' || task.namedAgentId === '_quality-reviewer';
+    return task.internal === 'validator';
   }
 
   private admitTask(task: AgentTask): void {
@@ -278,6 +279,7 @@ export class AgentManager {
         success: result.success,
         errors: result.errors,
         blocked: result.blocked,
+        cancelled: isCancelled,
       },
     });
 
@@ -311,6 +313,7 @@ export class AgentManager {
           durationMs: 0,
           success: false,
           errors: ['cancelled'],
+          cancelled: true,
         },
       });
       return true;

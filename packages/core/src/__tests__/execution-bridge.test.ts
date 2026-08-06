@@ -58,9 +58,21 @@ function makeDeps() {
     onTaskCompleted: vi.fn().mockResolvedValue(undefined),
     onTaskBlocked: vi.fn(),
     onTaskFailed: vi.fn(),
+    onTaskCancelled: vi.fn(),
     setAgentTaskId: vi.fn(),
   };
-  const gmailAgent = { id: 'agent-gmail', name: 'gmail', instructions: '' };
+  const gmailAgent = {
+    id: 'agent-gmail',
+    name: 'gmail',
+    instructions: 'Read receipts only, never delete.',
+    bash: {
+      access: 'scoped',
+      allowedCommands: [],
+      deniedCommands: [],
+      allowedPaths: [],
+      deniedPaths: [],
+    },
+  };
   const defaultAgent = { id: 'agent-raven', name: 'raven', instructions: '' };
   const namedAgentStore = {
     getAgentByName: vi.fn((n: string) => (n === 'gmail' ? gmailAgent : undefined)),
@@ -130,6 +142,24 @@ describe('createExecutionBridge', () => {
     deps.eventBus.emit(runAgentEvent({ agent: undefined }) as never);
     const req = requests[0] as { payload: Record<string, unknown> };
     expect(req.payload.namedAgentId).toBe('agent-raven');
+  });
+
+  it('carries the resolved agent persona into the dispatch: instructions prepended to the prompt, bashAccess passed through (F4)', () => {
+    const requests: Array<{ payload: Record<string, unknown> }> = [];
+    deps.eventBus.on('agent:task:request', (e) => requests.push(e as never));
+    deps.eventBus.emit(runAgentEvent() as never); // default agent: 'gmail'
+
+    const req = requests[0];
+    expect(req.payload.prompt).toBe(
+      '[Agent Instructions: Read receipts only, never delete.]\n\ndo it',
+    );
+    expect(req.payload.bashAccess).toEqual({
+      access: 'scoped',
+      allowedCommands: [],
+      deniedCommands: [],
+      allowedPaths: [],
+      deniedPaths: [],
+    });
   });
 
   it('mints a fresh agentTaskId per dispatch and persists it via setAgentTaskId', () => {
@@ -212,6 +242,32 @@ describe('createExecutionBridge', () => {
     expect(deps.executionEngine.onTaskBlocked).not.toHaveBeenCalled();
   });
 
+  it('routes a cancelled completion to onTaskCancelled — terminal, never retried or treated as blocked (F1)', () => {
+    const agentTaskId = dispatchAndCaptureAgentTaskId(deps);
+
+    deps.executionEngine.getTree.mockReturnValue({
+      tasks: new Map([['task-1', { status: 'in_progress', agentTaskId }]]),
+    });
+    deps.eventBus.emit({
+      id: 'e3c',
+      timestamp: Date.now(),
+      source: 'agent-manager',
+      type: 'agent:task:complete',
+      payload: {
+        taskId: agentTaskId,
+        result: 'Task cancelled',
+        durationMs: 5,
+        success: false,
+        errors: ['cancelled'],
+        cancelled: true,
+      },
+    } as never);
+
+    expect(deps.executionEngine.onTaskCancelled).toHaveBeenCalledWith('t1', 'task-1');
+    expect(deps.executionEngine.onTaskFailed).not.toHaveBeenCalled();
+    expect(deps.executionEngine.onTaskBlocked).not.toHaveBeenCalled();
+  });
+
   it('ignores completions for untracked tasks and non-running tree tasks', () => {
     deps.executionEngine.getTree.mockReturnValue({
       tasks: new Map([['task-1', { status: 'completed', agentTaskId: 'whatever' }]]),
@@ -252,6 +308,34 @@ describe('createExecutionBridge', () => {
       payload: { taskId: agentTaskId, result: 'stale', durationMs: 1, success: true },
     } as never);
 
+    expect(deps.executionEngine.onTaskCompleted).not.toHaveBeenCalled();
+  });
+
+  it('clears pending entries for a cancelled tree even when cancelAgentTask is not wired (F7)', () => {
+    // `deps` (from the shared beforeEach) has no cancelAgentTask — this must
+    // not stop the pending entry from being dropped.
+    const agentTaskId = dispatchAndCaptureAgentTaskId(deps);
+
+    deps.eventBus.emit({
+      id: 'e-f7',
+      timestamp: Date.now(),
+      source: 'task-execution-engine',
+      type: 'execution:tree:cancelled',
+      payload: { treeId: 't1' },
+    } as never);
+
+    // The entry was removed despite the missing cancelAgentTask — a later
+    // completion for it is now a no-op instead of advancing the tree.
+    deps.executionEngine.getTree.mockReturnValue({
+      tasks: new Map([['task-1', { status: 'in_progress', agentTaskId }]]),
+    });
+    deps.eventBus.emit({
+      id: 'e-f7b',
+      timestamp: Date.now(),
+      source: 'agent-manager',
+      type: 'agent:task:complete',
+      payload: { taskId: agentTaskId, result: 'late', durationMs: 1, success: true },
+    } as never);
     expect(deps.executionEngine.onTaskCompleted).not.toHaveBeenCalled();
   });
 
@@ -649,9 +733,70 @@ describe('execution flow integration (real engine + real event bus)', () => {
 
     const complete = completions.find(
       (e) => (e as unknown as { payload: { taskId: string } }).payload.taskId === 'queued-task',
-    ) as unknown as { payload: { success: boolean; errors?: string[] } } | undefined;
+    ) as unknown as
+      | { payload: { success: boolean; errors?: string[]; cancelled?: boolean } }
+      | undefined;
     expect(complete).toBeDefined();
     expect(complete!.payload.success).toBe(false);
     expect(complete!.payload.errors).toEqual(['cancelled']);
+    expect(complete!.payload.cancelled).toBe(true);
+  });
+
+  it('(6) cancelling an in-flight tree task marks it cancelled with no retry/re-dispatch, and the tree reaches a terminal state (F1)', async () => {
+    const eventBus = new EventBus();
+    const executionEngine = new TaskExecutionEngine({
+      db: dbInterface,
+      eventBus: toEventBusInterface(eventBus),
+    });
+    const { namedAgentStore, agentResolver } = makeBridgeCollaborators();
+    const bridge = createExecutionBridge({
+      eventBus,
+      executionEngine,
+      namedAgentStore: namedAgentStore as never,
+      agentResolver: agentResolver as never,
+    });
+    bridge.start();
+
+    const dispatched: string[] = [];
+    eventBus.on<AgentTaskRequestEvent>('agent:task:request', (event) => {
+      dispatched.push(event.payload.taskId);
+    });
+
+    const treeId = uid('tree');
+    const taskId = uid('t');
+    executionEngine.createTree({ id: treeId, tasks: [agentNode(taskId)] });
+    await executionEngine.startTree(treeId);
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(dispatched).toHaveLength(1);
+
+    // Simulate the agent-manager's cancellation completion (mirrors
+    // runTask's isCancelled branch: success:false, errors:['cancelled'],
+    // cancelled:true) for the in-flight dispatch — as opposed to
+    // executionEngine.cancelTree, which cancels tasks directly without
+    // going through this completion path.
+    eventBus.emit({
+      id: generateId(),
+      timestamp: Date.now(),
+      source: 'agent-manager',
+      type: 'agent:task:complete',
+      payload: {
+        taskId: dispatched[0],
+        result: 'Task cancelled',
+        durationMs: 5,
+        success: false,
+        errors: ['cancelled'],
+        cancelled: true,
+      },
+    } as RavenEvent);
+
+    await new Promise((r) => setTimeout(r, 20));
+
+    const tree = executionEngine.getTree(treeId)!;
+    const task = tree.tasks.get(taskId)!;
+    expect(task.status).toBe('cancelled');
+    expect(dispatched).toHaveLength(1); // no retry re-dispatch
+    expect(['completed', 'failed', 'cancelled']).toContain(tree.status); // reached terminal
+    bridge.stop();
   });
 });

@@ -57,6 +57,19 @@ function buildAgentTaskRequest(
 ): AgentTaskRequestEvent {
   const agent = resolveAgent(deps, payload.agent);
   const capabilities = deps.agentResolver.resolveAgentCapabilities(agent);
+  const basePrompt = payload.retryFeedback
+    ? buildRetryPrompt(
+        payload.prompt,
+        payload.retryFeedback,
+        payload.retryCount ?? DEFAULT_RETRY_ATTEMPT,
+      )
+    : payload.prompt;
+  // Carry the resolved agent's persona into the dispatch the same way
+  // orchestrator.ts does for chat turns (see handleUserChat) — the named
+  // agent's own instructions outrank the generic template prompt.
+  const prompt = agent.instructions
+    ? `[Agent Instructions: ${agent.instructions}]\n\n${basePrompt}`
+    : basePrompt;
   return {
     id: generateId(),
     timestamp: Date.now(),
@@ -64,18 +77,13 @@ function buildAgentTaskRequest(
     type: 'agent:task:request',
     payload: {
       taskId: agentTaskId,
-      prompt: payload.retryFeedback
-        ? buildRetryPrompt(
-            payload.prompt,
-            payload.retryFeedback,
-            payload.retryCount ?? DEFAULT_RETRY_ATTEMPT,
-          )
-        : payload.prompt,
+      prompt,
       skillName: agent.name,
       mcpServers: capabilities.mcpServers,
       agentDefinitions: capabilities.agentDefinitions,
       plugins: capabilities.plugins,
       namedAgentId: agent.id,
+      bashAccess: agent.bash,
       priority: 'normal',
       projectId: payload.projectId,
       treeId: payload.treeId,
@@ -109,6 +117,13 @@ function handleTaskFailure(
   payload: CompletePayload,
 ): void {
   const reason = payload.errors?.join('; ');
+  if (payload.cancelled) {
+    // Cancellation is terminal and must never enter the retry ladder — check
+    // this before blocked/failed so a cancelled task can't be misread as a
+    // retryable failure or an approval-pending block.
+    deps.executionEngine.onTaskCancelled(entry.treeId, entry.taskId);
+    return;
+  }
   if (payload.blocked) {
     deps.executionEngine.onTaskBlocked(
       entry.treeId,
@@ -202,10 +217,12 @@ export function createExecutionBridge(deps: ExecutionBridgeDeps): ExecutionBridg
   };
 
   const onTreeCancelled = (event: ExecutionTreeCancelledEvent): void => {
-    if (!deps.cancelAgentTask) return;
+    // Always drop this tree's pending entries — even when cancelAgentTask
+    // isn't wired (e.g. some test doubles), a cancelled tree's tasks must
+    // stop being tracked so a later completion for them can't advance it.
     for (const [agentTaskId, entry] of pending) {
       if (entry.treeId !== event.payload.treeId) continue;
-      deps.cancelAgentTask(agentTaskId);
+      deps.cancelAgentTask?.(agentTaskId);
       pending.delete(agentTaskId);
     }
   };

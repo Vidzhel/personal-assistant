@@ -154,13 +154,12 @@ export function enforcePermissionGate(
 }
 
 function resolveAgentRole(task: AgentTask): ScopeContext['role'] {
-  // Validators dispatched by create-validation-deps.ts run under
-  // skillName: 'orchestrator' with namedAgentId '_evaluator'/'_quality-reviewer'
-  // — check namedAgentId first so they get 'validation' scope (and can call
-  // submit_validation_score) rather than falling through to 'chat' scope,
-  // which would let them create task trees instead.
-  if (task.namedAgentId === '_evaluator' || task.namedAgentId === '_quality-reviewer')
-    return 'validation';
+  // Validators dispatched by create-validation-deps.ts carry
+  // internal: 'validator' on the request — set only by that runtime
+  // dispatcher, never by an agent-authored request, so this scope cannot be
+  // self-granted by simply naming an agent '_evaluator'/'_quality-reviewer'
+  // (namedAgentId is fully agent-authorable and must not gate this).
+  if (task.internal === 'validator') return 'validation';
   if (task.executionTaskId) return 'task';
   if (task.skillName === '_quality-reviewer' || task.skillName === '_evaluator')
     return 'validation';

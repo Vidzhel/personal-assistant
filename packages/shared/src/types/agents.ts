@@ -14,6 +14,7 @@ export interface NamedAgent {
   skills: string[]; // references library skill names
   model: string | null;
   maxTurns: number | null;
+  bash?: BashAccess;
   isDefault: boolean;
   createdAt: string;
   updatedAt: string;
@@ -125,6 +126,9 @@ export interface AgentTask {
   executionTaskId?: string;
   plugins?: Array<{ type: 'local'; path: string }>;
   bashAccess?: BashAccess;
+  /** Set only by runtime-internal dispatchers (create-validation-deps.ts) —
+   * see AgentTaskRequestEvent.payload.internal in events.ts. */
+  internal?: 'validator';
   result?: string;
   durationMs?: number;
   errors?: string[];

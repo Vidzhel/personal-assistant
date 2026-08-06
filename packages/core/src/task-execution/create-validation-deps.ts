@@ -20,6 +20,13 @@ const QualityReviewerOutputSchema = z.object({
 
 const VALIDATION_TIMEOUT_MS = 120_000;
 
+// Validators are prompt-hardcoded by design: runEvaluatorImpl/
+// runQualityReviewerImpl build their own prompts below rather than reading
+// projects/agents/_evaluator|_quality-reviewer/agent.yaml's `instructions`
+// (or its model/maxTurns) — those YAML fields are not wired to this dispatch
+// and must not be treated as configuring it. namedAgentId is passed through
+// only for identification/memory-scoping; `internal: 'validator'` below is
+// the actual privilege grant.
 function runAgent(
   eventBus: EventBusInterface,
   prompt: string,
@@ -55,6 +62,7 @@ function runAgent(
         mcpServers: {},
         priority: 'low',
         namedAgentId: agentId,
+        internal: 'validator',
       },
     });
   });

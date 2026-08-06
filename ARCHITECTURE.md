@@ -215,7 +215,7 @@ capability library (above), not a new suite.
 ## Data Layer
 
 - **SQLite** via `better-sqlite3` — single file at `data/raven.db`
-- Tables include `events`, `sessions`, `projects`, `schedules`, `preferences`, `tasks`, `task_trees`, `execution_tasks`, `named_agents` (see `migrations/`)
+- Tables include `events`, `sessions`, `projects`, `schedules`, `preferences`, `tasks`, `task_trees`, `execution_tasks`, `agent_tasks`, `audit_log`, `pending_approvals` (see `migrations/`)
 - Repositories in `packages/core/src/db/repositories/`
 
 ## API Layer

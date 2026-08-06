@@ -322,12 +322,25 @@ export class TaskExecutionEngine {
 
     this.emitEvent('execution:task:blocked', { treeId, taskId, reason });
 
-    // 'blocked' is deliberately NOT in TERMINAL_STATUSES (the approval flow
-    // must be able to resume the task via onApprovalGranted), so this is a
-    // safe no-op whenever the tree still has this task outstanding — it only
-    // matters when every *other* task has already reached a terminal state,
-    // in which case the tree correctly stays non-terminal instead of being
-    // marked complete/failed while a task is still awaiting approval.
+    // the tree deliberately stays non-terminal while a task awaits approval
+  }
+
+  /**
+   * Terminal cancellation path for a dispatched agent task — distinct from
+   * onTaskFailed (which enters the retry/escalate ladder). A cancelled task
+   * must never be retried, so this sets 'cancelled' directly (already a
+   * TERMINAL_STATUS) and lets checkTreeCompletion settle the tree.
+   */
+  onTaskCancelled(treeId: string, taskId: string): void {
+    const tree = this.loadTree(treeId);
+    if (!tree) return;
+
+    const task = tree.tasks.get(taskId);
+    if (!task) return;
+
+    this.updateTaskStatus(tree, task, 'cancelled');
+    this.saveTask(tree.id, task);
+
     this.checkTreeCompletion(tree);
   }
 

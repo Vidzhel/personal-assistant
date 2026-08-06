@@ -36,7 +36,7 @@ function DraggableCard({
 }: {
   card: BoardCard;
   onOpen: (card: BoardCard) => void;
-  onCancelTree: (treeId: string) => void;
+  onCancelTree: (treeId: string) => Promise<void>;
 }) {
   return (
     <div
@@ -83,9 +83,9 @@ export function TaskBoard({ projectId, search }: { projectId?: string; search?: 
     if (card.kind === 'task') void selectTask(card.id);
   };
 
-  const handleCancelTree = (treeId: string): void => {
+  const handleCancelTree = async (treeId: string): Promise<void> => {
     setTrees((prev) => applyTreeCancelled(prev, treeId));
-    api.cancelTaskTree(treeId).catch(() => void load());
+    await api.cancelTaskTree(treeId).catch(() => void load());
   };
 
   return (

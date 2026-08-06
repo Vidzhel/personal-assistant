@@ -65,6 +65,7 @@ function yamlToNamedAgent(loc: AgentLocation): NamedAgent {
     skills: loc.yaml.skills,
     model: loc.yaml.model ?? null,
     maxTurns: loc.yaml.maxTurns ?? null,
+    ...(loc.yaml.bash !== undefined && { bash: loc.yaml.bash }),
     isDefault: loc.yaml.isDefault ?? false,
     createdAt,
     updatedAt,

@@ -76,7 +76,7 @@ function TreeCancelAction({
   onCancelTree,
 }: {
   card: BoardCard;
-  onCancelTree?: (treeId: string) => void;
+  onCancelTree?: (treeId: string) => Promise<void>;
 }) {
   const [cancelling, setCancelling] = useState(false);
   if (card.kind !== 'plan' || !canCancelTree(card.status)) return null;
@@ -84,7 +84,7 @@ function TreeCancelAction({
   const handleCancelTree = (): void => {
     if (!confirm('Cancel this task tree? Running agent work will be aborted.')) return;
     setCancelling(true);
-    onCancelTree?.(card.id);
+    void onCancelTree?.(card.id).finally(() => setCancelling(false));
   };
 
   return (
@@ -99,7 +99,7 @@ function TreeCancelAction({
 interface TaskCardProps {
   card: BoardCard;
   onOpen: (card: BoardCard) => void;
-  onCancelTree?: (treeId: string) => void;
+  onCancelTree?: (treeId: string) => Promise<void>;
 }
 
 export function TaskCard({ card, onOpen, onCancelTree }: TaskCardProps) {

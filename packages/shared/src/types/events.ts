@@ -62,6 +62,11 @@ export interface AgentTaskRequestEvent extends BaseEvent {
     treeId?: string;
     executionTaskId?: string;
     taskBoardContext?: string;
+    /** Set only by runtime-internal dispatchers (create-validation-deps.ts)
+     * to grant validation scope (submit_validation_score, etc.) — never set
+     * from an agent-authored request, so this privilege cannot be
+     * self-granted by naming an agent '_evaluator'/'_quality-reviewer'. */
+    internal?: 'validator';
   };
 }
 
@@ -78,6 +83,9 @@ export interface AgentTaskCompleteEvent extends BaseEvent {
      * resumable via the approval flow — distinct from a hard failure that
      * should enter the retry/escalate ladder. */
     blocked?: boolean;
+    /** True when the task was cancelled (user/tree cancellation) rather than
+     * having failed on its own — terminal, must never enter the retry ladder. */
+    cancelled?: boolean;
   };
 }
 
