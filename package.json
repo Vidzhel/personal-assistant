@@ -26,6 +26,7 @@
     "test:coverage": "vitest run --coverage",
     "test:mcp": "vitest run --project mcp-ticktick",
     "test:mcp:watch": "vitest --project mcp-ticktick",
+    "test:knowledge": "RAVEN_TEST_KNOWLEDGE=1 vitest run --project knowledge-neo4j",
     "validate:library": "node --experimental-strip-types scripts/validate-library.ts",
     "validate:projects": "node --experimental-strip-types scripts/validate-projects.ts",
     "test:ticktick": "node --experimental-strip-types scripts/test-ticktick-manual.ts",

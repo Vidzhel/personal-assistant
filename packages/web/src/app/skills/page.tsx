@@ -37,8 +37,12 @@ function groupSkills(skills: Skill[]): Map<string, Skill[]> {
   const groups = new Map<string, Skill[]>();
   for (const s of skills) {
     const domain = classifySkill(s);
-    if (!groups.has(domain)) groups.set(domain, []);
-    groups.get(domain)!.push(s);
+    const existing = groups.get(domain);
+    if (existing) {
+      existing.push(s);
+    } else {
+      groups.set(domain, [s]);
+    }
   }
   return groups;
 }
@@ -119,9 +123,38 @@ export default function SkillsPage() {
   );
 }
 
-function SkillCard({ skill }: { skill: Skill }) {
+function SkillAgentTools({ agentDefinitions }: { agentDefinitions: string[] }) {
   const [showTools, setShowTools] = useState(false);
 
+  if (agentDefinitions.length === 0) return null;
+
+  return (
+    <div>
+      <button
+        onClick={() => setShowTools(!showTools)}
+        className="text-xs underline"
+        style={{ color: 'var(--accent)' }}
+      >
+        {showTools ? 'Hide' : 'Show'} agents ({agentDefinitions.length})
+      </button>
+      {showTools && (
+        <div className="mt-1 flex gap-1 flex-wrap">
+          {agentDefinitions.map((a) => (
+            <span
+              key={a}
+              className="text-xs px-2 py-0.5 rounded"
+              style={{ background: 'rgba(59,130,246,0.15)', color: 'rgb(96,165,250)' }}
+            >
+              {a}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SkillCard({ skill }: { skill: Skill }) {
   return (
     <div
       className="p-4 rounded-lg"
@@ -153,30 +186,7 @@ function SkillCard({ skill }: { skill: Skill }) {
             MCP: {skill.mcpServers.join(', ')}
           </p>
         )}
-        {skill.agentDefinitions.length > 0 && (
-          <div>
-            <button
-              onClick={() => setShowTools(!showTools)}
-              className="text-xs underline"
-              style={{ color: 'var(--accent)' }}
-            >
-              {showTools ? 'Hide' : 'Show'} agents ({skill.agentDefinitions.length})
-            </button>
-            {showTools && (
-              <div className="mt-1 flex gap-1 flex-wrap">
-                {skill.agentDefinitions.map((a) => (
-                  <span
-                    key={a}
-                    className="text-xs px-2 py-0.5 rounded"
-                    style={{ background: 'rgba(59,130,246,0.15)', color: 'rgb(96,165,250)' }}
-                  >
-                    {a}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+        <SkillAgentTools agentDefinitions={skill.agentDefinitions} />
       </div>
     </div>
   );

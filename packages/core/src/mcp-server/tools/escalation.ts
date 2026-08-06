@@ -77,6 +77,7 @@ async function waitForResolution(
 export function buildEscalationTools(
   deps: RavenMcpDeps,
   scope: ScopeContext,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SDK type erasure at heterogeneous tool collection (see comment above)
 ): Array<SdkMcpToolDefinition<any>> {
   const escalateToPlanned = tool(
     'escalate_to_planned',

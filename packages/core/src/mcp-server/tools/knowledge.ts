@@ -166,6 +166,7 @@ function buildGetKnowledgeContextTool(
 export function buildKnowledgeTools(
   deps: RavenMcpDeps,
   _scope: ScopeContext,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SDK type erasure at heterogeneous tool collection (see comment above)
 ): Array<SdkMcpToolDefinition<any>> {
   return [
     buildSearchKnowledgeTool(deps),

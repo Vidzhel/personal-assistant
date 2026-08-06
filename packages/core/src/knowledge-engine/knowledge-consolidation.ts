@@ -110,9 +110,59 @@ async function executePrunes(
   return count;
 }
 
-// eslint-disable-next-line max-lines-per-function -- orchestrates consolidation: query, agent spawn, merge/prune/digest
-export function createKnowledgeConsolidation(deps: ConsolidationDeps): KnowledgeConsolidation {
+interface ProjectConsolidationResult {
+  merged: number;
+  pruned: number;
+  digestCreated: boolean;
+}
+
+async function consolidateProjectBubbles(
+  deps: ConsolidationDeps,
+  projectId: string,
+  bubbles: ConsolidationBubbleRow[],
+): Promise<ProjectConsolidationResult> {
   const { neo4j, eventBus } = deps;
+  const bubbleList = bubbles
+    .map(
+      (b) =>
+        `ID: ${b.id}\nTitle: ${b.title}\nContent: ${b.content}\nTags: ${(b.tags ?? []).join(', ')}`,
+    )
+    .join('\n---\n');
+
+  const task = {
+    id: generateId(),
+    skillName: 'knowledge-consolidation',
+    prompt: `${CONSOLIDATION_PROMPT}\n\n---\n\nBubbles for project ${projectId}:\n\n${bubbleList}`,
+    status: 'queued' as const,
+    priority: 'low' as const,
+    mcpServers: {},
+    agentDefinitions: {},
+    createdAt: Date.now(),
+  };
+
+  const result = await runAgentTask({ task, eventBus, mcpServers: {}, agentDefinitions: {} });
+
+  const parseResult = ConsolidationResultSchema.safeParse(JSON.parse(result.result));
+  if (!parseResult.success) {
+    log.error(
+      `Invalid consolidation result for project ${projectId}: ${parseResult.error.message}`,
+    );
+    return { merged: 0, pruned: 0, digestCreated: false };
+  }
+
+  const parsed: ParsedConsolidation = parseResult.data;
+  try {
+    const merged = await executeMerges(neo4j, parsed.merges);
+    const pruned = await executePrunes(neo4j, parsed.prunes);
+    return { merged, pruned, digestCreated: Boolean(parsed.digest) };
+  } catch (err) {
+    log.error(`Failed to process consolidation result for project ${projectId}: ${err}`);
+    return { merged: 0, pruned: 0, digestCreated: false };
+  }
+}
+
+export function createKnowledgeConsolidation(deps: ConsolidationDeps): KnowledgeConsolidation {
+  const { neo4j } = deps;
 
   async function runConsolidation(projectId?: string): Promise<ConsolidationResult> {
     log.info(`Running knowledge consolidation${projectId ? ` for project ${projectId}` : ''}`);
@@ -137,39 +187,10 @@ export function createKnowledgeConsolidation(deps: ConsolidationDeps): Knowledge
     let digestCreated = false;
 
     for (const [pid, projectBubbles] of byProject) {
-      const bubbleList = projectBubbles
-        .map(
-          (b) =>
-            `ID: ${b.id}\nTitle: ${b.title}\nContent: ${b.content}\nTags: ${(b.tags ?? []).join(', ')}`,
-        )
-        .join('\n---\n');
-
-      const task = {
-        id: generateId(),
-        skillName: 'knowledge-consolidation',
-        prompt: `${CONSOLIDATION_PROMPT}\n\n---\n\nBubbles for project ${pid}:\n\n${bubbleList}`,
-        status: 'queued' as const,
-        priority: 'low' as const,
-        mcpServers: {},
-        agentDefinitions: {},
-        createdAt: Date.now(),
-      };
-
-      const result = await runAgentTask({ task, eventBus, mcpServers: {}, agentDefinitions: {} });
-
-      const parseResult = ConsolidationResultSchema.safeParse(JSON.parse(result.result));
-      if (!parseResult.success) {
-        log.error(`Invalid consolidation result for project ${pid}: ${parseResult.error.message}`);
-        continue;
-      }
-      const parsed: ParsedConsolidation = parseResult.data;
-      try {
-        totalMerged += await executeMerges(neo4j, parsed.merges);
-        totalPruned += await executePrunes(neo4j, parsed.prunes);
-        if (parsed.digest) digestCreated = true;
-      } catch (err) {
-        log.error(`Failed to process consolidation result for project ${pid}: ${err}`);
-      }
+      const projectResult = await consolidateProjectBubbles(deps, pid, projectBubbles);
+      totalMerged += projectResult.merged;
+      totalPruned += projectResult.pruned;
+      if (projectResult.digestCreated) digestCreated = true;
     }
 
     log.info(

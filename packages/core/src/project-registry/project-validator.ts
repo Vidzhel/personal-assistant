@@ -140,12 +140,74 @@ interface AgentsDirResult {
   warnings: string[];
 }
 
-async function validateAgentsDir(
-  agentsDir: string,
-  projectRel: string,
-  seenAgentNames: Set<string>,
-  opts?: ValidatorOptions,
-): Promise<AgentsDirResult> {
+interface CheckKnownSkillsOptions {
+  raw: Record<string, unknown>;
+  agentName: string;
+  projectRel: string;
+  opts?: ValidatorOptions;
+}
+
+function checkKnownSkills(options: CheckKnownSkillsOptions): string[] {
+  const { raw, agentName, projectRel, opts } = options;
+  if (!opts?.knownSkills) return [];
+  const errors: string[] = [];
+  const skills = Array.isArray(raw.skills) ? (raw.skills as string[]) : [];
+  for (const skill of skills) {
+    if (!opts.knownSkills.has(skill)) {
+      errors.push(
+        `Agent "${agentName}" in "${projectRel || '_global'}" references unknown skill "${skill}"`,
+      );
+    }
+  }
+  return errors;
+}
+
+interface ValidateAgentFileOptions {
+  filePath: string;
+  entryName: string;
+  projectRel: string;
+  seenAgentNames: Set<string>;
+  opts?: ValidatorOptions;
+}
+
+async function validateAgentFile(options: ValidateAgentFileOptions): Promise<AgentsDirResult> {
+  const { filePath, entryName, projectRel, seenAgentNames, opts } = options;
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  try {
+    const content = await readFile(filePath, 'utf-8');
+    const raw = yamlLoad(content) as Record<string, unknown>;
+    const parsed = AgentYamlSchema.parse(raw);
+
+    if (seenAgentNames.has(parsed.name)) {
+      errors.push(`Duplicate agent name "${parsed.name}" in project "${projectRel || '_global'}"`);
+    } else {
+      seenAgentNames.add(parsed.name);
+    }
+
+    const bashResult = checkBashAccess(raw, parsed.name, projectRel);
+    errors.push(...bashResult.errors);
+    warnings.push(...bashResult.warnings);
+
+    errors.push(...checkKnownSkills({ raw, agentName: parsed.name, projectRel, opts }));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    errors.push(`Invalid agent YAML in ${projectRel || '_global'}/${entryName}: ${msg}`);
+  }
+
+  return { errors, warnings };
+}
+
+interface ValidateAgentsDirOptions {
+  agentsDir: string;
+  projectRel: string;
+  seenAgentNames: Set<string>;
+  opts?: ValidatorOptions;
+}
+
+async function validateAgentsDir(options: ValidateAgentsDirOptions): Promise<AgentsDirResult> {
+  const { agentsDir, projectRel, seenAgentNames, opts } = options;
   const errors: string[] = [];
   const warnings: string[] = [];
   let entries;
@@ -160,38 +222,15 @@ async function validateAgentsDir(
   );
 
   for (const entry of yamlFiles) {
-    const filePath = join(agentsDir, entry.name);
-    try {
-      const content = await readFile(filePath, 'utf-8');
-      const raw = yamlLoad(content) as Record<string, unknown>;
-      const parsed = AgentYamlSchema.parse(raw);
-
-      if (seenAgentNames.has(parsed.name)) {
-        errors.push(
-          `Duplicate agent name "${parsed.name}" in project "${projectRel || '_global'}"`,
-        );
-      } else {
-        seenAgentNames.add(parsed.name);
-      }
-
-      const bashResult = checkBashAccess(raw, parsed.name, projectRel);
-      errors.push(...bashResult.errors);
-      warnings.push(...bashResult.warnings);
-
-      if (opts?.knownSkills) {
-        const skills = Array.isArray(raw.skills) ? (raw.skills as string[]) : [];
-        for (const skill of skills) {
-          if (!opts.knownSkills.has(skill)) {
-            errors.push(
-              `Agent "${parsed.name}" in "${projectRel || '_global'}" references unknown skill "${skill}"`,
-            );
-          }
-        }
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      errors.push(`Invalid agent YAML in ${projectRel || '_global'}/${entry.name}: ${msg}`);
-    }
+    const fileResult = await validateAgentFile({
+      filePath: join(agentsDir, entry.name),
+      entryName: entry.name,
+      projectRel,
+      seenAgentNames,
+      opts,
+    });
+    errors.push(...fileResult.errors);
+    warnings.push(...fileResult.warnings);
   }
 
   return { errors, warnings };
@@ -370,7 +409,12 @@ async function validateDir(dirPath: string, depth: number, ctx: ValidateContext)
   if (!(await isProjectDir(dirPath, isRoot))) return;
 
   const agentNames = new Set<string>();
-  const agentResult = await validateAgentsDir(join(dirPath, 'agents'), rel, agentNames, ctx.opts);
+  const agentResult = await validateAgentsDir({
+    agentsDir: join(dirPath, 'agents'),
+    projectRel: rel,
+    seenAgentNames: agentNames,
+    opts: ctx.opts,
+  });
   ctx.errors.push(...agentResult.errors);
   ctx.warnings.push(...agentResult.warnings);
 

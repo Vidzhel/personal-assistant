@@ -29,6 +29,7 @@ const errorResult = (message: string): ErrResult => ({
 export function buildSystemTools(
   deps: RavenMcpDeps,
   _scope: ScopeContext,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SDK type erasure at heterogeneous tool collection (see comment above)
 ): Array<SdkMcpToolDefinition<any>> {
   const listAgents = tool(
     'list_agents',

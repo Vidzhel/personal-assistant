@@ -85,14 +85,26 @@ function inputToYaml(input: NamedAgentCreateInput): AgentYaml {
   } as AgentYaml;
 }
 
+// Only patch a nullable field when the caller supplied a concrete (non-null) value;
+// `undefined` means "leave unchanged" and `null` means "no explicit value to set".
+function patchNullableField<K extends 'model' | 'maxTurns'>(
+  patch: Partial<AgentYaml>,
+  key: K,
+  value: AgentYaml[K] | null | undefined,
+): void {
+  if (value !== undefined && value !== null) {
+    patch[key] = value;
+  }
+}
+
 function updateInputToYamlPatch(input: NamedAgentUpdateInput): Partial<AgentYaml> {
   const patch: Partial<AgentYaml> = {};
   if (input.description !== undefined) patch.description = input.description ?? '';
   if (input.instructions !== undefined) patch.instructions = input.instructions ?? '';
   if (input.skills !== undefined) patch.skills = input.skills;
-  if (input.model !== undefined && input.model !== null) patch.model = input.model;
-  if (input.maxTurns !== undefined && input.maxTurns !== null) patch.maxTurns = input.maxTurns;
   if (input.bash !== undefined) patch.bash = input.bash;
+  patchNullableField(patch, 'model', input.model);
+  patchNullableField(patch, 'maxTurns', input.maxTurns);
   return patch;
 }
 
@@ -127,12 +139,15 @@ export function createYamlNamedAgentStore(deps: StoreDeps): NamedAgentStore {
     return collectLocations().get(idOrName);
   }
 
-  function emitEvent(
-    type: 'agent:config:created' | 'agent:config:updated' | 'agent:config:deleted',
-    agent: NamedAgent,
-    filePath: string,
-    extra?: Record<string, unknown>,
-  ): void {
+  interface EmitAgentEventOptions {
+    type: 'agent:config:created' | 'agent:config:updated' | 'agent:config:deleted';
+    agent: NamedAgent;
+    filePath: string;
+    extra?: Record<string, unknown>;
+  }
+
+  function emitEvent(options: EmitAgentEventOptions): void {
+    const { type, agent, filePath, extra } = options;
     eventBus.emit({
       id: generateId(),
       timestamp: Date.now(),
@@ -191,7 +206,7 @@ export function createYamlNamedAgentStore(deps: StoreDeps): NamedAgentStore {
       if (!loc) throw new Error(`Agent creation failed to register: ${input.name}`);
       const agent = yamlToNamedAgent(loc);
       log.info(`Named agent created: ${agent.name}`);
-      emitEvent('agent:config:created', agent, filePath);
+      emitEvent({ type: 'agent:config:created', agent, filePath });
       return agent;
     },
 
@@ -224,7 +239,12 @@ export function createYamlNamedAgentStore(deps: StoreDeps): NamedAgentStore {
         if (!newLoc) throw new Error(`Agent rename failed to register: ${newName}`);
         const agent = yamlToNamedAgent(newLoc);
         log.info(`Named agent renamed: ${id} → ${newName}`);
-        emitEvent('agent:config:updated', agent, filePath, { changes: Object.keys(input) });
+        emitEvent({
+          type: 'agent:config:updated',
+          agent,
+          filePath,
+          extra: { changes: Object.keys(input) },
+        });
         return agent;
       }
 
@@ -234,8 +254,11 @@ export function createYamlNamedAgentStore(deps: StoreDeps): NamedAgentStore {
       if (!updatedLoc) throw new Error(`Agent update failed to register: ${id}`);
       const agent = yamlToNamedAgent(updatedLoc);
       log.info(`Named agent updated: ${agent.name} [${Object.keys(input).join(', ')}]`);
-      emitEvent('agent:config:updated', agent, updatedLoc.filePath, {
-        changes: Object.keys(input),
+      emitEvent({
+        type: 'agent:config:updated',
+        agent,
+        filePath: updatedLoc.filePath,
+        extra: { changes: Object.keys(input) },
       });
       return agent;
     },
@@ -249,7 +272,7 @@ export function createYamlNamedAgentStore(deps: StoreDeps): NamedAgentStore {
       await agentYamlStore.deleteAgent(loc.projectPath, loc.yaml.name);
       await projectRegistry.load(projectsDir);
       log.info(`Named agent deleted: ${agent.name}`);
-      emitEvent('agent:config:deleted', agent, loc.filePath);
+      emitEvent({ type: 'agent:config:deleted', agent, filePath: loc.filePath });
     },
   };
 

@@ -69,6 +69,19 @@ describe('buildSystemPrompt', () => {
     );
     expect(prompt).not.toContain('## Related Sessions');
   });
+
+  it('includes task board context when set', () => {
+    const prompt = buildSystemPrompt(
+      makeTask({ taskBoardContext: 'You are working task-1 under parent root.' }),
+    );
+    expect(prompt).toContain('## Task Board');
+    expect(prompt).toContain('You are working task-1 under parent root.');
+  });
+
+  it('does not include task board section when unset', () => {
+    const prompt = buildSystemPrompt(makeTask());
+    expect(prompt).not.toContain('## Task Board');
+  });
 });
 
 describe('buildSubAgentPrompt', () => {

@@ -114,6 +114,7 @@ function buildGetSessionHistory(
 export function buildSessionTools(
   deps: RavenMcpDeps,
   scope: ScopeContext,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SDK type erasure at heterogeneous tool collection (see comment above)
 ): Array<SdkMcpToolDefinition<any>> {
   return [buildSendMessage(deps, scope), buildGetSessionHistory(deps, scope)];
 }

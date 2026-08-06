@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Orchestrator } from '../orchestrator/orchestrator.ts';
 import { EventBus } from '../event-bus/event-bus.ts';
 import { SuiteRegistry } from '../suite-registry/suite-registry.ts';

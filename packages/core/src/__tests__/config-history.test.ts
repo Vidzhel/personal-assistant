@@ -21,6 +21,16 @@ function mockExecResult(stdout: string): { stdout: string; stderr: string } {
   return { stdout, stderr: '' };
 }
 
+// `git-history.ts` lazily caches the repo root via a one-time `git rev-parse
+// --show-toplevel` call on first use. Prime that cache here so the mock
+// sequences in the tests below only need to account for the git commands
+// each function issues on purpose — otherwise the extra call shifts every
+// later `mockResolvedValueOnce` by one and leaks unconsumed mocks forward
+// into subsequent tests (vi.clearAllMocks() does not drain that queue).
+mockedExecFile.mockResolvedValueOnce(mockExecResult('/repo') as any);
+await getConfigCommits(0, 0);
+mockedExecFile.mockClear();
+
 function createMockEventBus(): EventBus {
   return {
     emit: vi.fn(),

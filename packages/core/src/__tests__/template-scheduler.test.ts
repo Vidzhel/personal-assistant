@@ -141,10 +141,16 @@ describe('createTemplateScheduler', () => {
     const treeId = await scheduler.triggerTemplate('auto-template');
 
     expect(treeId).toBeTruthy();
+    // Task IDs are namespaced with an 8-char prefix of the tree ID so re-triggering
+    // the same template doesn't collide on the UNIQUE task id constraint.
+    const taskIdPrefix = treeId.slice(0, 8);
     expect(deps.executionEngine.createTree).toHaveBeenCalledWith(
       expect.objectContaining({
         id: treeId,
-        tasks: expect.arrayContaining([expect.objectContaining({ id: 'task-1', type: 'agent' })]),
+        plan: 'A test template',
+        tasks: expect.arrayContaining([
+          expect.objectContaining({ id: `${taskIdPrefix}-task-1`, type: 'agent', blockedBy: [] }),
+        ]),
       }),
     );
     // Auto-approval triggers startTree

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { statusToColumn, buildBoard, type BoardCard } from '@/components/board/board-model';
+import { statusToColumn, buildBoard } from '@/components/board/board-model';
 import type { RavenTaskRecord, TaskTreeRecord } from '@/lib/api-client';
 
 function task(over: Partial<RavenTaskRecord> = {}): RavenTaskRecord {

@@ -42,7 +42,7 @@ describe('template integration', () => {
 
   it('validates all templates pass project validation', async () => {
     const { validateProjects } = await import('../project-registry/project-validator.ts');
-    const errors = await validateProjects(PROJECTS_DIR);
-    expect(errors).toEqual([]);
+    const result = await validateProjects(PROJECTS_DIR);
+    expect(result.errors).toEqual([]);
   });
 });

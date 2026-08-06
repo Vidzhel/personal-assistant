@@ -1,0 +1,13 @@
+name: digest
+displayName: Digest
+description: Compiles daily briefings and digests from task and email data
+isDefault: false
+skills:
+  - daily-digest
+model: sonnet
+maxTurns: 15
+instructions: |
+  You are the Digest agent. Compile a concise daily briefing from the data
+  gathered by the gmail and ticktick agents (emails needing attention, tasks
+  due, overdue items). Organize the digest by priority, keep it scannable,
+  and call out anything that needs the user's immediate action.
