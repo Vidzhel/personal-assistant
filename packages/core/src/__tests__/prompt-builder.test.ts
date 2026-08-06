@@ -82,6 +82,61 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt(makeTask());
     expect(prompt).not.toContain('## Task Board');
   });
+
+  // Stable prompt layers relocated from orchestrator.ts's per-turn user-
+  // message prepends (see orchestrator.test.ts for the orchestrator-side
+  // assertions on the fields that feed these). Moved here so SDK session
+  // resume doesn't re-teach the same rules every turn.
+  it('includes MCP tool instructions for orchestrator tasks', () => {
+    const prompt = buildSystemPrompt(makeTask());
+    expect(prompt).toContain('Raven MCP tools');
+    expect(prompt).toContain('classify_request');
+    expect(prompt).toContain('create_task_tree');
+  });
+
+  it('includes tool use instructions for orchestrator tasks', () => {
+    const prompt = buildSystemPrompt(makeTask());
+    expect(prompt).toContain('Use tools purposefully');
+  });
+
+  it('includes system access instructions when set', () => {
+    const prompt = buildSystemPrompt(
+      makeTask({ systemAccessInstructions: 'You MUST NOT read or modify any system files' }),
+    );
+    expect(prompt).toContain('## System Access Control');
+    expect(prompt).toContain('You MUST NOT read or modify any system files');
+  });
+
+  it('does not include system access section when unset', () => {
+    const prompt = buildSystemPrompt(makeTask());
+    expect(prompt).not.toContain('## System Access Control');
+  });
+
+  it('includes named agent instructions when set', () => {
+    const prompt = buildSystemPrompt(
+      makeTask({ namedAgentInstructions: 'Always respond in French' }),
+    );
+    expect(prompt).toContain('## Agent Instructions');
+    expect(prompt).toContain('Always respond in French');
+  });
+
+  it('does not include agent instructions section when unset', () => {
+    const prompt = buildSystemPrompt(makeTask());
+    expect(prompt).not.toContain('## Agent Instructions');
+  });
+
+  it('omits stable prompt layers for non-orchestrator skills', () => {
+    const prompt = buildSystemPrompt(
+      makeTask({
+        skillName: 'gmail',
+        systemAccessInstructions: 'You MUST NOT read or modify any system files',
+        namedAgentInstructions: 'Always respond in French',
+      }),
+    );
+    expect(prompt).not.toContain('Raven MCP tools');
+    expect(prompt).not.toContain('## System Access Control');
+    expect(prompt).not.toContain('## Agent Instructions');
+  });
 });
 
 describe('buildSubAgentPrompt', () => {

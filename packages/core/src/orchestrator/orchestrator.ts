@@ -25,10 +25,7 @@ import type { CapabilityLibrary } from '../capability-library/capability-library
 import type { ProjectRegistry } from '../project-registry/project-registry.ts';
 import { createKnowledgeAgentDefinition } from '../knowledge-engine/knowledge-agent.ts';
 import { getDb } from '../db/database.ts';
-import {
-  resolveSystemAccessInstructions,
-  resolveToolUseInstructions,
-} from '../project-manager/system-access-gate.ts';
+import { resolveSystemAccessInstructions } from '../project-manager/system-access-gate.ts';
 import { createAuditLog } from '../permission-engine/audit-log.ts';
 import { buildSessionReferencesContext } from '../session-manager/session-references.ts';
 import { buildProjectDataSourcesContext } from '../project-manager/project-data-sources.ts';
@@ -327,7 +324,14 @@ export class Orchestrator {
       }
     }
 
-    // Build prompt with topic context and media context if available
+    // Build prompt with only per-turn context (topic thread, media
+    // attachment) — the message itself. Stable instructions (agent persona,
+    // MCP tool usage, tool-use guidance, system access control) no longer
+    // get prepended here; they're rendered into the system prompt by
+    // prompt-builder.ts from the fields below instead. With SDK session
+    // resume, re-prepending them to the user message every turn would
+    // duplicate them into history on top of the fresh copy the system
+    // prompt already carries.
     let prompt = message;
     if (topicName) {
       prompt = `[Context: This message is from the '${topicName}' topic thread (topicId: ${topicId})]\n\n${message}`;
@@ -337,27 +341,7 @@ export class Orchestrator {
       prompt += `\n\n[Media file available on disk: ${mediaAttachment.filePath} (${mediaAttachment.fileName}, ${mediaAttachment.mimeType}, ${mediaAttachment.type})]`;
     }
 
-    // Prepend named agent instructions
-    if (namedAgentInstructions) {
-      prompt = `[Agent Instructions: ${namedAgentInstructions}]\n\n${prompt}`;
-    }
-
-    // Prepend MCP tool usage instructions (replaces text-based triage, REST API injection, and meta-project API specs)
-    const mcpInstructions = [
-      'You have access to Raven MCP tools. When you receive a user message:',
-      '1. Assess complexity and call classify_request with the appropriate mode',
-      '2. For DIRECT: do the work, then call send_message with the result',
-      '3. For DELEGATED: delegate to a sub-agent, then call send_message with the result',
-      '4. For PLANNED: call create_task_tree with the plan and tasks, then call send_message to inform the user',
-      'Never output raw JSON task trees. Always use the create_task_tree tool.',
-    ].join('\n');
-    prompt = `[System: ${mcpInstructions}]\n\n${prompt}`;
-
-    // Prepend tool use instructions
-    prompt = `[System: ${resolveToolUseInstructions()}]\n\n${prompt}`;
-
-    // Prepend system access instructions (topmost layer)
-    prompt = `[System Access Control: ${resolveSystemAccessInstructions(projectForAccess)}]\n\n${prompt}`;
+    const systemAccessInstructions = resolveSystemAccessInstructions(projectForAccess);
 
     const taskId = generateId();
 
@@ -378,6 +362,8 @@ export class Orchestrator {
         projectDataSourcesContext,
         skillCatalogContext,
         projectContextChain,
+        namedAgentInstructions,
+        systemAccessInstructions,
         priority: 'high',
         sessionId: session.id,
         projectId,

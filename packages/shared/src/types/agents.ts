@@ -121,6 +121,15 @@ export interface AgentTask {
   skillCatalogContext?: string;
   projectContextChain?: string;
   taskBoardContext?: string;
+  /** Named agent's persona instructions, rendered into the system prompt by
+   * prompt-builder.ts (stable per named agent, not per message) — see
+   * orchestrator.ts handleUserChat. Moved out of the per-turn user prompt so
+   * SDK session resume doesn't re-teach it every turn. */
+  namedAgentInstructions?: string;
+  /** Rendered text from system-access-gate.ts's resolveSystemAccessInstructions
+   * for this project's system access level; rendered into the system prompt
+   * by prompt-builder.ts for the same reason as namedAgentInstructions. */
+  systemAccessInstructions?: string;
   namedAgentId?: string;
   treeId?: string;
   executionTaskId?: string;

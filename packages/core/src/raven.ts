@@ -132,11 +132,14 @@ export async function createRaven(
 
   log.info(`Config loaded (model: ${config.CLAUDE_MODEL}, port: ${config.RAVEN_PORT})`);
 
-  // Initialize agent backend: injected override (tests) or SDK/CLI mode from config
+  // Initialize agent backend: injected override (tests) or the SDK backend.
+  // One backend now — the SDK drives the same `claude` binary under CLI/MAX
+  // auth. config.ANTHROPIC_API_KEY, if set, flows through as an env var
+  // rather than selecting a different code path (see agent-session.ts).
   if (overrides.agentBackend) {
     setActiveBackend(overrides.agentBackend);
   } else {
-    initializeBackend(config.ANTHROPIC_API_KEY);
+    initializeBackend();
   }
 
   // 2. Ensure data directories (resolve relative paths against dataRoot, not CWD)

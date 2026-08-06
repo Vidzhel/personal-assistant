@@ -28,6 +28,13 @@ export interface BackendOptions {
   signal?: AbortSignal;
   onStderr: (data: string) => void;
   cwd?: string;
+  /** SDK session id to resume — continues that session's history instead of
+   * starting cold. Only set for chat turns (see agent-session.ts runAgentTask). */
+  resume?: string;
+  /** Test-only seam: overrides the SDK's `pathToClaudeCodeExecutable`, letting
+   * tests point the backend at a fake executable instead of the real `claude`
+   * CLI. Never set in production. */
+  executablePathOverride?: string;
 }
 
 export interface BackendResult {

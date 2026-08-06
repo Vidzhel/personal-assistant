@@ -117,6 +117,8 @@ export class AgentManager {
       projectDataSourcesContext: payload.projectDataSourcesContext,
       skillCatalogContext: payload.skillCatalogContext,
       projectContextChain: payload.projectContextChain,
+      namedAgentInstructions: payload.namedAgentInstructions,
+      systemAccessInstructions: payload.systemAccessInstructions,
       namedAgentId: payload.namedAgentId,
       bashAccess: payload.bashAccess,
       treeId: payload.treeId,
@@ -225,6 +227,7 @@ export class AgentManager {
       signal: abortController.signal,
       ravenMcpDeps: this.ravenMcpDeps,
       memoryStore: this.memoryStore,
+      sessionManager: this.sessionManager,
     });
 
     this.abortControllers.delete(task.id);

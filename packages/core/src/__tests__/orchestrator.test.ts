@@ -109,11 +109,11 @@ describe('Orchestrator', () => {
     const payload = (event as unknown as { payload: Record<string, unknown> }).payload;
     expect(payload.skillName).toBe('orchestrator');
     expect(payload.mcpServers).toEqual({}); // NO MCPs on orchestrator
-    // System access and tool use instructions are now prepended
-    expect(payload.prompt).toContain('Hello Raven');
-    expect(payload.prompt).toContain('System Access Control');
-    expect(payload.prompt).toContain('MUST NOT read or modify'); // default 'none' for regular projects
-    expect(payload.prompt).toContain('Use tools purposefully');
+    // The user prompt carries only the message itself now — stable
+    // instructions (system access, tool use, MCP tools) are rendered into
+    // the system prompt by prompt-builder.ts instead (see prompt-builder.test.ts).
+    expect(payload.prompt).toBe('Hello Raven');
+    expect(payload.systemAccessInstructions).toContain('MUST NOT read or modify'); // default 'none' for regular projects
     expect(payload.priority).toBe('high');
   });
 
@@ -159,7 +159,7 @@ describe('Orchestrator', () => {
     expect(payload.mcpServers).toHaveProperty('email_gmail');
   });
 
-  it('meta-project chat includes MCP tool instructions and read-write access', async () => {
+  it('meta-project chat resolves read-write system access', async () => {
     const suiteRegistry = makeSuiteRegistry();
     _orchestrator = new Orchestrator({
       eventBus,
@@ -183,17 +183,13 @@ describe('Orchestrator', () => {
 
     const event = await taskRequestPromise;
     const payload = (event as unknown as { payload: Record<string, unknown> }).payload;
-    const prompt = payload.prompt as string;
 
-    // System access should be read-write for meta-project
-    expect(prompt).toContain('may read and modify system files');
-    // MCP tool instructions (replaces REST API injection)
-    expect(prompt).toContain('Raven MCP tools');
-    expect(prompt).toContain('classify_request');
-    expect(prompt).toContain('create_task_tree');
-    // Tool use instructions
-    expect(prompt).toContain('Use tools purposefully');
-    // Original message
-    expect(prompt).toContain('Show me all projects');
+    // System access should be read-write for meta-project — rendered into
+    // the system prompt by prompt-builder.ts (see prompt-builder.test.ts for
+    // the MCP tool / tool-use instruction assertions, which are now
+    // constant and don't depend on the project).
+    expect(payload.systemAccessInstructions).toContain('may read and modify system files');
+    // The user prompt carries only the original message.
+    expect(payload.prompt).toBe('Show me all projects');
   });
 });

@@ -36,6 +36,8 @@ import { EventBus } from '../event-bus/event-bus.ts';
 import { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 import { McpManager } from '../mcp-manager/mcp-manager.ts';
 import { createMessageStore, type MessageStore } from '../session-manager/message-store.ts';
+import { SessionManager } from '../session-manager/session-manager.ts';
+import { initDatabase, getDb } from '../db/database.ts';
 import type { RavenEvent, AgentTaskRequestEvent } from '@raven/shared';
 
 const mockQuery = vi.mocked(query);
@@ -252,6 +254,132 @@ describe('AgentManager', () => {
       expect(roles[1]).toBe('assistant');
       expect(roles[2]).toBe('action');
       expect(roles[3]).toBe('assistant');
+    });
+  });
+
+  describe('with sessionManager (resume threading)', () => {
+    // A dedicated eventBus, scoped to this describe block only — the outer
+    // `agentManager` (built in the top-level beforeEach with no
+    // sessionManager) would otherwise also be subscribed to the shared
+    // eventBus and double-process every emitted request.
+    let localEventBus: EventBus;
+    let sessionManager: SessionManager;
+    let _amWithSession: AgentManager;
+    let tmpDir: string;
+
+    beforeEach(() => {
+      tmpDir = mkdtempSync(join(tmpdir(), 'raven-am-session-'));
+      initDatabase(join(tmpDir, 'test.db'));
+      localEventBus = new EventBus();
+      sessionManager = new SessionManager();
+      _amWithSession = new AgentManager({
+        eventBus: localEventBus,
+        mcpManager,
+        suiteRegistry,
+        sessionManager,
+      });
+    });
+
+    afterEach(() => {
+      localEventBus.removeAllListeners();
+      try {
+        getDb().close();
+      } catch {
+        /* */
+      }
+      rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    function makeProject(projectId: string): void {
+      const now = Date.now();
+      getDb()
+        .prepare(
+          'INSERT INTO projects (id, name, skills, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+        )
+        .run(projectId, projectId, '[]', now, now);
+    }
+
+    function emitChatTurn(taskId: string, sessionId: string | undefined): void {
+      localEventBus.emit({
+        id: `evt-${taskId}`,
+        timestamp: Date.now(),
+        source: 'test',
+        type: 'agent:task:request',
+        payload: {
+          taskId,
+          sessionId,
+          prompt: 'Hello',
+          skillName: 'orchestrator',
+          mcpServers: {},
+          priority: 'normal',
+        },
+      } as RavenEvent);
+    }
+
+    it('links the SDK session id after a chat turn that carries sessionId', async () => {
+      // linkSdkSession's UPDATE is a no-op against a sessionId with no
+      // matching row, so the Raven session must actually exist first — mirror
+      // what orchestrator.ts does via getOrCreateSession before dispatching.
+      makeProject('proj-resume-1');
+      const session = sessionManager.getOrCreateSession('proj-resume-1');
+
+      mockQuery.mockImplementation(async function* () {
+        yield { type: 'system', subtype: 'init', session_id: 'sdk-resume-1' };
+        yield { type: 'result', subtype: 'success', result: 'done' };
+      } as unknown as typeof query);
+
+      const completionPromise = new Promise<void>((resolve) => {
+        localEventBus.once('agent:task:complete', () => resolve());
+      });
+
+      emitChatTurn('task-resume-1', session.id);
+      await completionPromise;
+
+      expect(sessionManager.getSdkSessionId(session.id)).toBe('sdk-resume-1');
+    });
+
+    it('resumes the SDK session on the second turn of the same Raven session', async () => {
+      makeProject('proj-resume-2');
+      const session = sessionManager.getOrCreateSession('proj-resume-2');
+
+      mockQuery.mockImplementation(async function* () {
+        yield { type: 'system', subtype: 'init', session_id: 'sdk-resume-2' };
+        yield { type: 'result', subtype: 'success', result: 'ok' };
+      } as unknown as typeof query);
+
+      const firstComplete = new Promise<void>((resolve) => {
+        localEventBus.once('agent:task:complete', () => resolve());
+      });
+      emitChatTurn('task-resume-2a', session.id);
+      await firstComplete;
+
+      const secondComplete = new Promise<void>((resolve) => {
+        localEventBus.once('agent:task:complete', () => resolve());
+      });
+      emitChatTurn('task-resume-2b', session.id);
+      await secondComplete;
+
+      expect(mockQuery.mock.calls.length).toBe(2);
+      const firstCallOptions = mockQuery.mock.calls[0][0].options as { resume?: string };
+      const secondCallOptions = mockQuery.mock.calls[1][0].options as { resume?: string };
+      expect(firstCallOptions.resume).toBeUndefined();
+      expect(secondCallOptions.resume).toBe('sdk-resume-2');
+    });
+
+    it('does not resume a task with no sessionId (execution/validator tasks stay cold)', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield { type: 'result', subtype: 'success', result: 'done' };
+      } as unknown as typeof query);
+
+      const completionPromise = new Promise<void>((resolve) => {
+        localEventBus.once('agent:task:complete', () => resolve());
+      });
+
+      emitChatTurn('task-no-session', undefined);
+      await completionPromise;
+
+      const callOptions = mockQuery.mock.calls[0][0].options as { resume?: string };
+      expect(callOptions.resume).toBeUndefined();
     });
   });
 

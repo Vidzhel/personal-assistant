@@ -14,6 +14,9 @@ export default tseslint.config(
       'data/',
       '*.config.*',
       '*.json',
+      // Plain-JS test fixtures spawned as fake subprocesses (not TypeScript,
+      // no node globals config applies to them) — see sdk-backend-contract.test.ts.
+      '**/__tests__/fixtures/**',
     ],
   },
 

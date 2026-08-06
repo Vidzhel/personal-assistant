@@ -9,6 +9,7 @@ import type {
 import { checkBashAccess } from '../bash-gate/bash-gate.ts';
 import { parseCommand } from '../bash-gate/command-parser.ts';
 import type { MessageStore } from '../session-manager/message-store.ts';
+import type { SessionManager } from '../session-manager/session-manager.ts';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { PermissionEngine } from '../permission-engine/permission-engine.ts';
 import type { AuditLog } from '../permission-engine/audit-log.ts';
@@ -17,7 +18,6 @@ import { buildSystemPrompt } from './prompt-builder.ts';
 import { getConfig, projectRoot } from '../config.ts';
 import type { AgentBackend, ToolUseMeta } from './agent-backend.ts';
 import { createSdkBackend } from './sdk-backend.ts';
-import { createCliBackend } from './cli-backend.ts';
 import { createRavenMcp, type RavenMcpDeps, type ScopeContext } from '../mcp-server/index.ts';
 import type { MemoryStore } from '../agent-memory/memory-store.ts';
 import { createMemoryMcp } from '../mcp-server/memory-mcp.ts';
@@ -30,9 +30,15 @@ const STDERR_ERROR_TAIL_LENGTH = -500;
 
 let activeBackend: AgentBackend | null = null;
 
-export function initializeBackend(apiKey: string): void {
-  activeBackend = apiKey ? createSdkBackend() : createCliBackend();
-  log.info(`Agent backend: ${apiKey ? 'SDK' : 'CLI'} mode`);
+/**
+ * One backend: the SDK drives the same `claude` binary under CLI/MAX auth
+ * that a hand-rolled CLI spawn used to (see sdk-backend.ts's env stripping).
+ * ANTHROPIC_API_KEY, when set, simply flows through as an env var rather
+ * than selecting a different code path — there is no more CLI/SDK split.
+ */
+export function initializeBackend(): void {
+  activeBackend = createSdkBackend();
+  log.info('Agent backend: SDK');
 }
 
 /**
@@ -47,9 +53,8 @@ export function setActiveBackend(backend: AgentBackend): void {
 
 function getActiveBackend(): AgentBackend {
   if (!activeBackend) {
-    // Fallback: auto-initialize based on config if not explicitly initialized
-    const config = getConfig();
-    initializeBackend(config.ANTHROPIC_API_KEY);
+    // Fallback: auto-initialize if not explicitly initialized yet
+    initializeBackend();
   }
   // initializeBackend always sets activeBackend
   return activeBackend as AgentBackend;
@@ -83,6 +88,12 @@ export interface RunOptions {
   signal?: AbortSignal;
   ravenMcpDeps?: RavenMcpDeps;
   memoryStore?: MemoryStore;
+  /** Used to resume the SDK session for chat turns (task.sessionId set) and
+   * to record the session id the backend returns. Execution/validation
+   * tasks never carry task.sessionId (see orchestrator.ts vs
+   * execution-bridge.ts), so they stay cold by design even when this is
+   * provided. */
+  sessionManager?: SessionManager;
 }
 
 export interface GateResult {
@@ -313,9 +324,20 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       return agentToolMap.get(meta.parentToolUseId);
     }
 
+    // Resume only applies to chat turns: task.sessionId is set exclusively
+    // by orchestrator.ts's handleUserChat (see AgentTaskRequestEvent.payload
+    // .sessionId). Execution-bridge dispatches and validator tasks never set
+    // it, so they always run cold — resuming session state into an unrelated
+    // task/validation lineage would leak chat context across it.
+    const resume =
+      task.sessionId && opts.sessionManager
+        ? opts.sessionManager.getSdkSessionId(task.sessionId)
+        : undefined;
+
     const backend = getActiveBackend();
     const backendResult = await backend({
       prompt,
+      resume,
       systemPrompt,
       allowedTools,
       model: config.CLAUDE_MODEL,
@@ -452,6 +474,14 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
     resultText = backendResult.result;
     success = backendResult.success;
     errors.push(...backendResult.errors);
+
+    // Always update, even when resuming: if the SDK continues the same
+    // session id this is a no-op, but resume can also fork to a new id, in
+    // which case the next turn must resume from the latest one, not the one
+    // we started this turn with.
+    if (task.sessionId && opts.sessionManager && sdkSessionId) {
+      opts.sessionManager.linkSdkSession(task.sessionId, sdkSessionId);
+    }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     const stderrOutput = stderrChunks.join('');

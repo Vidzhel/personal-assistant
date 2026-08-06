@@ -48,6 +48,17 @@ export class SessionManager {
     db.prepare('UPDATE sessions SET sdk_session_id = ? WHERE id = ?').run(sdkSessionId, sessionId);
   }
 
+  /** Direct lookup used to decide whether a chat turn resumes an existing
+   * SDK session or starts cold (see agent-session.ts runAgentTask). Returns
+   * undefined for a session that has never completed a turn yet. */
+  getSdkSessionId(sessionId: string): string | undefined {
+    const db = getDb();
+    const row = db.prepare('SELECT sdk_session_id FROM sessions WHERE id = ?').get(sessionId) as
+      | { sdk_session_id: string | null }
+      | undefined;
+    return row?.sdk_session_id ?? undefined;
+  }
+
   incrementTurnCount(sessionId: string): void {
     const db = getDb();
     db.prepare(

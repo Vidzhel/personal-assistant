@@ -62,6 +62,11 @@ export interface AgentTaskRequestEvent extends BaseEvent {
     treeId?: string;
     executionTaskId?: string;
     taskBoardContext?: string;
+    /** See AgentTask.namedAgentInstructions (agents.ts) — carried on the
+     * event so agent-manager can copy it onto the AgentTask it constructs. */
+    namedAgentInstructions?: string;
+    /** See AgentTask.systemAccessInstructions (agents.ts). */
+    systemAccessInstructions?: string;
     /** Set only by runtime-internal dispatchers (create-validation-deps.ts)
      * to grant validation scope (submit_validation_score, etc.) — never set
      * from an agent-authored request, so this privilege cannot be

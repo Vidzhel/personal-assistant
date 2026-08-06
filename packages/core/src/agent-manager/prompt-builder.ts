@@ -1,4 +1,19 @@
 import { SKILL_ORCHESTRATOR, type AgentTask, type Project } from '@raven/shared';
+import { resolveToolUseInstructions } from '../project-manager/system-access-gate.ts';
+
+// Verbatim text, relocated from orchestrator.ts's handleUserChat (previously
+// prepended fresh to the user message on every chat turn). Moved into the
+// system prompt so SDK session resume doesn't re-teach the same rules every
+// turn — with `resume`, a per-turn user-message prepend would duplicate into
+// history on top of the copy the system prompt already carries.
+const MCP_TOOL_INSTRUCTIONS = [
+  'You have access to Raven MCP tools. When you receive a user message:',
+  '1. Assess complexity and call classify_request with the appropriate mode',
+  '2. For DIRECT: do the work, then call send_message with the result',
+  '3. For DELEGATED: delegate to a sub-agent, then call send_message with the result',
+  '4. For PLANNED: call create_task_tree with the plan and tasks, then call send_message to inform the user',
+  'Never output raw JSON task trees. Always use the create_task_tree tool.',
+].join('\n');
 
 export function buildSystemPrompt(task: AgentTask, project?: Project): string {
   const parts: string[] = [
@@ -19,6 +34,19 @@ export function buildSystemPrompt(task: AgentTask, project?: Project): string {
       'Always delegate domain-specific work (tasks, email, etc.) to the appropriate sub-agent.',
       'Do NOT try to use ToolSearch or load MCP tools directly — your sub-agents already have the right tools.',
     );
+
+    // Stable per-turn prompt layers (see the module comment above and
+    // orchestrator.ts's handleUserChat, which computes namedAgentInstructions
+    // and systemAccessInstructions per project/agent but no longer prepends
+    // them to the user message).
+    if (task.systemAccessInstructions) {
+      parts.push('', '## System Access Control', task.systemAccessInstructions);
+    }
+    parts.push('', '## Tool Use', resolveToolUseInstructions());
+    parts.push('', '## MCP Tools', MCP_TOOL_INSTRUCTIONS);
+    if (task.namedAgentInstructions) {
+      parts.push('', '## Agent Instructions', task.namedAgentInstructions);
+    }
   } else {
     parts.push('- When using tools from MCP servers, prefer structured data over free-form text');
   }

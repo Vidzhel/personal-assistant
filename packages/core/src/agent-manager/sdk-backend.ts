@@ -13,6 +13,18 @@ export function createSdkBackend(): AgentBackend {
     let success = false;
     const errors: string[] = [];
 
+    // The owner runs MAX-plan CLI auth (ANTHROPIC_API_KEY empty in
+    // production): the SDK spawns its bundled `claude` binary and inherits
+    // `~/.claude` auth. CLAUDECODE/CLAUDE_CODE_ENTRYPOINT are the nesting
+    // guard the *outer* Claude Code session sets on this process's own env —
+    // left in place, the spawned child would think it's nested inside
+    // another Claude Code session and refuse to run. Delete rather than set
+    // to `undefined`: Node's child_process would otherwise pass the literal
+    // string "undefined" through as the env var's value.
+    const env = { ...process.env } as Record<string, string>;
+    delete env.CLAUDECODE;
+    delete env.CLAUDE_CODE_ENTRYPOINT;
+
     const queryOptions: Record<string, unknown> = {
       systemPrompt: opts.systemPrompt,
       allowedTools: opts.allowedTools,
@@ -21,7 +33,16 @@ export function createSdkBackend(): AgentBackend {
       maxTurns: opts.maxTurns,
       stderr: opts.onStderr,
       cwd: opts.cwd,
+      env,
     };
+
+    if (opts.resume) {
+      queryOptions.resume = opts.resume;
+    }
+
+    if (opts.executablePathOverride) {
+      queryOptions.pathToClaudeCodeExecutable = opts.executablePathOverride;
+    }
 
     if (Object.keys(opts.mcpServers).length > 0) {
       queryOptions.mcpServers = opts.mcpServers;
