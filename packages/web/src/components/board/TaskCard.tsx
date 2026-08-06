@@ -2,10 +2,11 @@
 
 import { useState } from 'react';
 import { Card } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
 import { StatusBadge, SourceBadge } from '@/components/ui/Badge';
 import { Disclosure } from '@/components/ui/Disclosure';
 import { api, type RavenTaskRecord } from '@/lib/api-client';
-import type { BoardCard } from '@/components/board/board-model';
+import { canCancelTree, type BoardCard } from '@/components/board/board-model';
 
 const PROGRESS_FULL = 100;
 
@@ -70,7 +71,38 @@ function ChildList({ loading, items }: { loading: boolean; items: ChildItem[] | 
   );
 }
 
-export function TaskCard({ card, onOpen }: { card: BoardCard; onOpen: (card: BoardCard) => void }) {
+function TreeCancelAction({
+  card,
+  onCancelTree,
+}: {
+  card: BoardCard;
+  onCancelTree?: (treeId: string) => void;
+}) {
+  const [cancelling, setCancelling] = useState(false);
+  if (card.kind !== 'plan' || !canCancelTree(card.status)) return null;
+
+  const handleCancelTree = (): void => {
+    if (!confirm('Cancel this task tree? Running agent work will be aborted.')) return;
+    setCancelling(true);
+    onCancelTree?.(card.id);
+  };
+
+  return (
+    <div className="mt-2 flex justify-end" onClick={(e) => e.stopPropagation()}>
+      <Button variant="danger" size="sm" onClick={handleCancelTree} disabled={cancelling}>
+        {cancelling ? 'Cancelling…' : 'Cancel'}
+      </Button>
+    </div>
+  );
+}
+
+interface TaskCardProps {
+  card: BoardCard;
+  onOpen: (card: BoardCard) => void;
+  onCancelTree?: (treeId: string) => void;
+}
+
+export function TaskCard({ card, onOpen, onCancelTree }: TaskCardProps) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<ChildItem[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -102,6 +134,8 @@ export function TaskCard({ card, onOpen }: { card: BoardCard; onOpen: (card: Boa
       {card.progress && (
         <ProgressBar completed={card.progress.completed} total={card.progress.total} />
       )}
+
+      <TreeCancelAction card={card} onCancelTree={onCancelTree} />
 
       <div className="mt-1.5" onClick={(e) => e.stopPropagation()}>
         <Disclosure

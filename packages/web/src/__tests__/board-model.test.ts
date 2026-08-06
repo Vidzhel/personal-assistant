@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { statusToColumn, buildBoard } from '@/components/board/board-model';
+import {
+  statusToColumn,
+  buildBoard,
+  canCancelTree,
+  applyTreeCancelled,
+} from '@/components/board/board-model';
 import type { RavenTaskRecord, TaskTreeRecord } from '@/lib/api-client';
 
 function task(over: Partial<RavenTaskRecord> = {}): RavenTaskRecord {
@@ -93,5 +98,34 @@ describe('buildBoard', () => {
     const doneIds = board.done.map((c) => c.id);
     expect(doneIds).toContain('recent');
     expect(doneIds).not.toContain('old');
+  });
+});
+
+describe('canCancelTree', () => {
+  it('allows cancelling a running tree', () => {
+    expect(canCancelTree('running')).toBe(true);
+  });
+  it('allows cancelling a tree pending approval', () => {
+    expect(canCancelTree('pending_approval')).toBe(true);
+  });
+  it('disallows cancelling terminal statuses', () => {
+    expect(canCancelTree('completed')).toBe(false);
+    expect(canCancelTree('failed')).toBe(false);
+    expect(canCancelTree('cancelled')).toBe(false);
+  });
+});
+
+describe('applyTreeCancelled', () => {
+  it('flips the matching tree to cancelled', () => {
+    const trees = [tree({ id: 'a', status: 'running' }), tree({ id: 'b', status: 'running' })];
+    const updated = applyTreeCancelled(trees, 'a');
+    expect(updated.find((t) => t.id === 'a')?.status).toBe('cancelled');
+    expect(updated.find((t) => t.id === 'b')?.status).toBe('running');
+  });
+
+  it('leaves the array unchanged when the id is not found', () => {
+    const trees = [tree({ id: 'a', status: 'running' })];
+    const updated = applyTreeCancelled(trees, 'missing');
+    expect(updated).toEqual(trees);
   });
 });

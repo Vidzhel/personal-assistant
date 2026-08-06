@@ -39,6 +39,16 @@ export function statusToColumn(status: string): BoardColumn | null {
   return STATUS_COLUMN[status] ?? null;
 }
 
+const CANCELLABLE_TREE_STATUSES = new Set(['pending_approval', 'running']);
+
+export function canCancelTree(status: string): boolean {
+  return CANCELLABLE_TREE_STATUSES.has(status);
+}
+
+export function applyTreeCancelled(trees: TaskTreeRecord[], treeId: string): TaskTreeRecord[] {
+  return trees.map((t) => (t.id === treeId ? { ...t, status: 'cancelled' } : t));
+}
+
 export interface BuildBoardOptions {
   doneSinceMs?: number;
 }

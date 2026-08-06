@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type RavenTaskRecord, type TaskTreeRecord } from '@/lib/api-client';
 import {
+  applyTreeCancelled,
   buildBoard,
   type Board,
   type BoardColumn as ColKey,
@@ -28,13 +29,21 @@ const COLUMN_TARGET_STATUS: Partial<Record<ColKey, string>> = {
   blocked: 'blocked',
 };
 
-function DraggableCard({ card, onOpen }: { card: BoardCard; onOpen: (card: BoardCard) => void }) {
+function DraggableCard({
+  card,
+  onOpen,
+  onCancelTree,
+}: {
+  card: BoardCard;
+  onOpen: (card: BoardCard) => void;
+  onCancelTree: (treeId: string) => void;
+}) {
   return (
     <div
       draggable={card.draggable}
       onDragStart={(e) => e.dataTransfer.setData('text/card-id', card.id)}
     >
-      <TaskCard card={card} onOpen={onOpen} />
+      <TaskCard card={card} onOpen={onOpen} onCancelTree={onCancelTree} />
     </div>
   );
 }
@@ -74,12 +83,22 @@ export function TaskBoard({ projectId, search }: { projectId?: string; search?: 
     if (card.kind === 'task') void selectTask(card.id);
   };
 
+  const handleCancelTree = (treeId: string): void => {
+    setTrees((prev) => applyTreeCancelled(prev, treeId));
+    api.cancelTaskTree(treeId).catch(() => void load());
+  };
+
   return (
     <div className="flex gap-3" style={{ minHeight: '320px' }}>
       {COLUMNS.map((col) => (
         <BoardColumn key={col} column={col} cards={board[col]} onDropCard={handleDrop}>
           {board[col].map((card) => (
-            <DraggableCard key={card.id} card={card} onOpen={onOpen} />
+            <DraggableCard
+              key={card.id}
+              card={card}
+              onOpen={onOpen}
+              onCancelTree={handleCancelTree}
+            />
           ))}
         </BoardColumn>
       ))}

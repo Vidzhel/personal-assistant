@@ -2,13 +2,13 @@
 
 import { useState } from 'react';
 import { api, type ActiveTaskInfo } from '@/lib/api-client';
+import { Button } from '@/components/ui/Button';
 import { SendMessageModal } from './SendMessageModal';
 
 const MS_PER_SECOND = 1000;
 const SECONDS_PER_MINUTE = 60;
 const MINUTES_PER_HOUR = 60;
 const ID_DISPLAY_LENGTH = 8;
-const OPACITY_HALF = 0.5;
 
 function formatElapsed(startMs?: number, createdMs?: number): string {
   const base = startMs ?? createdMs;
@@ -104,14 +104,9 @@ export function AgentMonitorCard({ task, section, onRefresh }: AgentMonitorCardP
 
       {/* Actions */}
       <div className="flex items-center gap-2 mt-3">
-        <button
-          onClick={handleCancel}
-          disabled={cancelling}
-          className="text-xs px-2 py-1 rounded"
-          style={{ color: 'var(--error)', opacity: cancelling ? OPACITY_HALF : 1 }}
-        >
+        <Button variant="danger" size="sm" onClick={handleCancel} disabled={cancelling}>
           {cancelling ? 'Cancelling...' : 'Terminate'}
-        </button>
+        </Button>
 
         {task.sessionId && (
           <button
