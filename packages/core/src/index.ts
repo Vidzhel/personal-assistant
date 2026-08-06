@@ -52,9 +52,8 @@ import { createSessionRetrospective } from './session-manager/session-retrospect
 import { createSessionCompaction } from './session-manager/session-compaction.ts';
 import { createKnowledgeConsolidation } from './knowledge-engine/knowledge-consolidation.ts';
 import { TaskExecutionEngine } from './task-execution/task-execution-engine.ts';
-import { buildTaskBoardInstructions } from './task-execution/task-board-protocol.ts';
-import { buildRetryPrompt } from './task-execution/validation-pipeline.ts';
 import { createValidationDeps } from './task-execution/create-validation-deps.ts';
+import { createExecutionBridge } from './task-execution/execution-bridge.ts';
 import { TemplateRegistry } from './template-engine/template-registry.ts';
 import { createTemplateScheduler } from './template-engine/template-scheduler.ts';
 import type { SessionIdleEvent } from '@raven/shared';
@@ -236,38 +235,17 @@ async function main(): Promise<void> {
   });
   log.info('task execution engine initialized');
 
-  // Wire execution:task:run-agent → agent:task:request
-  baseContext.eventBus.on('execution:task:run-agent', (event: unknown) => {
-    const payload = (event as RavenEvent & { payload: Record<string, unknown> }).payload as {
-      treeId: string;
-      taskId: string;
-      agent?: string;
-      prompt: string;
-      parentTaskId: string;
-      retryFeedback?: string;
-      retryCount?: number;
-      projectId?: string;
-    };
-    baseContext.eventBus.emit({
-      id: generateId(),
-      timestamp: Date.now(),
-      source: 'task-execution-engine',
-      type: 'agent:task:request',
-      payload: {
-        taskId: payload.taskId,
-        prompt: payload.retryFeedback
-          ? buildRetryPrompt(payload.prompt, payload.retryFeedback, payload.retryCount ?? 1)
-          : payload.prompt,
-        skillName: 'orchestrator',
-        mcpServers: {},
-        priority: 'normal',
-        projectId: payload.projectId,
-        treeId: payload.treeId,
-        executionTaskId: payload.taskId,
-        taskBoardContext: buildTaskBoardInstructions(payload.parentTaskId, payload.retryFeedback),
-      },
-    });
+  // Execution bridge: runtime observes agent:task:complete and drives
+  // onTaskCompleted/onTaskBlocked on the engine, honoring the template's
+  // `agent` field with resolved capabilities (replaces the old inline
+  // bridge that hardcoded skillName: 'orchestrator' and mcpServers: {}).
+  const executionBridge = createExecutionBridge({
+    eventBus,
+    executionEngine,
+    namedAgentStore,
+    agentResolver,
   });
+  executionBridge.start();
 
   // 7i. Init template engine (registry + scheduler)
   const templateRegistry = new TemplateRegistry();
@@ -330,27 +308,7 @@ async function main(): Promise<void> {
   // 9. Init session manager + message store
   const sessionManager = new SessionManager();
   const messageStore = createMessageStore({ basePath: sessionPath });
-
-  // 10. Init agent manager
   const memoryStore = createMemoryStore({ projectsDir });
-  const agentManager = new AgentManager({
-    eventBus,
-    mcpManager,
-    suiteRegistry,
-    permissionEngine,
-    auditLog,
-    pendingApprovals,
-    executionLogger,
-    messageStore,
-    sessionManager,
-    memoryStore,
-  });
-
-  // 10b. Inject agentManager into service context for callback handler
-  Object.assign(baseContext.config, { agentManager });
-
-  // Expose agent manager globally for suite services (ticktick-sync)
-  (globalThis as unknown as Record<string, unknown>).__raven_agent_manager__ = agentManager;
 
   // 11. Orchestrator — initialized after knowledge engine (step 12j) for context injection
 
@@ -480,6 +438,38 @@ async function main(): Promise<void> {
   idleDetector.start();
   log.info('Session idle detector started');
 
+  // 10. Init agent manager (after knowledge/retrieval engines so ravenMcpDeps can carry them)
+  const agentManager = new AgentManager({
+    eventBus,
+    mcpManager,
+    suiteRegistry,
+    permissionEngine,
+    auditLog,
+    pendingApprovals,
+    executionLogger,
+    messageStore,
+    sessionManager,
+    memoryStore,
+    ravenMcpDeps: {
+      executionEngine,
+      messageStore,
+      sessionManager,
+      knowledgeStore,
+      retrievalEngine,
+      namedAgentStore,
+      projectRegistry,
+      eventBus,
+      db: dbInterface,
+      pendingApprovals,
+    },
+  });
+
+  // 10b. Inject agentManager into service context for callback handler
+  Object.assign(baseContext.config, { agentManager });
+
+  // Expose agent manager globally for suite services (ticktick-sync)
+  (globalThis as unknown as Record<string, unknown>).__raven_agent_manager__ = agentManager;
+
   // 11c. Init orchestrator (after knowledge engine for context injection)
   const _orchestrator = new Orchestrator({
     eventBus,
@@ -548,6 +538,7 @@ async function main(): Promise<void> {
   const shutdown = async (): Promise<void> => {
     log.info('Shutting down...');
     idleDetector.stop();
+    executionBridge.stop();
     templateScheduler.stop();
     permissionEngine.shutdown();
     scheduleEngine.stop();

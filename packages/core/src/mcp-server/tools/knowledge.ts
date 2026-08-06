@@ -53,44 +53,52 @@ async function handleSearchKnowledge(
   return errorResult('No knowledge backend available — retrievalEngine or knowledgeStore required');
 }
 
-function buildSearchKnowledgeTool(deps: RavenMcpDeps): SdkMcpToolDefinition<any> {
+const SearchKnowledgeSchema = {
+  query: z.string().describe('Search query'),
+  tags: z.array(z.string()).optional().describe('Filter by tags'),
+  domain: z.string().optional().describe('Filter by domain'),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_SEARCH_LIMIT)
+    .optional()
+    .describe('Maximum results (1-50, default 10)'),
+};
+
+function buildSearchKnowledgeTool(
+  deps: RavenMcpDeps,
+): SdkMcpToolDefinition<typeof SearchKnowledgeSchema> {
   return tool(
     'search_knowledge',
     'Search the knowledge base for relevant information.',
-    {
-      query: z.string().describe('Search query'),
-      tags: z.array(z.string()).optional().describe('Filter by tags'),
-      domain: z.string().optional().describe('Filter by domain'),
-      limit: z
-        .number()
-        .int()
-        .min(1)
-        .max(MAX_SEARCH_LIMIT)
-        .optional()
-        .describe('Maximum results (1-50, default 10)'),
-    },
+    SearchKnowledgeSchema,
     async (args): Promise<TextContent> => handleSearchKnowledge(deps, args),
     { annotations: { readOnlyHint: true, idempotentHint: true } },
   );
 }
 
-function buildSaveKnowledgeTool(deps: RavenMcpDeps): SdkMcpToolDefinition<any> {
+const SaveKnowledgeSchema = {
+  content: z.string().describe('The knowledge content to save'),
+  title: z
+    .string()
+    .optional()
+    .describe('Title for the bubble (defaults to first 80 chars of content)'),
+  tags: z.array(z.string()).optional().describe('Tags to associate with this bubble'),
+  domain: z.string().optional().describe('Domain to categorize this bubble'),
+  permanence: z
+    .enum(['temporary', 'normal', 'robust'])
+    .optional()
+    .describe('Permanence level (default: normal)'),
+};
+
+function buildSaveKnowledgeTool(
+  deps: RavenMcpDeps,
+): SdkMcpToolDefinition<typeof SaveKnowledgeSchema> {
   return tool(
     'save_knowledge',
     'Save a new piece of knowledge to the knowledge base.',
-    {
-      content: z.string().describe('The knowledge content to save'),
-      title: z
-        .string()
-        .optional()
-        .describe('Title for the bubble (defaults to first 80 chars of content)'),
-      tags: z.array(z.string()).optional().describe('Tags to associate with this bubble'),
-      domain: z.string().optional().describe('Domain to categorize this bubble'),
-      permanence: z
-        .enum(['temporary', 'normal', 'robust'])
-        .optional()
-        .describe('Permanence level (default: normal)'),
-    },
+    SaveKnowledgeSchema,
     async (args): Promise<TextContent> => {
       if (!deps.knowledgeStore) {
         return errorResult('No knowledgeStore available — cannot save knowledge');
@@ -108,20 +116,24 @@ function buildSaveKnowledgeTool(deps: RavenMcpDeps): SdkMcpToolDefinition<any> {
   );
 }
 
-function buildGetKnowledgeContextTool(deps: RavenMcpDeps): SdkMcpToolDefinition<any> {
+const GetKnowledgeContextSchema = {
+  query: z.string().describe('Query to retrieve context for'),
+  maxResults: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_CONTEXT_LIMIT)
+    .optional()
+    .describe('Maximum results (1-20, default 5)'),
+};
+
+function buildGetKnowledgeContextTool(
+  deps: RavenMcpDeps,
+): SdkMcpToolDefinition<typeof GetKnowledgeContextSchema> {
   return tool(
     'get_knowledge_context',
     'Retrieve formatted knowledge context for a query, suitable for injecting into prompts.',
-    {
-      query: z.string().describe('Query to retrieve context for'),
-      maxResults: z
-        .number()
-        .int()
-        .min(1)
-        .max(MAX_CONTEXT_LIMIT)
-        .optional()
-        .describe('Maximum results (1-20, default 5)'),
-    },
+    GetKnowledgeContextSchema,
     async (args): Promise<TextContent> => {
       if (!deps.retrievalEngine) {
         return errorResult('No retrievalEngine available — cannot get knowledge context');
@@ -145,6 +157,12 @@ function buildGetKnowledgeContextTool(deps: RavenMcpDeps): SdkMcpToolDefinition<
   );
 }
 
+// Heterogeneous collection: each builder above keeps its own concrete,
+// zod-inferred schema type (no `any`); only this array — which must hold
+// tools with different schemas side by side, and whose elements are called
+// with per-tool concrete args in the test suite via `.find()` — needs the
+// erasure, matching the SDK's own `Array<SdkMcpToolDefinition<any>>` field
+// on `createSdkMcpServer`.
 export function buildKnowledgeTools(
   deps: RavenMcpDeps,
   _scope: ScopeContext,

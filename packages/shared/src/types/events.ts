@@ -61,6 +61,7 @@ export interface AgentTaskRequestEvent extends BaseEvent {
     bashAccess?: BashAccess;
     treeId?: string;
     executionTaskId?: string;
+    taskBoardContext?: string;
   };
 }
 

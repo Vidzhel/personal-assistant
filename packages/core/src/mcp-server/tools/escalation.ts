@@ -67,6 +67,12 @@ async function waitForResolution(
 
 // ── buildEscalationTools ────────────────────────────────────────────────
 
+// Heterogeneous collection: escalateToPlanned/requestApproval each carry a
+// different concrete, zod-inferred schema (no `any` in either definition
+// below); only this array — which must hold tools with different schemas
+// side by side, and whose elements are called with per-tool concrete args
+// in the test suite via `.find()` — needs the erasure, matching the SDK's
+// own `Array<SdkMcpToolDefinition<any>>` field on `createSdkMcpServer`.
 // eslint-disable-next-line max-lines-per-function -- builds two tool definitions, each with its own handler logic
 export function buildEscalationTools(
   deps: RavenMcpDeps,

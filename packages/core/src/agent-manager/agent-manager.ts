@@ -121,6 +121,7 @@ export class AgentManager {
       bashAccess: payload.bashAccess,
       treeId: payload.treeId,
       executionTaskId: payload.executionTaskId,
+      taskBoardContext: payload.taskBoardContext,
     };
 
     // Insert by priority

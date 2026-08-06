@@ -19,14 +19,19 @@ const okResult = (data: unknown): { content: [{ type: 'text'; text: string }] } 
   content: [{ type: 'text', text: JSON.stringify(data) }],
 });
 
-function buildSendMessage(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDefinition<any> {
+const SendMessageSchema = {
+  content: z.string().describe('The message content to send'),
+  format: z.enum(['text', 'markdown']).optional().describe('Message format'),
+};
+
+function buildSendMessage(
+  deps: RavenMcpDeps,
+  scope: ScopeContext,
+): SdkMcpToolDefinition<typeof SendMessageSchema> {
   return tool(
     'send_message',
     'Send a message to the current session as the assistant.',
-    {
-      content: z.string().describe('The message content to send'),
-      format: z.enum(['text', 'markdown']).optional().describe('Message format'),
-    },
+    SendMessageSchema,
     async (args) => {
       if (!scope.sessionId) {
         return errorResult('No sessionId in scope — cannot send_message');
@@ -56,22 +61,24 @@ function buildSendMessage(deps: RavenMcpDeps, scope: ScopeContext): SdkMcpToolDe
   );
 }
 
+const GetSessionHistorySchema = {
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_HISTORY_LIMIT)
+    .optional()
+    .describe('Maximum number of messages to return (1-100, default 20)'),
+};
+
 function buildGetSessionHistory(
   deps: RavenMcpDeps,
   scope: ScopeContext,
-): SdkMcpToolDefinition<any> {
+): SdkMcpToolDefinition<typeof GetSessionHistorySchema> {
   return tool(
     'get_session_history',
     'Retrieve the message history for the current session.',
-    {
-      limit: z
-        .number()
-        .int()
-        .min(1)
-        .max(MAX_HISTORY_LIMIT)
-        .optional()
-        .describe('Maximum number of messages to return (1-100, default 20)'),
-    },
+    GetSessionHistorySchema,
     async (args) => {
       if (!scope.sessionId) {
         return errorResult('No sessionId in scope — cannot get_session_history');
@@ -98,6 +105,12 @@ function buildGetSessionHistory(
   );
 }
 
+// Heterogeneous collection: each builder above keeps its own concrete,
+// zod-inferred schema type (no `any`); only this array — which must hold
+// tools with different schemas side by side, and whose elements are called
+// with per-tool concrete args in the test suite via `.find()` — needs the
+// erasure, matching the SDK's own `Array<SdkMcpToolDefinition<any>>` field
+// on `createSdkMcpServer`.
 export function buildSessionTools(
   deps: RavenMcpDeps,
   scope: ScopeContext,
