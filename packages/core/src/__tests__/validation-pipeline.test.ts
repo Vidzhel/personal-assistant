@@ -148,7 +148,11 @@ describe('validateTaskResult', () => {
         { requireArtifacts: true, evaluator: true, qualityReview: false },
         makeDeps({ runEvaluator: evalFn }),
       );
-      expect(evalFn).toHaveBeenCalledWith('Build a widget', 'Result text', undefined);
+      expect(evalFn).toHaveBeenCalledWith('Build a widget', 'Result text', {
+        criteria: undefined,
+        treeId: task.parentTaskId,
+        taskId: task.id,
+      });
     });
   });
 

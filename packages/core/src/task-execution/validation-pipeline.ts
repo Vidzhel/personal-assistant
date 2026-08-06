@@ -16,16 +16,23 @@ export interface ValidationResult {
   gate3Feedback?: string;
 }
 
+/** Identifies which tree/task a validation call is for — used for logging
+ * only (e.g. a warning on evaluator auto-pass), never for control flow. */
+export interface ValidationContext {
+  treeId?: string;
+  taskId?: string;
+}
+
 export interface ValidationDeps {
   runEvaluator: (
     taskPrompt: string,
     result: string,
-    criteria?: string,
+    options?: { criteria?: string } & ValidationContext,
   ) => Promise<{ passed: boolean; reason: string }>;
   runQualityReviewer: (
     taskPrompt: string,
     result: string,
-    threshold: number,
+    options: { threshold: number } & ValidationContext,
   ) => Promise<{ passed: boolean; score: number; feedback: string }>;
 }
 
@@ -74,11 +81,11 @@ export async function validateTaskResult(
 
   // Gate 2: Evaluator
   if (resolvedConfig.evaluator) {
-    const evalResult = await deps.runEvaluator(
-      taskPrompt,
-      resultSummary,
-      resolvedConfig.evaluatorCriteria,
-    );
+    const evalResult = await deps.runEvaluator(taskPrompt, resultSummary, {
+      criteria: resolvedConfig.evaluatorCriteria,
+      treeId: task.parentTaskId,
+      taskId: task.id,
+    });
     if (!evalResult.passed) {
       log.info('Gate 2 failed: evaluator rejected result', task.id, evalResult.reason);
       return {
@@ -92,11 +99,11 @@ export async function validateTaskResult(
 
     // Gate 3: Quality Review (only after gate 2 passes)
     if (resolvedConfig.qualityReview) {
-      const qrResult = await deps.runQualityReviewer(
-        taskPrompt,
-        resultSummary,
-        resolvedConfig.qualityThreshold,
-      );
+      const qrResult = await deps.runQualityReviewer(taskPrompt, resultSummary, {
+        threshold: resolvedConfig.qualityThreshold,
+        treeId: task.parentTaskId,
+        taskId: task.id,
+      });
       if (!qrResult.passed) {
         log.info('Gate 3 failed: quality below threshold', task.id, qrResult.score);
         return {

@@ -1,6 +1,55 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
+
+// Mock the claude-code SDK before importing AgentManager — only the S8a
+// "queued-cancel emits completion" integration case below spins up a real
+// AgentManager; every other test in this file uses a fake agent responder
+// on a real EventBus instead of the SDK.
+vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
+  query: vi.fn(),
+}));
+
+vi.mock('../config.ts', () => {
+  const config = {
+    ANTHROPIC_API_KEY: 'test-key',
+    CLAUDE_MODEL: 'claude-sonnet-4-6',
+    RAVEN_PORT: 4001,
+    RAVEN_TIMEZONE: 'UTC',
+    RAVEN_MAX_CONCURRENT_AGENTS: 1,
+    RAVEN_AGENT_MAX_TURNS: 25,
+    DATABASE_PATH: './data/raven.db',
+    SESSION_PATH: './data/sessions',
+    LOG_LEVEL: 'info',
+  };
+  return {
+    getConfig: () => config,
+    loadConfig: () => config,
+    projectRoot: '/test/root',
+  };
+});
+
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { query } from '@anthropic-ai/claude-agent-sdk';
+import { generateId } from '@raven/shared';
+import type {
+  RavenEvent,
+  RavenEventType,
+  AgentTaskRequestEvent,
+  EventBusInterface,
+  TaskTreeNode,
+} from '@raven/shared';
 import { EventBus } from '../event-bus/event-bus.ts';
 import { createExecutionBridge } from '../task-execution/execution-bridge.ts';
+import { TaskExecutionEngine } from '../task-execution/task-execution-engine.ts';
+import { AgentManager } from '../agent-manager/agent-manager.ts';
+import { SuiteRegistry } from '../suite-registry/suite-registry.ts';
+import { McpManager } from '../mcp-manager/mcp-manager.ts';
+import { initDatabase, getDb } from '../db/database.ts';
+
+const mockQuery = vi.mocked(query);
+
+// ── Unit-test suite: mocked engine + collaborators ────────────────────────
 
 function makeDeps() {
   const eventBus = new EventBus();
@@ -8,6 +57,8 @@ function makeDeps() {
     getTree: vi.fn(),
     onTaskCompleted: vi.fn().mockResolvedValue(undefined),
     onTaskBlocked: vi.fn(),
+    onTaskFailed: vi.fn(),
+    setAgentTaskId: vi.fn(),
   };
   const gmailAgent = { id: 'agent-gmail', name: 'gmail', instructions: '' };
   const defaultAgent = { id: 'agent-raven', name: 'raven', instructions: '' };
@@ -43,6 +94,18 @@ function runAgentEvent(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/** Emits the run-agent event and returns the agentTaskId the bridge minted
+ * for it (captured from the resulting agent:task:request payload). */
+function dispatchAndCaptureAgentTaskId(
+  deps: ReturnType<typeof makeDeps>,
+  overrides: Record<string, unknown> = {},
+): string {
+  const requests: Array<{ payload: Record<string, unknown> }> = [];
+  deps.eventBus.on('agent:task:request', (e) => requests.push(e as never));
+  deps.eventBus.emit(runAgentEvent(overrides) as never);
+  return requests[0].payload.taskId as string;
+}
+
 describe('createExecutionBridge', () => {
   let deps: ReturnType<typeof makeDeps>;
   beforeEach(() => {
@@ -69,18 +132,31 @@ describe('createExecutionBridge', () => {
     expect(req.payload.namedAgentId).toBe('agent-raven');
   });
 
-  it('advances the tree when a tracked agent task completes', () => {
-    deps.executionEngine.getTree.mockReturnValue({
-      tasks: new Map([['task-1', { status: 'in_progress' }]]),
-    });
+  it('mints a fresh agentTaskId per dispatch and persists it via setAgentTaskId', () => {
+    const requests: Array<{ payload: Record<string, unknown> }> = [];
+    deps.eventBus.on('agent:task:request', (e) => requests.push(e as never));
     deps.eventBus.emit(runAgentEvent() as never);
+
+    const agentTaskId = requests[0].payload.taskId as string;
+    expect(agentTaskId).not.toBe('task-1'); // the tree task id, kept separately
+    expect(requests[0].payload.executionTaskId).toBe('task-1');
+    expect(deps.executionEngine.setAgentTaskId).toHaveBeenCalledWith('t1', 'task-1', agentTaskId);
+  });
+
+  it('advances the tree when a tracked agent task completes', () => {
+    const agentTaskId = dispatchAndCaptureAgentTaskId(deps);
+
+    deps.executionEngine.getTree.mockReturnValue({
+      tasks: new Map([['task-1', { status: 'in_progress', agentTaskId }]]),
+    });
     deps.eventBus.emit({
       id: 'e2',
       timestamp: Date.now(),
       source: 'agent-manager',
       type: 'agent:task:complete',
-      payload: { taskId: 'task-1', result: 'summary text', durationMs: 5, success: true },
+      payload: { taskId: agentTaskId, result: 'summary text', durationMs: 5, success: true },
     } as never);
+
     expect(deps.executionEngine.onTaskCompleted).toHaveBeenCalledWith({
       treeId: 't1',
       taskId: 'task-1',
@@ -89,24 +165,56 @@ describe('createExecutionBridge', () => {
     });
   });
 
-  it('blocks the tree task on failure', () => {
+  it('routes an approval-blocked failure to onTaskBlocked (resumable, not retried)', () => {
+    const agentTaskId = dispatchAndCaptureAgentTaskId(deps);
+
     deps.executionEngine.getTree.mockReturnValue({
-      tasks: new Map([['task-1', { status: 'in_progress' }]]),
+      tasks: new Map([['task-1', { status: 'in_progress', agentTaskId }]]),
     });
-    deps.eventBus.emit(runAgentEvent() as never);
     deps.eventBus.emit({
       id: 'e3',
       timestamp: Date.now(),
       source: 'agent-manager',
       type: 'agent:task:complete',
-      payload: { taskId: 'task-1', result: '', durationMs: 5, success: false, errors: ['boom'] },
+      payload: {
+        taskId: agentTaskId,
+        result: '',
+        durationMs: 5,
+        success: false,
+        blocked: true,
+        errors: ['queued-for-approval'],
+      },
     } as never);
-    expect(deps.executionEngine.onTaskBlocked).toHaveBeenCalledWith('t1', 'task-1', 'boom');
+
+    expect(deps.executionEngine.onTaskBlocked).toHaveBeenCalledWith(
+      't1',
+      'task-1',
+      'queued-for-approval',
+    );
+    expect(deps.executionEngine.onTaskFailed).not.toHaveBeenCalled();
+  });
+
+  it('routes a hard failure (not blocked) to onTaskFailed so it enters the retry ladder', () => {
+    const agentTaskId = dispatchAndCaptureAgentTaskId(deps);
+
+    deps.executionEngine.getTree.mockReturnValue({
+      tasks: new Map([['task-1', { status: 'in_progress', agentTaskId }]]),
+    });
+    deps.eventBus.emit({
+      id: 'e3b',
+      timestamp: Date.now(),
+      source: 'agent-manager',
+      type: 'agent:task:complete',
+      payload: { taskId: agentTaskId, result: '', durationMs: 5, success: false, errors: ['boom'] },
+    } as never);
+
+    expect(deps.executionEngine.onTaskFailed).toHaveBeenCalledWith('t1', 'task-1', 'boom');
+    expect(deps.executionEngine.onTaskBlocked).not.toHaveBeenCalled();
   });
 
   it('ignores completions for untracked tasks and non-running tree tasks', () => {
     deps.executionEngine.getTree.mockReturnValue({
-      tasks: new Map([['task-1', { status: 'completed' }]]),
+      tasks: new Map([['task-1', { status: 'completed', agentTaskId: 'whatever' }]]),
     });
     deps.eventBus.emit({
       id: 'e4',
@@ -115,14 +223,435 @@ describe('createExecutionBridge', () => {
       type: 'agent:task:complete',
       payload: { taskId: 'untracked', result: 'x', durationMs: 1, success: true },
     } as never);
-    deps.eventBus.emit(runAgentEvent() as never);
+
+    const agentTaskId = dispatchAndCaptureAgentTaskId(deps);
     deps.eventBus.emit({
       id: 'e5',
       timestamp: Date.now(),
       source: 'agent-manager',
       type: 'agent:task:complete',
-      payload: { taskId: 'task-1', result: 'x', durationMs: 1, success: true },
+      payload: { taskId: agentTaskId, result: 'x', durationMs: 1, success: true },
     } as never);
     expect(deps.executionEngine.onTaskCompleted).not.toHaveBeenCalled();
+  });
+
+  it('ignores a completion whose agentTaskId no longer matches the task current attempt', () => {
+    const agentTaskId = dispatchAndCaptureAgentTaskId(deps);
+
+    // Simulate a superseded attempt: the tree task's *current* agentTaskId
+    // has already moved on to a newer dispatch, even though this (stale)
+    // agentTaskId is the one carried by the completion event arriving now.
+    deps.executionEngine.getTree.mockReturnValue({
+      tasks: new Map([['task-1', { status: 'in_progress', agentTaskId: 'some-newer-id' }]]),
+    });
+    deps.eventBus.emit({
+      id: 'e6',
+      timestamp: Date.now(),
+      source: 'agent-manager',
+      type: 'agent:task:complete',
+      payload: { taskId: agentTaskId, result: 'stale', durationMs: 1, success: true },
+    } as never);
+
+    expect(deps.executionEngine.onTaskCompleted).not.toHaveBeenCalled();
+  });
+
+  it('routes to onTaskFailed instead of dispatching when agent resolution throws (S9)', () => {
+    deps.namedAgentStore.getAgentByName.mockReturnValue(undefined);
+    deps.namedAgentStore.getDefaultAgent.mockImplementation(() => {
+      throw new Error('No default agent configured');
+    });
+
+    const requests: unknown[] = [];
+    deps.eventBus.on('agent:task:request', (e) => requests.push(e));
+
+    deps.eventBus.emit(runAgentEvent({ agent: undefined }) as never);
+
+    expect(requests).toHaveLength(0);
+    expect(deps.executionEngine.setAgentTaskId).not.toHaveBeenCalled();
+    expect(deps.executionEngine.onTaskFailed).toHaveBeenCalledWith(
+      't1',
+      'task-1',
+      expect.stringContaining('No default agent configured'),
+    );
+  });
+
+  it('cancels pending agent tasks for a tree on execution:tree:cancelled', () => {
+    // Independent deps/bus so this extra bridge instance (with
+    // cancelAgentTask wired) doesn't double-listen on the shared beforeEach
+    // bus alongside the bridge already started there.
+    const localDeps = makeDeps();
+    const cancelAgentTask = vi.fn().mockReturnValue(true);
+    createExecutionBridge({ ...localDeps, cancelAgentTask } as never).start();
+
+    const agentTaskId = dispatchAndCaptureAgentTaskId(localDeps);
+
+    localDeps.eventBus.emit({
+      id: 'e7',
+      timestamp: Date.now(),
+      source: 'task-execution-engine',
+      type: 'execution:tree:cancelled',
+      payload: { treeId: 't1' },
+    } as never);
+
+    expect(cancelAgentTask).toHaveBeenCalledWith(agentTaskId);
+
+    // The entry was removed — a later completion for it is now a no-op.
+    localDeps.eventBus.emit({
+      id: 'e8',
+      timestamp: Date.now(),
+      source: 'agent-manager',
+      type: 'agent:task:complete',
+      payload: { taskId: agentTaskId, result: 'late', durationMs: 1, success: true },
+    } as never);
+    expect(localDeps.executionEngine.onTaskCompleted).not.toHaveBeenCalled();
+  });
+});
+
+// ── Integration suite: REAL TaskExecutionEngine + real EventBus ──────────
+
+function makeDbInterface(db: ReturnType<typeof initDatabase>) {
+  return {
+    run: (sql: string, ...params: unknown[]) => db.prepare(sql).run(...params),
+    get: <T>(sql: string, ...params: unknown[]) => db.prepare(sql).get(...params) as T | undefined,
+    all: <T>(sql: string, ...params: unknown[]) => db.prepare(sql).all(...params) as T[],
+  };
+}
+
+/** Wraps a real EventBus as the plain EventBusInterface shape the engine
+ * expects — mirrors how index.ts's baseContext.eventBus wraps it. */
+function toEventBusInterface(bus: EventBus): EventBusInterface {
+  return {
+    emit: (event: unknown) => bus.emit(event as RavenEvent),
+    on: (type: string, handler: (event: unknown) => void) =>
+      bus.on(type as RavenEventType, handler),
+    off: (type: string, handler: (event: unknown) => void) =>
+      bus.off(type as RavenEventType, handler),
+  };
+}
+
+let idCounter = 0;
+function uid(base: string): string {
+  idCounter++;
+  return `${base}-${String(idCounter)}`;
+}
+
+function agentNode(id: string, overrides: Record<string, unknown> = {}): TaskTreeNode {
+  return {
+    type: 'agent',
+    id,
+    title: `Task ${id}`,
+    prompt: `Do ${id}`,
+    blockedBy: [],
+    ...overrides,
+  } as TaskTreeNode;
+}
+
+function makeBridgeCollaborators() {
+  const defaultAgent = { id: 'agent-default', name: 'default-agent', instructions: '' };
+  const namedAgentStore = {
+    getAgentByName: vi.fn(() => undefined),
+    getAgent: vi.fn(() => undefined),
+    getDefaultAgent: vi.fn(() => defaultAgent),
+  };
+  const agentResolver = {
+    resolveAgentCapabilities: vi.fn(() => ({ mcpServers: {}, agentDefinitions: {}, plugins: [] })),
+  };
+  return { namedAgentStore, agentResolver };
+}
+
+type FakeAgentOutcome = { success: boolean; result?: string; blocked?: boolean; errors?: string[] };
+
+/** Fakes the agent-manager side of the loop: replies to every
+ * agent:task:request with an agent:task:complete, asynchronously (via a
+ * macrotask) so the bridge's pending-map bookkeeping is genuinely exercised. */
+function installFakeAgent(eventBus: EventBus, respond: () => FakeAgentOutcome): void {
+  eventBus.on<AgentTaskRequestEvent>('agent:task:request', (event) => {
+    const outcome = respond();
+    setTimeout(() => {
+      eventBus.emit({
+        id: generateId(),
+        timestamp: Date.now(),
+        source: 'agent-manager',
+        type: 'agent:task:complete',
+        payload: {
+          taskId: event.payload.taskId,
+          result: outcome.result ?? '',
+          durationMs: 5,
+          success: outcome.success,
+          ...(outcome.blocked !== undefined && { blocked: outcome.blocked }),
+          ...(outcome.errors !== undefined && { errors: outcome.errors }),
+        },
+      } as RavenEvent);
+    }, 0);
+  });
+}
+
+describe('execution flow integration (real engine + real event bus)', () => {
+  let tmpDir: string;
+  let dbInterface: ReturnType<typeof makeDbInterface>;
+
+  beforeAll(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'raven-exec-bridge-integ-'));
+    const rawDb = initDatabase(join(tmpDir, 'test.db'));
+    dbInterface = makeDbInterface(rawDb);
+  });
+
+  afterAll(() => {
+    try {
+      getDb().close();
+    } catch {
+      /* already closed */
+    }
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('(1) happy path: tree completes when the fake agent always succeeds', async () => {
+    const eventBus = new EventBus();
+    const executionEngine = new TaskExecutionEngine({
+      db: dbInterface,
+      eventBus: toEventBusInterface(eventBus),
+    });
+    const { namedAgentStore, agentResolver } = makeBridgeCollaborators();
+    const bridge = createExecutionBridge({
+      eventBus,
+      executionEngine,
+      namedAgentStore: namedAgentStore as never,
+      agentResolver: agentResolver as never,
+    });
+    bridge.start();
+    installFakeAgent(eventBus, () => ({ success: true, result: 'done' }));
+
+    const treeId = uid('tree');
+    const t1 = uid('t');
+    const t2 = uid('t');
+    executionEngine.createTree({
+      id: treeId,
+      tasks: [agentNode(t1), agentNode(t2, { blockedBy: [t1] })],
+    });
+    await executionEngine.startTree(treeId);
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(executionEngine.getTree(treeId)!.status).toBe('completed');
+    bridge.stop();
+  });
+
+  it('(2) agent failure retries up to maxRetries then the tree reaches failed', async () => {
+    const eventBus = new EventBus();
+    const executionEngine = new TaskExecutionEngine({
+      db: dbInterface,
+      eventBus: toEventBusInterface(eventBus),
+    });
+    const { namedAgentStore, agentResolver } = makeBridgeCollaborators();
+    const bridge = createExecutionBridge({
+      eventBus,
+      executionEngine,
+      namedAgentStore: namedAgentStore as never,
+      agentResolver: agentResolver as never,
+    });
+    bridge.start();
+
+    let attempts = 0;
+    installFakeAgent(eventBus, () => {
+      attempts++;
+      return { success: false, errors: ['synthetic failure'] };
+    });
+
+    const treeId = uid('tree');
+    const taskId = uid('t');
+    executionEngine.createTree({ id: treeId, tasks: [agentNode(taskId)] });
+    await executionEngine.startTree(treeId);
+
+    await new Promise((r) => setTimeout(r, 250));
+
+    const tree = executionEngine.getTree(treeId)!;
+    const task = tree.tasks.get(taskId)!;
+    expect(task.status).toBe('failed');
+    expect(task.retryCount).toBe(2); // no validation config -> default maxRetries
+    expect(tree.status).toBe('failed');
+    expect(attempts).toBe(3); // initial attempt + 2 retries
+    bridge.stop();
+  });
+
+  it('(3) validation-failure re-dispatch mints a new agentTaskId; a stale completion from the first attempt is ignored', async () => {
+    const eventBus = new EventBus();
+    let evaluatorCallCount = 0;
+    const executionEngine = new TaskExecutionEngine({
+      db: dbInterface,
+      eventBus: toEventBusInterface(eventBus),
+      validationDeps: {
+        runEvaluator: async () => {
+          evaluatorCallCount++;
+          return evaluatorCallCount === 1
+            ? { passed: false, reason: 'not detailed enough' }
+            : { passed: true, reason: 'good' };
+        },
+        runQualityReviewer: async () => ({ passed: true, score: 5, feedback: '' }),
+      },
+    });
+    const { namedAgentStore, agentResolver } = makeBridgeCollaborators();
+    const bridge = createExecutionBridge({
+      eventBus,
+      executionEngine,
+      namedAgentStore: namedAgentStore as never,
+      agentResolver: agentResolver as never,
+    });
+    bridge.start();
+
+    const dispatchedAgentTaskIds: string[] = [];
+    eventBus.on<AgentTaskRequestEvent>('agent:task:request', (event) => {
+      dispatchedAgentTaskIds.push(event.payload.taskId);
+    });
+    installFakeAgent(eventBus, () => ({ success: true, result: 'a summary with enough detail' }));
+
+    const treeId = uid('tree');
+    const taskId = uid('t');
+    executionEngine.createTree({
+      id: treeId,
+      tasks: [
+        {
+          type: 'agent',
+          id: taskId,
+          title: 'Validated task',
+          prompt: 'Write a summary',
+          blockedBy: [],
+          validation: {
+            requireArtifacts: false,
+            evaluator: true,
+            evaluatorModel: 'haiku',
+            qualityReview: false,
+            qualityModel: 'sonnet',
+            qualityThreshold: 3,
+            maxRetries: 1,
+            retryBackoffMs: 0,
+            onMaxRetriesFailed: 'escalate',
+          },
+        } as TaskTreeNode,
+      ],
+    });
+    await executionEngine.startTree(treeId);
+
+    // Let the first attempt complete, validation reject it, and the retry
+    // (second attempt) get dispatched.
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(dispatchedAgentTaskIds.length).toBeGreaterThanOrEqual(2);
+    const firstAgentTaskId = dispatchedAgentTaskIds[0];
+
+    const midTree = executionEngine.getTree(treeId)!;
+    const midTask = midTree.tasks.get(taskId)!;
+    expect(midTask.agentTaskId).not.toBe(firstAgentTaskId); // superseded by the retry
+
+    // A late/duplicate completion carrying the FIRST attempt's agentTaskId
+    // must not be able to advance the tree.
+    const onTaskCompletedSpy = vi.spyOn(executionEngine, 'onTaskCompleted');
+    eventBus.emit({
+      id: generateId(),
+      timestamp: Date.now(),
+      source: 'agent-manager',
+      type: 'agent:task:complete',
+      payload: { taskId: firstAgentTaskId, result: 'stale', durationMs: 1, success: true },
+    } as RavenEvent);
+
+    await new Promise((r) => setTimeout(r, 30));
+    expect(onTaskCompletedSpy).not.toHaveBeenCalled();
+
+    // The tree still reaches completion via the second (real) attempt.
+    await new Promise((r) => setTimeout(r, 100));
+    expect(executionEngine.getTree(treeId)!.status).toBe('completed');
+    bridge.stop();
+  });
+
+  it('(4) cancelTree aborts in-flight agent runs via cancelAgentTask', async () => {
+    const eventBus = new EventBus();
+    const executionEngine = new TaskExecutionEngine({
+      db: dbInterface,
+      eventBus: toEventBusInterface(eventBus),
+    });
+    const { namedAgentStore, agentResolver } = makeBridgeCollaborators();
+    const cancelAgentTask = vi.fn().mockReturnValue(true);
+    const bridge = createExecutionBridge({
+      eventBus,
+      executionEngine,
+      namedAgentStore: namedAgentStore as never,
+      agentResolver: agentResolver as never,
+      cancelAgentTask,
+    });
+    bridge.start();
+
+    // No fake agent installed — the dispatched task never completes,
+    // simulating a genuinely in-flight agent run.
+    const dispatched: string[] = [];
+    eventBus.on<AgentTaskRequestEvent>('agent:task:request', (event) => {
+      dispatched.push(event.payload.taskId);
+    });
+
+    const treeId = uid('tree');
+    const taskId = uid('t');
+    executionEngine.createTree({ id: treeId, tasks: [agentNode(taskId)] });
+    await executionEngine.startTree(treeId);
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(dispatched).toHaveLength(1);
+
+    executionEngine.cancelTree(treeId);
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(cancelAgentTask).toHaveBeenCalledWith(dispatched[0]);
+    expect(executionEngine.getTree(treeId)!.status).toBe('cancelled');
+    bridge.stop();
+  });
+
+  it('(5) AgentManager.cancelTask on a queued task emits agent:task:complete with success:false (S8a)', async () => {
+    const eventBus = new EventBus();
+    const suiteRegistry = new SuiteRegistry();
+    const mcpManager = new McpManager(suiteRegistry);
+
+    // Gate the SDK query so the first dispatched task never resolves,
+    // forcing the second (maxConcurrent=1) to sit in the queue.
+    mockQuery.mockImplementation(async function* () {
+      yield* []; // satisfy require-yield; the await below never returns
+      await new Promise(() => {
+        /* never resolves — task stays "running" for the test's duration */
+      });
+    } as unknown as typeof query);
+
+    const agentManager = new AgentManager({ eventBus, mcpManager, suiteRegistry });
+
+    const completions: RavenEvent[] = [];
+    eventBus.on('agent:task:complete', (e) => completions.push(e));
+
+    function emitRequest(taskId: string): void {
+      eventBus.emit({
+        id: generateId(),
+        timestamp: Date.now(),
+        source: 'test',
+        type: 'agent:task:request',
+        payload: {
+          taskId,
+          prompt: 'x',
+          skillName: 'orchestrator',
+          mcpServers: {},
+          priority: 'normal',
+        },
+      } as RavenEvent);
+    }
+
+    emitRequest('running-task');
+    emitRequest('queued-task');
+
+    await new Promise((r) => setTimeout(r, 10));
+    expect(agentManager.getRunningCount()).toBe(1);
+    expect(agentManager.getQueueLength()).toBe(1);
+
+    const cancelled = agentManager.cancelTask('queued-task');
+    expect(cancelled).toBe(true);
+
+    const complete = completions.find(
+      (e) => (e as unknown as { payload: { taskId: string } }).payload.taskId === 'queued-task',
+    ) as unknown as { payload: { success: boolean; errors?: string[] } } | undefined;
+    expect(complete).toBeDefined();
+    expect(complete!.payload.success).toBe(false);
+    expect(complete!.payload.errors).toEqual(['cancelled']);
   });
 });

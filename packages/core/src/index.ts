@@ -57,6 +57,7 @@ import { createExecutionBridge } from './task-execution/execution-bridge.ts';
 import { TemplateRegistry } from './template-engine/template-registry.ts';
 import { createTemplateScheduler } from './template-engine/template-scheduler.ts';
 import type { SessionIdleEvent } from '@raven/shared';
+import type { RavenMcpDeps } from './mcp-server/index.ts';
 import { createMemoryStore } from './agent-memory/memory-store.ts';
 import { createJobRegistry } from './scheduler/job-registry.ts';
 import { registerCoreJobs } from './scheduler/core-jobs.ts';
@@ -235,19 +236,13 @@ async function main(): Promise<void> {
   });
   log.info('task execution engine initialized');
 
-  // Execution bridge: runtime observes agent:task:complete and drives
-  // onTaskCompleted/onTaskBlocked on the engine, honoring the template's
-  // `agent` field with resolved capabilities (replaces the old inline
-  // bridge that hardcoded skillName: 'orchestrator' and mcpServers: {}).
-  const executionBridge = createExecutionBridge({
-    eventBus,
-    executionEngine,
-    namedAgentStore,
-    agentResolver,
-  });
-  executionBridge.start();
-
-  // 7i. Init template engine (registry + scheduler)
+  // 7i. Init template engine (registry + scheduler). Construction only here —
+  // templateScheduler.start() is deferred until after AgentManager exists
+  // (see below): starting it here would let a due-on-boot schedule fire a
+  // template, which drives the execution engine to emit
+  // execution:task:run-agent — and if the execution bridge is listening but
+  // AgentManager isn't constructed yet, the resulting agent:task:request has
+  // no subscriber and the task silently stalls forever.
   const templateRegistry = new TemplateRegistry();
   await templateRegistry.load(projectsDir);
   log.info(
@@ -259,8 +254,6 @@ async function main(): Promise<void> {
     executionEngine,
     eventBus: baseContext.eventBus,
   });
-  templateScheduler.start();
-  log.info('Template scheduler started');
 
   // 7i. Task notification handler — post to Telegram agent topic or "Tasks" fallback
   for (const eventType of ['task:created', 'task:completed'] as const) {
@@ -309,6 +302,65 @@ async function main(): Promise<void> {
   const sessionManager = new SessionManager();
   const messageStore = createMessageStore({ basePath: sessionPath });
   const memoryStore = createMemoryStore({ projectsDir });
+
+  // 10. Init agent manager. INVARIANT: AgentManager subscribes before any
+  // agent:task:request emitter starts — it is the sole subscriber for that
+  // event, so it must exist before executionBridge.start(),
+  // templateScheduler.start(), scheduleEngine.start(), idleDetector.start(),
+  // or any of the knowledge/Neo4j engines below (which can take a while to
+  // initialize and previously left a boot window where those events were
+  // silently dropped). ravenMcpDeps is a mutable object: knowledgeStore and
+  // retrievalEngine are added via Object.assign once the knowledge engine
+  // initializes further down — agent-session resolves ravenMcpDeps lazily
+  // per task at run time, and every knowledge-dependent MCP tool already
+  // guards for "not available", so the fields can be optional here.
+  const ravenMcpDeps: RavenMcpDeps = {
+    eventBus,
+    executionEngine,
+    messageStore,
+    sessionManager,
+    namedAgentStore,
+    projectRegistry,
+    db: dbInterface,
+    pendingApprovals,
+  };
+  const agentManager = new AgentManager({
+    eventBus,
+    mcpManager,
+    suiteRegistry,
+    permissionEngine,
+    auditLog,
+    pendingApprovals,
+    executionLogger,
+    messageStore,
+    sessionManager,
+    memoryStore,
+    ravenMcpDeps,
+  });
+
+  // 10b. Inject agentManager into service context for callback handler
+  Object.assign(baseContext.config, { agentManager });
+
+  // Expose agent manager globally for suite services (ticktick-sync)
+  (globalThis as unknown as Record<string, unknown>).__raven_agent_manager__ = agentManager;
+
+  // Execution bridge: runtime observes agent:task:complete and drives
+  // onTaskCompleted/onTaskBlocked/onTaskFailed on the engine, honoring the
+  // template's `agent` field with resolved capabilities. Started only now
+  // that agentManager exists to receive the agent:task:request events it
+  // emits, and wired to agentManager.cancelTask so a cancelled tree can
+  // abort in-flight agent runs.
+  const executionBridge = createExecutionBridge({
+    eventBus,
+    executionEngine,
+    namedAgentStore,
+    agentResolver,
+    cancelAgentTask: agentManager.cancelTask.bind(agentManager),
+  });
+  executionBridge.start();
+
+  templateScheduler.start();
+  log.info('Template scheduler started');
 
   // 11. Orchestrator — initialized after knowledge engine (step 12j) for context injection
 
@@ -370,6 +422,12 @@ async function main(): Promise<void> {
     knowledgeDir,
   });
   log.info('Knowledge retrieval engine initialized (chunking + multi-tier search)');
+
+  // Knowledge engine is up — extend the already-constructed ravenMcpDeps
+  // (AgentManager was built earlier, before this potentially slow Neo4j/
+  // reindex boot window) so subsequent agent-session invocations get
+  // knowledge tools too.
+  Object.assign(ravenMcpDeps, { knowledgeStore, retrievalEngine });
 
   // 12k. Init context injector for pervasive knowledge injection
   // Context injector kept for retrieval engine; agents now access knowledge via MCP tools
@@ -437,38 +495,6 @@ async function main(): Promise<void> {
   });
   idleDetector.start();
   log.info('Session idle detector started');
-
-  // 10. Init agent manager (after knowledge/retrieval engines so ravenMcpDeps can carry them)
-  const agentManager = new AgentManager({
-    eventBus,
-    mcpManager,
-    suiteRegistry,
-    permissionEngine,
-    auditLog,
-    pendingApprovals,
-    executionLogger,
-    messageStore,
-    sessionManager,
-    memoryStore,
-    ravenMcpDeps: {
-      executionEngine,
-      messageStore,
-      sessionManager,
-      knowledgeStore,
-      retrievalEngine,
-      namedAgentStore,
-      projectRegistry,
-      eventBus,
-      db: dbInterface,
-      pendingApprovals,
-    },
-  });
-
-  // 10b. Inject agentManager into service context for callback handler
-  Object.assign(baseContext.config, { agentManager });
-
-  // Expose agent manager globally for suite services (ticktick-sync)
-  (globalThis as unknown as Record<string, unknown>).__raven_agent_manager__ = agentManager;
 
   // 11c. Init orchestrator (after knowledge engine for context injection)
   const _orchestrator = new Orchestrator({

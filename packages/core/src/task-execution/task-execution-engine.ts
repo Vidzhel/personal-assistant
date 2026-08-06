@@ -13,11 +13,7 @@ import {
   type TaskArtifact,
 } from '@raven/shared';
 import { findReadyTasks } from './dependency-resolver.ts';
-import {
-  validateTaskResult,
-  buildRetryPrompt,
-  type ValidationDeps,
-} from './validation-pipeline.ts';
+import { validateTaskResult, type ValidationDeps } from './validation-pipeline.ts';
 
 const execFileAsync = promisify(execFileCb);
 
@@ -325,6 +321,59 @@ export class TaskExecutionEngine {
     this.saveTask(tree.id, task);
 
     this.emitEvent('execution:task:blocked', { treeId, taskId, reason });
+
+    // 'blocked' is deliberately NOT in TERMINAL_STATUSES (the approval flow
+    // must be able to resume the task via onApprovalGranted), so this is a
+    // safe no-op whenever the tree still has this task outstanding — it only
+    // matters when every *other* task has already reached a terminal state,
+    // in which case the tree correctly stays non-terminal instead of being
+    // marked complete/failed while a task is still awaiting approval.
+    this.checkTreeCompletion(tree);
+  }
+
+  /**
+   * Failure path for a dispatched agent task that did not complete
+   * successfully and was not blocked pending approval (see onTaskBlocked).
+   * Reuses the same retry/escalate ladder as a validation failure so the
+   * tree always reaches a terminal state instead of stalling forever.
+   */
+  onTaskFailed(treeId: string, taskId: string, error: string): void {
+    const tree = this.loadTree(treeId);
+    if (!tree) return;
+
+    const task = tree.tasks.get(taskId);
+    if (!task) return;
+
+    const maxRetries =
+      (task.node.type === 'agent' ? task.node.validation?.maxRetries : undefined) ?? 2;
+
+    if (task.retryCount < maxRetries) {
+      task.retryCount += 1;
+      task.lastError = error;
+      this.updateTaskStatus(tree, task, 'todo');
+      this.saveTask(tree.id, task);
+      this.processReadyTasks(tree);
+      return;
+    }
+
+    this.handleTaskFailure(tree, task, error);
+  }
+
+  /**
+   * Persists the agent-manager task id for the in-flight dispatch attempt so
+   * a later `agent:task:complete` can be verified against the task's
+   * *current* attempt — a stale completion from a superseded retry carries
+   * an older agentTaskId and must not be allowed to advance the tree.
+   */
+  setAgentTaskId(treeId: string, taskId: string, agentTaskId: string): void {
+    const tree = this.loadTree(treeId);
+    if (!tree) return;
+
+    const task = tree.tasks.get(taskId);
+    if (!task) return;
+
+    task.agentTaskId = agentTaskId;
+    this.saveTask(tree.id, task);
   }
 
   async onApprovalGranted(treeId: string, taskId: string): Promise<void> {
@@ -357,6 +406,11 @@ export class TaskExecutionEngine {
     }
 
     this.updateTreeStatus(tree, 'cancelled');
+
+    // Abort any in-flight agent runs for this tree — the execution bridge
+    // subscribes to this and cancels the corresponding agent-manager tasks
+    // so a cancelled tree doesn't leave orphaned agents running.
+    this.emitEvent('execution:tree:cancelled', { treeId });
   }
 
   getTree(treeId: string): TaskTree | undefined {
@@ -434,14 +488,10 @@ export class TaskExecutionEngine {
     task.startedAt = new Date().toISOString();
     this.saveTask(tree.id, task);
 
-    const retryFeedback =
-      task.retryCount > 0 && task.lastError
-        ? buildRetryPrompt(
-            task.node.type === 'agent' ? task.node.prompt : task.node.title,
-            task.lastError,
-            task.retryCount,
-          )
-        : undefined;
+    // Raw failure reason only — the execution-bridge does the single
+    // buildRetryPrompt wrap (with the real retryCount carried below) so the
+    // feedback isn't embedded into the prompt more than once.
+    const retryFeedback = task.retryCount > 0 && task.lastError ? task.lastError : undefined;
 
     this.emitEvent('execution:task:run-agent', {
       treeId: tree.id,
@@ -449,6 +499,8 @@ export class TaskExecutionEngine {
       agent: task.node.type === 'agent' ? task.node.agent : undefined,
       prompt: task.node.type === 'agent' ? task.node.prompt : task.node.title,
       parentTaskId: task.parentTaskId,
+      projectId: tree.projectId,
+      retryCount: task.retryCount,
       ...(retryFeedback !== undefined && { retryFeedback }),
     });
   }

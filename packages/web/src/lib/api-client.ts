@@ -207,7 +207,6 @@ export const api = {
     const qs = projectId ? `?projectId=${projectId}` : '';
     return request<Record<string, number>>(`/tasks/counts${qs}`);
   },
-  getTaskTemplates: () => request<TaskTemplateRecord[]>('/task-templates'),
   enqueueMessage: (sessionId: string, message: string) =>
     request(`/sessions/${sessionId}/enqueue`, {
       method: 'POST',
@@ -574,15 +573,6 @@ export interface NamedAgentRecord {
   suites?: Array<{ name: string; displayName: string }>;
   isActive?: boolean;
   taskCounts?: { completed: number; inProgress: number };
-}
-
-export interface TaskTemplateRecord {
-  name: string;
-  title: string;
-  description?: string;
-  prompt?: string;
-  defaultAgentId?: string;
-  projectId?: string;
 }
 
 export interface ProjectDataSource {

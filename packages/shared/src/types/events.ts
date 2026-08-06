@@ -74,6 +74,10 @@ export interface AgentTaskCompleteEvent extends BaseEvent {
     durationMs: number;
     success: boolean;
     errors?: string[];
+    /** True when the failure is an approval-pending block (queued-for-approval),
+     * resumable via the approval flow — distinct from a hard failure that
+     * should enter the retry/escalate ladder. */
+    blocked?: boolean;
   };
 }
 
@@ -782,6 +786,13 @@ export interface ExecutionTreeCompletedEvent extends BaseEvent {
   };
 }
 
+export interface ExecutionTreeCancelledEvent extends BaseEvent {
+  type: 'execution:tree:cancelled';
+  payload: {
+    treeId: string;
+  };
+}
+
 export interface ExecutionTreeCreateEvent extends BaseEvent {
   type: 'execution:tree:create';
   payload: {
@@ -921,6 +932,7 @@ export type RavenEvent =
   | ExecutionTaskBlockedEvent
   | ExecutionTaskApprovalNeededEvent
   | ExecutionTreeCompletedEvent
+  | ExecutionTreeCancelledEvent
   | ExecutionTreeCreateEvent
   | ExecutionTaskValidationEvent
   | ExecutionTaskProgressEvent

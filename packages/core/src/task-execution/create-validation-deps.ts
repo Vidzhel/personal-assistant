@@ -65,12 +65,14 @@ interface RunEvaluatorOptions {
   taskPrompt: string;
   result: string;
   criteria?: string;
+  treeId?: string;
+  taskId?: string;
 }
 
 async function runEvaluatorImpl(
   options: RunEvaluatorOptions,
 ): Promise<{ passed: boolean; reason: string }> {
-  const { eventBus, taskPrompt, result, criteria } = options;
+  const { eventBus, taskPrompt, result, criteria, treeId, taskId } = options;
   const prompt = [
     'Evaluate this task result.',
     `Task: ${taskPrompt}`,
@@ -92,7 +94,13 @@ async function runEvaluatorImpl(
     }
     return { passed: parsed.data.passed, reason: parsed.data.reason };
   } catch (err) {
-    log.error(`Evaluator failed: ${String(err)}`);
+    // Auto-pass keeps the pipeline moving (fail-open by design), but a
+    // silent auto-pass on timeout/error is exactly the kind of thing that
+    // needs to be visible — log it as a warning with the tree/task it
+    // affected instead of just an error with no traceable context.
+    log.warn(
+      `Evaluator unavailable (tree=${treeId ?? 'unknown'}, task=${taskId ?? 'unknown'}), auto-passing: ${String(err)}`,
+    );
     return { passed: true, reason: 'Evaluator unavailable, auto-passing' };
   }
 }
@@ -102,12 +110,14 @@ interface RunQualityReviewerOptions {
   taskPrompt: string;
   result: string;
   threshold: number;
+  treeId?: string;
+  taskId?: string;
 }
 
 async function runQualityReviewerImpl(
   options: RunQualityReviewerOptions,
 ): Promise<{ passed: boolean; score: number; feedback: string }> {
-  const { eventBus, taskPrompt, result, threshold } = options;
+  const { eventBus, taskPrompt, result, threshold, treeId, taskId } = options;
   const prompt = [
     'Review this task result for quality.',
     `Task: ${taskPrompt}`,
@@ -131,7 +141,11 @@ async function runQualityReviewerImpl(
     }
     return { passed: parsed.data.pass, score: parsed.data.score, feedback: parsed.data.feedback };
   } catch (err) {
-    log.error(`Quality reviewer failed: ${String(err)}`);
+    // Same rationale as the evaluator: keep the fail-open auto-pass, but
+    // surface it as a warning tied to the tree/task instead of a silent pass.
+    log.warn(
+      `Quality reviewer unavailable (tree=${treeId ?? 'unknown'}, task=${taskId ?? 'unknown'}), auto-passing: ${String(err)}`,
+    );
     return {
       passed: true,
       score: MAX_QUALITY_SCORE,
@@ -142,9 +156,23 @@ async function runQualityReviewerImpl(
 
 export function createValidationDeps(eventBus: EventBusInterface): ValidationDeps {
   return {
-    runEvaluator: (taskPrompt, result, criteria) =>
-      runEvaluatorImpl({ eventBus, taskPrompt, result, criteria }),
-    runQualityReviewer: (taskPrompt, result, threshold) =>
-      runQualityReviewerImpl({ eventBus, taskPrompt, result, threshold }),
+    runEvaluator: (taskPrompt, result, options) =>
+      runEvaluatorImpl({
+        eventBus,
+        taskPrompt,
+        result,
+        criteria: options?.criteria,
+        treeId: options?.treeId,
+        taskId: options?.taskId,
+      }),
+    runQualityReviewer: (taskPrompt, result, options) =>
+      runQualityReviewerImpl({
+        eventBus,
+        taskPrompt,
+        result,
+        threshold: options.threshold,
+        treeId: options.treeId,
+        taskId: options.taskId,
+      }),
   };
 }

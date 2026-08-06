@@ -279,13 +279,17 @@ describe('task execution integration', () => {
     expect(task1.retryCount).toBe(1);
     expect(task1.lastError).toBe('Summary too vague');
 
-    // A retry run-agent event should have been emitted (with retryFeedback)
+    // A retry run-agent event should have been emitted with the raw failure
+    // reason as retryFeedback (the engine no longer pre-wraps it — the
+    // execution-bridge does the single buildRetryPrompt wrap) along with the
+    // real retryCount for that wrap.
     runEvents = eventBus.getByType('execution:task:run-agent');
     const retryEvent = runEvents.find(
       (e: any) => e.payload.taskId === taskId && e.payload.retryFeedback,
     );
     expect(retryEvent).toBeDefined();
-    expect(retryEvent!.payload.retryFeedback).toContain('Retry Attempt');
+    expect(retryEvent!.payload.retryFeedback).toBe('Summary too vague');
+    expect(retryEvent!.payload.retryCount).toBe(1);
 
     // Second attempt — evaluator will accept
     eventBus.clear();

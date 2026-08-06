@@ -139,15 +139,35 @@ export class AgentManager {
     this.processQueue();
   }
 
+  private static isValidatorTask(task: AgentTask): boolean {
+    return task.namedAgentId === '_evaluator' || task.namedAgentId === '_quality-reviewer';
+  }
+
+  private admitTask(task: AgentTask): void {
+    const promise = this.runTask(task).finally(() => {
+      this.running.delete(task.id);
+      this.processQueue();
+    });
+    this.running.set(task.id, promise);
+  }
+
   private processQueue(): void {
+    // Validator headroom: complete_task's handler awaits validation while
+    // holding a running slot, so at maxConcurrent saturation the evaluator/
+    // quality-reviewer would queue behind the very task it's validating and
+    // starve until it times out. Admit validator tasks regardless of the
+    // concurrency cap so they never starve behind normal task traffic.
+    let validatorIdx = this.queue.findIndex((t) => AgentManager.isValidatorTask(t));
+    while (validatorIdx !== -1) {
+      const task = this.queue.splice(validatorIdx, 1)[0];
+      this.admitTask(task);
+      validatorIdx = this.queue.findIndex((t) => AgentManager.isValidatorTask(t));
+    }
+
     while (this.running.size < this.maxConcurrent && this.queue.length > 0) {
       const task = this.queue.shift();
       if (!task) break;
-      const promise = this.runTask(task).finally(() => {
-        this.running.delete(task.id);
-        this.processQueue();
-      });
-      this.running.set(task.id, promise);
+      this.admitTask(task);
     }
   }
 
@@ -257,6 +277,7 @@ export class AgentManager {
         durationMs: result.durationMs,
         success: result.success,
         errors: result.errors,
+        blocked: result.blocked,
       },
     });
 
@@ -274,6 +295,24 @@ export class AgentManager {
       task.completedAt = Date.now();
       this.executionLogger?.logTaskComplete(task);
       log.info(`Cancelled queued task: ${taskId}`);
+      // The running branch already emits agent:task:complete via the abort
+      // path (runTask always emits on completion); a queued task never
+      // reaches runTask, so it must emit here or callers waiting on this
+      // taskId (the execution bridge, validators) will hang forever.
+      this.eventBus.emit({
+        id: generateId(),
+        timestamp: Date.now(),
+        source: 'agent-manager',
+        projectId: task.projectId,
+        type: 'agent:task:complete',
+        payload: {
+          taskId: task.id,
+          result: '',
+          durationMs: 0,
+          success: false,
+          errors: ['cancelled'],
+        },
+      });
       return true;
     }
 
