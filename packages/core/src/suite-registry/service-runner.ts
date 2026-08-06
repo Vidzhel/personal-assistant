@@ -90,6 +90,11 @@ export class ServiceRunner {
     }
     this.running = [];
   }
+
+  /** Number of services currently running (started successfully via startServices). */
+  getRunningCount(): number {
+    return this.running.length;
+  }
 }
 
 async function exists(path: string): Promise<boolean> {

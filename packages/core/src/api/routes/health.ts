@@ -7,6 +7,7 @@ const BYTES_PER_MB = 1_048_576;
 
 // eslint-disable-next-line max-lines-per-function -- health endpoint aggregates all subsystem statuses
 export function registerHealthRoute(app: FastifyInstance, deps: ApiDeps): void {
+  // eslint-disable-next-line max-lines-per-function -- health endpoint aggregates all subsystem statuses
   app.get('/api/health', async () => {
     const suiteNames = deps.suiteRegistry.getEnabledSuiteNames();
     const taskStats = deps.executionLogger.getTaskStats(ONE_HOUR_MS);
@@ -37,6 +38,11 @@ export function registerHealthRoute(app: FastifyInstance, deps: ApiDeps): void {
       status: overallStatus,
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
+      knowledge: deps.knowledgeStore ? ('ok' as const) : ('unavailable' as const),
+      services: {
+        loaded: deps.serviceRunner.getRunningCount(),
+        configured: deps.configuredServiceCount,
+      },
       subsystems: {
         database: { status: dbStatus, latencyMs: dbLatencyMs },
         eventBus: { status: 'ok', listenerCount: deps.eventBus.listenerCount() },

@@ -78,6 +78,8 @@ describe('API routes', () => {
       executionLogger,
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
       configuredSuiteCount: 0,
+      serviceRunner: { getRunningCount: () => 0 },
+      configuredServiceCount: 0,
     } as any;
 
     registerHealthRoute(app, deps);
@@ -132,6 +134,8 @@ describe('API routes', () => {
       expect(body.subsystems).toHaveProperty('agentManager');
       expect(body).toHaveProperty('taskStats');
       expect(body).toHaveProperty('memory');
+      expect(body.knowledge).toBe('unavailable');
+      expect(body.services).toEqual({ loaded: 0, configured: 0 });
     });
   });
 

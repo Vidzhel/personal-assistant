@@ -83,6 +83,18 @@ export function getConfig(): AppConfig {
   return config;
 }
 
+/**
+ * Test/override seam: some modules (agent-manager, agent-session,
+ * permission-engine) read config via the getConfig() singleton rather than
+ * a threaded parameter. createRaven() receives `config` as an argument
+ * instead of calling loadConfig() itself, so it must sync this module-level
+ * singleton on the caller's behalf — otherwise those modules throw "Config
+ * not loaded" even though a config was clearly provided.
+ */
+export function setConfig(cfg: AppConfig): void {
+  config = cfg;
+}
+
 export interface SkillsConfig {
   [skillName: string]: {
     enabled: boolean;

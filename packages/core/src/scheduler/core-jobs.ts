@@ -8,8 +8,12 @@ interface ArchiverLike {
 
 export interface CoreJobDeps {
   taskStore: ArchiverLike;
-  retrospective: Retrospective;
-  knowledgeConsolidation: KnowledgeConsolidation;
+  // Undefined when the knowledge engine failed to initialize (e.g. Neo4j
+  // unreachable at boot) — the corresponding job is simply not registered,
+  // so scheduleEngine logs "handler not registered" and skips it instead
+  // of throwing.
+  retrospective?: Retrospective;
+  knowledgeConsolidation?: KnowledgeConsolidation;
 }
 
 export function registerCoreJobs(registry: JobRegistry, deps: CoreJobDeps): void {
@@ -18,13 +22,19 @@ export function registerCoreJobs(registry: JobRegistry, deps: CoreJobDeps): void
     return { summary: `Archived ${count} completed tasks` };
   });
 
-  registry.register('knowledge-retrospective', async () => {
-    await deps.retrospective.runFullRetrospective();
-    return { summary: 'Knowledge retrospective complete' };
-  });
+  const { retrospective, knowledgeConsolidation } = deps;
 
-  registry.register('knowledge-consolidation', async () => {
-    await deps.knowledgeConsolidation.runConsolidation();
-    return { summary: 'Knowledge consolidation complete' };
-  });
+  if (retrospective) {
+    registry.register('knowledge-retrospective', async () => {
+      await retrospective.runFullRetrospective();
+      return { summary: 'Knowledge retrospective complete' };
+    });
+  }
+
+  if (knowledgeConsolidation) {
+    registry.register('knowledge-consolidation', async () => {
+      await knowledgeConsolidation.runConsolidation();
+      return { summary: 'Knowledge consolidation complete' };
+    });
+  }
 }

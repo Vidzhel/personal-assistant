@@ -52,6 +52,7 @@ import { tmpdir } from 'node:os';
 import { EventBus } from '../event-bus/event-bus.ts';
 import { initDatabase, getDb } from '../db/database.ts';
 import { SuiteRegistry } from '../suite-registry/suite-registry.ts';
+import { ServiceRunner } from '../suite-registry/service-runner.ts';
 import { McpManager } from '../mcp-manager/mcp-manager.ts';
 import { AgentManager } from '../agent-manager/agent-manager.ts';
 import { SessionManager } from '../session-manager/session-manager.ts';
@@ -129,6 +130,8 @@ describe('E2E: Full boot → chat → events flow', () => {
           executionLogger,
           messageStore,
           configuredSuiteCount: 0,
+          serviceRunner: new ServiceRunner(),
+          configuredServiceCount: 0,
         },
         0, // Let OS assign port
         '127.0.0.1',

@@ -31,4 +31,15 @@ describe('registerCoreJobs', () => {
     await reg.get('knowledge-consolidation')!({ scheduleName: 'k', params: {} });
     expect(knowledgeConsolidation.runConsolidation).toHaveBeenCalled();
   });
+
+  it('registers only task-archival when knowledge deps are undefined (Neo4j unavailable)', () => {
+    const reg = createJobRegistry();
+    const taskStore = { archiveCompletedTasks: vi.fn().mockReturnValue(0) };
+
+    registerCoreJobs(reg, { taskStore: taskStore as any });
+
+    expect(reg.list()).toEqual(['task-archival']);
+    expect(reg.has('knowledge-retrospective')).toBe(false);
+    expect(reg.has('knowledge-consolidation')).toBe(false);
+  });
 });

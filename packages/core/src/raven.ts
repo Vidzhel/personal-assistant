@@ -8,7 +8,7 @@ import {
   type RavenEvent,
   type RavenEventType,
 } from '@raven/shared';
-import { loadSuitesConfig, projectRoot, type AppConfig } from './config.ts';
+import { loadSuitesConfig, projectRoot, setConfig, type AppConfig } from './config.ts';
 import { loadIntegrationsConfig } from './config/integrations-config.ts';
 import { initDatabase, createDbInterface, getDb } from './db/database.ts';
 import { EventBus } from './event-bus/event-bus.ts';
@@ -37,22 +37,32 @@ import { createConfigCommitter } from './agent-registry/config-committer.ts';
 import { createSuiteScaffolder } from './suite-registry/suite-scaffolder.ts';
 import { createScaffoldingApi } from './scaffolding/scaffolding-api.ts';
 import { createKnowledgeStore } from './knowledge-engine/knowledge-store.ts';
+import type { KnowledgeStore } from './knowledge-engine/knowledge-store.ts';
 import { createIngestionProcessor } from './knowledge-engine/ingestion.ts';
+import type { IngestionProcessor } from './knowledge-engine/ingestion.ts';
 import { createEmbeddingEngine } from './knowledge-engine/embeddings.ts';
+import type { EmbeddingEngine } from './knowledge-engine/embeddings.ts';
 import { createClusteringEngine } from './knowledge-engine/clustering.ts';
+import type { ClusteringEngine } from './knowledge-engine/clustering.ts';
 import { createChunkingEngine } from './knowledge-engine/chunking.ts';
+import type { ChunkingEngine } from './knowledge-engine/chunking.ts';
 import { createRetrievalEngine } from './knowledge-engine/retrieval.ts';
+import type { RetrievalEngine } from './knowledge-engine/retrieval.ts';
 import { createContextInjector } from './knowledge-engine/context-injector.ts';
 import { createKnowledgeLifecycle } from './knowledge-engine/knowledge-lifecycle.ts';
+import type { KnowledgeLifecycle } from './knowledge-engine/knowledge-lifecycle.ts';
 import { createRetrospective } from './knowledge-engine/retrospective.ts';
+import type { Retrospective } from './knowledge-engine/retrospective.ts';
 import { loadKnowledgeDomainConfig } from './knowledge-engine/domain-config.ts';
 import { createNeo4jClient } from './knowledge-engine/neo4j-client.ts';
+import type { Neo4jClient } from './knowledge-engine/neo4j-client.ts';
 import { syncProjectNodes } from './knowledge-engine/project-knowledge.ts';
 import { getMetaProject } from './project-manager/meta-project.ts';
 import { createIdleDetector } from './session-manager/idle-detector.ts';
 import { createSessionRetrospective } from './session-manager/session-retrospective.ts';
 import { createSessionCompaction } from './session-manager/session-compaction.ts';
 import { createKnowledgeConsolidation } from './knowledge-engine/knowledge-consolidation.ts';
+import type { KnowledgeConsolidation } from './knowledge-engine/knowledge-consolidation.ts';
 import { TaskExecutionEngine } from './task-execution/task-execution-engine.ts';
 import { createValidationDeps } from './task-execution/create-validation-deps.ts';
 import { createExecutionBridge } from './task-execution/execution-bridge.ts';
@@ -106,6 +116,13 @@ export async function createRaven(
   overrides: RavenOverrides = {},
 ): Promise<RavenInstance> {
   log.info('Starting Raven...');
+
+  // Sync the getConfig() singleton — agent-manager, agent-session, and
+  // permission-engine read config that way rather than via a threaded
+  // parameter. index.ts's loadConfig() used to do this implicitly as a
+  // side effect; createRaven takes config as an argument instead, so it
+  // must set this explicitly.
+  setConfig(config);
 
   const dataRoot = overrides.dataDir ?? projectRoot;
 
@@ -205,6 +222,14 @@ export async function createRaven(
 
   // Count configured (enabled) suites
   const configuredSuiteCount = Object.values(suitesConfig).filter((s) => s?.enabled).length;
+
+  // Count declared services across all loaded suites (IMAP watcher, Telegram
+  // bot, etc.) — "configured" here mirrors configuredSuiteCount's meaning:
+  // how many are declared, regardless of whether they were actually started
+  // (skipSuites or a startup failure can make loaded < configured).
+  const configuredServiceCount = suiteRegistry
+    .getAllSuites()
+    .reduce((sum, s) => sum + s.manifest.services.length, 0);
 
   // 6. Start suite services (IMAP watcher, Telegram bot, etc.)
   const serviceRunner = new ServiceRunner();
@@ -408,111 +433,163 @@ export async function createRaven(
 
   // 11. Orchestrator — initialized after knowledge engine (step 12j) for context injection
 
-  // 12d. Init Neo4j client for knowledge engine
-  const neo4jClient = createNeo4jClient({
-    uri: config.NEO4J_URI,
-    user: config.NEO4J_USER,
-    password: config.NEO4J_PASSWORD,
-  });
-  await neo4jClient.ensureSchema();
-  await syncProjectNodes(neo4jClient);
-  log.info(`Neo4j connected (${config.NEO4J_URI})`);
-
-  // 12e. Init knowledge store and reindex
-  const knowledgeStore = createKnowledgeStore({ neo4j: neo4jClient, knowledgeDir });
-  const reindexResult = await knowledgeStore.reindexAll();
-  log.info(`Knowledge store: ${reindexResult.indexed} bubbles indexed`);
-
-  // 12f. Init knowledge ingestion processor
   const mediaDir = resolve(dataRoot, 'data/media');
   if (!existsSync(mediaDir)) mkdirSync(mediaDir, { recursive: true });
-  const ingestionProcessor = createIngestionProcessor({
-    knowledgeStore,
-    eventBus,
-    executionLogger,
-    mediaDir,
-  });
-  ingestionProcessor.start();
 
-  // 12g. Init embedding engine (lazy model init — loads on first use)
-  const embeddingEngine = createEmbeddingEngine({ neo4j: neo4jClient, eventBus, knowledgeStore });
-  embeddingEngine.start();
+  // 12d–12m + knowledge-consolidation, all gated on Neo4j being reachable.
+  // Wrapped in one try/catch: Neo4j may be unreachable (no Docker, laptop
+  // dev, CI) — degrade to "no knowledge engine" rather than dying before
+  // the HTTP port ever binds. Locals are only promoted to the outer `let`s
+  // on full success, so a partial failure never leaves a half-wired engine
+  // holding a reference to an unreachable Neo4j client.
+  let neo4jClient: Neo4jClient | undefined;
+  let knowledgeStore: KnowledgeStore | undefined;
+  let ingestionProcessor: IngestionProcessor | undefined;
+  let embeddingEngine: EmbeddingEngine | undefined;
+  let clusteringEngine: ClusteringEngine | undefined;
+  let chunkingEngine: ChunkingEngine | undefined;
+  let retrievalEngine: RetrievalEngine | undefined;
+  let knowledgeLifecycle: KnowledgeLifecycle | undefined;
+  let retrospective: Retrospective | undefined;
+  let knowledgeConsolidation: KnowledgeConsolidation | undefined;
 
-  // 12h. Init clustering engine
-  const domainConfig = loadKnowledgeDomainConfig(configDir);
-  const clusteringEngine = createClusteringEngine({
-    neo4j: neo4jClient,
-    eventBus,
-    embeddingEngine,
-    knowledgeStore,
-    domainConfig,
-  });
-  await clusteringEngine.start();
-  log.info('Knowledge intelligence engine initialized (embeddings + clustering)');
+  // Tracked outside the try so a driver that connects partway through (e.g.
+  // ensureSchema succeeds but a later step throws) can still be closed in
+  // the catch block below — it never gets promoted to the outer
+  // `neo4jClient`, so nothing else would close it otherwise.
+  let client: Neo4jClient | undefined;
 
-  // 12i. Init chunking engine (chunk-level embeddings for retrieval)
-  const chunkingEngine = createChunkingEngine({
-    neo4j: neo4jClient,
-    eventBus,
-    knowledgeStore,
-    knowledgeDir,
-  });
-  chunkingEngine.start();
+  try {
+    // 12d. Init Neo4j client for knowledge engine
+    client = createNeo4jClient({
+      uri: config.NEO4J_URI,
+      user: config.NEO4J_USER,
+      password: config.NEO4J_PASSWORD,
+    });
+    await client.ensureSchema();
+    await syncProjectNodes(client);
+    log.info(`Neo4j connected (${config.NEO4J_URI})`);
 
-  // 12j. Init retrieval engine (multi-tier search pipeline)
-  const retrievalEngine = createRetrievalEngine({
-    neo4j: neo4jClient,
-    knowledgeStore,
-    knowledgeDir,
-  });
-  log.info('Knowledge retrieval engine initialized (chunking + multi-tier search)');
+    // 12e. Init knowledge store and reindex
+    const store = createKnowledgeStore({ neo4j: client, knowledgeDir });
+    const reindexResult = await store.reindexAll();
+    log.info(`Knowledge store: ${reindexResult.indexed} bubbles indexed`);
 
-  // Knowledge engine is up — extend the already-constructed ravenMcpDeps
-  // (AgentManager was built earlier, before this potentially slow Neo4j/
-  // reindex boot window) so subsequent agent-session invocations get
-  // knowledge tools too.
-  Object.assign(ravenMcpDeps, { knowledgeStore, retrievalEngine });
+    // 12f. Init knowledge ingestion processor
+    const ingestion = createIngestionProcessor({
+      knowledgeStore: store,
+      eventBus,
+      executionLogger,
+      mediaDir,
+    });
+    ingestion.start();
 
-  // 12k. Init context injector for pervasive knowledge injection
-  // Context injector kept for retrieval engine; agents now access knowledge via MCP tools
-  const _contextInjector = createContextInjector({ retrievalEngine });
+    // 12g. Init embedding engine (lazy model init — loads on first use)
+    const embedding = createEmbeddingEngine({ neo4j: client, eventBus, knowledgeStore: store });
+    embedding.start();
 
-  // 12l. Init knowledge lifecycle engine (stale detection, snooze, merge, remove)
-  const knowledgeLifecycle = createKnowledgeLifecycle({
-    neo4j: neo4jClient,
-    knowledgeStore,
-    eventBus,
-    embeddingEngine,
-    chunkingEngine,
-    knowledgeDir,
-  });
+    // 12h. Init clustering engine
+    const domainConfig = loadKnowledgeDomainConfig(configDir);
+    const clustering = createClusteringEngine({
+      neo4j: client,
+      eventBus,
+      embeddingEngine: embedding,
+      knowledgeStore: store,
+      domainConfig,
+    });
+    await clustering.start();
+    log.info('Knowledge intelligence engine initialized (embeddings + clustering)');
 
-  // 12m. Init retrospective engine (weekly summary generation)
-  const retrospective = createRetrospective({
-    neo4j: neo4jClient,
-    eventBus,
-    lifecycle: knowledgeLifecycle,
-  });
-  log.info('Knowledge lifecycle & retrospective engines initialized');
+    // 12i. Init chunking engine (chunk-level embeddings for retrieval)
+    const chunking = createChunkingEngine({
+      neo4j: client,
+      eventBus,
+      knowledgeStore: store,
+      knowledgeDir,
+    });
+    chunking.start();
 
-  // 11a. Init session retrospective, compaction, and consolidation
-  const sessionRetrospective = createSessionRetrospective({
-    messageStore,
-    sessionManager,
-    eventBus,
-    config,
-    knowledgeStore,
-    neo4j: neo4jClient,
-  });
+    // 12j. Init retrieval engine (multi-tier search pipeline)
+    const retrieval = createRetrievalEngine({
+      neo4j: client,
+      knowledgeStore: store,
+      knowledgeDir,
+    });
+    log.info('Knowledge retrieval engine initialized (chunking + multi-tier search)');
+
+    // Knowledge engine is up — extend the already-constructed ravenMcpDeps
+    // (AgentManager was built earlier, before this potentially slow Neo4j/
+    // reindex boot window) so subsequent agent-session invocations get
+    // knowledge tools too.
+    Object.assign(ravenMcpDeps, { knowledgeStore: store, retrievalEngine: retrieval });
+
+    // 12k. Init context injector for pervasive knowledge injection
+    // Context injector kept for retrieval engine; agents now access knowledge via MCP tools
+    const _contextInjector = createContextInjector({ retrievalEngine: retrieval });
+
+    // 12l. Init knowledge lifecycle engine (stale detection, snooze, merge, remove)
+    const lifecycle = createKnowledgeLifecycle({
+      neo4j: client,
+      knowledgeStore: store,
+      eventBus,
+      embeddingEngine: embedding,
+      chunkingEngine: chunking,
+      knowledgeDir,
+    });
+
+    // 12m. Init retrospective engine (weekly summary generation)
+    const retro = createRetrospective({
+      neo4j: client,
+      eventBus,
+      lifecycle,
+    });
+    log.info('Knowledge lifecycle & retrospective engines initialized');
+
+    const consolidation = createKnowledgeConsolidation({
+      neo4j: client,
+      eventBus,
+      config,
+    });
+
+    neo4jClient = client;
+    knowledgeStore = store;
+    ingestionProcessor = ingestion;
+    embeddingEngine = embedding;
+    clusteringEngine = clustering;
+    chunkingEngine = chunking;
+    retrievalEngine = retrieval;
+    knowledgeLifecycle = lifecycle;
+    retrospective = retro;
+    knowledgeConsolidation = consolidation;
+  } catch (err) {
+    log.warn(`Knowledge engine unavailable (Neo4j unreachable) — continuing without it: ${err}`);
+    // Best-effort: dispose of a driver that got constructed but never made
+    // it to a fully-initialized state, so its connection pool doesn't
+    // linger as an open handle.
+    if (client) {
+      await client.close().catch((closeErr: unknown) => {
+        log.debug(`Neo4j driver close after failed init also failed: ${closeErr}`);
+      });
+    }
+  }
+
+  // 11a. Init session retrospective — its factory requires knowledgeStore +
+  // neo4j (both non-optional), so only construct it when the knowledge
+  // engine came up. Compaction has no Neo4j dependency and is unaffected.
+  const sessionRetrospective =
+    knowledgeStore && neo4jClient
+      ? createSessionRetrospective({
+          messageStore,
+          sessionManager,
+          eventBus,
+          config,
+          knowledgeStore,
+          neo4j: neo4jClient,
+        })
+      : undefined;
 
   const sessionCompaction = createSessionCompaction({
     messageStore,
-    eventBus,
-    config,
-  });
-
-  const knowledgeConsolidation = createKnowledgeConsolidation({
-    neo4j: neo4jClient,
     eventBus,
     config,
   });
@@ -530,13 +607,17 @@ export async function createRaven(
   });
   scheduleEngine.start();
 
-  // 11b. Init idle detector + register session:idle handler
+  // 11b. Init idle detector + register session:idle handler (only when the
+  // knowledge engine came up — sessionRetrospective is undefined otherwise)
   const idleDetector = createIdleDetector({ eventBus, config });
-  eventBus.on<SessionIdleEvent>('session:idle', (e) => {
-    sessionRetrospective
-      .runRetrospective(e.payload.sessionId, e.payload.projectId)
-      .catch((err: unknown) => log.error(`Session retrospective failed: ${err}`));
-  });
+  if (sessionRetrospective) {
+    const retrospectiveOnIdle = sessionRetrospective;
+    eventBus.on<SessionIdleEvent>('session:idle', (e) => {
+      retrospectiveOnIdle
+        .runRetrospective(e.payload.sessionId, e.payload.projectId)
+        .catch((err: unknown) => log.error(`Session retrospective failed: ${err}`));
+    });
+  }
   idleDetector.start();
   log.info('Session idle detector started');
 
@@ -555,8 +636,9 @@ export async function createRaven(
     port: config.RAVEN_PORT,
   });
 
-  // 12n. Backfill chunk embeddings for any un-chunked bubbles (non-blocking)
-  chunkingEngine.backfillChunks().catch((err: unknown) => {
+  // 12n. Backfill chunk embeddings for any un-chunked bubbles (non-blocking).
+  // Undefined when the knowledge engine failed to initialize.
+  chunkingEngine?.backfillChunks().catch((err: unknown) => {
     const msg = err instanceof Error ? err.message : String(err);
     log.error(`Chunk backfill failed: ${msg}`);
   });
@@ -592,6 +674,8 @@ export async function createRaven(
         namedAgentStore,
         suiteScaffolder,
         configuredSuiteCount,
+        serviceRunner,
+        configuredServiceCount,
         unsnoozableCategories: (suitesConfig['notifications']?.config?.unsnoozableCategories ??
           []) as string[],
         sessionRetrospective,
@@ -622,7 +706,7 @@ export async function createRaven(
     permissionEngine.shutdown();
     scheduleEngine.stop();
     await serviceRunner.stopAll();
-    await neo4jClient.close();
+    if (neo4jClient) await neo4jClient.close();
     if (server) await server.close();
     log.info('Goodbye!');
   }
