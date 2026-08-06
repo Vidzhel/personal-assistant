@@ -102,17 +102,18 @@ docker compose up --build
 
 ## Adding a New Skill
 
-1. Create `packages/skills/skill-myskill/` with standard package structure
-2. Implement the `RavenSkill` interface (extend `BaseSkill` for defaults)
-3. Export a factory function from `src/index.ts`
-4. Add to `config/skills.json`
-5. Run `npm install` to link the workspace
+1. Create `library/skills/<domain>/<sub>/<name>/config.json` (name, description, `mcps`, `vendorSkills`, `tools`, `model`, `maxTurns`, `actions`) and `skill.md` (the skill's prompt/instructions)
+2. Bind it to an agent by adding the skill name to that agent's `skills:` list in `projects/**/agents/*.yaml`
+3. Validate with `npm run validate:library`
+4. Restart core — `CapabilityLibrary` loads `library/` at boot
 
-See `ARCHITECTURE.md` for the full skill plugin contract and MCP isolation model.
+See `ARCHITECTURE.md` for the full capability library layout and the Raven MCP / per-agent
+capability scoping model. (`suites/` — background services enabled via `config/suites.json`
+— are deprecated; don't add new ones.)
 
 ### Vendor Skills
 
-Third-party Claude Code skills are vendored as git submodules in `vendor/`:
+Third-party Claude Code skills are vendored as git submodules in `library/vendor/`:
 
 ```bash
 # Initial setup (after clone)
@@ -134,7 +135,7 @@ git submodule update --init --recursive
 See [Google Workspace Setup](./docs/GOOGLE_WORKSPACE_SETUP.md) for detailed gws CLI setup.
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full system architecture, including:
-- MCP isolation model (sub-agent delegation)
+- Per-agent capability resolution + the in-process Raven MCP (role-scoped tools)
 - Event bus and flows
-- Skill plugin system
+- Capability library (and the deprecated suites it's replacing)
 - Docker deployment
