@@ -35,6 +35,16 @@ export function initializeBackend(apiKey: string): void {
   log.info(`Agent backend: ${apiKey ? 'SDK' : 'CLI'} mode`);
 }
 
+/**
+ * Test/override seam: inject a backend directly, bypassing the SDK/CLI
+ * selection in initializeBackend(). Used by createRaven's `agentBackend`
+ * override so tests never spawn a real subprocess.
+ */
+export function setActiveBackend(backend: AgentBackend): void {
+  activeBackend = backend;
+  log.info('Agent backend: injected (override)');
+}
+
 function getActiveBackend(): AgentBackend {
   if (!activeBackend) {
     // Fallback: auto-initialize based on config if not explicitly initialized
