@@ -35,8 +35,6 @@ const DEFAULT_RULES: ClassificationRule[] = [
     condition: { field: 'confidence', op: 'lt', value: 0.8 },
   },
   { sourcePattern: 'agent:task:complete', urgencyTier: 'yellow', deliveryMode: 'tell-when-active' },
-  { sourcePattern: 'pipeline:complete', urgencyTier: 'green', deliveryMode: 'save-for-later' },
-  { sourcePattern: 'pipeline:failed', urgencyTier: 'yellow', deliveryMode: 'tell-when-active' },
   { sourcePattern: 'email:triage:*', urgencyTier: 'green', deliveryMode: 'save-for-later' },
   { sourcePattern: 'schedule:triggered', urgencyTier: 'green', deliveryMode: 'save-for-later' },
 ];

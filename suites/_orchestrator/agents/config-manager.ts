@@ -22,7 +22,6 @@ export function buildConfigManagerPrompt(systemState: ConfigManagerState): strin
 }
 
 export interface ConfigManagerState {
-  pipelines: Array<{ name: string; enabled: boolean; trigger: string }>;
   suites: Array<{ name: string; displayName: string; enabled: boolean }>;
   agents: Array<{ id: string; name: string; description: string | null; isDefault: boolean }>;
   schedules: Array<{ id: string; name: string; cron: string; enabled: boolean }>;
@@ -32,7 +31,7 @@ export interface ConfigManagerState {
 function buildRoleSection(): string {
   return `You are the Config Manager agent within Raven. Your job is to generate, edit, and manage system configuration based on natural language user requests.
 
-You handle four resource types: pipelines, suites, agents, and schedules.
+You handle three resource types: suites, agents, and schedules.
 
 For every change you propose, you MUST output structured JSON so the system can present it to the user for approval before applying. NEVER apply changes directly.
 
@@ -41,29 +40,6 @@ You can also view/inspect resources without making changes.`;
 
 function buildSchemaSection(): string {
   return `## Resource Schemas
-
-### Pipeline YAML
-\`\`\`yaml
-name: pipeline-name          # kebab-case, verb-noun preferred (e.g. email-to-tasks)
-version: 1
-description: "What this pipeline does"
-trigger:
-  type: cron|event|manual     # trigger type
-  schedule: "0 * * * *"       # cron expression (if type: cron)
-  event: "event:type"         # event type (if type: event)
-settings:
-  retry: { maxAttempts: 3, backoffMs: 5000 }
-  timeout: 600000
-  onError: stop|continue
-nodes:
-  node-id:                    # kebab-case, verb-noun (e.g. fetch-emails)
-    skill: suite-name
-    action: action-name
-    params: {}
-connections:
-  - { from: node-a, to: node-b, condition: "optional" }
-enabled: true
-\`\`\`
 
 ### Suite Structure
 \`\`\`
@@ -89,15 +65,6 @@ suites/suite-name/
 
 function buildCurrentStateSection(state: ConfigManagerState): string {
   const lines: string[] = ['## Current System State'];
-
-  lines.push('\n### Pipelines');
-  if (state.pipelines.length === 0) {
-    lines.push('No pipelines configured.');
-  } else {
-    for (const p of state.pipelines) {
-      lines.push(`- **${p.name}**: ${p.enabled ? 'enabled' : 'disabled'}, trigger: ${p.trigger}`);
-    }
-  }
 
   lines.push('\n### Suites');
   if (state.suites.length === 0) {
@@ -150,9 +117,9 @@ You MUST respond with a JSON object matching this structure:
 \`\`\`json
 {
   "action": "create" | "update" | "delete" | "view",
-  "resourceType": "pipeline" | "suite" | "agent" | "schedule",
+  "resourceType": "suite" | "agent" | "schedule",
   "resourceName": "the-resource-name",
-  "content": "full content for create, or updated content for update (YAML for pipelines, JSON for agents/schedules)",
+  "content": "full content for create, or updated content for update",
   "diff": "human-readable summary of what changed (for updates)",
   "description": "brief explanation of what this change does"
 }
@@ -163,7 +130,6 @@ Rules:
 - For \`update\`: include both \`content\` (new version) and \`diff\` (what changed)
 - For \`delete\`: include \`resourceName\` only, no content needed
 - For \`view\`: set \`content\` to the formatted current state of the requested resource
-- Pipeline content must be valid YAML
 - Agent/schedule content must be valid JSON
 - Suite content must be a JSON object with fields: name, displayName, description, mcpServers (optional)
 - All names must be kebab-case
@@ -172,7 +138,7 @@ Rules:
 
 export default defineAgent({
   name: AGENT_CONFIG_MANAGER,
-  description: 'Generates, edits, and manages system configuration (pipelines, suites, agents, schedules) from natural language.',
+  description: 'Generates, edits, and manages system configuration (suites, agents, schedules) from natural language.',
   model: 'sonnet',
   tools: ['Read', 'Glob', 'Grep'],
   maxTurns: 15,

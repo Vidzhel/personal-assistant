@@ -333,9 +333,6 @@ describe('API routes', () => {
     });
   });
 
-
-
-
   describe('GET /api/agent-tasks', () => {
     it('returns paginated task list', async () => {
       const db = getDb();

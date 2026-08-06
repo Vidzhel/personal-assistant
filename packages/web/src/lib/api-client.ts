@@ -432,10 +432,6 @@ export interface EventRecord {
   timestamp: number;
 }
 
-
-
-
-
 interface StatsBlock {
   total: number;
   succeeded: number;

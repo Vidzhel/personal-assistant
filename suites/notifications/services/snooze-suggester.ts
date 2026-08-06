@@ -114,7 +114,6 @@ function getIgnoredCategories(): CategoryStats[] {
 function buildSnoozeCategory(prefix: string): string {
   // Map prefix to common wildcard pattern
   const wildcardMap: Record<string, string> = {
-    pipeline: 'pipeline:*',
     email: 'email:triage:*',
     agent: 'agent:task:complete',
     insight: 'insight:*',
@@ -126,7 +125,6 @@ function buildSnoozeCategory(prefix: string): string {
 
 function getCategoryDisplayName(category: string): string {
   const nameMap: Record<string, string> = {
-    'pipeline:*': 'pipeline status',
     'email:triage:*': 'email triage',
     'agent:task:complete': 'task completion',
     'insight:*': 'insights',

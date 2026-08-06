@@ -236,5 +236,4 @@ describe('buildSystemTools', () => {
       expect(tool?.annotations?.idempotentHint).toBe(true);
     });
   });
-
 });

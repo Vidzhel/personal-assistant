@@ -51,16 +51,6 @@ describe('urgency-classifier', () => {
       expect(result).toEqual({ urgencyTier: 'yellow', deliveryMode: 'tell-when-active' });
     });
 
-    it('classifies pipeline:complete as green/save-for-later', () => {
-      const result = classifyNotification(makeNotifEvent('pipeline:complete'));
-      expect(result).toEqual({ urgencyTier: 'green', deliveryMode: 'save-for-later' });
-    });
-
-    it('classifies pipeline:failed as yellow/tell-when-active', () => {
-      const result = classifyNotification(makeNotifEvent('pipeline:failed'));
-      expect(result).toEqual({ urgencyTier: 'yellow', deliveryMode: 'tell-when-active' });
-    });
-
     it('classifies email:triage:processed as green/save-for-later', () => {
       const result = classifyNotification(makeNotifEvent('email:triage:processed'));
       expect(result).toEqual({ urgencyTier: 'green', deliveryMode: 'save-for-later' });
@@ -74,7 +64,7 @@ describe('urgency-classifier', () => {
 
   describe('producer override', () => {
     it('respects urgencyTier and deliveryMode when both are set in payload', () => {
-      const event = makeNotifEvent('pipeline:complete', {
+      const event = makeNotifEvent('agent:task:complete', {
         urgencyTier: 'red',
         deliveryMode: 'tell-now',
       });
@@ -83,21 +73,21 @@ describe('urgency-classifier', () => {
     });
 
     it('uses rule-based tier when only urgencyTier is set in payload', () => {
-      const event = makeNotifEvent('pipeline:complete', {
-        urgencyTier: 'yellow',
+      const event = makeNotifEvent('agent:task:complete', {
+        urgencyTier: 'red',
       });
       const result = classifyNotification(event);
-      // source matches pipeline:complete rule → green/save-for-later, but urgencyTier override → yellow
-      expect(result.urgencyTier).toBe('yellow');
-      expect(result.deliveryMode).toBe('save-for-later');
+      // source matches agent:task:complete rule → yellow/tell-when-active, but urgencyTier override → red
+      expect(result.urgencyTier).toBe('red');
+      expect(result.deliveryMode).toBe('tell-when-active');
     });
 
     it('uses rule-based mode when only deliveryMode is set in payload', () => {
-      const event = makeNotifEvent('pipeline:complete', {
+      const event = makeNotifEvent('agent:task:complete', {
         deliveryMode: 'tell-now',
       });
       const result = classifyNotification(event);
-      expect(result.urgencyTier).toBe('green');
+      expect(result.urgencyTier).toBe('yellow');
       expect(result.deliveryMode).toBe('tell-now');
     });
   });

@@ -154,7 +154,7 @@ describe('snooze-suggester service', () => {
       expect(emittedEvents[0].type).toBe('notification');
       expect(emittedEvents[0].source).toBe('system:snooze-suggestion');
       expect(emittedEvents[0].payload.title).toBe('Quiet category detected');
-      expect(emittedEvents[0].payload.body).toContain('pipeline status');
+      expect(emittedEvents[0].payload.body).toContain('pipeline:*');
       expect(emittedEvents[0].payload.actions).toHaveLength(3);
 
       expect(emittedEvents[1].type).toBe('notification:snooze-proposal');

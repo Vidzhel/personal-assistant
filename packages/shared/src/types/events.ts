@@ -233,13 +233,6 @@ export const PermissionDeniedPayloadSchema = z.object({
   sessionId: z.string().optional(),
 });
 
-
-
-
-
-
-
-
 export interface VoiceReceivedEvent extends BaseEvent {
   type: 'voice:received';
   payload: {

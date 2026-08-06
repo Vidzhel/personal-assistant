@@ -302,18 +302,17 @@ describe('config-manager: convention doc injection', () => {
     const { buildConfigManagerPrompt } = await import('../agents/config-manager.ts');
 
     const prompt = buildConfigManagerPrompt({
-      pipelines: [],
       suites: [],
       agents: [],
       schedules: [],
       conventionDocs: {
-        'Pipeline Conventions': '## Pipeline naming\nUse kebab-case verb-noun format.',
+        'Schedule Conventions': '## Schedule naming\nUse kebab-case verb-noun format.',
         'Suite Conventions': '## Required files\nsuite.ts, mcp.json, actions.json',
       },
     });
 
     expect(prompt).toContain('Convention Documents');
-    expect(prompt).toContain('Pipeline Conventions');
+    expect(prompt).toContain('Schedule Conventions');
     expect(prompt).toContain('kebab-case verb-noun');
     expect(prompt).toContain('Suite Conventions');
     expect(prompt).toContain('Required files');
@@ -323,7 +322,6 @@ describe('config-manager: convention doc injection', () => {
     const { buildConfigManagerPrompt } = await import('../agents/config-manager.ts');
 
     const prompt = buildConfigManagerPrompt({
-      pipelines: [],
       suites: [],
       agents: [],
       schedules: [],
