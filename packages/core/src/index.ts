@@ -25,7 +25,6 @@ import { createPendingApprovals } from './permission-engine/pending-approvals.ts
 import { createExecutionLogger } from './agent-manager/execution-logger.ts';
 import { initializeBackend } from './agent-manager/agent-session.ts';
 import { createTaskStore } from './task-manager/task-store.ts';
-import { createTemplateLoader } from './task-manager/template-loader.ts';
 import { createTaskLifecycle } from './task-manager/task-lifecycle.ts';
 import { createYamlNamedAgentStore } from './agent-registry/yaml-named-agent-store.ts';
 import { createAgentResolver } from './agent-registry/agent-resolver.ts';
@@ -205,10 +204,8 @@ async function main(): Promise<void> {
   const executionLogger = createExecutionLogger({ db: getDb() });
   log.info('Execution logger initialized');
 
-  // 7e. Init task store and template loader
+  // 7e. Init task store
   const taskStore = createTaskStore({ db: dbInterface, eventBus: baseContext.eventBus });
-  const templatesDir = resolve(projectRoot, 'config/task-templates');
-  const templateLoader = createTemplateLoader({ templatesDir, taskStore });
   log.info('Task manager initialized');
 
   // Expose task store globally for suite services
@@ -527,7 +524,6 @@ async function main(): Promise<void> {
       retrospective,
       db: dbInterface,
       taskStore,
-      templateLoader,
       namedAgentStore,
       suiteScaffolder,
       configuredSuiteCount,

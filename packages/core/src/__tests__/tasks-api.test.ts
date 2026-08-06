@@ -1,12 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { initDatabase, getDb } from '../db/database.ts';
 import { createTaskStore } from '../task-manager/task-store.ts';
-import { createTemplateLoader } from '../task-manager/template-loader.ts';
 import { registerTaskRoutes } from '../api/routes/tasks.ts';
 
 function makeMockEventBus() {
@@ -28,25 +27,10 @@ describe('Tasks API', () => {
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-tasks-api-'));
 
-    // Create templates
-    const templatesDir = join(tmpDir, 'templates');
-    mkdirSync(templatesDir);
-    writeFileSync(
-      join(templatesDir, 'research.yaml'),
-      `
-name: research
-title: Research Topic
-description: Research a topic
-prompt: Research thoroughly
-defaultAgentId: orchestrator
-`,
-    );
-
     const db = initDatabase(join(tmpDir, 'test.db'));
     const dbIface = makeDbInterface(db);
     const eventBus = makeMockEventBus();
     const taskStore = createTaskStore({ db: dbIface, eventBus });
-    const templateLoader = createTemplateLoader({ templatesDir, taskStore });
 
     // Seed tasks
     taskStore.createTask({ title: 'Task A', projectId: 'proj-1', source: 'manual' });
@@ -67,7 +51,7 @@ defaultAgentId: orchestrator
 
     app = Fastify({ logger: false });
     await app.register(cors, { origin: true });
-    registerTaskRoutes(app, { taskStore, templateLoader });
+    registerTaskRoutes(app, { taskStore });
     await app.ready();
   });
 
@@ -182,18 +166,6 @@ defaultAgentId: orchestrator
       expect(task.source).toBe('manual');
     });
 
-    it('creates from template', async () => {
-      const res = await app.inject({
-        method: 'POST',
-        url: '/api/tasks',
-        payload: { title: 'Custom Research', templateName: 'research' },
-      });
-      expect(res.statusCode).toBe(201);
-      const task = JSON.parse(res.payload);
-      expect(task.title).toBe('Custom Research');
-      expect(task.source).toBe('template');
-    });
-
     it('returns 400 for invalid input', async () => {
       const res = await app.inject({
         method: 'POST',
@@ -252,16 +224,6 @@ defaultAgentId: orchestrator
       const completed = JSON.parse(res.payload);
       expect(completed.status).toBe('completed');
       expect(completed.artifacts).toContain('result.md');
-    });
-  });
-
-  describe('GET /api/task-templates', () => {
-    it('returns available templates', async () => {
-      const res = await app.inject({ method: 'GET', url: '/api/task-templates' });
-      expect(res.statusCode).toBe(200);
-      const templates = JSON.parse(res.payload);
-      expect(templates.length).toBeGreaterThanOrEqual(1);
-      expect(templates[0].name).toBe('research');
     });
   });
 });

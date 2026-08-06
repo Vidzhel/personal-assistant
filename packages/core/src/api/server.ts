@@ -40,7 +40,6 @@ import { registerFinancialRoutes } from './routes/financial.ts';
 import { registerTaskRoutes } from './routes/tasks.ts';
 import { registerAgentRoutes } from './routes/agents.ts';
 import type { TaskStore } from '../task-manager/task-store.ts';
-import type { TemplateLoader } from '../task-manager/template-loader.ts';
 import type { NamedAgentStore } from '../agent-registry/yaml-named-agent-store.ts';
 import type { SuiteScaffolder } from '../suite-registry/suite-scaffolder.ts';
 import type { ProjectRegistry } from '../project-registry/project-registry.ts';
@@ -85,7 +84,6 @@ export interface ApiDeps {
   configuredSuiteCount: number;
   unsnoozableCategories?: string[];
   taskStore?: TaskStore;
-  templateLoader?: TemplateLoader;
   namedAgentStore?: NamedAgentStore;
   suiteScaffolder?: SuiteScaffolder;
   configChangeResolver?: ConfigChangeResolver;
@@ -158,10 +156,9 @@ export async function createApiServer(
   }
 
   // Task management
-  if (deps.taskStore && deps.templateLoader) {
+  if (deps.taskStore) {
     registerTaskRoutes(app, {
       taskStore: deps.taskStore,
-      templateLoader: deps.templateLoader,
     });
   }
 

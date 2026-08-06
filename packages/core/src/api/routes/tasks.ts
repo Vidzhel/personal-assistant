@@ -8,7 +8,6 @@ import {
   TaskSourceValues,
 } from '@raven/shared';
 import type { TaskStore } from '../../task-manager/task-store.ts';
-import type { TemplateLoader } from '../../task-manager/template-loader.ts';
 
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
@@ -33,16 +32,9 @@ const CountsQuerySchema = z.object({
   projectId: z.string().optional(),
 });
 
-const CreateBodySchema = TaskCreateInputSchema.extend({
-  templateName: z.string().optional(),
-});
-
 // eslint-disable-next-line max-lines-per-function -- route registration
-export function registerTaskRoutes(
-  app: FastifyInstance,
-  deps: { taskStore: TaskStore; templateLoader: TemplateLoader },
-): void {
-  const { taskStore, templateLoader } = deps;
+export function registerTaskRoutes(app: FastifyInstance, deps: { taskStore: TaskStore }): void {
+  const { taskStore } = deps;
 
   // GET /api/tasks — query tasks with filters
   app.get('/api/tasks', async (req, reply) => {
@@ -77,9 +69,9 @@ export function registerTaskRoutes(
     return { ...task, subtasks };
   });
 
-  // POST /api/tasks — create task (manual or from template)
+  // POST /api/tasks — create task (manual)
   app.post('/api/tasks', async (req, reply) => {
-    const result = CreateBodySchema.safeParse(req.body);
+    const result = TaskCreateInputSchema.safeParse(req.body);
     if (!result.success) {
       return reply.status(HTTP_STATUS.BAD_REQUEST).send({
         error: 'Invalid task input',
@@ -87,18 +79,7 @@ export function registerTaskRoutes(
       });
     }
 
-    const { templateName, ...input } = result.data;
-
-    if (templateName) {
-      try {
-        const task = templateLoader.createTaskFromTemplate(templateName, input);
-        return reply.status(HTTP_STATUS.CREATED).send(task);
-      } catch (err) {
-        return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: (err as Error).message });
-      }
-    }
-
-    const task = taskStore.createTask(input);
+    const task = taskStore.createTask(result.data);
     return reply.status(HTTP_STATUS.CREATED).send(task);
   });
 
@@ -133,10 +114,5 @@ export function registerTaskRoutes(
     } catch (err) {
       return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: (err as Error).message });
     }
-  });
-
-  // GET /api/task-templates — list available templates
-  app.get('/api/task-templates', async () => {
-    return templateLoader.listTemplates();
   });
 }
