@@ -23,15 +23,9 @@ export interface RevertResult {
 export interface LifeDashboardData {
   today: {
     autonomousActionsCount: number;
-    pipelinesCompleted: number;
   };
-  pipelines: {
+  schedules: {
     activeCount: number;
-    lastRun?: {
-      name: string;
-      status: string;
-      completedAt: string;
-    };
   };
   pendingApprovalsCount: number;
   insights: Array<{

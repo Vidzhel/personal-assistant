@@ -69,3 +69,5 @@ const PRIORITY_COLOR_MAP: Record<string, string> = {
 export function getTaskPriorityColor(priority: string): string {
   return PRIORITY_COLOR_MAP[priority] ?? 'var(--text-muted)';
 }
+
+export const formatDuration = formatTaskDuration;

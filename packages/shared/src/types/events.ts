@@ -46,7 +46,6 @@ export interface AgentTaskRequestEvent extends BaseEvent {
     prompt: string;
     skillName: string;
     actionName?: string;
-    pipelineName?: string;
     mcpServers: Record<string, McpServerConfig>;
     agentDefinitions?: Record<string, SubAgentDefinition>;
     knowledgeContext?: string;
@@ -234,88 +233,12 @@ export const PermissionDeniedPayloadSchema = z.object({
   sessionId: z.string().optional(),
 });
 
-export interface ConfigPipelinesReloadedEvent extends BaseEvent {
-  type: 'config:pipelines:reloaded';
-  payload: {
-    pipelineName: string;
-    action: 'loaded' | 'reloaded' | 'removed';
-    timestamp: string;
-  };
-}
 
-export interface PipelineStartedEvent extends BaseEvent {
-  type: 'pipeline:started';
-  payload: {
-    runId: string;
-    pipelineName: string;
-    triggerType: string;
-    timestamp: string;
-  };
-}
 
-export interface PipelineStepCompleteEvent extends BaseEvent {
-  type: 'pipeline:step:complete';
-  payload: {
-    runId: string;
-    pipelineName: string;
-    nodeId: string;
-    output: unknown;
-    durationMs: number;
-    timestamp: string;
-    attempt?: number;
-    maxAttempts?: number;
-  };
-}
 
-export interface PipelineStepFailedEvent extends BaseEvent {
-  type: 'pipeline:step:failed';
-  payload: {
-    runId: string;
-    pipelineName: string;
-    nodeId: string;
-    error: string;
-    durationMs: number;
-    timestamp: string;
-    attempt?: number;
-    maxAttempts?: number;
-  };
-}
 
-export interface PipelineStepRetryEvent extends BaseEvent {
-  type: 'pipeline:step:retry';
-  payload: {
-    runId: string;
-    pipelineName: string;
-    nodeId: string;
-    attempt: number;
-    maxAttempts: number;
-    backoffMs: number;
-    timestamp: string;
-  };
-}
 
-export interface PipelineCompleteEvent extends BaseEvent {
-  type: 'pipeline:complete';
-  payload: {
-    runId: string;
-    pipelineName: string;
-    status: 'completed';
-    durationMs: number;
-    timestamp: string;
-  };
-}
 
-export interface PipelineFailedEvent extends BaseEvent {
-  type: 'pipeline:failed';
-  payload: {
-    runId: string;
-    pipelineName: string;
-    status: 'failed';
-    error: string;
-    durationMs: number;
-    timestamp: string;
-  };
-}
 
 export interface VoiceReceivedEvent extends BaseEvent {
   type: 'voice:received';
@@ -518,13 +441,13 @@ export const TaskManagementAutonomousFailedPayloadSchema = z.object({
 export interface TaskManagementManageRequestEvent extends BaseEvent {
   type: 'task-management:manage-request';
   payload: {
-    source: 'telegram' | 'api' | 'pipeline';
+    source: 'telegram' | 'api';
     requestId?: string;
   };
 }
 
 export const TaskManagementManageRequestPayloadSchema = z.object({
-  source: z.enum(['telegram', 'api', 'pipeline']),
+  source: z.enum(['telegram', 'api']),
   requestId: z.string().optional(),
 });
 
@@ -933,16 +856,9 @@ export type RavenEvent =
   | PermissionApprovedEvent
   | PermissionBlockedEvent
   | PermissionDeniedEvent
-  | ConfigPipelinesReloadedEvent
   | SystemHealthAlertEvent
   | VoiceReceivedEvent
   | MediaReceivedEvent
-  | PipelineStartedEvent
-  | PipelineStepCompleteEvent
-  | PipelineStepFailedEvent
-  | PipelineStepRetryEvent
-  | PipelineCompleteEvent
-  | PipelineFailedEvent
   | EmailReplyStartEvent
   | EmailReplySendEvent
   | EmailReplyEditEvent
@@ -1221,7 +1137,7 @@ export const MaintenanceReportGeneratedPayloadSchema = z.object({
 });
 
 export type ConfigChangeAction = 'create' | 'update' | 'delete' | 'view';
-export type ConfigResourceType = 'pipeline' | 'suite' | 'agent' | 'schedule';
+export type ConfigResourceType = 'suite' | 'agent' | 'schedule';
 
 export interface ConfigVersionRevertedEvent extends BaseEvent {
   type: 'config:version:reverted';
@@ -1255,7 +1171,7 @@ export interface ConfigChangeProposedEvent extends BaseEvent {
 export const ConfigChangeProposedPayloadSchema = z.object({
   changeId: z.string(),
   action: z.enum(['create', 'update', 'delete', 'view']),
-  resourceType: z.enum(['pipeline', 'suite', 'agent', 'schedule']),
+  resourceType: z.enum(['suite', 'agent', 'schedule']),
   resourceName: z.string(),
   description: z.string(),
   sessionId: z.string().optional(),
@@ -1274,7 +1190,7 @@ export interface ConfigChangeAppliedEvent extends BaseEvent {
 export const ConfigChangeAppliedPayloadSchema = z.object({
   changeId: z.string(),
   action: z.enum(['create', 'update', 'delete', 'view']),
-  resourceType: z.enum(['pipeline', 'suite', 'agent', 'schedule']),
+  resourceType: z.enum(['suite', 'agent', 'schedule']),
   resourceName: z.string(),
 });
 
@@ -1291,7 +1207,7 @@ export interface ConfigChangeRejectedEvent extends BaseEvent {
 export const ConfigChangeRejectedPayloadSchema = z.object({
   changeId: z.string(),
   action: z.enum(['create', 'update', 'delete', 'view']),
-  resourceType: z.enum(['pipeline', 'suite', 'agent', 'schedule']),
+  resourceType: z.enum(['suite', 'agent', 'schedule']),
   resourceName: z.string(),
 });
 

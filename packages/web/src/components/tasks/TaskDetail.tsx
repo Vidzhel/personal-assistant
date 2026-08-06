@@ -102,7 +102,7 @@ function StreamingOutput({ taskId, onRefresh }: { taskId: string; onRefresh: () 
         <h3 className="text-sm font-semibold">Live Output</h3>
         {connected && (
           <span
-            className="w-2 h-2 rounded-full pipeline-running"
+            className="w-2 h-2 rounded-full status-running"
             style={{ background: 'var(--success)' }}
           />
         )}

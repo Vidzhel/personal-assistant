@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useKnowledgeStore } from '@/stores/knowledge-store';
 import { KnowledgeView } from '@/components/knowledge/KnowledgeView';
@@ -21,7 +21,7 @@ function useFirstProjectId(): string | null {
   return projectId;
 }
 
-export default function KnowledgePage() {
+function KnowledgePageInner() {
   const { setHighlightedNodeIds } = useKnowledgeStore();
   const projectId = useFirstProjectId();
   const searchParams = useSearchParams();
@@ -36,4 +36,12 @@ export default function KnowledgePage() {
   }, [searchParams, setHighlightedNodeIds]);
 
   return <KnowledgeView projectId={projectId ?? undefined} />;
+}
+
+export default function KnowledgePage() {
+  return (
+    <Suspense fallback={null}>
+      <KnowledgePageInner />
+    </Suspense>
+  );
 }

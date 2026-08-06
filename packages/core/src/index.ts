@@ -27,10 +27,6 @@ import { initializeBackend } from './agent-manager/agent-session.ts';
 import { createTaskStore } from './task-manager/task-store.ts';
 import { createTemplateLoader } from './task-manager/template-loader.ts';
 import { createTaskLifecycle } from './task-manager/task-lifecycle.ts';
-import { createPipelineEngine } from './pipeline-engine/pipeline-engine.ts';
-import { createPipelineStore } from './pipeline-engine/pipeline-store.ts';
-import { createPipelineScheduler } from './pipeline-engine/pipeline-scheduler.ts';
-import { createPipelineEventTrigger } from './pipeline-engine/pipeline-event-trigger.ts';
 import { createYamlNamedAgentStore } from './agent-registry/yaml-named-agent-store.ts';
 import { createAgentResolver } from './agent-registry/agent-resolver.ts';
 import { CapabilityLibrary } from './capability-library/capability-library.ts';
@@ -361,39 +357,6 @@ async function main(): Promise<void> {
 
   // 11. Orchestrator — initialized after knowledge engine (step 12j) for context injection
 
-  // 12b. Init pipeline engine
-  const pipelineStore = createPipelineStore({ db: dbInterface });
-  const pipelineEngine = createPipelineEngine({
-    eventBus,
-    suiteRegistry,
-    mcpManager,
-    pipelineStore,
-  });
-  const pipelinesDir = resolve(projectRoot, 'config/pipelines');
-  pipelineEngine.initialize(pipelinesDir);
-  log.info('Pipeline engine initialized');
-
-  // 12c. Init pipeline scheduler (cron triggers) and event triggers
-  const pipelineScheduler = createPipelineScheduler({
-    pipelineEngine,
-    eventBus,
-    timezone: config.RAVEN_TIMEZONE,
-  });
-  const pipelineEventTrigger = createPipelineEventTrigger({
-    pipelineEngine,
-    eventBus,
-  });
-  pipelineScheduler.registerPipelines();
-  pipelineEventTrigger.registerPipelines();
-
-  const cronCount = pipelineEngine
-    .getAllPipelines()
-    .filter((p) => p.config.enabled && p.config.trigger.type === 'cron').length;
-  const eventCount = pipelineEngine
-    .getAllPipelines()
-    .filter((p) => p.config.enabled && p.config.trigger.type === 'event').length;
-  log.info(`Pipeline scheduler: ${cronCount} cron jobs, ${eventCount} event triggers`);
-
   // 12d. Init Neo4j client for knowledge engine
   const neo4jClient = createNeo4jClient({
     uri: config.NEO4J_URI,
@@ -553,9 +516,6 @@ async function main(): Promise<void> {
       pendingApprovals,
       executionLogger,
       messageStore,
-      pipelineEngine,
-      pipelineStore,
-      pipelineScheduler,
       knowledgeStore,
       ingestionProcessor,
       embeddingEngine,
@@ -593,9 +553,6 @@ async function main(): Promise<void> {
     log.info('Shutting down...');
     idleDetector.stop();
     templateScheduler.stop();
-    pipelineScheduler.shutdown();
-    pipelineEventTrigger.shutdown();
-    pipelineEngine.shutdown();
     permissionEngine.shutdown();
     scheduleEngine.stop();
     await serviceRunner.stopAll();

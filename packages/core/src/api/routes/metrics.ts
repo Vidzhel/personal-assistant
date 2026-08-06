@@ -1,7 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { HTTP_STATUS } from '@raven/shared';
 import type { ExecutionLogger } from '../../agent-manager/execution-logger.ts';
-import type { PipelineStore } from '../../pipeline-engine/pipeline-store.ts';
 
 const PERIOD_MS: Record<string, number> = {
   '1h': 3_600_000,
@@ -17,7 +16,6 @@ export function registerMetricsRoute(
   app: FastifyInstance,
   deps: {
     executionLogger: ExecutionLogger;
-    pipelineStore?: PipelineStore;
   },
 ): void {
   app.get<{ Querystring: { period?: string } }>('/api/metrics', async (req, reply) => {
@@ -33,9 +31,6 @@ export function registerMetricsRoute(
     const taskStats = deps.executionLogger.getTaskStats(sinceMs);
     const perSkill = deps.executionLogger.getPerSkillStats(sinceMs);
 
-    const pipelineStats = deps.pipelineStore?.getGlobalStats(sinceMs) ?? null;
-    const perPipeline = deps.pipelineStore?.getPerPipelineStats(sinceMs) ?? [];
-
     return {
       period,
       tasks: {
@@ -48,15 +43,7 @@ export function registerMetricsRoute(
             : 0,
         avgDurationMs: taskStats.avgDurationMs,
       },
-      pipelines: pipelineStats ?? {
-        total: 0,
-        succeeded: 0,
-        failed: 0,
-        successRate: 0,
-        avgDurationMs: null,
-      },
       perSkill,
-      perPipeline,
     };
   });
 }

@@ -1,7 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, basename } from 'node:path';
-import { parse as parseYaml } from 'yaml';
-import { createLogger, PipelineConfigSchema } from '@raven/shared';
+import { join } from 'node:path';
+import { createLogger } from '@raven/shared';
 import type { ScheduleRecord } from '@raven/shared';
 
 const log = createLogger('convention-auditor');
@@ -9,7 +8,7 @@ const log = createLogger('convention-auditor');
 const KEBAB_CASE_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 
 export interface ConventionViolation {
-  resourceType: 'suite' | 'pipeline' | 'agent' | 'schedule';
+  resourceType: 'suite' | 'agent' | 'schedule';
   resourceName: string;
   rule: string;
   severity: 'error' | 'warning';
@@ -38,11 +37,6 @@ export async function auditConventions(
   const suiteViolations = auditSuites(suitesDir);
   violations.push(...suiteViolations.violations);
   totalChecked += suiteViolations.checked;
-
-  // Audit pipelines
-  const pipelineViolations = auditPipelines(configDir);
-  violations.push(...pipelineViolations.violations);
-  totalChecked += pipelineViolations.checked;
 
   // Audit agents
   const agentViolations = auditAgents(configDir);
@@ -163,87 +157,6 @@ function auditSuites(suitesDir: string): AuditResult {
         severity: 'warning',
         message: `Missing UPDATE.md for dependency monitoring`,
         fix: `Create UPDATE.md with dependency monitoring instructions`,
-      });
-    }
-  }
-
-  return { violations, checked };
-}
-
-function auditPipelines(configDir: string): AuditResult {
-  const violations: ConventionViolation[] = [];
-  let checked = 0;
-
-  const pipelinesDir = join(configDir, 'pipelines');
-  if (!existsSync(pipelinesDir)) return { violations, checked };
-
-  const files = readdirSync(pipelinesDir).filter((f) => f.endsWith('.yaml') || f.endsWith('.yml'));
-
-  for (const file of files) {
-    checked++;
-    const pipelineName = basename(file, file.endsWith('.yaml') ? '.yaml' : '.yml');
-    const filePath = join(pipelinesDir, file);
-
-    try {
-      const content = readFileSync(filePath, 'utf-8');
-      const parsed = parseYaml(content) as Record<string, unknown>;
-
-      // Validate against Zod schema
-      const result = PipelineConfigSchema.safeParse(parsed);
-      if (!result.success) {
-        violations.push({
-          resourceType: 'pipeline',
-          resourceName: pipelineName,
-          rule: 'valid-schema',
-          severity: 'error',
-          message: `Schema validation failed: ${result.error.issues[0]?.message ?? 'unknown'}`,
-          fix: `Fix pipeline YAML to match the expected schema`,
-        });
-      }
-
-      // Check for trigger
-      if (!parsed.trigger) {
-        violations.push({
-          resourceType: 'pipeline',
-          resourceName: pipelineName,
-          rule: 'has-trigger',
-          severity: 'error',
-          message: `Pipeline has no trigger defined`,
-          fix: `Add a trigger: { type: cron|event|manual, ... }`,
-        });
-      }
-
-      // Check version field
-      if (parsed.version === undefined) {
-        violations.push({
-          resourceType: 'pipeline',
-          resourceName: pipelineName,
-          rule: 'has-version',
-          severity: 'warning',
-          message: `Pipeline missing version field`,
-          fix: `Add version: 1 to the pipeline`,
-        });
-      }
-
-      // Check enabled field
-      if (parsed.enabled === undefined) {
-        violations.push({
-          resourceType: 'pipeline',
-          resourceName: pipelineName,
-          rule: 'has-enabled',
-          severity: 'warning',
-          message: `Pipeline missing enabled field`,
-          fix: `Add enabled: true or enabled: false`,
-        });
-      }
-    } catch (err) {
-      violations.push({
-        resourceType: 'pipeline',
-        resourceName: pipelineName,
-        rule: 'valid-yaml',
-        severity: 'error',
-        message: `Failed to parse YAML: ${err instanceof Error ? err.message : String(err)}`,
-        fix: `Fix YAML syntax errors in ${file}`,
       });
     }
   }

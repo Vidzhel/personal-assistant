@@ -85,9 +85,9 @@ export default function DashboardPage() {
           href: '/activity',
         },
         {
-          label: 'Active Pipelines',
-          value: dashboardData.pipelines.activeCount,
-          href: '/pipelines',
+          label: 'Active Schedules',
+          value: dashboardData.schedules.activeCount,
+          href: '/schedules',
         },
         {
           label: 'Pending Approvals',

@@ -153,6 +153,6 @@ button:disabled,
   100% { opacity: 1; }
 }
 
-.pipeline-running {
+.status-running {
   animation: pulse-ring 1.5s ease-in-out infinite;
 }

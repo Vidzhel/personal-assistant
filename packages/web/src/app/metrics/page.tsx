@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { type MetricsResponse } from '@/lib/api-client';
 import { usePolling } from '@/hooks/usePolling';
-import { formatDuration } from '@/lib/pipeline-helpers';
+import { formatDuration } from '@/lib/task-helpers';
 
 const POLL_INTERVAL_MS = 10_000;
 const PERIODS = ['1h', '24h', '7d', '30d'] as const;
@@ -137,22 +137,20 @@ function SummaryCards({ data }: { data: MetricsResponse | null }) {
   const taskSuccessRate = `${data?.tasks.successRate ?? 0}${PERCENT_SYMBOL}`;
   const taskAvgDuration =
     data?.tasks.avgDurationMs != null ? formatDuration(data.tasks.avgDurationMs) : '-';
-  const pipelineTotal = String(data?.pipelines.total ?? 0);
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
       <SummaryCard label="Total Tasks" value={taskTotal} />
       <SummaryCard label="Task Success Rate" value={taskSuccessRate} />
       <SummaryCard label="Avg Task Duration" value={taskAvgDuration} />
-      <SummaryCard label="Pipeline Runs" value={pipelineTotal} />
     </div>
   );
 }
 
 function LoadingSkeleton() {
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-      {Array.from({ length: 4 }).map((_, i) => (
+    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+      {Array.from({ length: 3 }).map((_, i) => (
         <div
           key={i}
           className="h-20 rounded-lg animate-pulse"
@@ -163,23 +161,14 @@ function LoadingSkeleton() {
   );
 }
 
-function toStatsRows(data: MetricsResponse | null): {
-  skillRows: StatsRow[];
-  pipelineRows: StatsRow[];
-} {
+function toStatsRows(data: MetricsResponse | null): { skillRows: StatsRow[] } {
   const skillRows = (data?.perSkill ?? []).map((s) => ({
     name: s.skillName,
     total: s.total,
     successRate: s.successRate,
     avgDurationMs: s.avgDurationMs,
   }));
-  const pipelineRows = (data?.perPipeline ?? []).map((p) => ({
-    name: p.pipelineName,
-    total: p.total,
-    successRate: p.successRate,
-    avgDurationMs: p.avgDurationMs,
-  }));
-  return { skillRows, pipelineRows };
+  return { skillRows };
 }
 
 export default function MetricsPage() {
@@ -188,7 +177,7 @@ export default function MetricsPage() {
     `/metrics?period=${period}`,
     POLL_INTERVAL_MS,
   );
-  const { skillRows, pipelineRows } = toStatsRows(data);
+  const { skillRows } = toStatsRows(data);
 
   return (
     <div className="p-8 space-y-6">
@@ -196,7 +185,7 @@ export default function MetricsPage() {
         <div>
           <h1 className="text-2xl font-bold">Execution Metrics</h1>
           <p className="text-sm mt-1" style={{ color: 'var(--text-muted)' }}>
-            Task and pipeline performance overview.
+            Task performance overview.
           </p>
         </div>
         <PeriodSelector selected={period} onSelect={setPeriod} />
@@ -207,10 +196,7 @@ export default function MetricsPage() {
       ) : (
         <>
           <SummaryCards data={data} />
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <StatsTable title="Per-Skill Breakdown" nameHeader="Skill" rows={skillRows} />
-            <StatsTable title="Per-Pipeline Breakdown" nameHeader="Pipeline" rows={pipelineRows} />
-          </div>
+          <StatsTable title="Per-Skill Breakdown" nameHeader="Skill" rows={skillRows} />
         </>
       )}
     </div>

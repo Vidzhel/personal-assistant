@@ -9,7 +9,6 @@ const nav = [
   { href: '/', label: 'Dashboard', icon: '~' },
   { href: '/projects', label: 'Projects', icon: '#' },
   { href: '/activity', label: 'Activity', icon: '>' },
-  { href: '/pipelines', label: 'Pipelines', icon: '|' },
   { href: '/templates', label: 'Templates', icon: 'T' },
   { href: '/tasks', label: 'Tasks', icon: '=' },
   { href: '/metrics', label: 'Metrics', icon: '%' },

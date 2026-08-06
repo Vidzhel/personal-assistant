@@ -120,22 +120,5 @@ export function buildSystemTools(
     },
   );
 
-  const triggerPipeline = tool(
-    'trigger_pipeline',
-    'Trigger a named pipeline by name.',
-    {
-      name: z.string().describe('Pipeline name'),
-      params: z.record(z.string(), z.string()).optional().describe('Optional trigger parameters'),
-    },
-    async (args) => {
-      if (!deps.pipelineEngine) {
-        return errorResult('pipelineEngine not available');
-      }
-      const triggerType = args.params ? JSON.stringify(args.params) : 'manual';
-      const { runId } = deps.pipelineEngine.triggerPipeline(args.name, triggerType);
-      return okResult({ treeId: runId });
-    },
-  );
-
-  return [listAgents, createAgent, updateAgent, listProjects, triggerPipeline];
+  return [listAgents, createAgent, updateAgent, listProjects];
 }

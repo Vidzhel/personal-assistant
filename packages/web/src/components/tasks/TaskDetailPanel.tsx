@@ -92,7 +92,6 @@ export function TaskDetailPanel() {
           <MetaRow label="Source" value={task.source} />
           <MetaRow label="Project" value={task.projectId} />
           <MetaRow label="Agent" value={task.assignedAgentId} />
-          <MetaRow label="Pipeline" value={task.pipelineId} />
           <MetaRow label="External ID" value={task.externalId} />
           <MetaRow label="Created" value={formatDate(task.createdAt)} />
           <MetaRow label="Updated" value={formatDate(task.updatedAt)} />

@@ -634,16 +634,16 @@ describe('handleCallback', () => {
     });
 
     it('snooze-week creates a snooze for the resolved category', () => {
-      const action: CallbackAction = { domain: 'snooze', action: 'snooze-week', target: 'pipe', args: [] };
+      const action: CallbackAction = { domain: 'snooze', action: 'snooze-week', target: 'email', args: [] };
       const result = handleCallback(action, deps);
 
       expect(result.success).toBe(true);
       expect(result.message).toContain('Snoozed');
-      expect(result.message).toContain('pipeline:*');
+      expect(result.message).toContain('email:triage:*');
 
       const snoozes = getActiveSnoozes(dbInstance);
       expect(snoozes).toHaveLength(1);
-      expect(snoozes[0].category).toBe('pipeline:*');
+      expect(snoozes[0].category).toBe('email:triage:*');
       expect(snoozes[0].snoozedUntil).toBeTruthy();
     });
 

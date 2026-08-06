@@ -93,27 +93,6 @@ export const api = {
   getAgentTask: (id: string) => request<TaskRecord>(`/agent-tasks/${id}`),
   getActiveTasks: () => request<ActiveTasks>('/agent-tasks/active'),
   cancelTask: (taskId: string) => request(`/agent-tasks/${taskId}/cancel`, { method: 'POST' }),
-  getPipelines: () => request<EnrichedPipeline[]>('/pipelines'),
-  getPipeline: (name: string) => request<EnrichedPipeline>(`/pipelines/${name}`),
-  getPipelineRuns: (name: string, limit?: number) => {
-    const qs = limit ? `?limit=${limit}` : '';
-    return request<PipelineRunRecord[]>(`/pipelines/${name}/runs${qs}`);
-  },
-  triggerPipeline: (name: string) =>
-    request<{ runId: string; status: string }>(`/pipelines/${name}/trigger`, { method: 'POST' }),
-  savePipeline: async (name: string, yamlString: string) => {
-    const res = await fetch(`${API_URL}/pipelines/${name}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'text/yaml' },
-      body: yamlString,
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      const detail = (body as { error?: string } | null)?.error;
-      throw new Error(detail ?? `Pipeline save failed (${res.status})`);
-    }
-    return res.json() as Promise<{ config: PipelineConfig }>;
-  },
   getMetrics: (period = '24h') => request<MetricsResponse>(`/metrics?period=${period}`),
   getKnowledgeGraph: (params?: {
     view?: string;
@@ -453,48 +432,9 @@ export interface EventRecord {
   timestamp: number;
 }
 
-export interface PipelineRunRecord {
-  id: string;
-  pipeline_name: string;
-  trigger_type: string;
-  status: string;
-  started_at: string;
-  completed_at?: string;
-  node_results?: string;
-  error?: string;
-}
 
-export interface PipelineTrigger {
-  type: 'cron' | 'event' | 'manual' | 'webhook';
-  schedule?: string;
-  event?: string;
-  filter?: Record<string, string>;
-}
 
-export interface PipelineConfig {
-  name: string;
-  description?: string;
-  version: number;
-  trigger: PipelineTrigger;
-  settings?: {
-    retry?: { maxAttempts: number; backoffMs: number };
-    timeout?: number;
-    onError?: 'stop' | 'continue';
-  };
-  nodes: Record<string, unknown>;
-  connections: unknown[];
-  enabled: boolean;
-}
 
-export interface EnrichedPipeline {
-  config: PipelineConfig;
-  executionOrder: string[];
-  entryPoints: string[];
-  filePath: string;
-  loadedAt: string;
-  lastRun: PipelineRunRecord | null;
-  nextRun: string | null;
-}
 
 interface StatsBlock {
   total: number;
@@ -507,9 +447,7 @@ interface StatsBlock {
 export interface MetricsResponse {
   period: string;
   tasks: StatsBlock;
-  pipelines: StatsBlock;
   perSkill: Array<StatsBlock & { skillName: string }>;
-  perPipeline: Array<StatsBlock & { pipelineName: string }>;
 }
 
 export interface KnowledgeGraphNode {

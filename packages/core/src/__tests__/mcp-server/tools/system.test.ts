@@ -66,18 +66,6 @@ describe('buildSystemTools', () => {
         resolveProjectContext: vi.fn(),
         load: vi.fn(),
       },
-      pipelineEngine: {
-        initialize: vi.fn(),
-        getPipeline: vi.fn(),
-        getAllPipelines: vi.fn(),
-        executePipeline: vi.fn(),
-        triggerPipeline: vi
-          .fn()
-          .mockReturnValue({ runId: 'run-123', execution: Promise.resolve() }),
-        savePipeline: vi.fn(),
-        deletePipeline: vi.fn(),
-        shutdown: vi.fn(),
-      },
     } as any;
     scope = { role: 'system' };
   });
@@ -249,35 +237,4 @@ describe('buildSystemTools', () => {
     });
   });
 
-  describe('trigger_pipeline', () => {
-    it('triggers pipeline and returns treeId', async () => {
-      (deps.pipelineEngine!.triggerPipeline as any).mockReturnValue({
-        runId: 'run-abc',
-        execution: Promise.resolve(),
-      });
-
-      const tools = buildSystemTools(deps, scope);
-      const tool = tools.find((t) => t.name === 'trigger_pipeline');
-      expect(tool).toBeDefined();
-
-      const result = await tool!.handler({ name: 'daily-digest' }, {});
-
-      expect(deps.pipelineEngine!.triggerPipeline).toHaveBeenCalledWith('daily-digest', 'manual');
-      expect(result.isError).toBeFalsy();
-      const parsed = JSON.parse((result.content[0] as any).text);
-      expect(parsed.treeId).toBe('run-abc');
-    });
-
-    it('returns error when pipelineEngine is unavailable', async () => {
-      deps.pipelineEngine = undefined;
-
-      const tools = buildSystemTools(deps, scope);
-      const tool = tools.find((t) => t.name === 'trigger_pipeline');
-
-      const result = await tool!.handler({ name: 'daily-digest' }, {});
-
-      expect(result.isError).toBe(true);
-      expect((result.content[0] as any).text).toContain('pipelineEngine');
-    });
-  });
 });

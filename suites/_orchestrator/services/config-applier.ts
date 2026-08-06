@@ -1,15 +1,10 @@
-import { createLogger, generateId, SOURCE_CONFIG_MANAGER, PipelineConfigSchema, type EventBusInterface } from '@raven/shared';
+import { createLogger, generateId, SOURCE_CONFIG_MANAGER, type EventBusInterface } from '@raven/shared';
 import type { ConfigChangeAction, ConfigResourceType } from '@raven/shared';
-import { parse as parseYaml } from 'yaml';
 
 const log = createLogger('config-applier');
 
 export interface ConfigApplierDeps {
   eventBus: EventBusInterface;
-  pipelineEngine: {
-    savePipeline: (name: string, yamlContent: string) => { config: unknown };
-    deletePipeline: (name: string) => boolean;
-  };
   suiteScaffolder: {
     scaffoldSuite: (input: { name: string; displayName: string; description: string; mcpServers?: Record<string, unknown> }) => { suitePath: string };
   };
@@ -33,8 +28,7 @@ export interface ApplyResult {
 }
 
 /**
- * Validates a config change before applying — Zod schemas for pipelines,
- * structural checks for agents/schedules.
+ * Validates a config change before applying — structural checks for agents/schedules/suites.
  */
 export function validateConfigChange(
   change: {
@@ -56,20 +50,6 @@ export function validateConfigChange(
   }
 
   const errors: string[] = [];
-
-  if (resourceType === 'pipeline') {
-    try {
-      const parsed = parseYaml(content) as Record<string, unknown>;
-      const result = PipelineConfigSchema.safeParse(parsed);
-      if (!result.success) {
-        for (const issue of result.error.issues) {
-          errors.push(`Pipeline schema: ${issue.path.join('.')}: ${issue.message}`);
-        }
-      }
-    } catch (err) {
-      errors.push(`Invalid YAML: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }
 
   if (resourceType === 'agent') {
     try {
@@ -138,8 +118,6 @@ export async function applyConfigChange(
 
   try {
     switch (resourceType) {
-      case 'pipeline':
-        return applyPipelineChange(deps, action, resourceName, content);
       case 'suite':
         return applySuiteChange(deps, action, resourceName, content);
       case 'agent':
@@ -168,31 +146,6 @@ export async function applyConfigChange(
 
     return { success: false, message: `Failed to apply: ${message}`, error: message };
   }
-}
-
-function applyPipelineChange(
-  deps: ConfigApplierDeps,
-  action: ConfigChangeAction,
-  name: string,
-  content?: string,
-): ApplyResult {
-  if (action === 'create' || action === 'update') {
-    if (!content) {
-      return { success: false, message: 'Pipeline content (YAML) is required for create/update' };
-    }
-    deps.pipelineEngine.savePipeline(name, content);
-    return { success: true, message: `Pipeline "${name}" ${action === 'create' ? 'created' : 'updated'}` };
-  }
-
-  if (action === 'delete') {
-    const deleted = deps.pipelineEngine.deletePipeline(name);
-    if (!deleted) {
-      return { success: false, message: `Pipeline "${name}" not found` };
-    }
-    return { success: true, message: `Pipeline "${name}" deleted` };
-  }
-
-  return { success: false, message: `Unsupported pipeline action: ${action}` };
 }
 
 function applySuiteChange(

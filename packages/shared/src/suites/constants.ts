@@ -103,7 +103,6 @@ export const UNSNOOZABLE_CATEGORIES = ['permission:blocked', 'system:health:aler
 
 // Category shortcode mapping for Telegram callback data (64-byte limit)
 export const CATEGORY_SHORTCODES: Record<string, string> = {
-  pipe: 'pipeline:*',
   email: 'email:triage:*',
   task: 'agent:task:complete',
   insight: 'insight:*',
@@ -111,7 +110,6 @@ export const CATEGORY_SHORTCODES: Record<string, string> = {
 };
 
 export const SHORTCODE_FROM_CATEGORY: Record<string, string> = {
-  'pipeline:*': 'pipe',
   'email:triage:*': 'email',
   'agent:task:complete': 'task',
   'insight:*': 'insight',

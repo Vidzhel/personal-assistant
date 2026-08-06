@@ -4,7 +4,6 @@ const SUBJECT_TRUNCATE_LEN = 60;
 
 const ICON_MAP: Array<[string, string]> = [
   ['email:', '@'],
-  ['pipeline:', '|'],
   ['agent:', '>'],
   ['schedule:', '#'],
   ['permission:', '!'],
@@ -22,16 +21,12 @@ export function getEventIcon(type: string): string {
 }
 
 const EXACT_COLOR_MAP: Record<string, string> = {
-  'pipeline:complete': 'var(--success)',
-  'pipeline:failed': 'var(--error)',
-  'pipeline:step:failed': 'var(--error)',
   'agent:task:complete': 'var(--success)',
   'permission:denied': 'var(--error)',
   'system:health:alert': 'var(--error)',
 };
 
 const PREFIX_COLOR_MAP: Array<[string, string]> = [
-  ['pipeline:', 'var(--warning)'],
   ['agent:', 'var(--accent-hover)'],
   ['permission:', 'var(--warning)'],
   ['email:', 'var(--accent)'],
@@ -68,11 +63,6 @@ const DESCRIPTION_MAP: Record<string, DescriptionFormatter> = {
   'email:triage:action-items': () => 'Action items extracted from email',
   'email:action-extract:completed': () => 'Email action extraction completed',
   'email:reply:send': () => 'Email reply sent',
-  'pipeline:started': (pl) => `Pipeline '${p(pl, 'pipelineName')}' started`,
-  'pipeline:complete': (pl) => `Pipeline '${p(pl, 'pipelineName')}' completed`,
-  'pipeline:failed': (pl) => `Pipeline '${p(pl, 'pipelineName')}' failed: ${p(pl, 'error')}`,
-  'pipeline:step:complete': (pl) => `Pipeline step completed: ${p(pl, 'stepName')}`,
-  'pipeline:step:failed': (pl) => `Pipeline step failed: ${p(pl, 'stepName')}`,
   'agent:task:complete': (pl) => `Agent task completed (${p(pl, 'skillName')})`,
   'agent:task:request': (pl) => `Agent task requested (${p(pl, 'skillName')})`,
   'agent:message': (pl) => `Agent message from ${p(pl, 'skillName')}`,
@@ -85,7 +75,6 @@ const DESCRIPTION_MAP: Record<string, DescriptionFormatter> = {
     `Task management failed: ${p(pl, 'error') || p(pl, 'action')}`,
   'schedule:triggered': (pl) => `Schedule triggered: ${p(pl, 'scheduleName')}`,
   'config:reloaded': (pl) => `Configuration reloaded: ${p(pl, 'configType')}`,
-  'config:pipelines:reloaded': () => 'Pipeline configuration reloaded',
   'voice:received': () => 'Voice message received',
   'media:received': () => 'Media file received',
   notification: (pl) => `Notification: ${p(pl, 'message') || p(pl, 'summary')}`,

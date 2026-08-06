@@ -81,11 +81,10 @@ describe('GET /api/dashboard/life', () => {
     // Today section
     expect(data.today).toBeDefined();
     expect(typeof data.today.autonomousActionsCount).toBe('number');
-    expect(typeof data.today.pipelinesCompleted).toBe('number');
 
-    // Pipelines
-    expect(data.pipelines).toBeDefined();
-    expect(data.pipelines.activeCount).toBe(3);
+    // Schedules
+    expect(data.schedules).toBeDefined();
+    expect(data.schedules.activeCount).toBe(3);
 
     // Approvals
     expect(data.pendingApprovalsCount).toBe(1);

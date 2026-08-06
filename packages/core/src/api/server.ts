@@ -11,9 +11,6 @@ import type { AuditLog } from '../permission-engine/audit-log.ts';
 import type { PendingApprovals } from '../permission-engine/pending-approvals.ts';
 import type { ExecutionLogger } from '../agent-manager/execution-logger.ts';
 import type { MessageStore } from '../session-manager/message-store.ts';
-import type { PipelineEngine } from '../pipeline-engine/pipeline-engine.ts';
-import type { PipelineStore } from '../pipeline-engine/pipeline-store.ts';
-import type { PipelineScheduler } from '../pipeline-engine/pipeline-scheduler.ts';
 import type { KnowledgeStore } from '../knowledge-engine/knowledge-store.ts';
 import type { IngestionProcessor } from '../knowledge-engine/ingestion.ts';
 import type { EmbeddingEngine } from '../knowledge-engine/embeddings.ts';
@@ -35,7 +32,6 @@ import { registerEventRoutes } from './routes/events.ts';
 import { registerAuditLogRoutes } from './routes/audit-logs.ts';
 import { registerApprovalRoutes } from './routes/approvals.ts';
 import { registerAgentTaskRoutes } from './routes/agent-tasks.ts';
-import { registerPipelineRoutes } from './routes/pipelines.ts';
 import { registerMetricsRoute } from './routes/metrics.ts';
 import { registerKnowledgeRoutes } from './routes/knowledge.ts';
 import { registerNotificationPreferencesRoutes } from './routes/notification-preferences.ts';
@@ -76,9 +72,6 @@ export interface ApiDeps {
   pendingApprovals: PendingApprovals;
   executionLogger: ExecutionLogger;
   messageStore: MessageStore;
-  pipelineEngine: PipelineEngine;
-  pipelineStore?: PipelineStore;
-  pipelineScheduler?: PipelineScheduler;
   knowledgeStore?: KnowledgeStore;
   ingestionProcessor?: IngestionProcessor;
   embeddingEngine?: EmbeddingEngine;
@@ -145,14 +138,8 @@ export async function createApiServer(
     agentManager: deps.agentManager,
     db: deps.db,
   });
-  registerPipelineRoutes(app, {
-    pipelineEngine: deps.pipelineEngine,
-    pipelineStore: deps.pipelineStore,
-    pipelineScheduler: deps.pipelineScheduler,
-  });
   registerMetricsRoute(app, {
     executionLogger: deps.executionLogger,
-    pipelineStore: deps.pipelineStore,
   });
   if (deps.knowledgeStore && deps.ingestionProcessor) {
     registerKnowledgeRoutes(app, {
@@ -248,7 +235,6 @@ export async function createApiServer(
     scheduleEngine: deps.scheduleEngine,
     agentManager: deps.agentManager,
     pendingApprovals: deps.pendingApprovals,
-    pipelineStore: deps.pipelineStore,
     db: deps.db,
   });
 

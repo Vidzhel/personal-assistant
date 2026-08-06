@@ -85,7 +85,7 @@ export interface GateResult {
 export function enforcePermissionGate(
   actionName: string,
   deps: PermissionDeps & { eventBus: EventBus },
-  context: { sessionId?: string; skillName: string; pipelineName?: string },
+  context: { sessionId?: string; skillName: string },
 ): GateResult {
   const tier = deps.permissionEngine.resolveTier(actionName);
 

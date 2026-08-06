@@ -13,15 +13,12 @@ import { registerSuiteRoutes } from '../api/routes/suites.ts';
 import { registerScheduleRoutes } from '../api/routes/schedules.ts';
 import { registerEventRoutes } from '../api/routes/events.ts';
 import { registerAuditLogRoutes } from '../api/routes/audit-logs.ts';
-import { registerPipelineRoutes } from '../api/routes/pipelines.ts';
 import { registerAgentTaskRoutes } from '../api/routes/agent-tasks.ts';
 import { registerMetricsRoute } from '../api/routes/metrics.ts';
 import { createAuditLog } from '../permission-engine/audit-log.ts';
 import { createPendingApprovals } from '../permission-engine/pending-approvals.ts';
 import { createExecutionLogger } from '../agent-manager/execution-logger.ts';
 import { createMessageStore } from '../session-manager/message-store.ts';
-import { createPipelineStore } from '../pipeline-engine/pipeline-store.ts';
-import { createDbInterface } from '../db/database.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -80,16 +77,6 @@ describe('API routes', () => {
       pendingApprovals,
       executionLogger,
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
-      pipelineEngine: {
-        initialize: () => {},
-        getPipeline: () => undefined,
-        getAllPipelines: () => [],
-        executePipeline: () => Promise.reject(new Error('Not available in test')),
-        triggerPipeline: () => {
-          throw new Error('Not available in test');
-        },
-        shutdown: () => {},
-      },
       configuredSuiteCount: 0,
     } as any;
 
@@ -100,65 +87,6 @@ describe('API routes', () => {
     registerScheduleRoutes(app, deps);
     registerEventRoutes(app);
     registerAuditLogRoutes(app, auditLog);
-
-    const dbInterface = createDbInterface();
-    const pipelineStore = createPipelineStore({ db: dbInterface });
-    const mockPipelineEngine = {
-      initialize: () => {},
-      getPipeline: (name: string) => {
-        if (name === 'test-pipeline') {
-          return {
-            config: {
-              name: 'test-pipeline',
-              description: 'A test pipeline',
-              version: 1,
-              trigger: { type: 'cron', schedule: '0 6 * * *' },
-              nodes: {},
-              connections: [],
-              enabled: true,
-            },
-            executionOrder: [],
-            entryPoints: [],
-            filePath: '/tmp/test.yaml',
-            loadedAt: new Date().toISOString(),
-          };
-        }
-        return undefined;
-      },
-      getAllPipelines: () => [
-        {
-          config: {
-            name: 'test-pipeline',
-            description: 'A test pipeline',
-            version: 1,
-            trigger: { type: 'cron', schedule: '0 6 * * *' },
-            nodes: {},
-            connections: [],
-            enabled: true,
-          },
-          executionOrder: [],
-          entryPoints: [],
-          filePath: '/tmp/test.yaml',
-          loadedAt: new Date().toISOString(),
-        },
-      ],
-      triggerPipeline: () => ({ runId: 'run-1', execution: Promise.resolve() }),
-      savePipeline: () => ({}),
-      deletePipeline: () => true,
-      shutdown: () => {},
-    } as any;
-
-    const mockScheduler = {
-      getNextRun: (name: string) => (name === 'test-pipeline' ? '2026-03-17T06:00:00.000Z' : null),
-      registerPipelines: () => {},
-      shutdown: () => {},
-    };
-
-    registerPipelineRoutes(app, {
-      pipelineEngine: mockPipelineEngine,
-      pipelineStore,
-      pipelineScheduler: mockScheduler,
-    });
 
     const mockAgentManager = {
       ...makeMockAgentManager(),
@@ -173,7 +101,6 @@ describe('API routes', () => {
 
     registerMetricsRoute(app, {
       executionLogger,
-      pipelineStore,
     });
 
     await app.ready();
@@ -406,57 +333,8 @@ describe('API routes', () => {
     });
   });
 
-  describe('GET /api/pipelines', () => {
-    it('returns enriched pipeline list with lastRun and nextRun', async () => {
-      const res = await app.inject({ method: 'GET', url: '/api/pipelines' });
-      expect(res.statusCode).toBe(200);
-      const body = JSON.parse(res.payload);
-      expect(Array.isArray(body)).toBe(true);
-      expect(body.length).toBe(1);
-      expect(body[0].config.name).toBe('test-pipeline');
-      expect(body[0]).toHaveProperty('lastRun');
-      expect(body[0]).toHaveProperty('nextRun');
-      expect(body[0].nextRun).toBe('2026-03-17T06:00:00.000Z');
-    });
-  });
 
-  describe('GET /api/pipelines/:name', () => {
-    it('returns enriched single pipeline with lastRun and nextRun', async () => {
-      const res = await app.inject({ method: 'GET', url: '/api/pipelines/test-pipeline' });
-      expect(res.statusCode).toBe(200);
-      const body = JSON.parse(res.payload);
-      expect(body.config.name).toBe('test-pipeline');
-      expect(body).toHaveProperty('lastRun');
-      expect(body).toHaveProperty('nextRun');
-      expect(body.nextRun).toBe('2026-03-17T06:00:00.000Z');
-    });
 
-    it('returns 404 for nonexistent pipeline', async () => {
-      const res = await app.inject({ method: 'GET', url: '/api/pipelines/no-such-pipeline' });
-      expect(res.statusCode).toBe(404);
-    });
-  });
-
-  describe('GET /api/pipelines/:name/runs', () => {
-    it('returns run history for a pipeline', async () => {
-      const db = getDb();
-      const now = new Date().toISOString();
-      db.prepare(
-        'INSERT INTO pipeline_runs (id, pipeline_name, trigger_type, status, started_at, completed_at, node_results, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      ).run('run-test-1', 'test-pipeline', 'cron', 'completed', now, now, null, null);
-
-      const res = await app.inject({
-        method: 'GET',
-        url: '/api/pipelines/test-pipeline/runs',
-      });
-      expect(res.statusCode).toBe(200);
-      const body = JSON.parse(res.payload);
-      expect(Array.isArray(body)).toBe(true);
-      expect(body.length).toBeGreaterThanOrEqual(1);
-      expect(body[0].pipeline_name).toBe('test-pipeline');
-      expect(body[0].status).toBe('completed');
-    });
-  });
 
   describe('GET /api/agent-tasks', () => {
     it('returns paginated task list', async () => {
@@ -513,10 +391,7 @@ describe('API routes', () => {
       expect(body.tasks).toHaveProperty('failed');
       expect(body.tasks).toHaveProperty('successRate');
       expect(body.tasks).toHaveProperty('avgDurationMs');
-      expect(body.pipelines).toHaveProperty('total');
-      expect(body.pipelines).toHaveProperty('successRate');
       expect(Array.isArray(body.perSkill)).toBe(true);
-      expect(Array.isArray(body.perPipeline)).toBe(true);
     });
 
     it('respects period query param', async () => {
@@ -534,22 +409,6 @@ describe('API routes', () => {
     it('reflects inserted test data accurately', async () => {
       const db = getDb();
       const now = new Date();
-      const fiveMinAgo = new Date(now.getTime() - 300000);
-
-      // Insert pipeline runs
-      db.prepare(
-        'INSERT INTO pipeline_runs (id, pipeline_name, trigger_type, status, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?)',
-      ).run(
-        'metrics-run-1',
-        'daily-digest',
-        'cron',
-        'completed',
-        fiveMinAgo.toISOString(),
-        now.toISOString(),
-      );
-      db.prepare(
-        'INSERT INTO pipeline_runs (id, pipeline_name, trigger_type, status, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?)',
-      ).run('metrics-run-2', 'daily-digest', 'cron', 'failed', fiveMinAgo.toISOString(), null);
 
       // Insert agent tasks
       db.prepare(
@@ -601,20 +460,11 @@ describe('API routes', () => {
       expect(body.tasks.succeeded).toBeGreaterThanOrEqual(2);
       expect(body.tasks.failed).toBeGreaterThanOrEqual(1);
 
-      // Pipeline stats
-      expect(body.pipelines.total).toBeGreaterThanOrEqual(2);
-
       // Per-skill breakdown
       expect(body.perSkill.length).toBeGreaterThanOrEqual(2);
       const gmailSkill = body.perSkill.find((s: any) => s.skillName === 'gmail');
       expect(gmailSkill).toBeDefined();
       expect(gmailSkill.total).toBeGreaterThanOrEqual(2);
-
-      // Per-pipeline breakdown
-      expect(body.perPipeline.length).toBeGreaterThanOrEqual(1);
-      const digestPipeline = body.perPipeline.find((p: any) => p.pipelineName === 'daily-digest');
-      expect(digestPipeline).toBeDefined();
-      expect(digestPipeline.total).toBeGreaterThanOrEqual(2);
     });
   });
 });

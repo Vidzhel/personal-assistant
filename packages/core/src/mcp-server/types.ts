@@ -5,7 +5,6 @@ import type { KnowledgeStore } from '../knowledge-engine/knowledge-store.ts';
 import type { RetrievalEngine } from '../knowledge-engine/retrieval.ts';
 import type { NamedAgentStore } from '../agent-registry/yaml-named-agent-store.ts';
 import type { ProjectRegistry } from '../project-registry/project-registry.ts';
-import type { PipelineEngine } from '../pipeline-engine/pipeline-engine.ts';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { DatabaseInterface } from '@raven/shared';
 import type { PendingApprovals } from '../permission-engine/pending-approvals.ts';
@@ -18,7 +17,6 @@ export interface RavenMcpDeps {
   retrievalEngine?: RetrievalEngine;
   namedAgentStore?: NamedAgentStore;
   projectRegistry?: ProjectRegistry;
-  pipelineEngine?: PipelineEngine;
   eventBus: EventBus;
   db?: DatabaseInterface;
   pendingApprovals?: PendingApprovals;

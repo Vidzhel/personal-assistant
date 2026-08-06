@@ -30,18 +30,18 @@ describe('config-presenter', () => {
     const result = presentConfigChange(
       {
         action: 'create',
-        resourceType: 'pipeline',
+        resourceType: 'schedule',
         resourceName: 'email-to-tasks',
         content: 'name: email-to-tasks\nversion: 1',
-        description: 'Create a new pipeline',
+        description: 'Create a new schedule',
       },
       mockEventBus,
     );
 
     expect(result.action).toBe('create');
-    expect(result.resourceType).toBe('pipeline');
+    expect(result.resourceType).toBe('schedule');
     expect(result.resourceName).toBe('email-to-tasks');
-    expect(result.displayText).toContain('Create pipeline');
+    expect(result.displayText).toContain('Create schedule');
     expect(result.displayText).toContain('email-to-tasks');
     expect(events.length).toBe(1);
   });
@@ -59,7 +59,7 @@ describe('config-presenter', () => {
     const result = presentConfigChange(
       {
         action: 'update',
-        resourceType: 'pipeline',
+        resourceType: 'schedule',
         resourceName: 'morning-briefing',
         currentContent: 'schedule: "0 6 * * *"',
         content: 'schedule: "0 9 * * 1-5"',
@@ -71,7 +71,7 @@ describe('config-presenter', () => {
     expect(result.action).toBe('update');
     expect(result.diffText).toContain('--- current');
     expect(result.diffText).toContain('+++ proposed');
-    expect(result.displayText).toContain('Update pipeline');
+    expect(result.displayText).toContain('Update schedule');
   });
 
   it('should format delete proposal with confirmation', async () => {
@@ -127,69 +127,10 @@ describe('config-presenter', () => {
 // ---------- config-applier ----------
 
 describe('config-applier', () => {
-  it('should call savePipeline for pipeline create', async () => {
-    const savePipeline = vi.fn().mockReturnValue({ config: {} });
-    const deps = {
-      eventBus: { emit: vi.fn(), on: vi.fn(), off: vi.fn() },
-      pipelineEngine: { savePipeline, deletePipeline: vi.fn() },
-      suiteScaffolder: { scaffoldSuite: vi.fn() },
-      namedAgentStore: { createAgent: vi.fn(), updateAgent: vi.fn(), deleteAgent: vi.fn(), getAgentByName: vi.fn() },
-      scheduler: { addSchedule: vi.fn(), removeSchedule: vi.fn(), getSchedules: vi.fn().mockReturnValue([]) },
-    };
-
-    const { applyConfigChange } = await import('../services/config-applier.ts');
-
-    const pipelineYaml = `name: test-pipe
-version: 1
-trigger:
-  type: manual
-nodes:
-  do-thing:
-    skill: test
-    action: run
-connections: []
-enabled: true`;
-
-    const result = await applyConfigChange(deps, {
-      changeId: 'test-1',
-      action: 'create',
-      resourceType: 'pipeline',
-      resourceName: 'test-pipe',
-      content: pipelineYaml,
-    });
-
-    expect(result.success).toBe(true);
-    expect(savePipeline).toHaveBeenCalledWith('test-pipe', pipelineYaml);
-  });
-
-  it('should call deletePipeline for pipeline delete', async () => {
-    const deletePipeline = vi.fn().mockReturnValue(true);
-    const deps = {
-      eventBus: { emit: vi.fn(), on: vi.fn(), off: vi.fn() },
-      pipelineEngine: { savePipeline: vi.fn(), deletePipeline },
-      suiteScaffolder: { scaffoldSuite: vi.fn() },
-      namedAgentStore: { createAgent: vi.fn(), updateAgent: vi.fn(), deleteAgent: vi.fn(), getAgentByName: vi.fn() },
-      scheduler: { addSchedule: vi.fn(), removeSchedule: vi.fn(), getSchedules: vi.fn().mockReturnValue([]) },
-    };
-
-    const { applyConfigChange } = await import('../services/config-applier.ts');
-
-    const result = await applyConfigChange(deps, {
-      changeId: 'test-2',
-      action: 'delete',
-      resourceType: 'pipeline',
-      resourceName: 'old-pipe',
-    });
-
-    expect(result.success).toBe(true);
-    expect(deletePipeline).toHaveBeenCalledWith('old-pipe');
-  });
-
   it('should call scaffoldSuite for suite create', async () => {
     const scaffoldSuite = vi.fn().mockReturnValue({ suitePath: '/suites/new-suite' });
     const deps = {
       eventBus: { emit: vi.fn(), on: vi.fn(), off: vi.fn() },
-      pipelineEngine: { savePipeline: vi.fn(), deletePipeline: vi.fn() },
       suiteScaffolder: { scaffoldSuite },
       namedAgentStore: { createAgent: vi.fn(), updateAgent: vi.fn(), deleteAgent: vi.fn(), getAgentByName: vi.fn() },
       scheduler: { addSchedule: vi.fn(), removeSchedule: vi.fn(), getSchedules: vi.fn().mockReturnValue([]) },
@@ -213,7 +154,6 @@ enabled: true`;
     const createAgent = vi.fn().mockResolvedValue({ id: 'a1', name: 'test-agent' });
     const deps = {
       eventBus: { emit: vi.fn(), on: vi.fn(), off: vi.fn() },
-      pipelineEngine: { savePipeline: vi.fn(), deletePipeline: vi.fn() },
       suiteScaffolder: { scaffoldSuite: vi.fn() },
       namedAgentStore: { createAgent, updateAgent: vi.fn(), deleteAgent: vi.fn(), getAgentByName: vi.fn() },
       scheduler: { addSchedule: vi.fn(), removeSchedule: vi.fn(), getSchedules: vi.fn().mockReturnValue([]) },
@@ -237,7 +177,6 @@ enabled: true`;
     const addSchedule = vi.fn();
     const deps = {
       eventBus: { emit: vi.fn(), on: vi.fn(), off: vi.fn() },
-      pipelineEngine: { savePipeline: vi.fn(), deletePipeline: vi.fn() },
       suiteScaffolder: { scaffoldSuite: vi.fn() },
       namedAgentStore: { createAgent: vi.fn(), updateAgent: vi.fn(), deleteAgent: vi.fn(), getAgentByName: vi.fn() },
       scheduler: { addSchedule, removeSchedule: vi.fn(), getSchedules: vi.fn().mockReturnValue([]) },
@@ -260,7 +199,6 @@ enabled: true`;
   it('should return error when content is missing for create', async () => {
     const deps = {
       eventBus: { emit: vi.fn(), on: vi.fn(), off: vi.fn() },
-      pipelineEngine: { savePipeline: vi.fn(), deletePipeline: vi.fn() },
       suiteScaffolder: { scaffoldSuite: vi.fn() },
       namedAgentStore: { createAgent: vi.fn(), updateAgent: vi.fn(), deleteAgent: vi.fn(), getAgentByName: vi.fn() },
       scheduler: { addSchedule: vi.fn(), removeSchedule: vi.fn(), getSchedules: vi.fn().mockReturnValue([]) },
@@ -271,7 +209,7 @@ enabled: true`;
     const result = await applyConfigChange(deps, {
       changeId: 'test-6',
       action: 'create',
-      resourceType: 'pipeline',
+      resourceType: 'agent',
       resourceName: 'empty',
     });
 

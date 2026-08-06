@@ -2,7 +2,6 @@ import type { FastifyInstance } from 'fastify';
 import type { ScheduleEngine } from '../../scheduler/schedule-engine.ts';
 import type { AgentManager } from '../../agent-manager/agent-manager.ts';
 import type { PendingApprovals } from '../../permission-engine/pending-approvals.ts';
-import type { PipelineStore } from '../../pipeline-engine/pipeline-store.ts';
 import type { DatabaseInterface } from '@raven/shared';
 import type { LifeDashboardData } from '@raven/shared';
 
@@ -13,7 +12,6 @@ interface DashboardDeps {
   scheduleEngine: ScheduleEngine;
   agentManager: AgentManager;
   pendingApprovals: PendingApprovals;
-  pipelineStore?: PipelineStore;
   db?: DatabaseInterface;
 }
 
@@ -31,7 +29,6 @@ interface CountRow {
 
 // eslint-disable-next-line max-lines-per-function -- contains one large route handler aggregating multiple data sources
 export function registerDashboardRoutes(app: FastifyInstance, deps: DashboardDeps): void {
-  // eslint-disable-next-line max-lines-per-function, complexity -- aggregates data from multiple sources with conditional guards
   app.get('/api/dashboard/life', async (): Promise<LifeDashboardData> => {
     // Autonomous actions today
     const todayMidnight = new Date();
@@ -39,7 +36,6 @@ export function registerDashboardRoutes(app: FastifyInstance, deps: DashboardDep
     const todayMs = todayMidnight.getTime();
 
     let autonomousActionsCount = 0;
-    let pipelinesCompleted = 0;
 
     if (deps.db) {
       const taskRow = deps.db.get<CountRow>(
@@ -47,16 +43,9 @@ export function registerDashboardRoutes(app: FastifyInstance, deps: DashboardDep
         todayMs,
       );
       autonomousActionsCount = taskRow?.count ?? 0;
-
-      const pipelineRow = deps.db.get<CountRow>(
-        "SELECT COUNT(*) as count FROM pipeline_runs WHERE status = 'completed' AND completed_at >= ?",
-        new Date(todayMs).toISOString(),
-      );
-      pipelinesCompleted = pipelineRow?.count ?? 0;
     }
 
-    // Active pipelines
-    const globalStats = deps.pipelineStore?.getGlobalStats(todayMs);
+    // Active schedules
     const activeCount = deps.scheduleEngine.getActiveCount();
 
     // Pending approvals — query() already filters WHERE resolution IS NULL
@@ -96,9 +85,8 @@ export function registerDashboardRoutes(app: FastifyInstance, deps: DashboardDep
     return {
       today: {
         autonomousActionsCount,
-        pipelinesCompleted: pipelinesCompleted || (globalStats?.succeeded ?? 0),
       },
-      pipelines: {
+      schedules: {
         activeCount,
       },
       pendingApprovalsCount,

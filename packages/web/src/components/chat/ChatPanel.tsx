@@ -1,33 +1,9 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useChat, type ChatMessage } from '@/hooks/useChat';
 import { Markdown } from '@/components/ui/Markdown';
-import { PipelinePreview } from './PipelinePreview';
 
-const PIPELINE_KEYS = ['name:', 'trigger:', 'nodes:', 'connections:'];
-const MIN_PIPELINE_KEYS = 3;
-
-interface YamlSplit {
-  before: string;
-  yaml: string;
-  after: string;
-}
-
-function splitPipelineYaml(content: string): YamlSplit | null {
-  const match = /```ya?ml\n([\s\S]*?)```/.exec(content);
-  if (!match) return null;
-  const yaml = match[1].trim();
-  const matchedKeys = PIPELINE_KEYS.filter((k) => yaml.includes(k));
-  if (matchedKeys.length < MIN_PIPELINE_KEYS) return null;
-  return {
-    before: content.slice(0, match.index).trim(),
-    yaml,
-    after: content.slice(match.index + match[0].length).trim(),
-  };
-}
-
-// eslint-disable-next-line max-lines-per-function -- chat panel with message list, input, and controls
 export function ChatPanel({
   projectId,
   sessionId,
@@ -40,7 +16,6 @@ export function ChatPanel({
     sessionId,
   });
   const [input, setInput] = useState('');
-  const [dismissedYaml, setDismissedYaml] = useState<Set<string>>(new Set());
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -54,10 +29,6 @@ export function ChatPanel({
     setInput('');
   };
 
-  const handleDismissYaml = useCallback((msgId: string) => {
-    setDismissedYaml((prev) => new Set(prev).add(msgId));
-  }, []);
-
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -68,12 +39,7 @@ export function ChatPanel({
         )}
         {!loading && messages.length === 0 && <EmptyState />}
         {messages.map((msg) => (
-          <MessageBubble
-            key={msg.id}
-            message={msg}
-            dismissed={dismissedYaml.has(msg.id)}
-            onDismissYaml={() => handleDismissYaml(msg.id)}
-          />
+          <MessageBubble key={msg.id} message={msg} />
         ))}
         <div ref={bottomRef} />
       </div>
@@ -162,33 +128,6 @@ function ThinkingBubble({ content }: { content: string }) {
   );
 }
 
-function MarkdownBlock({ content }: { content: string }) {
-  return (
-    <div
-      className="max-w-[80%] px-4 py-2 rounded-lg text-sm"
-      style={{
-        background: 'var(--bg-card)',
-        color: 'var(--text)',
-        border: '1px solid var(--border)',
-      }}
-    >
-      <Markdown content={content} />
-    </div>
-  );
-}
-
-function PipelineYamlBubble({ split, onDismiss }: { split: YamlSplit; onDismiss: () => void }) {
-  return (
-    <div className="flex justify-start">
-      <div className="max-w-[80%] w-full space-y-2">
-        {split.before && <MarkdownBlock content={split.before} />}
-        <PipelinePreview yaml={split.yaml} onDismiss={onDismiss} />
-        {split.after && <MarkdownBlock content={split.after} />}
-      </div>
-    </div>
-  );
-}
-
 function ContentBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === 'user';
   return (
@@ -207,22 +146,10 @@ function ContentBubble({ message }: { message: ChatMessage }) {
   );
 }
 
-function MessageBubble({
-  message,
-  dismissed,
-  onDismissYaml,
-}: {
-  message: ChatMessage;
-  dismissed: boolean;
-  onDismissYaml: () => void;
-}) {
+function MessageBubble({ message }: { message: ChatMessage }) {
   if (message.role === 'action') return null;
   if (message.role === 'thinking') return <ThinkingBubble content={message.content} />;
 
-  const isUser = message.role === 'user';
-  const split = !isUser && !dismissed ? splitPipelineYaml(message.content) : null;
-
-  if (split) return <PipelineYamlBubble split={split} onDismiss={onDismissYaml} />;
   return <ContentBubble message={message} />;
 }
 
