@@ -7,6 +7,7 @@ import { buildKnowledgeTools } from './tools/knowledge.ts';
 import { buildValidationTools } from './tools/validation.ts';
 import { buildSystemTools } from './tools/system.ts';
 import { buildEscalationTools } from './tools/escalation.ts';
+import { buildScaffoldTools } from './tools/scaffold.ts';
 import type { RavenMcpDeps } from './types.ts';
 
 export type { RavenMcpDeps } from './types.ts';
@@ -23,6 +24,7 @@ export function createRavenMcp(
     ...buildValidationTools(deps, scope),
     ...buildSystemTools(deps, scope),
     ...buildEscalationTools(deps, scope),
+    ...buildScaffoldTools(deps, scope),
   ];
 
   const scopedTools = allTools.filter((t) => isToolAllowed(scope, t.name));

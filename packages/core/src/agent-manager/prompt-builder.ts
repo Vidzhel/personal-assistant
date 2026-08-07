@@ -13,6 +13,7 @@ const MCP_TOOL_INSTRUCTIONS = [
   '3. For DELEGATED: delegate to a sub-agent, then call send_message with the result',
   '4. For PLANNED: call create_task_tree with the plan and tasks, then call send_message to inform the user',
   'Never output raw JSON task trees. Always use the create_task_tree tool.',
+  'When the owner asks you to learn a new behavior, schedule, or skill, use create_agent/create_template/create_schedule/create_skill — they go live immediately (no restart) and are git-committed.',
 ].join('\n');
 
 // Stable per-turn prompt layers for orchestrator chat turns (see the module

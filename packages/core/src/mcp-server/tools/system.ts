@@ -51,7 +51,7 @@ export function buildSystemTools(
 
   const createAgent = tool(
     'create_agent',
-    'Create a new named agent.',
+    'Create a new named agent. Give it `skills` from the capability library so it can actually use MCP tools/actions — an agent with no skills can only chat.',
     {
       name: z
         .string()
@@ -61,10 +61,22 @@ export function buildSystemTools(
       instructions: z.string().optional().describe('System instructions for the agent'),
       model: z.enum(['haiku', 'sonnet', 'opus']).optional().describe('Model to use'),
       maxTurns: z.number().int().min(1).max(MAX_TURNS).optional().describe('Max turns (1-100)'),
+      skills: z
+        .array(z.string())
+        .optional()
+        .describe('Capability library skill names this agent can use (see list of skills)'),
     },
     async (args) => {
       if (!deps.namedAgentStore) {
         return errorResult('namedAgentStore not available');
+      }
+      const skills = args.skills ?? [];
+      if (deps.capabilityLibrary) {
+        const known = new Set(deps.capabilityLibrary.getSkillNames());
+        const unknown = skills.filter((s) => !known.has(s));
+        if (unknown.length > 0) {
+          return errorResult(`Unknown skill(s): ${unknown.join(', ')}`);
+        }
       }
       const agent = await deps.namedAgentStore.createAgent({
         name: args.name,
@@ -72,7 +84,7 @@ export function buildSystemTools(
         instructions: args.instructions,
         model: args.model,
         maxTurns: args.maxTurns,
-        skills: [],
+        skills,
       });
       return okResult({ agentId: agent.id });
     },

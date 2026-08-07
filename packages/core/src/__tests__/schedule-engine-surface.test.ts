@@ -102,4 +102,58 @@ describe('schedule engine surface', () => {
     expect(engine.getActiveCount()).toBe(1);
     engine.stop();
   });
+
+  it('reload() picks up a newly added schedule without recreating the engine', () => {
+    const { engine } = makeEngine();
+    engine.start();
+    expect(engine.getActiveCount()).toBe(1);
+
+    // reload() never touches jobRegistry/taskStore/schedulePrefs/
+    // scheduleFireLog (only deps.schedules) — reusing the "has-job" ref
+    // that makeEngine() already registered is enough to prove a brand new
+    // schedule definition gets picked up live.
+    engine.reload([
+      ...defs(),
+      {
+        name: 'brand-new',
+        cron: '0 * * * *',
+        timezone: 'UTC',
+        enabled: true,
+        params: {},
+        run: { kind: 'job', ref: 'has-job' },
+      },
+    ]);
+
+    const list = engine.list();
+    expect(list.find((s) => s.name === 'brand-new')).toBeDefined();
+    expect(engine.getActiveCount()).toBe(2);
+    engine.stop();
+  });
+
+  it('reload() drops a schedule that is no longer in the new list', () => {
+    const { engine } = makeEngine();
+    engine.start();
+    expect(engine.getActiveCount()).toBe(1);
+
+    engine.reload([]);
+
+    expect(engine.list()).toHaveLength(0);
+    expect(engine.getActiveCount()).toBe(0);
+    engine.stop();
+  });
+
+  it('reload() preserves enabled-overrides made via schedulePrefs', () => {
+    const { engine } = makeEngine();
+    engine.start();
+    engine.setEnabled('has-job', false);
+    expect(engine.getActiveCount()).toBe(0);
+
+    engine.reload(defs());
+
+    // The override was set on the shared schedulePrefs fake, which reload()
+    // never touches — the schedule stays disabled across the resync.
+    expect(engine.list().find((s) => s.name === 'has-job')!.enabled).toBe(false);
+    expect(engine.getActiveCount()).toBe(0);
+    engine.stop();
+  });
 });

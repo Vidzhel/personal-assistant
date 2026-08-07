@@ -49,6 +49,21 @@ describe('scope', () => {
       expect(isToolAllowed(scope, 'classify_request')).toBe(true);
     });
 
+    it('allows the extension tools for chat scope ("Raven, learn to do X")', () => {
+      const scope: ScopeContext = { role: 'chat', sessionId: 'sess-1' };
+      for (const toolName of [
+        'create_agent',
+        'update_agent',
+        'list_projects',
+        'create_template',
+        'create_schedule',
+        'create_skill',
+        'reload_registries',
+      ]) {
+        expect(isToolAllowed(scope, toolName)).toBe(true);
+      }
+    });
+
     it('allows submit_validation_score for validation scope', () => {
       const scope: ScopeContext = { role: 'validation' };
       expect(isToolAllowed(scope, 'submit_validation_score')).toBe(true);

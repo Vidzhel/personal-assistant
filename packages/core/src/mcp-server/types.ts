@@ -5,6 +5,11 @@ import type { KnowledgeStore } from '../knowledge-engine/knowledge-store.ts';
 import type { RetrievalEngine } from '../knowledge-engine/retrieval.ts';
 import type { NamedAgentStore } from '../agent-registry/yaml-named-agent-store.ts';
 import type { ProjectRegistry } from '../project-registry/project-registry.ts';
+import type { CapabilityLibrary } from '../capability-library/capability-library.ts';
+import type {
+  ScaffoldAndActivateFn,
+  ReloadRegistriesResult,
+} from '../scaffolding/scaffold-and-activate.ts';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { DatabaseInterface } from '@raven/shared';
 import type { PendingApprovals } from '../permission-engine/pending-approvals.ts';
@@ -17,6 +22,14 @@ export interface RavenMcpDeps {
   retrievalEngine?: RetrievalEngine;
   namedAgentStore?: NamedAgentStore;
   projectRegistry?: ProjectRegistry;
+  capabilityLibrary?: CapabilityLibrary;
+  /** Write -> reload registry -> git-commit for one artifact kind. Powers
+   * the create_template/create_schedule/create_skill MCP tools (chat scope)
+   * — see scaffolding/scaffold-and-activate.ts. */
+  scaffoldAndActivate?: ScaffoldAndActivateFn;
+  /** Manual escape hatch behind reload_registries — reloads every registry
+   * from disk without writing anything new. */
+  reloadRegistries?: () => Promise<ReloadRegistriesResult>;
   eventBus: EventBus;
   db?: DatabaseInterface;
   pendingApprovals?: PendingApprovals;

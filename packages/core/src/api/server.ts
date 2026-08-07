@@ -59,6 +59,7 @@ import type { TaskExecutionEngine } from '../task-execution/task-execution-engin
 import type { TemplateRegistry } from '../template-engine/template-registry.ts';
 import type { TemplateScheduler } from '../template-engine/template-scheduler.ts';
 import type { ScaffoldingApi } from '../scaffolding/scaffolding-api.ts';
+import type { ScaffoldAndActivateFn } from '../scaffolding/scaffold-and-activate.ts';
 import { registerScaffoldingRoutes } from '../scaffolding/scaffolding-routes.ts';
 
 const log = createLogger('api');
@@ -99,6 +100,7 @@ export interface ApiDeps {
   templateRegistry?: TemplateRegistry;
   templateScheduler?: TemplateScheduler;
   scaffoldingApi?: ScaffoldingApi;
+  scaffoldAndActivate?: ScaffoldAndActivateFn;
 }
 
 // eslint-disable-next-line max-lines-per-function, complexity -- server setup registers all route groups
@@ -185,7 +187,10 @@ export async function createApiServer(
 
   // Scaffolding API (project domain creation)
   if (deps.scaffoldingApi) {
-    registerScaffoldingRoutes(app, deps.scaffoldingApi);
+    registerScaffoldingRoutes(app, {
+      scaffoldingApi: deps.scaffoldingApi,
+      scaffoldAndActivate: deps.scaffoldAndActivate,
+    });
   }
 
   // Named agents management

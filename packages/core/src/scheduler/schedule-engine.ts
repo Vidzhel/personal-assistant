@@ -124,6 +124,11 @@ export interface ScheduleEngine {
   runNow(name: string): Promise<boolean>;
   getActiveCount(): number;
   getUpcoming(limit: number): Array<{ name: string; scheduledAt: string; kind: string }>;
+  /** Full stop/rebuild/restart against a fresh schedule list — the cheapest
+   * correct resync after a scaffolded schedule changes the definitions on
+   * disk. jobRegistry/taskStore/schedulePrefs/scheduleFireLog are untouched,
+   * so fire-log history and enabled-overrides survive the reload. */
+  reload(schedules: ScheduleYaml[]): void;
 }
 
 type EntryMap = Map<string, { def: ScheduleYaml; job: Cron | null }>;
@@ -214,17 +219,32 @@ function buildUpcoming(
     .map((x) => ({ name: x.name, scheduledAt: x.next.toISOString(), kind: x.kind }));
 }
 
+/** Stop every running cron, rebuild `entries` from `deps.schedules`, and
+ * start whichever ones are registered + enabled. Shared by start() (initial
+ * boot) and reload() (a scaffolded schedule changed the definitions) — both
+ * are "throw away and rebuild," which is simpler and safer than diffing
+ * added/removed/changed schedules for what is, in practice, a handful of
+ * cron jobs. */
+function resync(entries: EntryMap, deps: ScheduleEngineDeps): number {
+  for (const name of entries.keys()) stopEntry(name, entries);
+  entries.clear();
+  for (const def of deps.schedules) entries.set(def.name, { def, job: null });
+  for (const name of entries.keys()) startEntry(name, entries, deps);
+  return [...entries.values()].filter((e) => e.job).length;
+}
+
 export function createScheduleEngine(deps: ScheduleEngineDeps): ScheduleEngine {
   const entries: EntryMap = new Map();
 
   return {
     start(): void {
-      for (const name of entries.keys()) stopEntry(name, entries);
-      entries.clear();
-      for (const def of deps.schedules) entries.set(def.name, { def, job: null });
-      for (const name of entries.keys()) startEntry(name, entries, deps);
-      const active = [...entries.values()].filter((e) => e.job).length;
+      const active = resync(entries, deps);
       log.info(`Schedule engine started with ${active} active schedules`);
+    },
+    reload(schedules: ScheduleYaml[]): void {
+      deps.schedules = schedules;
+      const active = resync(entries, deps);
+      log.info(`Schedule engine reloaded with ${active} active schedules`);
     },
     stop(): void {
       for (const name of entries.keys()) stopEntry(name, entries);

@@ -28,6 +28,17 @@ const SCOPE_TOOLS: Record<ScopeContext['role'], Set<string>> = {
     'get_session_history',
     'search_knowledge',
     'list_agents',
+    'list_projects',
+    // Extension tools — "Raven, learn to do X" in chat. create_agent/
+    // update_agent already write through namedAgentStore, which hot-reloads
+    // + git-commits on its own (agent:config:* events -> ConfigCommitter);
+    // the rest go through scaffoldAndActivate (see scaffold-and-activate.ts).
+    'create_agent',
+    'update_agent',
+    'create_template',
+    'create_schedule',
+    'create_skill',
+    'reload_registries',
   ]),
   system: new Set(['*']),
   validation: new Set(['submit_validation_score', 'get_task_context']),

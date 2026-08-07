@@ -36,6 +36,10 @@ import { ProjectRegistry } from './project-registry/project-registry.ts';
 import { createAgentYamlStore } from './project-registry/agent-yaml-store.ts';
 import { createConfigCommitter } from './agent-registry/config-committer.ts';
 import { createScaffoldingApi } from './scaffolding/scaffolding-api.ts';
+import {
+  createScaffoldAndActivate,
+  createReloadRegistries,
+} from './scaffolding/scaffold-and-activate.ts';
 import { createKnowledgeStore } from './knowledge-engine/knowledge-store.ts';
 import type { KnowledgeStore } from './knowledge-engine/knowledge-store.ts';
 import { createIngestionProcessor } from './knowledge-engine/ingestion.ts';
@@ -227,7 +231,13 @@ export async function createRaven(
   const agentYamlStore = createAgentYamlStore();
 
   // Create scaffolding API (project domain creation)
-  const scaffoldingApi = createScaffoldingApi({ projectsDir, projectRegistry, agentYamlStore });
+  const scaffoldingApi = createScaffoldingApi({
+    projectsDir,
+    projectRegistry,
+    agentYamlStore,
+    capabilityLibrary,
+    libraryDir,
+  });
 
   // One project store: reconcile the DB cache against the filesystem
   // registry — link/create rows for every directory, scaffold or drop
@@ -408,6 +418,7 @@ export async function createRaven(
     sessionManager,
     namedAgentStore,
     projectRegistry,
+    capabilityLibrary,
     db: dbInterface,
     pendingApprovals,
   };
@@ -662,6 +673,27 @@ export async function createRaven(
   });
   scheduleEngine.start();
 
+  // Scaffold-and-activate: the single write->reload->commit path per
+  // artifact kind (project/agent/template/schedule/skill) that makes
+  // chat-driven "Raven, learn to do X" produce a live, git-committed
+  // artifact with no restart. Built only now that scheduleEngine exists
+  // (schedule-kind activation resyncs it) — added to ravenMcpDeps via
+  // Object.assign, same lazy-extension pattern as knowledgeStore below,
+  // since AgentManager (which holds ravenMcpDeps) was already constructed
+  // above per the INVARIANT comment on ravenMcpDeps's first assignment.
+  const scaffoldAndActivateDeps = {
+    scaffoldingApi,
+    projectRegistry,
+    templateRegistry,
+    scheduleEngine,
+    capabilityLibrary,
+    projectsDir,
+    libraryDir,
+  };
+  const scaffoldAndActivate = createScaffoldAndActivate(scaffoldAndActivateDeps);
+  const reloadRegistries = createReloadRegistries(scaffoldAndActivateDeps);
+  Object.assign(ravenMcpDeps, { scaffoldAndActivate, reloadRegistries });
+
   // 11b. Init idle detector + register session:idle handler — sessionRetrospective
   // is unconditionally constructed now (Phase 3), so this always wires up.
   const idleDetector = createIdleDetector({ eventBus, config });
@@ -738,6 +770,7 @@ export async function createRaven(
         templateRegistry,
         templateScheduler,
         scaffoldingApi,
+        scaffoldAndActivate,
       },
       config.RAVEN_PORT,
     );

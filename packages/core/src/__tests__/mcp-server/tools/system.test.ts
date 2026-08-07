@@ -207,6 +207,39 @@ describe('buildSystemTools', () => {
       expect(result.isError).toBe(true);
       expect((result.content[0] as any).text).toContain('namedAgentStore');
     });
+
+    it('passes a supplied skills list through to createAgent', async () => {
+      const created = makeAgent({ id: 'new-agent-id', name: 'my-bot', skills: ['gmail'] });
+      (deps.namedAgentStore!.createAgent as any).mockResolvedValue(created);
+      deps.capabilityLibrary = {
+        getSkillNames: vi.fn().mockReturnValue(['gmail', 'ticktick']),
+      } as any;
+
+      const tools = buildSystemTools(deps, scope);
+      const tool = tools.find((t) => t.name === 'create_agent');
+
+      const result = await tool!.handler({ name: 'my-bot', skills: ['gmail'] }, {});
+
+      expect(deps.namedAgentStore!.createAgent).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'my-bot', skills: ['gmail'] }),
+      );
+      expect(result.isError).toBeFalsy();
+    });
+
+    it('rejects an unknown skill name when capabilityLibrary is available', async () => {
+      deps.capabilityLibrary = {
+        getSkillNames: vi.fn().mockReturnValue(['gmail']),
+      } as any;
+
+      const tools = buildSystemTools(deps, scope);
+      const tool = tools.find((t) => t.name === 'create_agent');
+
+      const result = await tool!.handler({ name: 'my-bot', skills: ['not-a-real-skill'] }, {});
+
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as any).text).toContain('not-a-real-skill');
+      expect(deps.namedAgentStore!.createAgent).not.toHaveBeenCalled();
+    });
   });
 
   describe('update_agent', () => {
