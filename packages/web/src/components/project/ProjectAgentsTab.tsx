@@ -98,15 +98,15 @@ function AgentMiniCard({ agent, badge }: { agent: NamedAgentRecord; badge: 'own'
           {agent.description}
         </p>
       )}
-      {agent.suites && agent.suites.length > 0 && (
+      {agent.skills.length > 0 && (
         <div className="flex flex-wrap gap-1 mt-2">
-          {agent.suites.map((s) => (
+          {agent.skills.map((s) => (
             <span
-              key={s.name}
+              key={s}
               className="text-xs px-1.5 py-0.5 rounded"
               style={{ background: 'var(--bg-hover)', color: 'var(--accent)' }}
             >
-              {s.displayName}
+              {s}
             </span>
           ))}
         </div>

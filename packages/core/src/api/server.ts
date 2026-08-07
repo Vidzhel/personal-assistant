@@ -46,7 +46,6 @@ import type { ProjectRegistry } from '../project-registry/project-registry.ts';
 import type { AgentYamlStore } from '../project-registry/agent-yaml-store.ts';
 import { registerSSERoutes } from './sse/stream.ts';
 import { registerWebSocketHandler } from './ws/handler.ts';
-import { registerConfigChangesRoutes, type ConfigChangeResolver } from './routes/config-changes.ts';
 import { registerConfigHistoryRoutes } from './routes/config-history.ts';
 import { registerDashboardRoutes } from './routes/dashboard.ts';
 import { registerProjectKnowledgeRoutes } from './routes/project-knowledge.ts';
@@ -86,7 +85,6 @@ export interface ApiDeps {
   unsnoozableCategories?: string[];
   taskStore?: TaskStore;
   namedAgentStore?: NamedAgentStore;
-  configChangeResolver?: ConfigChangeResolver;
   sessionRetrospective?: SessionRetrospective;
   dataDir?: string;
   projectRegistry?: ProjectRegistry;
@@ -211,15 +209,6 @@ export async function createApiServer(
     registerNotificationPreferencesRoutes(app, {
       db: deps.db,
       unsnoozableCategories: deps.unsnoozableCategories,
-    });
-  }
-
-  // Config changes management
-  if (deps.db) {
-    registerConfigChangesRoutes(app, {
-      db: deps.db,
-      eventBus: deps.eventBus,
-      resolver: deps.configChangeResolver,
     });
   }
 

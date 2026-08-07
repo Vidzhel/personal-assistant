@@ -70,11 +70,11 @@ export function AgentCard({ agent }: { agent: NamedAgentRecord }) {
         </p>
       )}
 
-      {agent.suites && agent.suites.length > 0 && (
+      {agent.skills.length > 0 ? (
         <div className="flex flex-wrap gap-1">
-          {agent.suites.map((s) => (
+          {agent.skills.map((s) => (
             <span
-              key={s.name}
+              key={s}
               className="text-xs px-2 py-0.5 rounded-full"
               style={{
                 background: 'var(--accent-bg)',
@@ -83,15 +83,13 @@ export function AgentCard({ agent }: { agent: NamedAgentRecord }) {
                 opacity: 0.8,
               }}
             >
-              {s.displayName}
+              {s}
             </span>
           ))}
         </div>
-      )}
-
-      {agent.suiteIds.length === 0 && (
+      ) : (
         <p className="text-xs italic" style={{ color: 'var(--text-muted)' }}>
-          All suites (unrestricted)
+          All skills (unrestricted)
         </p>
       )}
 

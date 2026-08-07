@@ -17,9 +17,6 @@
  *   s:k:{cat}      → keep (dismiss snooze suggestion)
  *   s:m:{cat}      → mute category indefinitely
  *   s:u:{id}       → unsnooze (remove snooze)
- *   c:a:{id}       → config change apply
- *   c:e:{id}       → config change edit
- *   c:d:{id}       → config change discard
  *   noop           → disabled button (no action)
  */
 
@@ -30,7 +27,6 @@ import {
   type EventBusInterface,
   type LoggerInterface,
   type DatabaseInterface,
-  type ConfigChangeResolver,
 } from '@raven/shared';
 import {
   createSnooze,
@@ -45,7 +41,7 @@ import {
 import { getInsightById, updateInsightStatus } from '../../insight-engine/insight-store.ts';
 
 export interface CallbackAction {
-  domain: 'task' | 'approval' | 'email' | 'email-reply' | 'snooze' | 'knowledge-insight' | 'config';
+  domain: 'task' | 'approval' | 'email' | 'email-reply' | 'snooze' | 'knowledge-insight';
   action: string;
   target: string;
   args: string[];
@@ -65,8 +61,6 @@ export interface PendingApprovalInfo {
   resolution?: 'approved' | 'denied';
   sessionId?: string;
 }
-
-export type { ConfigChangeResolver };
 
 export interface CallbackDeps {
   eventBus: EventBusInterface;
@@ -95,12 +89,11 @@ export interface CallbackDeps {
       details?: string;
     }): void;
   };
-  configChangeResolver?: ConfigChangeResolver;
 }
 
 const DOMAIN_MAP: Record<
   string,
-  'task' | 'approval' | 'email' | 'email-reply' | 'snooze' | 'knowledge-insight' | 'config'
+  'task' | 'approval' | 'email' | 'email-reply' | 'snooze' | 'knowledge-insight'
 > = {
   t: 'task',
   a: 'approval',
@@ -108,7 +101,6 @@ const DOMAIN_MAP: Record<
   er: 'email-reply',
   s: 'snooze',
   ki: 'knowledge-insight',
-  c: 'config',
 };
 
 const SNOOZE_ACTIONS: Record<string, string> = {
@@ -148,12 +140,6 @@ const KI_ACTIONS: Record<string, string> = {
   n: 'not-useful',
 };
 
-const CONFIG_ACTIONS: Record<string, string> = {
-  a: 'apply',
-  e: 'edit',
-  d: 'discard',
-};
-
 const MAX_CALLBACK_BYTES = 64;
 const MIN_CALLBACK_PARTS = 3; // domain:action:target
 
@@ -179,7 +165,6 @@ export function parseCallbackData(data: string): CallbackAction | null {
     'email-reply': EMAIL_REPLY_ACTIONS,
     snooze: SNOOZE_ACTIONS,
     'knowledge-insight': KI_ACTIONS,
-    config: CONFIG_ACTIONS,
   };
   const actionMap = actionMaps[domain];
   const action = actionMap[actionPrefix];
@@ -213,7 +198,11 @@ function handleTaskAction(action: CallbackAction, deps: CallbackDeps): CallbackR
   deps.agentManager
     .executeApprovedAction({
       actionName: `task:${action.action}`,
-      skillName: 'task-management',
+      // Library skill name (library/skills/productivity/task-management/ticktick/config.json)
+      // — resolves MCP servers/sub-agents via CapabilityLibrary.collectMcpServers
+      // in executeApprovedAction; the pre-library suite name ('task-management')
+      // resolves to nothing there.
+      skillName: 'ticktick',
       details: prompt,
     })
     .then((result) => {
@@ -384,7 +373,9 @@ function handleEmailAction(action: CallbackAction, deps: CallbackDeps): Callback
   deps.agentManager
     .executeApprovedAction({
       actionName: `email:${action.action}`,
-      skillName: 'email',
+      // Library skill name (library/skills/communication/email/gmail/config.json)
+      // — see the ticktick comment above for why this can't stay 'email'.
+      skillName: 'gmail',
       details: prompt,
     })
     .then((result) => {
@@ -700,69 +691,6 @@ function handleKnowledgeInsightAction(action: CallbackAction, deps: CallbackDeps
   return { success: false, message: `Unknown knowledge-insight action: ${action.action}` };
 }
 
-function resolveConfigChangeAction(
-  deps: CallbackDeps,
-  request: { shortId: string; resolveAction: 'apply' | 'discard'; successLabel: string },
-): CallbackResult {
-  const { shortId, resolveAction, successLabel } = request;
-  if (!deps.configChangeResolver) {
-    return { success: false, message: 'Config change resolver not available' };
-  }
-
-  const result = deps.configChangeResolver.resolve(shortId, resolveAction);
-  if (!result.success) {
-    return { success: false, message: result.message };
-  }
-
-  return {
-    success: true,
-    message: successLabel,
-    updatedKeyboard: [[{ text: successLabel, callback_data: 'noop' }]],
-  };
-}
-
-function handleConfigAction(action: CallbackAction, deps: CallbackDeps): CallbackResult {
-  const shortId = action.target;
-
-  if (action.action === 'apply') {
-    return resolveConfigChangeAction(deps, {
-      shortId,
-      resolveAction: 'apply',
-      successLabel: 'Applied \u2713',
-    });
-  }
-
-  if (action.action === 'edit') {
-    deps.eventBus.emit({
-      id: generateId(),
-      timestamp: Date.now(),
-      source: 'telegram-callback',
-      type: 'notification',
-      payload: {
-        channel: 'telegram' as const,
-        title: 'Edit Config Change',
-        body: 'Describe the changes you want to make to this configuration.',
-        topicName: 'Raven System',
-      },
-    });
-
-    return {
-      success: true,
-      message: 'Describe your changes:',
-    };
-  }
-
-  if (action.action === 'discard') {
-    return resolveConfigChangeAction(deps, {
-      shortId,
-      resolveAction: 'discard',
-      successLabel: 'Discarded \u2717',
-    });
-  }
-
-  return { success: false, message: `Unknown config action: ${action.action}` };
-}
-
 export function handleCallback(action: CallbackAction, deps: CallbackDeps): CallbackResult {
   if (action.domain === 'task') {
     return handleTaskAction(action, deps);
@@ -778,9 +706,6 @@ export function handleCallback(action: CallbackAction, deps: CallbackDeps): Call
   }
   if (action.domain === 'knowledge-insight') {
     return handleKnowledgeInsightAction(action, deps);
-  }
-  if (action.domain === 'config') {
-    return handleConfigAction(action, deps);
   }
   return handleApprovalAction(action, deps);
 }

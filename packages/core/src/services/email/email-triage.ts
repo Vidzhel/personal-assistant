@@ -96,7 +96,10 @@ async function applyLabelAction(
   try {
     await agentManager.executeApprovedAction({
       actionName: 'gmail:label-email',
-      skillName: SUITE_EMAIL,
+      // Library skill name ('gmail'), not the pre-library SUITE_EMAIL label —
+      // executeApprovedAction resolves MCP servers/sub-agents from this via
+      // CapabilityLibrary.collectMcpServers, which only knows library names.
+      skillName: 'gmail',
       details: `Apply the label "${label}" to email with messageId "${email.messageId}" from "${email.from}" with subject "${email.subject}".`,
     });
     return `label:${label}`;
@@ -115,7 +118,10 @@ async function applyArchiveAction(
   try {
     await agentManager.executeApprovedAction({
       actionName: 'gmail:archive-email',
-      skillName: SUITE_EMAIL,
+      // Library skill name ('gmail'), not the pre-library SUITE_EMAIL label —
+      // executeApprovedAction resolves MCP servers/sub-agents from this via
+      // CapabilityLibrary.collectMcpServers, which only knows library names.
+      skillName: 'gmail',
       details: `Archive the email with messageId "${email.messageId}" from "${email.from}" with subject "${email.subject}".`,
     });
     return 'archive';
@@ -134,7 +140,10 @@ async function applyMarkReadAction(
   try {
     await agentManager.executeApprovedAction({
       actionName: 'gmail:mark-read',
-      skillName: SUITE_EMAIL,
+      // Library skill name ('gmail'), not the pre-library SUITE_EMAIL label —
+      // executeApprovedAction resolves MCP servers/sub-agents from this via
+      // CapabilityLibrary.collectMcpServers, which only knows library names.
+      skillName: 'gmail',
       details: `Mark the email with messageId "${email.messageId}" as read.`,
     });
     return 'markRead';

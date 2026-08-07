@@ -183,7 +183,8 @@ async function fetchOpenTasksJson(agentManager: AgentManagerLike): Promise<strin
   try {
     const fetchResult = await agentManager.executeApprovedAction({
       actionName: 'ticktick:get-tasks',
-      skillName: 'task-management',
+      // Library skill name — see callback-handler.ts's comment on the same fix.
+      skillName: 'ticktick',
       details:
         'Get all open tasks across all projects. Return JSON array with fields: id, projectId, title, content, priority (0=none,1=low,3=medium,5=high), dueDate, startDate, tags, status. Use the get_all_tasks or filter_tasks MCP tool.',
     });
@@ -223,7 +224,8 @@ async function analyzeTasksForRecommendations(
   try {
     const analysisResult = await agentManager.executeApprovedAction({
       actionName: 'ticktick:get-tasks',
-      skillName: 'task-management',
+      // Library skill name — see callback-handler.ts's comment on the same fix.
+      skillName: 'ticktick',
       details: buildAnalysisPrompt(tasksJson),
     });
 
@@ -261,7 +263,8 @@ async function executeRecommendation(
   try {
     const result = await agentManager.executeApprovedAction({
       actionName,
-      skillName: 'task-management',
+      // Library skill name — see callback-handler.ts's comment on the same fix.
+      skillName: 'ticktick',
       details: buildActionPrompt(rec),
     });
 

@@ -61,14 +61,39 @@ export default function SettingsPage() {
       >
         <h2 className="font-semibold">Configuration</h2>
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-          Edit{' '}
+          Capabilities live in{' '}
           <code
             className="font-mono text-xs px-1 py-0.5 rounded"
             style={{ background: 'var(--bg-hover)' }}
           >
-            config/skills.json
+            library/
           </code>{' '}
-          to enable/disable skills.
+          — add or edit a skill's{' '}
+          <code
+            className="font-mono text-xs px-1 py-0.5 rounded"
+            style={{ background: 'var(--bg-hover)' }}
+          >
+            config.json
+          </code>{' '}
+          to change what it declares (MCPs, actions, tiers). See the{' '}
+          <a href="/skills" className="underline" style={{ color: 'var(--accent)' }}>
+            Skills
+          </a>{' '}
+          page for what is currently loaded.
+        </p>
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+          Agents, templates, and schedules are scoped per project under{' '}
+          <code
+            className="font-mono text-xs px-1 py-0.5 rounded"
+            style={{ background: 'var(--bg-hover)' }}
+          >
+            projects/&lt;project&gt;/
+          </code>{' '}
+          — edit the YAML files there directly, or use the{' '}
+          <a href="/agents" className="underline" style={{ color: 'var(--accent)' }}>
+            Agents
+          </a>{' '}
+          page.
         </p>
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
           Edit{' '}

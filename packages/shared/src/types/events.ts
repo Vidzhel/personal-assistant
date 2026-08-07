@@ -1255,13 +1255,6 @@ export interface PendingConfigChangeRow {
   resolved_at: string | null;
 }
 
-export interface ConfigChangeResolver {
-  resolve: (
-    changeId: string,
-    resolution: 'apply' | 'discard',
-  ) => { success: boolean; message: string };
-}
-
 export function mapConfigChangeRow(row: PendingConfigChangeRow): PendingConfigChange {
   return {
     id: row.id,

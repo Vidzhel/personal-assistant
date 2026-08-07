@@ -221,7 +221,10 @@ async function handleReplyStart(event: unknown): Promise<void> {
   try {
     const result = await agentManager.executeApprovedAction({
       actionName: 'gmail:get-email',
-      skillName: SUITE_EMAIL,
+      // Library skill name ('gmail'), not the pre-library SUITE_EMAIL label —
+      // executeApprovedAction resolves MCP servers/sub-agents from this via
+      // CapabilityLibrary.collectMcpServers, which only knows library names.
+      skillName: 'gmail',
       details: prompt,
     });
 
@@ -268,7 +271,10 @@ async function handleReplySend(event: unknown): Promise<void> {
   try {
     const result = await agentManager.executeApprovedAction({
       actionName: 'gmail:reply-email',
-      skillName: SUITE_EMAIL,
+      // Library skill name ('gmail'), not the pre-library SUITE_EMAIL label —
+      // executeApprovedAction resolves MCP servers/sub-agents from this via
+      // CapabilityLibrary.collectMcpServers, which only knows library names.
+      skillName: 'gmail',
       details: sendPrompt,
     });
 
@@ -368,7 +374,10 @@ async function handleReplyEdit(event: unknown): Promise<void> {
   try {
     const result = await agentManager.executeApprovedAction({
       actionName: 'gmail:get-email',
-      skillName: SUITE_EMAIL,
+      // Library skill name ('gmail'), not the pre-library SUITE_EMAIL label —
+      // executeApprovedAction resolves MCP servers/sub-agents from this via
+      // CapabilityLibrary.collectMcpServers, which only knows library names.
+      skillName: 'gmail',
       details: editPrompt,
     });
 

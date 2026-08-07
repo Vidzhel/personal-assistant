@@ -64,7 +64,10 @@ function getAgentManager(): AgentManagerLike | null {
 async function fetchTicktickTasks(agentManager: AgentManagerLike): Promise<TicktickTask[] | null> {
   const fetchResult = await agentManager.executeApprovedAction({
     actionName: 'ticktick:get-tasks',
-    skillName: SUITE_TASK_MANAGEMENT,
+    // Library skill name ('ticktick'), not the pre-library SUITE_TASK_MANAGEMENT
+    // label — executeApprovedAction resolves MCP servers/sub-agents from this
+    // via CapabilityLibrary.collectMcpServers, which only knows library names.
+    skillName: 'ticktick',
     details: 'Fetch all TickTick tasks for sync',
   });
 

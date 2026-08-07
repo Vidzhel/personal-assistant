@@ -175,7 +175,7 @@ describe('autonomous-manager service', () => {
       expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith(
         expect.objectContaining({
           actionName: 'ticktick:get-tasks',
-          skillName: 'task-management',
+          skillName: 'ticktick',
           details: expect.stringContaining('Get all open tasks'),
         }),
       );
@@ -292,7 +292,7 @@ describe('autonomous-manager service', () => {
       expect(updateCall[0]).toEqual(
         expect.objectContaining({
           actionName: 'ticktick:update-task',
-          skillName: 'task-management',
+          skillName: 'ticktick',
         }),
       );
 
@@ -677,7 +677,7 @@ describe('autonomous-manager service', () => {
       expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith(
         expect.objectContaining({
           actionName: 'ticktick:get-tasks',
-          skillName: 'task-management',
+          skillName: 'ticktick',
         }),
       );
 

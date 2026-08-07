@@ -273,7 +273,7 @@ describe('handleCallback', () => {
       expect(result.updatedKeyboard).toEqual([[{ text: 'Done \u2713', callback_data: 'noop' }]]);
       expect(deps.agentManager.executeApprovedAction).toHaveBeenCalledWith({
         actionName: 'task:complete',
-        skillName: 'task-management',
+        skillName: 'ticktick',
         details: expect.stringContaining('tid1'),
       });
     });
@@ -291,7 +291,7 @@ describe('handleCallback', () => {
       expect(result.message).toBe('Snoozed \u2713');
       expect(deps.agentManager.executeApprovedAction).toHaveBeenCalledWith({
         actionName: 'task:snooze',
-        skillName: 'task-management',
+        skillName: 'ticktick',
         details: expect.stringContaining('1 day'),
       });
     });
@@ -307,7 +307,7 @@ describe('handleCallback', () => {
 
       expect(deps.agentManager.executeApprovedAction).toHaveBeenCalledWith({
         actionName: 'task:snooze',
-        skillName: 'task-management',
+        skillName: 'ticktick',
         details: expect.stringContaining('1 week'),
       });
     });
@@ -320,7 +320,7 @@ describe('handleCallback', () => {
       expect(result.message).toBe('Dropped');
       expect(deps.agentManager.executeApprovedAction).toHaveBeenCalledWith({
         actionName: 'task:drop',
-        skillName: 'task-management',
+        skillName: 'ticktick',
         details: expect.stringContaining('tid4'),
       });
     });
@@ -377,7 +377,7 @@ describe('handleCallback', () => {
       expect(result.message).toBe('Archived \u2713');
       expect(deps.agentManager.executeApprovedAction).toHaveBeenCalledWith({
         actionName: 'email:archive',
-        skillName: 'email',
+        skillName: 'gmail',
         details: expect.stringContaining('em2'),
       });
     });
@@ -390,7 +390,7 @@ describe('handleCallback', () => {
       expect(result.message).toBe('Flagged \u2713');
       expect(deps.agentManager.executeApprovedAction).toHaveBeenCalledWith({
         actionName: 'email:flag',
-        skillName: 'email',
+        skillName: 'gmail',
         details: expect.stringContaining('em3'),
       });
     });

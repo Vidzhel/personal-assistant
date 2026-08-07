@@ -171,7 +171,8 @@ async function createTasksFromItems(
     try {
       const result = await agentManager.executeApprovedAction({
         actionName: 'ticktick:create-task',
-        skillName: 'task-management',
+        // Library skill name — see callback-handler.ts's comment on the same fix.
+        skillName: 'ticktick',
         details: prompt,
       });
       if (result.success) {
@@ -197,7 +198,8 @@ async function fetchEmailForActionItems(
   try {
     const fetchResult = await agentManager.executeApprovedAction({
       actionName: 'gmail:get-email',
-      skillName: 'email',
+      // Library skill name — see callback-handler.ts's comment on the same fix.
+      skillName: 'gmail',
       details: `Fetch the full email with messageId "${emailId}". Return JSON with fields: from, to, subject, body, date, messageId.`,
     });
 
@@ -265,7 +267,8 @@ async function extractActionItemsForEmail(
 
     const extractResult = await agentManager.executeApprovedAction({
       actionName: 'gmail:search-emails',
-      skillName: 'email',
+      // Library skill name — see callback-handler.ts's comment on the same fix.
+      skillName: 'gmail',
       details: extractionPrompt,
     });
 

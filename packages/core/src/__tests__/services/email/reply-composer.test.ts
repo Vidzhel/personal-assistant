@@ -135,7 +135,7 @@ describe('reply-composer service', () => {
       // Should call agent manager to fetch email and compose draft
       expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith({
         actionName: 'gmail:get-email',
-        skillName: 'email',
+        skillName: 'gmail',
         details: expect.stringContaining('email-123'),
       });
 
@@ -168,7 +168,7 @@ describe('reply-composer service', () => {
 
       expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith({
         actionName: 'gmail:get-email',
-        skillName: 'email',
+        skillName: 'gmail',
         details: expect.stringContaining("tell them I'll have it ready by Thursday"),
       });
     });
@@ -258,7 +258,7 @@ describe('reply-composer service', () => {
       // Should call agent manager with gmail:reply-email action
       expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith({
         actionName: 'gmail:reply-email',
-        skillName: 'email',
+        skillName: 'gmail',
         details: expect.stringContaining('Reply to email'),
       });
     });
@@ -365,7 +365,7 @@ describe('reply-composer service', () => {
       // Should call agent with new instructions
       expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith({
         actionName: 'gmail:get-email',
-        skillName: 'email',
+        skillName: 'gmail',
         details: expect.stringContaining('Change Thursday to Friday'),
       });
 

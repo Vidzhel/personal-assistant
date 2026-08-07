@@ -179,7 +179,7 @@ describe('action-extractor service', () => {
       expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith(
         expect.objectContaining({
           actionName: 'gmail:get-email',
-          skillName: 'email',
+          skillName: 'gmail',
           details: expect.stringContaining('msg-001'),
         }),
       );
@@ -243,7 +243,7 @@ describe('action-extractor service', () => {
       expect(calls[1][0]).toEqual(
         expect.objectContaining({
           actionName: 'gmail:search-emails',
-          skillName: 'email',
+          skillName: 'gmail',
           details: expect.stringContaining('action items'),
         }),
       );
@@ -328,7 +328,7 @@ describe('action-extractor service', () => {
       expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith(
         expect.objectContaining({
           actionName: 'ticktick:create-task',
-          skillName: 'task-management',
+          skillName: 'ticktick',
           details: expect.stringContaining('Send the Q1 report'),
         }),
       );

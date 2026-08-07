@@ -9,7 +9,7 @@ import {
 
 interface AgentState {
   agents: NamedAgentRecord[];
-  availableSuites: Skill[];
+  availableSkills: Skill[];
   availableProjects: Project[];
   selectedAgentTasks: RavenTaskRecord[];
   showForm: boolean;
@@ -19,7 +19,7 @@ interface AgentState {
   error: string | null;
 
   fetchAgents: () => Promise<void>;
-  fetchSuites: () => Promise<void>;
+  fetchSkills: () => Promise<void>;
   fetchProjects: () => Promise<void>;
   openCreateForm: () => void;
   openEditForm: (id: string) => void;
@@ -30,7 +30,6 @@ interface AgentState {
     name: string;
     description?: string;
     instructions?: string;
-    suiteIds?: string[];
     skills?: string[];
     model?: string;
     maxTurns?: number;
@@ -43,7 +42,6 @@ interface AgentState {
       name?: string;
       description?: string | null;
       instructions?: string | null;
-      suiteIds?: string[];
       skills?: string[];
       model?: string | null;
       maxTurns?: number | null;
@@ -56,7 +54,7 @@ interface AgentState {
 // eslint-disable-next-line max-lines-per-function -- Zustand store factory
 export const useAgentStore = create<AgentState>((set, get) => ({
   agents: [],
-  availableSuites: [],
+  availableSkills: [],
   availableProjects: [],
   selectedAgentTasks: [],
   showForm: false,
@@ -74,10 +72,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
-  fetchSuites: async () => {
+  fetchSkills: async () => {
     try {
-      const suites = await api.getSkills();
-      set({ availableSuites: suites });
+      const skills = await api.getSkills();
+      set({ availableSkills: skills });
     } catch {
       /* */
     }

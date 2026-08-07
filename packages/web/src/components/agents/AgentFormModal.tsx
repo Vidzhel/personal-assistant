@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { useAgentStore } from '@/stores/agent-store';
-import { CreateSuiteForm } from './CreateSuiteForm';
 
 type BashAccess = 'none' | 'sandboxed' | 'scoped' | 'full';
 
@@ -10,7 +9,7 @@ type BashAccess = 'none' | 'sandboxed' | 'scoped' | 'full';
 export function AgentFormModal() {
   const {
     agents,
-    availableSuites,
+    availableSkills,
     availableProjects,
     editingAgentId,
     loading,
@@ -18,7 +17,6 @@ export function AgentFormModal() {
     closeForm,
     createAgent,
     updateAgent,
-    fetchSuites,
     fetchProjects,
   } = useAgentStore();
 
@@ -27,10 +25,7 @@ export function AgentFormModal() {
   const [name, setName] = useState(editing?.name ?? '');
   const [description, setDescription] = useState(editing?.description ?? '');
   const [instructions, setInstructions] = useState(editing?.instructions ?? '');
-  const [selectedSuites, setSelectedSuites] = useState<Set<string>>(
-    new Set(editing?.suiteIds ?? []),
-  );
-  const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set());
+  const [selectedSkills, setSelectedSkills] = useState<Set<string>>(new Set(editing?.skills ?? []));
   const [model, setModel] = useState(editing?.model ?? '');
   const [maxTurns, setMaxTurns] = useState(editing?.maxTurns?.toString() ?? '');
   const [bashAccess, setBashAccess] = useState<BashAccess>('none');
@@ -38,7 +33,6 @@ export function AgentFormModal() {
   const [allowedPaths, setAllowedPaths] = useState('');
   const [deniedPaths, setDeniedPaths] = useState('');
   const [projectScope, setProjectScope] = useState('');
-  const [showCreateSuite, setShowCreateSuite] = useState(false);
   const [nameError, setNameError] = useState('');
 
   useEffect(() => {
@@ -52,7 +46,7 @@ export function AgentFormModal() {
       setInstructions(editing.instructions ?? '');
       setModel(editing.model ?? '');
       setMaxTurns(editing.maxTurns?.toString() ?? '');
-      setSelectedSuites(new Set(editing.suiteIds));
+      setSelectedSkills(new Set(editing.skills));
     }
   }, [editing]);
 
@@ -67,15 +61,6 @@ export function AgentFormModal() {
     }
     setNameError('');
     return true;
-  }
-
-  function toggleSuite(suiteName: string) {
-    setSelectedSuites((prev) => {
-      const next = new Set(prev);
-      if (next.has(suiteName)) next.delete(suiteName);
-      else next.add(suiteName);
-      return next;
-    });
   }
 
   function toggleSkill(skillName: string) {
@@ -116,7 +101,6 @@ export function AgentFormModal() {
         name,
         description,
         instructions,
-        suiteIds: Array.from(selectedSuites),
         skills,
         model: model || null,
         maxTurns: parsedMaxTurns ?? null,
@@ -127,7 +111,6 @@ export function AgentFormModal() {
         name,
         description: description || undefined,
         instructions: instructions || undefined,
-        suiteIds: Array.from(selectedSuites),
         skills,
         model: model || undefined,
         maxTurns: parsedMaxTurns,
@@ -135,11 +118,6 @@ export function AgentFormModal() {
         projectScope: projectScope || undefined,
       });
     }
-  }
-
-  function handleSuiteCreated() {
-    setShowCreateSuite(false);
-    void fetchSuites();
   }
 
   const showBashDetails = bashAccess === 'sandboxed' || bashAccess === 'scoped';
@@ -242,59 +220,28 @@ export function AgentFormModal() {
             <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
               Skills this agent can use. Leave empty for unrestricted access.
             </p>
-            <div className="space-y-1 max-h-32 overflow-y-auto">
-              {availableSuites.map((skill) => (
+            <div className="space-y-1 max-h-40 overflow-y-auto">
+              {availableSkills.map((skill) => (
                 <label key={skill.name} className="flex items-center gap-2 text-sm cursor-pointer">
                   <input
                     type="checkbox"
                     checked={selectedSkills.has(skill.name)}
                     onChange={() => toggleSkill(skill.name)}
                   />
-                  <span>{skill.displayName}</span>
-                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                    ({skill.name})
-                  </span>
+                  <span>{skill.name}</span>
+                  {skill.description && (
+                    <span
+                      className="text-xs truncate"
+                      style={{ color: 'var(--text-muted)' }}
+                      title={skill.description}
+                    >
+                      {skill.description}
+                    </span>
+                  )}
                 </label>
               ))}
             </div>
           </div>
-
-          {/* Suite bindings */}
-          <div>
-            <label className="block text-sm font-medium mb-1">Suite Bindings</label>
-            <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
-              No suites selected = access to all suites
-            </p>
-            <div className="space-y-1 max-h-40 overflow-y-auto">
-              {availableSuites.map((suite) => (
-                <label key={suite.name} className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={selectedSuites.has(suite.name)}
-                    onChange={() => toggleSuite(suite.name)}
-                  />
-                  <span>{suite.displayName}</span>
-                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                    ({suite.name})
-                  </span>
-                </label>
-              ))}
-            </div>
-            <button
-              onClick={() => setShowCreateSuite(true)}
-              className="text-xs mt-2 underline"
-              style={{ color: 'var(--accent)' }}
-            >
-              + Create New Suite
-            </button>
-          </div>
-
-          {showCreateSuite && (
-            <CreateSuiteForm
-              onCreated={handleSuiteCreated}
-              onCancel={() => setShowCreateSuite(false)}
-            />
-          )}
 
           {/* Bash access */}
           <div>

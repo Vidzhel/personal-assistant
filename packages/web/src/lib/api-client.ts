@@ -220,7 +220,6 @@ export const api = {
     name: string;
     description?: string;
     instructions?: string;
-    suiteIds?: string[];
     skills?: string[];
     model?: string;
     maxTurns?: number;
@@ -233,7 +232,6 @@ export const api = {
       name?: string;
       description?: string | null;
       instructions?: string | null;
-      suiteIds?: string[];
       skills?: string[];
       model?: string | null;
       maxTurns?: number | null;
@@ -247,15 +245,6 @@ export const api = {
     if (params?.offset) qs.set('offset', String(params.offset));
     return request<RavenTaskRecord[]>(`/agents/${id}/tasks?${qs}`);
   },
-  createSuite: (data: { name: string; displayName: string; description?: string }) =>
-    request<{ name: string; displayName: string; description: string; suitePath: string }>(
-      '/suites',
-      {
-        method: 'POST',
-        body: JSON.stringify(data),
-      },
-    ),
-
   // Project data sources
   getProjectDataSources: (projectId: string) =>
     request<ProjectDataSource[]>(`/projects/${projectId}/data-sources`),
@@ -333,14 +322,18 @@ export interface Project {
   templateCount?: number;
 }
 
+export interface SkillAction {
+  name: string;
+  tier: string;
+}
+
 export interface Skill {
   name: string;
-  displayName: string;
-  version: string;
   description: string;
-  capabilities: string[];
-  mcpServers: string[];
-  agentDefinitions: string[];
+  domain: string;
+  mcps: string[];
+  actions: SkillAction[];
+  model?: string;
 }
 
 export interface Schedule {
@@ -564,13 +557,12 @@ export interface NamedAgentRecord {
   name: string;
   description: string | null;
   instructions: string | null;
-  suiteIds: string[];
+  skills: string[];
   model: string | null;
   maxTurns: number | null;
   isDefault: boolean;
   createdAt: string;
   updatedAt: string;
-  suites?: Array<{ name: string; displayName: string }>;
   isActive?: boolean;
   taskCounts?: { completed: number; inProgress: number };
 }

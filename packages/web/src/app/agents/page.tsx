@@ -14,7 +14,7 @@ export default function AgentsPage() {
     showForm,
     showTaskHistory,
     fetchAgents,
-    fetchSuites,
+    fetchSkills,
     fetchProjects,
     openCreateForm,
   } = useAgentStore();
@@ -22,11 +22,11 @@ export default function AgentsPage() {
 
   useEffect(() => {
     void fetchAgents();
-    void fetchSuites();
+    void fetchSkills();
     void fetchProjects();
     timerRef.current = setInterval(() => void fetchAgents(), POLL_INTERVAL_MS);
     return () => clearInterval(timerRef.current);
-  }, [fetchAgents, fetchSuites, fetchProjects]);
+  }, [fetchAgents, fetchSkills, fetchProjects]);
 
   return (
     <div className="p-8 space-y-6">

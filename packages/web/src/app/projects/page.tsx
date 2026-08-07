@@ -122,7 +122,7 @@ export default function ProjectsPage() {
                     border: '1px solid var(--border)',
                   }}
                 >
-                  {s.displayName}
+                  {s.name}
                 </button>
               ))}
             </div>
