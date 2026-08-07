@@ -4,7 +4,7 @@ import websocket from '@fastify/websocket';
 import { createLogger } from '@raven/shared';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { SuiteRegistry } from '../suite-registry/suite-registry.ts';
-import type { ServiceRunner } from '../suite-registry/service-runner.ts';
+import type { ServiceRunner } from '../services/runner.ts';
 import type { SessionManager } from '../session-manager/session-manager.ts';
 import type { ScheduleEngine } from '../scheduler/schedule-engine.ts';
 import type { AgentManager } from '../agent-manager/agent-manager.ts';

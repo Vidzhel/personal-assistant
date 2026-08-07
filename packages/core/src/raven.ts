@@ -14,7 +14,8 @@ import { loadIntegrationsConfig } from './config/integrations-config.ts';
 import { initDatabase, createDbInterface, getDb } from './db/database.ts';
 import { EventBus } from './event-bus/event-bus.ts';
 import { SuiteRegistry } from './suite-registry/suite-registry.ts';
-import { ServiceRunner } from './suite-registry/service-runner.ts';
+import { createServiceRunner } from './services/runner.ts';
+import { SERVICE_DEFINITIONS } from './services/registry.ts';
 import { McpManager } from './mcp-manager/mcp-manager.ts';
 import { AgentManager } from './agent-manager/agent-manager.ts';
 import { SessionManager } from './session-manager/session-manager.ts';
@@ -226,16 +227,15 @@ export async function createRaven(
   // Count configured (enabled) suites
   const configuredSuiteCount = Object.values(suitesConfig).filter((s) => s?.enabled).length;
 
-  // Count declared services across all loaded suites (IMAP watcher, Telegram
-  // bot, etc.) — "configured" here mirrors configuredSuiteCount's meaning:
-  // how many are declared, regardless of whether they were actually started
-  // (skipSuites or a startup failure can make loaded < configured).
-  const configuredServiceCount = suiteRegistry
-    .getAllSuites()
-    .reduce((sum, s) => sum + s.manifest.services.length, 0);
+  // Count declared services (IMAP watcher, Telegram bot, etc.) — "configured"
+  // here mirrors configuredSuiteCount's meaning: how many are declared,
+  // regardless of whether they were actually started (skipSuites, missing
+  // env, or a startup failure can make loaded < configured).
+  const configuredServiceCount = SERVICE_DEFINITIONS.length;
 
-  // 6. Start suite services (IMAP watcher, Telegram bot, etc.)
-  const serviceRunner = new ServiceRunner();
+  // 6. Start background services (IMAP watcher, Telegram bot, etc.) — now
+  // compiled ServiceDefinitions rather than suite-declared dynamic imports.
+  const serviceRunner = createServiceRunner();
   const jobRegistry = createJobRegistry();
   const baseContext = {
     eventBus: {
@@ -254,7 +254,7 @@ export async function createRaven(
   };
 
   if (!overrides.skipSuites) {
-    await serviceRunner.startServices(suiteRegistry.getAllSuites(), baseContext);
+    await serviceRunner.startServices(SERVICE_DEFINITIONS, baseContext);
   }
 
   // 7. Init permission engine
