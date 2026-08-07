@@ -298,6 +298,11 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
         command: cfg.command,
         args: cfg.args,
         env: cfg.env,
+        // SDK 0.3.x connects external MCPs non-blocking by default, which can
+        // let turn 1 start before a task's tools register. Raven only hands a
+        // task an MCP it needs, so block until connected (5s cap) — restores
+        // the pre-0.3.x turn-1 availability the system was built against.
+        alwaysLoad: true,
       };
     }
 
