@@ -72,11 +72,12 @@ export interface CallbackDeps {
     getById(id: string): PendingApprovalInfo | undefined;
   };
   agentManager: {
-    executeApprovedAction(params: {
+    executeAction(params: {
       actionName: string;
       skillName: string;
       details?: string;
       sessionId?: string;
+      preApproved?: boolean;
     }): Promise<{ success: boolean; error?: string }>;
   };
   auditLog: {
@@ -196,11 +197,11 @@ function handleTaskAction(action: CallbackAction, deps: CallbackDeps): CallbackR
 
   // Fire-and-forget: execute via agent manager (spawns TickTick sub-agent)
   deps.agentManager
-    .executeApprovedAction({
+    .executeAction({
       actionName: `task:${action.action}`,
       // Library skill name (library/skills/productivity/task-management/ticktick/config.json)
       // — resolves MCP servers/sub-agents via CapabilityLibrary.collectMcpServers
-      // in executeApprovedAction; the pre-library suite name ('task-management')
+      // in executeAction; the pre-library suite name ('task-management')
       // resolves to nothing there.
       skillName: 'ticktick',
       details: prompt,
@@ -242,13 +243,16 @@ function emitApprovalOutcomeEvent(
       },
     });
 
-    // Fire-and-forget: execute the approved action
+    // Fire-and-forget: execute the approved action. A human just tapped
+    // "Approve" on this exact pending approval via Telegram — see
+    // AgentManager.ApprovedActionParams.preApproved.
     deps.agentManager
-      .executeApprovedAction({
+      .executeAction({
         actionName: approval.actionName,
         skillName: approval.skillName,
         details: approval.details,
         sessionId: approval.sessionId,
+        preApproved: true,
       })
       .catch((err: unknown) => {
         deps.logger.error(`Approved action execution failed: ${err}`);
@@ -371,7 +375,7 @@ function handleEmailAction(action: CallbackAction, deps: CallbackDeps): Callback
   }
 
   deps.agentManager
-    .executeApprovedAction({
+    .executeAction({
       actionName: `email:${action.action}`,
       // Library skill name (library/skills/communication/email/gmail/config.json)
       // — see the ticktick comment above for why this can't stay 'email'.

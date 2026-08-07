@@ -22,6 +22,13 @@ export interface PendingApprovals {
   query(): PendingApproval[];
   getById(id: string): PendingApproval | undefined;
   resolve(id: string, resolution: 'approved' | 'denied'): PendingApproval;
+  /** Most recent still-unresolved approval for this (actionName, sessionId)
+   * pair, if any — used by tool-policy.ts's blockForApproval to dedup
+   * repeated red-tier attempts (e.g. a model retrying the same blocked MCP
+   * call) into one pending row instead of spamming a fresh approval +
+   * Telegram ping per attempt. sessionId is matched with SQL `IS` so
+   * `undefined` correctly matches other undefined-session callers too. */
+  findUnresolved(actionName: string, sessionId?: string): PendingApproval | undefined;
   initialize(): void;
 }
 
@@ -106,6 +113,18 @@ export function createPendingApprovals(db: Database.Database): PendingApprovals 
       const row = db.prepare('SELECT * FROM pending_approvals WHERE id = ?').get(id) as
         | PendingApprovalRow
         | undefined;
+
+      return row ? rowToApproval(row) : undefined;
+    },
+
+    findUnresolved(actionName: string, sessionId?: string): PendingApproval | undefined {
+      const row = db
+        .prepare(
+          `SELECT * FROM pending_approvals
+           WHERE action_name = ? AND session_id IS ? AND resolution IS NULL
+           ORDER BY requested_at DESC LIMIT 1`,
+        )
+        .get(actionName, sessionId ?? null) as PendingApprovalRow | undefined;
 
       return row ? rowToApproval(row) : undefined;
     },

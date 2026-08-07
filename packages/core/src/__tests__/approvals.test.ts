@@ -19,7 +19,7 @@ import {
 
 function makeMockAgentManager() {
   return {
-    executeApprovedAction: vi.fn().mockResolvedValue({ success: true }),
+    executeAction: vi.fn().mockResolvedValue({ success: true }),
     getQueueLength: () => 0,
     getRunningCount: () => 0,
   };
@@ -64,7 +64,7 @@ describe('Approval Queue API', () => {
 
   beforeEach(() => {
     emittedEvents = [];
-    mockAgentManager.executeApprovedAction.mockClear();
+    mockAgentManager.executeAction.mockClear();
   });
 
   afterAll(async () => {
@@ -152,7 +152,7 @@ describe('Approval Queue API', () => {
       expect(approvedEvents.length).toBeGreaterThan(0);
 
       // Verify post-approval execution
-      expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith(
+      expect(mockAgentManager.executeAction).toHaveBeenCalledWith(
         expect.objectContaining({
           actionName: 'gmail:send-email',
           skillName: 'gmail',
@@ -177,7 +177,7 @@ describe('Approval Queue API', () => {
       expect(body.status).toBe('resolved');
 
       // Verify NO execution on deny
-      expect(mockAgentManager.executeApprovedAction).not.toHaveBeenCalled();
+      expect(mockAgentManager.executeAction).not.toHaveBeenCalled();
 
       // Verify denied event emission
       const deniedEvents = emittedEvents.filter((e) => e.type === 'permission:denied');
@@ -287,7 +287,7 @@ describe('Approval Queue API', () => {
   });
 
   describe('Post-approval execution (AC #6)', () => {
-    it('calls executeApprovedAction on approve with correct params', async () => {
+    it('calls executeAction on approve with correct params', async () => {
       const approval = insertTestApproval({
         actionName: 'gmail:send-email',
         skillName: 'gmail',
@@ -301,17 +301,18 @@ describe('Approval Queue API', () => {
         payload: { resolution: 'approved' },
       });
 
-      expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith({
+      expect(mockAgentManager.executeAction).toHaveBeenCalledWith({
         actionName: 'gmail:send-email',
         skillName: 'gmail',
         details: 'Send to user@test.com',
         sessionId: 'sess-exec',
+        preApproved: true,
       });
     });
 
     it('writes executed audit entry on successful execution', async () => {
       const approval = insertTestApproval({ actionName: 'exec-success-test' });
-      mockAgentManager.executeApprovedAction.mockResolvedValueOnce({ success: true });
+      mockAgentManager.executeAction.mockResolvedValueOnce({ success: true });
 
       await app.inject({
         method: 'POST',
@@ -326,7 +327,7 @@ describe('Approval Queue API', () => {
 
     it('writes failed audit entry on execution failure', async () => {
       const approval = insertTestApproval({ actionName: 'exec-fail-test' });
-      mockAgentManager.executeApprovedAction.mockResolvedValueOnce({
+      mockAgentManager.executeAction.mockResolvedValueOnce({
         success: false,
         error: 'Agent crash',
       });

@@ -21,12 +21,36 @@ interface RunningService {
  * declared `requiresEnv`. Mirrors the semantics of the former suite
  * `ServiceRunner`: missing env vars skip the service with a log line
  * (never fatal to boot); a `start()` failure is logged and boot continues.
+ *
+ * M12: `RAVEN_DISABLED_SERVICES` (comma-separated service `name`s, e.g.
+ * "autonomous-manager,drive-watcher") is checked BEFORE env gating — an
+ * operator kill switch for a misbehaving service that doesn't require
+ * unsetting credentials shared with other services (several services share
+ * one requiresEnv group, e.g. TICKTICK_ENV covers both autonomous-manager
+ * and ticktick-sync — unsetting env would disable both).
  */
+function parseDisabledServiceNames(): Set<string> {
+  const raw = process.env.RAVEN_DISABLED_SERVICES ?? '';
+  return new Set(
+    raw
+      .split(',')
+      .map((name) => name.trim())
+      .filter((name) => name.length > 0),
+  );
+}
+
 export function createServiceRunner(): ServiceRunner {
   let running: RunningService[] = [];
 
   async function startServices(defs: ServiceDefinition[], context: ServiceContext): Promise<void> {
+    const disabled = parseDisabledServiceNames();
+
     for (const def of defs) {
+      if (disabled.has(def.name)) {
+        log.info(`Service "${def.name}" skipped: disabled via RAVEN_DISABLED_SERVICES`);
+        continue;
+      }
+
       const missing = def.requiresEnv.filter((v) => !process.env[v]);
       if (missing.length > 0) {
         log.error(

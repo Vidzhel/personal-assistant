@@ -85,6 +85,12 @@ export interface AgentTaskCompleteEvent extends BaseEvent {
      * resume the *next* turn of the same Raven session, not a substitute
      * for sessionId above. */
     sdkSessionId?: string;
+    /** The skill this task ran under (AgentTask.skillName), populated by both
+     * agent-manager.ts emit sites (runTask, cancelTask). H4: insight-processor.ts's
+     * handleTaskComplete filters `agent:task:complete` events by skillName —
+     * this field didn't exist before, so that filter always failed silently
+     * and no pattern-analysis result was ever processed into an insight. */
+    skillName?: string;
     result: string;
     durationMs: number;
     success: boolean;

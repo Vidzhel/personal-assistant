@@ -60,6 +60,11 @@ describe('insight-processor', () => {
     mockEventBus.emit.mockClear();
   });
 
+  // H4: the real dispatch (data-collector.ts) sends skillName: 'pattern-analysis'
+  // (the library skill name) — matching that here is what actually exercises
+  // handleTaskComplete's skillName filter against the same value production
+  // uses, instead of a fixture-only value that happened to match the old,
+  // never-populated filter for the wrong reason.
   function makeEvent(insights: any[], success = true): unknown {
     return {
       id: 'evt-1',
@@ -68,7 +73,7 @@ describe('insight-processor', () => {
       type: 'agent:task:complete',
       payload: {
         taskId: 'task-1',
-        skillName: 'proactive-intelligence',
+        skillName: 'pattern-analysis',
         success,
         result: JSON.stringify({ insights }),
       },
@@ -163,6 +168,32 @@ describe('insight-processor', () => {
     expect(suppressedEmit[0].payload.reason).toBe('duplicate');
   });
 
+  // H4 regression: AgentTaskCompleteEvent.payload didn't declare skillName at
+  // all, and agent-manager.ts's two emit sites never populated it — so this
+  // handler's skillName filter always failed silently and no pattern-analysis
+  // result was ever processed, even for a well-formed, successful completion.
+  it('reacts to a matching agent:task:complete completion (H4 regression)', () => {
+    mockFindRecentByHash.mockReturnValue(undefined);
+
+    handleTaskComplete(
+      makeEvent([
+        {
+          patternKey: 'h4-regression',
+          title: 'Regression check',
+          body: 'Should be processed now that skillName is populated.',
+          confidence: 0.9,
+          serviceSources: ['gmail'],
+          keyFacts: ['fact:h4'],
+        },
+      ]),
+    );
+
+    expect(mockInsertInsight).toHaveBeenCalledWith(
+      mockDb,
+      expect.objectContaining({ patternKey: 'h4-regression', status: 'queued' }),
+    );
+  });
+
   it('ignores events from other skills', () => {
     handleTaskComplete({
       id: 'evt-2',
@@ -190,7 +221,7 @@ describe('insight-processor', () => {
       type: 'agent:task:complete',
       payload: {
         taskId: 'task-3',
-        skillName: 'proactive-intelligence',
+        skillName: 'pattern-analysis',
         success: true,
         result: 'not valid json at all',
       },

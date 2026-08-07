@@ -5,6 +5,7 @@ import {
   DEFAULT_INSIGHT_AUTO_DISMISS_HOURS,
   type EventBusInterface,
   type DatabaseInterface,
+  type AgentTaskCompleteEvent,
   AgentInsightResultSchema,
 } from '@raven/shared';
 import type { ServiceContext, RavenService } from '../types.ts';
@@ -218,12 +219,20 @@ function processInsightRecommendation(insight: InsightRecommendation): void {
   queueInsightForDelivery(insight, hash);
 }
 
+// H4: must match the actionName-dispatch skillName in data-collector.ts's
+// pattern-analysis job (library/skills/system/pattern-analysis/config.json).
+const PATTERN_ANALYSIS_SKILL_NAME = 'pattern-analysis';
+
 function handleTaskComplete(event: unknown): void {
   try {
-    const e = event as Record<string, unknown>;
-    const payload = e.payload as Record<string, unknown>;
+    // H4: AgentTaskCompleteEvent.payload now declares skillName — this used
+    // to be a bare `Record<string, unknown>` cast checking a field that
+    // didn't exist on the real payload type at all, so the filter below
+    // silently never matched and no pattern-analysis result was ever
+    // processed into an insight.
+    const { payload } = event as AgentTaskCompleteEvent;
 
-    if (payload.skillName !== SUITE_PROACTIVE_INTELLIGENCE) return;
+    if (payload.skillName !== PATTERN_ANALYSIS_SKILL_NAME) return;
     if (!payload.success) {
       log.warn('Pattern analysis task failed — no insights to process');
       return;
@@ -232,7 +241,7 @@ function handleTaskComplete(event: unknown): void {
     // Auto-dismiss stale insights before processing new ones
     autoDismissStaleInsights();
 
-    const resultStr = payload.result as string;
+    const resultStr = payload.result;
     if (!resultStr) return;
 
     const parsedResult = parseInsightPayload(resultStr);

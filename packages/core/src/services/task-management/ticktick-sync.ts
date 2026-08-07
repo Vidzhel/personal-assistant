@@ -12,7 +12,7 @@ const log = createLogger('ticktick-sync');
 const SYNC_SCHEDULE_NAME = 'ticktick-task-sync';
 
 interface AgentManagerLike {
-  executeApprovedAction(params: {
+  executeAction(params: {
     actionName: string;
     skillName: string;
     details?: string;
@@ -62,10 +62,10 @@ function getAgentManager(): AgentManagerLike | null {
 }
 
 async function fetchTicktickTasks(agentManager: AgentManagerLike): Promise<TicktickTask[] | null> {
-  const fetchResult = await agentManager.executeApprovedAction({
+  const fetchResult = await agentManager.executeAction({
     actionName: 'ticktick:get-tasks',
     // Library skill name ('ticktick'), not the pre-library SUITE_TASK_MANAGEMENT
-    // label — executeApprovedAction resolves MCP servers/sub-agents from this
+    // label — executeAction resolves MCP servers/sub-agents from this
     // via CapabilityLibrary.collectMcpServers, which only knows library names.
     skillName: 'ticktick',
     details: 'Fetch all TickTick tasks for sync',

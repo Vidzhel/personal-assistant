@@ -244,7 +244,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
   // Permission gate: enforce before query() only when actionName is
   // explicitly provided, and skip it entirely when this task is the
   // synthetic re-dispatch for an action a human already approved
-  // (AgentManager.executeApprovedAction sets task.approvedActionName ===
+  // (AgentManager.executeAction sets task.approvedActionName ===
   // actionName in that case) — otherwise resolveTier would report the same
   // red tier again and the approve -> re-run loop would never close. The
   // canUseTool policy built below carries the same approvedActionName

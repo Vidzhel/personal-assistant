@@ -26,7 +26,7 @@ import {
  * BEFORE the fake backend is ever called -> a pending approval row +
  * `permission:blocked` are queued -> REST `POST /api/approvals/:id/resolve`
  * resolves it -> approve re-dispatches through
- * `AgentManager.executeApprovedAction`, which this time DOES reach the fake
+ * `AgentManager.executeAction`, which this time DOES reach the fake
  * backend (prompt: "Execute approved action: ...") -> deny never
  * re-dispatches. Audit rows are asserted via the real `/api/audit-logs`
  * route.
@@ -165,7 +165,7 @@ describe('e2e: approval flow round-trip over the real composition root', () => {
     expect(pending1.map((p) => p.id)).toContain(approvalId1);
 
     // ── Resolve: approve. The route (routes/approvals.ts) awaits
-    // agentManager.executeApprovedAction end-to-end before replying, so by
+    // agentManager.executeAction end-to-end before replying, so by
     // the time this fetch resolves, the re-dispatch has already reached (or
     // failed to reach) the fake backend — no polling needed.
     const resolveRes1 = await fetch(`${baseUrl}/api/approvals/${approvalId1}/resolve`, {
@@ -183,7 +183,7 @@ describe('e2e: approval flow round-trip over the real composition root', () => {
     expect(approved.length).toBe(1);
     expect(approved[0].payload.actionName).toBe('gmail:send-email');
 
-    // executeApprovedAction's re-dispatch genuinely reached the fake backend.
+    // executeAction's re-dispatch genuinely reached the fake backend.
     expect(calls.length).toBe(1);
     expect(calls[0].prompt).toContain('Execute approved action: gmail:send-email');
 

@@ -14,7 +14,7 @@ import type { ServiceContext, RavenService } from '../types.ts';
 const log = createLogger('autonomous-manager');
 
 interface AgentManagerLike {
-  executeApprovedAction(params: {
+  executeAction(params: {
     actionName: string;
     skillName: string;
     details?: string;
@@ -181,7 +181,7 @@ function buildActionPrompt(rec: RecommendedAction): string {
 
 async function fetchOpenTasksJson(agentManager: AgentManagerLike): Promise<string | null> {
   try {
-    const fetchResult = await agentManager.executeApprovedAction({
+    const fetchResult = await agentManager.executeAction({
       actionName: 'ticktick:get-tasks',
       // Library skill name — see callback-handler.ts's comment on the same fix.
       skillName: 'ticktick',
@@ -222,7 +222,7 @@ async function analyzeTasksForRecommendations(
   tasksJson: string,
 ): Promise<RecommendedAction[] | null> {
   try {
-    const analysisResult = await agentManager.executeApprovedAction({
+    const analysisResult = await agentManager.executeAction({
       actionName: 'ticktick:get-tasks',
       // Library skill name — see callback-handler.ts's comment on the same fix.
       skillName: 'ticktick',
@@ -261,7 +261,7 @@ async function executeRecommendation(
   }
 
   try {
-    const result = await agentManager.executeApprovedAction({
+    const result = await agentManager.executeAction({
       actionName,
       // Library skill name — see callback-handler.ts's comment on the same fix.
       skillName: 'ticktick',

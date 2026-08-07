@@ -52,7 +52,7 @@ describe('email-triage service', () => {
     eventHandlers = {};
 
     mockAgentManager = {
-      executeApprovedAction: vi.fn().mockResolvedValue({ success: true }),
+      executeAction: vi.fn().mockResolvedValue({ success: true }),
     };
 
     mockEventBus = {
@@ -135,11 +135,11 @@ describe('email-triage service', () => {
         receivedAt: Date.now(),
       });
 
-      // Should call executeApprovedAction for archive + markRead
-      expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith(
+      // Should call executeAction for archive + markRead
+      expect(mockAgentManager.executeAction).toHaveBeenCalledWith(
         expect.objectContaining({ actionName: 'gmail:archive-email' }),
       );
-      expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith(
+      expect(mockAgentManager.executeAction).toHaveBeenCalledWith(
         expect.objectContaining({ actionName: 'gmail:mark-read' }),
       );
 
@@ -174,8 +174,8 @@ describe('email-triage service', () => {
         receivedAt: Date.now(),
       });
 
-      // Should call executeApprovedAction for label
-      expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith(
+      // Should call executeAction for label
+      expect(mockAgentManager.executeAction).toHaveBeenCalledWith(
         expect.objectContaining({ actionName: 'gmail:label-email' }),
       );
 
@@ -206,7 +206,7 @@ describe('email-triage service', () => {
         receivedAt: Date.now(),
       });
 
-      expect(mockAgentManager.executeApprovedAction).not.toHaveBeenCalled();
+      expect(mockAgentManager.executeAction).not.toHaveBeenCalled();
       // Should NOT emit triage:processed when no rules match
       const processedEmits = mockEventBus.emit.mock.calls.filter(
         (c: unknown[]) => (c[0] as { type: string }).type === 'email:triage:processed',
@@ -223,13 +223,13 @@ describe('email-triage service', () => {
         snippet: '',
       });
 
-      expect(mockAgentManager.executeApprovedAction).not.toHaveBeenCalled();
+      expect(mockAgentManager.executeAction).not.toHaveBeenCalled();
     });
   });
 
   describe('graceful degradation', () => {
     it('continues processing when agent manager action fails', async () => {
-      mockAgentManager.executeApprovedAction.mockRejectedValue(new Error('Gmail API unavailable'));
+      mockAgentManager.executeAction.mockRejectedValue(new Error('Gmail API unavailable'));
       await startService();
 
       await emitEventAsync('email:new', {
@@ -267,7 +267,7 @@ describe('email-triage service', () => {
         receivedAt: Date.now(),
       });
 
-      expect(mockAgentManager.executeApprovedAction).not.toHaveBeenCalled();
+      expect(mockAgentManager.executeAction).not.toHaveBeenCalled();
     });
   });
 
@@ -304,7 +304,7 @@ describe('email-triage service', () => {
         receivedAt: Date.now(),
       });
 
-      expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith(
+      expect(mockAgentManager.executeAction).toHaveBeenCalledWith(
         expect.objectContaining({ actionName: 'gmail:archive-email' }),
       );
     });
@@ -328,7 +328,7 @@ describe('email-triage service', () => {
         receivedAt: Date.now(),
       });
 
-      expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith(
+      expect(mockAgentManager.executeAction).toHaveBeenCalledWith(
         expect.objectContaining({ actionName: 'gmail:label-email' }),
       );
     });
@@ -363,7 +363,7 @@ describe('email-triage service', () => {
         receivedAt: Date.now(),
       });
 
-      expect(mockAgentManager.executeApprovedAction).not.toHaveBeenCalled();
+      expect(mockAgentManager.executeAction).not.toHaveBeenCalled();
     });
   });
 });

@@ -84,7 +84,7 @@ describe('autonomous-manager service', () => {
     jobRegistry = createJobRegistry();
 
     mockAgentManager = {
-      executeApprovedAction: vi.fn().mockResolvedValue({ success: true, result: '{}' }),
+      executeAction: vi.fn().mockResolvedValue({ success: true, result: '{}' }),
     };
 
     mockEventBus = {
@@ -165,14 +165,14 @@ describe('autonomous-manager service', () => {
 
   describe('Task 2: fetch and analyze tasks', () => {
     it('fetches all open tasks via ticktick:get-tasks on job invocation', async () => {
-      mockAgentManager.executeApprovedAction
+      mockAgentManager.executeAction
         .mockResolvedValueOnce({ success: true, result: TASK_LIST_JSON }) // fetch
         .mockResolvedValueOnce({ success: true, result: '[]' }); // analysis returns empty
 
       await startService();
       await runAutonomousJob();
 
-      expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith(
+      expect(mockAgentManager.executeAction).toHaveBeenCalledWith(
         expect.objectContaining({
           actionName: 'ticktick:get-tasks',
           skillName: 'ticktick',
@@ -182,7 +182,7 @@ describe('autonomous-manager service', () => {
     });
 
     it('emits failure event when task fetch fails', async () => {
-      mockAgentManager.executeApprovedAction.mockResolvedValueOnce({
+      mockAgentManager.executeAction.mockResolvedValueOnce({
         success: false,
         error: 'TickTick API error',
       });
@@ -200,7 +200,7 @@ describe('autonomous-manager service', () => {
     });
 
     it('emits completion with all counts=0 when task list is empty', async () => {
-      mockAgentManager.executeApprovedAction.mockResolvedValueOnce({
+      mockAgentManager.executeAction.mockResolvedValueOnce({
         success: true,
         result: '[]',
       });
@@ -227,7 +227,7 @@ describe('autonomous-manager service', () => {
     });
 
     it('emits failure when AI analysis returns invalid JSON', async () => {
-      mockAgentManager.executeApprovedAction
+      mockAgentManager.executeAction
         .mockResolvedValueOnce({ success: true, result: TASK_LIST_JSON })
         .mockResolvedValueOnce({ success: true, result: 'I cannot produce valid JSON' });
 
@@ -245,7 +245,7 @@ describe('autonomous-manager service', () => {
     });
 
     it('emits failure event when task fetch throws', async () => {
-      mockAgentManager.executeApprovedAction.mockRejectedValueOnce(new Error('Network timeout'));
+      mockAgentManager.executeAction.mockRejectedValueOnce(new Error('Network timeout'));
 
       await startService();
       await runAutonomousJob();
@@ -264,7 +264,7 @@ describe('autonomous-manager service', () => {
 
   describe('Task 3: execute actions through permission gates', () => {
     function setupFetchAndAnalysis(recommendations: string): void {
-      mockAgentManager.executeApprovedAction
+      mockAgentManager.executeAction
         .mockResolvedValueOnce({ success: true, result: TASK_LIST_JSON }) // fetch
         .mockResolvedValueOnce({ success: true, result: recommendations }); // analysis
     }
@@ -282,13 +282,13 @@ describe('autonomous-manager service', () => {
         },
       ]);
       setupFetchAndAnalysis(recs);
-      mockAgentManager.executeApprovedAction.mockResolvedValueOnce({ success: true }); // update
+      mockAgentManager.executeAction.mockResolvedValueOnce({ success: true }); // update
 
       await startService();
       await runAutonomousJob();
 
       // Verify ticktick:update-task was called
-      const updateCall = mockAgentManager.executeApprovedAction.mock.calls[2];
+      const updateCall = mockAgentManager.executeAction.mock.calls[2];
       expect(updateCall[0]).toEqual(
         expect.objectContaining({
           actionName: 'ticktick:update-task',
@@ -322,7 +322,7 @@ describe('autonomous-manager service', () => {
       ]);
       setupFetchAndAnalysis(recs);
       // Red-tier returns success: false with "queued" in error
-      mockAgentManager.executeApprovedAction.mockResolvedValueOnce({
+      mockAgentManager.executeAction.mockResolvedValueOnce({
         success: false,
         error: 'Action queued-for-approval (red tier)',
       });
@@ -384,7 +384,7 @@ describe('autonomous-manager service', () => {
         },
       ]);
       setupFetchAndAnalysis(recs);
-      mockAgentManager.executeApprovedAction
+      mockAgentManager.executeAction
         .mockResolvedValueOnce({ success: true }) // task-1 succeeds
         .mockResolvedValueOnce({ success: false, error: 'Agent failed' }) // task-2 fails
         .mockResolvedValueOnce({ success: true }); // task-3 succeeds
@@ -408,7 +408,7 @@ describe('autonomous-manager service', () => {
     it('filters out low-confidence recommendations', async () => {
       // 3 recommendations: 1 low (filtered), 1 medium, 1 high → only 2 executed
       setupFetchAndAnalysis(RECOMMENDATIONS_JSON);
-      mockAgentManager.executeApprovedAction
+      mockAgentManager.executeAction
         .mockResolvedValueOnce({ success: true }) // update-task (high)
         .mockResolvedValueOnce({ success: true }); // complete-task (medium)
       // delete-task (low) should be filtered out — no 3rd action call
@@ -417,7 +417,7 @@ describe('autonomous-manager service', () => {
       await runAutonomousJob();
 
       // 2 fetch/analysis + 2 actions = 4 total calls (not 5)
-      expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledTimes(4);
+      expect(mockAgentManager.executeAction).toHaveBeenCalledTimes(4);
 
       const completedEvents = getEmittedEvents('task-management:autonomous:completed');
       expect(completedEvents[0]).toEqual(
@@ -446,7 +446,7 @@ describe('autonomous-manager service', () => {
           changes: { priority: 5 },
         },
       ]);
-      mockAgentManager.executeApprovedAction
+      mockAgentManager.executeAction
         .mockResolvedValueOnce({ success: true, result: TASK_LIST_JSON })
         .mockResolvedValueOnce({ success: true, result: recs })
         .mockResolvedValueOnce({ success: true });
@@ -466,7 +466,7 @@ describe('autonomous-manager service', () => {
     });
 
     it('skips notification when 0 actions executed or queued', async () => {
-      mockAgentManager.executeApprovedAction
+      mockAgentManager.executeAction
         .mockResolvedValueOnce({ success: true, result: TASK_LIST_JSON })
         .mockResolvedValueOnce({ success: true, result: '[]' });
 
@@ -489,7 +489,7 @@ describe('autonomous-manager service', () => {
           changes: { priority: 5 },
         },
       ]);
-      mockAgentManager.executeApprovedAction
+      mockAgentManager.executeAction
         .mockResolvedValueOnce({ success: true, result: TASK_LIST_JSON })
         .mockResolvedValueOnce({ success: true, result: recs })
         .mockResolvedValueOnce({ success: true });
@@ -519,7 +519,7 @@ describe('autonomous-manager service', () => {
       const slowPromise = new Promise((resolve) => {
         resolveFirst = resolve;
       });
-      mockAgentManager.executeApprovedAction.mockReturnValueOnce(slowPromise);
+      mockAgentManager.executeAction.mockReturnValueOnce(slowPromise);
 
       await startService();
       const handler = jobRegistry.get('autonomous-task-management')!;
@@ -534,8 +534,8 @@ describe('autonomous-manager service', () => {
       resolveFirst!({ success: true, result: '[]' });
       await firstRun;
 
-      // Only 1 call to executeApprovedAction (the first run)
-      expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledTimes(1);
+      // Only 1 call to executeAction (the first run)
+      expect(mockAgentManager.executeAction).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -543,7 +543,7 @@ describe('autonomous-manager service', () => {
 
   describe('manual trigger via manage-request', () => {
     it('runs same flow as schedule trigger', async () => {
-      mockAgentManager.executeApprovedAction.mockResolvedValueOnce({
+      mockAgentManager.executeAction.mockResolvedValueOnce({
         success: true,
         result: '[]',
       });
@@ -553,7 +553,7 @@ describe('autonomous-manager service', () => {
         source: 'telegram',
       });
 
-      expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith(
+      expect(mockAgentManager.executeAction).toHaveBeenCalledWith(
         expect.objectContaining({
           actionName: 'ticktick:get-tasks',
         }),
@@ -566,7 +566,7 @@ describe('autonomous-manager service', () => {
         source: 'invalid-source',
       });
 
-      expect(mockAgentManager.executeApprovedAction).not.toHaveBeenCalled();
+      expect(mockAgentManager.executeAction).not.toHaveBeenCalled();
     });
   });
 
@@ -665,7 +665,7 @@ describe('autonomous-manager service', () => {
 
   describe('green-tier silent read', () => {
     it('ticktick:get-tasks called with correct params, no notification for the read', async () => {
-      mockAgentManager.executeApprovedAction.mockResolvedValueOnce({
+      mockAgentManager.executeAction.mockResolvedValueOnce({
         success: true,
         result: '[]',
       });
@@ -674,7 +674,7 @@ describe('autonomous-manager service', () => {
       await runAutonomousJob();
 
       // Verify get-tasks was called
-      expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith(
+      expect(mockAgentManager.executeAction).toHaveBeenCalledWith(
         expect.objectContaining({
           actionName: 'ticktick:get-tasks',
           skillName: 'ticktick',

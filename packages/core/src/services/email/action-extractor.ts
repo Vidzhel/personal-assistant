@@ -14,7 +14,7 @@ import type { ServiceContext, RavenService } from '../types.ts';
 const log = createLogger('action-extractor');
 
 interface AgentManagerLike {
-  executeApprovedAction(params: {
+  executeAction(params: {
     actionName: string;
     skillName: string;
     details?: string;
@@ -169,7 +169,7 @@ async function createTasksFromItems(
     const prompt = `Create a task: "${item.title}"${dueDateStr}, priority: ${item.priority}. Note: From email by ${emailMeta.from} — "${emailMeta.subject}" (${emailMeta.date}). Context: ${item.context}`;
 
     try {
-      const result = await agentManager.executeApprovedAction({
+      const result = await agentManager.executeAction({
         actionName: 'ticktick:create-task',
         // Library skill name — see callback-handler.ts's comment on the same fix.
         skillName: 'ticktick',
@@ -196,7 +196,7 @@ async function fetchEmailForActionItems(
   emailId: string,
 ): Promise<FetchedEmail | null> {
   try {
-    const fetchResult = await agentManager.executeApprovedAction({
+    const fetchResult = await agentManager.executeAction({
       actionName: 'gmail:get-email',
       // Library skill name — see callback-handler.ts's comment on the same fix.
       skillName: 'gmail',
@@ -265,7 +265,7 @@ async function extractActionItemsForEmail(
   try {
     const extractionPrompt = buildActionExtractionPrompt(emailData);
 
-    const extractResult = await agentManager.executeApprovedAction({
+    const extractResult = await agentManager.executeAction({
       actionName: 'gmail:search-emails',
       // Library skill name — see callback-handler.ts's comment on the same fix.
       skillName: 'gmail',

@@ -34,7 +34,7 @@ export interface AgentManagerDeps {
   auditLog?: AuditLog;
   pendingApprovals?: PendingApprovals;
   /** Threaded into PermissionDeps.capabilityLibrary (canUseTool policy's
-   * unmapped-MCP-tool fallback) AND used directly by executeApprovedAction
+   * unmapped-MCP-tool fallback) AND used directly by executeAction
    * to resolve a skillName's mcpServers/agentDefinitions. */
   capabilityLibrary?: CapabilityLibrary;
   executionLogger?: ExecutionLogger;
@@ -49,6 +49,18 @@ export interface ApprovedActionParams {
   skillName: string;
   details?: string;
   sessionId?: string;
+  /** True ONLY when a human has already approved this exact action via the
+   * pending-approvals flow (api/routes/approvals.ts's resolveApproval,
+   * callback-handler.ts's approval-resolution path) — NOT when a background
+   * service is simply re-dispatching an action it decided on its own
+   * (autonomous-manager.ts, ticktick-sync.ts, email-triage.ts, etc.).
+   * Defaults to false. Only when true does executeAction mark the synthetic
+   * task's `approvedActionName`, which is what lets agent-session.ts's
+   * pre-check gate and the canUseTool tool-policy skip re-resolving the
+   * action's tier. Leaving this false (the default) means the call re-enters
+   * enforcePermissionGate exactly like any other actionName-bearing task —
+   * a red-tier action queues for approval instead of running ungated. */
+  preApproved?: boolean;
 }
 
 export interface ActiveTaskInfo {
@@ -321,6 +333,7 @@ export class AgentManager {
         // must never be aliased into this field again.
         sessionId: task.sessionId,
         sdkSessionId: result.sdkSessionId,
+        skillName: task.skillName,
         result: result.result,
         durationMs: result.durationMs,
         success: result.success,
@@ -357,6 +370,7 @@ export class AgentManager {
         payload: {
           taskId: task.id,
           sessionId: task.sessionId,
+          skillName: task.skillName,
           result: '',
           durationMs: 0,
           success: false,
@@ -420,7 +434,7 @@ export class AgentManager {
     return this.running.size;
   }
 
-  async executeApprovedAction(
+  async executeAction(
     params: ApprovedActionParams,
   ): Promise<{ success: boolean; result?: string; error?: string }> {
     // Resolve capabilities for this skill from the library. An unknown
@@ -451,12 +465,18 @@ export class AgentManager {
       agentDefinitions,
       createdAt: Date.now(),
       actionName: params.actionName,
-      // A human already approved exactly this action via the pending-approvals
-      // flow (see api/routes/approvals.ts's resolveApproval) — mark it so
-      // agent-session.ts's pre-check gate and the canUseTool policy both
-      // treat this re-dispatch as pre-approved instead of re-resolving the
-      // same (still red) tier and queuing it for approval again.
-      approvedActionName: params.actionName,
+      // Only set when a human already approved exactly this action via the
+      // pending-approvals flow (params.preApproved === true — see
+      // api/routes/approvals.ts's resolveApproval and callback-handler.ts's
+      // approval-resolution path). Marking it lets agent-session.ts's
+      // pre-check gate and the canUseTool policy both treat this re-dispatch
+      // as pre-approved instead of re-resolving the same (still red) tier and
+      // queuing it for approval again. Background/service call sites that
+      // never had human approval (autonomous-manager.ts, ticktick-sync.ts,
+      // email-triage.ts, etc.) must NOT set preApproved, so their actions
+      // keep re-entering enforcePermissionGate/tool-policy like any other
+      // actionName-bearing task.
+      approvedActionName: params.preApproved === true ? params.actionName : undefined,
     };
 
     await this.runTask(task);

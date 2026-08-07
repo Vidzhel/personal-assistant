@@ -124,7 +124,7 @@ export interface AgentTask {
   /** Set only by runtime-internal dispatchers (create-validation-deps.ts) —
    * see AgentTaskRequestEvent.payload.internal in events.ts. */
   internal?: 'validator';
-  /** Set only by AgentManager.executeApprovedAction on the synthetic
+  /** Set only by AgentManager.executeAction on the synthetic
    * re-dispatch task created after a human approves a red-tier action (see
    * agent-manager.ts). Equals `actionName` on that one task. Both
    * agent-session.ts's pre-execution gate and the canUseTool tool-policy

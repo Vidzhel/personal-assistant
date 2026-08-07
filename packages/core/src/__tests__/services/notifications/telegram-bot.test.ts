@@ -823,7 +823,7 @@ describe('telegram-bot service', () => {
           getById: vi.fn().mockReturnValue(undefined),
         },
         agentManager: {
-          executeApprovedAction: vi.fn().mockResolvedValue({ success: true }),
+          executeAction: vi.fn().mockResolvedValue({ success: true }),
         },
         auditLog: {
           insert: vi.fn(),

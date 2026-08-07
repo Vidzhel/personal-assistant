@@ -1,7 +1,8 @@
 import { createLogger, generateId } from '@raven/shared';
 import type { AuditOutcome, BashAccess, PermissionTier } from '@raven/shared';
 import type { CanUseTool, PermissionResult } from '@anthropic-ai/claude-agent-sdk';
-import { checkBashAccess } from '../bash-gate/bash-gate.ts';
+import { checkBashAccess, globMatch } from '../bash-gate/bash-gate.ts';
+import type { BashGateResult } from '../bash-gate/bash-gate.ts';
 import { parseCommand } from '../bash-gate/command-parser.ts';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { PermissionEngine } from './permission-engine.ts';
@@ -93,6 +94,36 @@ const AUDIT_COMMAND_TRUNCATE_LENGTH = 200;
  *      trusted).
  *   4. Else (no skill references this server, or it declares zero actions)
  *      -> 'yellow'.
+ *
+ * ## Sub-agent MCP routing probe (2026-08-07, live `query()` probe, in-process
+ * `createSdkMcpServer` echo tool + a sub-agent whose `tools` included the
+ * `mcp__probe__*` pattern, delegated to via the `Agent` tool — no external
+ * credentials/MCPs involved):
+ *
+ * - CONFIRMED: `canUseTool` DOES fire for a sub-agent's own MCP tool calls —
+ *   it is NOT bypassed for delegated work. The callback fired with
+ *   `options.agentID` populated to the sub-agent's id (undefined/absent for
+ *   the top-level agent's own calls), which is the SDK's own way of telling
+ *   the policy which agent triggered the request. This means AgentDefinition
+ *   `tools` entries carrying `mcp__<server>__*` patterns (capability-library.ts's
+ *   collectAgentDefinitions) are gated by this exact same policy when the
+ *   sub-agent actually calls them — no separate mitigation (e.g. a
+ *   PreToolUse hook) is needed for this concern.
+ * - SURPRISE, unrelated to the routing question but discovered by the same
+ *   probe and directly affecting THIS module: on the currently-installed
+ *   `@anthropic-ai/claude-agent-sdk`, returning the bare
+ *   `{ behavior: 'allow' }` this file's `allow()` helper used to return
+ *   throws a runtime `ZodError` INSIDE the SDK for any MCP tool call (proven
+ *   for both a top-level call and a sub-agent call) — the tool_result comes
+ *   back as an error ("Tool permission request failed: ZodError... expected
+ *   record, received undefined" at `updatedInput`), even though
+ *   `sdk.d.ts` marks `updatedInput` as optional. `allow()` now takes the
+ *   tool's `input` and echoes it back as `updatedInput` to satisfy the
+ *   SDK's actual runtime schema. Every call site below was updated to pass
+ *   its `input` through. This was silently broken in production for every
+ *   gated MCP tool call (and would have broken this PR's own H2 file-tool
+ *   gating) — the existing test suite never caught it because it mocks the
+ *   SDK's `query()` entirely and never exercises this validation path.
  */
 
 export interface ToolPolicyTaskContext {
@@ -102,7 +133,7 @@ export interface ToolPolicyTaskContext {
   /** See AgentTask.approvedActionName (packages/shared/src/types/agents.ts).
    * When a resolved action name equals this, the policy allows it directly
    * instead of re-resolving its tier — closes the approve -> re-run loop for
-   * AgentManager.executeApprovedAction's synthetic task. */
+   * AgentManager.executeAction's synthetic task. */
   approvedActionName?: string;
 }
 
@@ -174,8 +205,12 @@ function resolveIntegrationAction(
   return { actionName, tier: fallbackTierForServer(deps.capabilityLibrary, server) };
 }
 
-function allow(): PermissionResult {
-  return { behavior: 'allow' };
+// See this file's module docstring, "Sub-agent MCP routing probe" — the
+// SDK's runtime PermissionResult validator requires `updatedInput` to be a
+// record on the 'allow' branch even though sdk.d.ts marks it optional.
+// Echoing the tool's own input back unchanged is the correct no-op default.
+function allow(input: Record<string, unknown> = {}): PermissionResult {
+  return { behavior: 'allow', updatedInput: input };
 }
 
 function deny(message: string): PermissionResult {
@@ -205,13 +240,91 @@ function handleBash(
 
   if (gateResult.allowed) {
     log.info(`Bash allowed [${bashAccess.access}] cmd="${chain.allBinaries.join(' | ')}"`);
-    return allow();
+    return allow(input);
   }
 
   log.warn(
     `Bash denied [${bashAccess.access}] cmd="${chain.allBinaries.join(' | ')}": ${gateResult.reason}`,
   );
   return deny(gateResult.reason ?? 'Bash command denied');
+}
+
+const FILE_TOOL_PATH_KEYS: Record<string, string> = {
+  Write: 'file_path',
+  Edit: 'file_path',
+  MultiEdit: 'file_path',
+  NotebookEdit: 'notebook_path',
+};
+
+const FILE_TOOL_ACTION_NAMES: Record<string, string> = {
+  Write: 'fs:write',
+  Edit: 'fs:edit',
+  MultiEdit: 'fs:multi-edit',
+  NotebookEdit: 'fs:notebook-edit',
+};
+
+function matchesAnyPath(patterns: string[], value: string): boolean {
+  return patterns.some((p) => globMatch(p, value));
+}
+
+/** Mirrors bash-gate.ts's checkPaths/checkScoped/checkSandboxed path logic
+ * exactly (deny takes precedence; an empty allowedPaths means unrestricted)
+ * — 'sandboxed' has no equivalent of its command-allowlist for a file path,
+ * so both 'scoped' and 'sandboxed' reduce to the same path check here. */
+function checkFileAccess(path: string, bashAccess: BashAccess): BashGateResult {
+  switch (bashAccess.access) {
+    case 'none':
+      return { allowed: false, reason: 'File-writing tools are disabled (bash access: none)' };
+    case 'full':
+      return { allowed: true };
+    case 'scoped':
+    case 'sandboxed':
+      if (bashAccess.deniedPaths.length > 0 && matchesAnyPath(bashAccess.deniedPaths, path)) {
+        return { allowed: false, reason: `Path "${path}" is denied` };
+      }
+      if (bashAccess.allowedPaths.length > 0 && !matchesAnyPath(bashAccess.allowedPaths, path)) {
+        return { allowed: false, reason: `Path "${path}" is not in the allowed paths` };
+      }
+      return { allowed: true };
+    default:
+      return { allowed: false, reason: `Unknown access level: ${String(bashAccess.access)}` };
+  }
+}
+
+/** H2: Write/Edit/MultiEdit/NotebookEdit used to fall through to the
+ * catch-all `allow()` — completely ungated regardless of `task.bashAccess`.
+ * These are file-mutating tools exactly like Bash, so they're gated with the
+ * SAME access/path semantics bash-gate.ts uses for Bash paths. */
+function handleFileTool(
+  deps: ToolPolicyDeps,
+  task: ToolPolicyTaskContext,
+  call: { toolName: string; input: Record<string, unknown> },
+): PermissionResult {
+  const { toolName, input } = call;
+  const bashAccess = task.bashAccess ?? DEFAULT_BASH_ACCESS;
+  const pathKey = FILE_TOOL_PATH_KEYS[toolName];
+  const rawPath = input[pathKey];
+  const path = typeof rawPath === 'string' ? rawPath : '(unresolved path)';
+  const actionName = FILE_TOOL_ACTION_NAMES[toolName];
+  const gateResult = checkFileAccess(path, bashAccess);
+  const details = `access=${bashAccess.access} path="${path}"${gateResult.reason ? ` reason=${gateResult.reason}` : ''}`;
+
+  deps.auditLog.insert({
+    skillName: task.skillName,
+    actionName,
+    permissionTier: gateResult.allowed ? 'green' : 'red',
+    outcome: gateResult.allowed ? 'executed' : 'denied',
+    sessionId: task.sessionId,
+    details,
+  });
+
+  if (gateResult.allowed) {
+    log.info(`${toolName} allowed [${bashAccess.access}] path="${path}"`);
+    return allow(input);
+  }
+
+  log.warn(`${toolName} denied [${bashAccess.access}] path="${path}": ${gateResult.reason}`);
+  return deny(gateResult.reason ?? `${toolName} denied`);
 }
 
 function auditAction(
@@ -275,45 +388,86 @@ function emitBlockedEvent(
 function allowKnownTier(
   deps: ToolPolicyDeps,
   task: ToolPolicyTaskContext,
-  action: { actionName: string; tier: PermissionTier },
+  action: { actionName: string; tier: PermissionTier; input: Record<string, unknown> },
 ): PermissionResult {
   auditAction(deps, task, { ...action, outcome: 'executed' });
   if (action.tier === 'yellow') {
     emitApprovedEvent(deps, task, action);
   }
-  return allow();
+  return allow(action.input);
+}
+
+const APPROVAL_ARGS_MAX_LENGTH = 500;
+const SENSITIVE_KEY_PATTERN = /token|password|secret|key/i;
+const REDACTED_PLACEHOLDER = '[REDACTED]';
+
+/** M9: approvals must carry the tool's actual arguments so a post-approval
+ * re-dispatch (AgentManager.executeAction's synthetic task) has them
+ * available — today it only gets the actionName + this `details` string.
+ * Redacts any key matching /token|password|secret|key/i (case-insensitive)
+ * before serializing, and truncates to ~500 chars. */
+function summarizeToolInput(input: Record<string, unknown>): string {
+  try {
+    const redacted: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(input)) {
+      redacted[key] = SENSITIVE_KEY_PATTERN.test(key) ? REDACTED_PLACEHOLDER : value;
+    }
+    const json = JSON.stringify(redacted);
+    return json.length > APPROVAL_ARGS_MAX_LENGTH
+      ? `${json.slice(0, APPROVAL_ARGS_MAX_LENGTH)}...`
+      : json;
+  } catch (err) {
+    return `(unserializable input: ${err instanceof Error ? err.message : String(err)})`;
+  }
 }
 
 function blockForApproval(
   deps: ToolPolicyDeps,
   task: ToolPolicyTaskContext,
-  action: { actionName: string; tier: PermissionTier; server: string; tool: string },
+  action: {
+    actionName: string;
+    tier: PermissionTier;
+    server: string;
+    tool: string;
+    input: Record<string, unknown>;
+  },
 ): PermissionResult {
   auditAction(deps, task, { ...action, outcome: 'queued' });
-  const approval = deps.pendingApprovals.insert({
-    actionName: action.actionName,
-    skillName: task.skillName,
-    details: `Blocked: ${action.actionName} (tool mcp__${action.server}__${action.tool})`,
-    sessionId: task.sessionId,
-  });
-  emitBlockedEvent(deps, task, {
-    actionName: action.actionName,
-    tier: action.tier,
-    approvalId: approval.id,
-  });
+
+  // M8: dedup repeated attempts at the same still-blocked action within this
+  // session into one pending row instead of spamming a fresh approval + a
+  // fresh Telegram ping per retry.
+  const existing = deps.pendingApprovals.findUnresolved(action.actionName, task.sessionId);
+  const approval =
+    existing ??
+    deps.pendingApprovals.insert({
+      actionName: action.actionName,
+      skillName: task.skillName,
+      details: `Blocked: ${action.actionName} (tool mcp__${action.server}__${action.tool}) args=${summarizeToolInput(action.input)}`,
+      sessionId: task.sessionId,
+    });
+
+  if (!existing) {
+    emitBlockedEvent(deps, task, {
+      actionName: action.actionName,
+      tier: action.tier,
+      approvalId: approval.id,
+    });
+  }
+
   return deny(`Queued for approval (id ${approval.id}) — the owner has been asked on Telegram`);
 }
 
 function handleIntegrationMcp(
   deps: ToolPolicyDeps,
   task: ToolPolicyTaskContext,
-  mcpCall: { server: string; tool: string },
+  mcpCall: { server: string; tool: string; input: Record<string, unknown> },
 ): PermissionResult {
-  const { server, tool } = mcpCall;
+  const { server, tool, input } = mcpCall;
   const { actionName, tier } = resolveIntegrationAction(deps, server, tool);
 
   // Loop-closure: this exact action was just approved for this task's
-  // synthetic re-dispatch (AgentManager.executeApprovedAction) — allow it
+  // synthetic re-dispatch (AgentManager.executeAction) — allow it
   // directly rather than re-resolving its tier and queuing it again.
   if (task.approvedActionName && task.approvedActionName === actionName) {
     auditAction(deps, task, {
@@ -322,14 +476,14 @@ function handleIntegrationMcp(
       outcome: 'executed',
       details: 'pre-approved re-dispatch',
     });
-    return allow();
+    return allow(input);
   }
 
   if (tier === 'green' || tier === 'yellow') {
-    return allowKnownTier(deps, task, { actionName, tier });
+    return allowKnownTier(deps, task, { actionName, tier, input });
   }
 
-  return blockForApproval(deps, task, { actionName, tier, server, tool });
+  return blockForApproval(deps, task, { actionName, tier, server, tool, input });
 }
 
 export function createToolPolicy(deps: ToolPolicyDeps, task: ToolPolicyTaskContext): CanUseTool {
@@ -338,22 +492,28 @@ export function createToolPolicy(deps: ToolPolicyDeps, task: ToolPolicyTaskConte
       return handleBash(deps, task, input);
     }
 
+    // H2: Write/Edit/MultiEdit/NotebookEdit used to reach the catch-all
+    // below and execute completely ungated — see handleFileTool's docstring.
+    if (toolName in FILE_TOOL_PATH_KEYS) {
+      return handleFileTool(deps, task, { toolName, input });
+    }
+
     // Already role-scoped by mcp-server/index.ts's ScopeContext (chat/task/
     // validation/knowledge) — no additional tier gating needed.
     if (toolName.startsWith('mcp__raven__') || toolName.startsWith('mcp__memory__')) {
-      return allow();
+      return allow(input);
     }
 
     const mcpMatch = MCP_TOOL_NAME_PATTERN.exec(toolName);
     if (mcpMatch) {
       const [, server, tool] = mcpMatch;
-      return handleIntegrationMcp(deps, task, { server, tool });
+      return handleIntegrationMcp(deps, task, { server, tool, input });
     }
 
     // Read/Glob/Grep/WebSearch/WebFetch/Agent/TodoWrite/... — everything
     // else. These are also pre-listed in agent-session.ts's allowedTools, so
     // in practice the SDK rarely routes them here; this branch exists as a
     // defensive catch-all and is exercised directly by tool-policy.test.ts.
-    return allow();
+    return allow(input);
   };
 }

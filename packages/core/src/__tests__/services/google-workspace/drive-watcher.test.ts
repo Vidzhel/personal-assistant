@@ -13,18 +13,10 @@ vi.mock('node:child_process', () => ({
   spawn: mockSpawn,
 }));
 
-const mockReadFileSync = vi.fn();
-const mockExistsSync = vi.fn(() => false);
-
 vi.mock('node:fs/promises', () => ({
   readFile: mockReadFile,
   writeFile: mockWriteFile,
   mkdir: mockMkdir,
-}));
-
-vi.mock('node:fs', () => ({
-  readFileSync: mockReadFileSync,
-  existsSync: mockExistsSync,
 }));
 
 vi.mock('@raven/shared', () => ({
@@ -247,57 +239,6 @@ describe('GWS Drive Watcher Service', () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(mockSpawn).toHaveBeenCalledTimes(3); // token + error + retry
-  });
-
-  it('handles config:reloaded to update monitored folders from disk', async () => {
-    queueSpawnResponses(
-      { code: 0, stdout: START_TOKEN_RESPONSE + '\n', stderr: '' },
-      { code: 0, stdout: CHANGES_NON_MONITORED + '\n', stderr: '' },
-    );
-
-    await service.start({ ...defaultContext });
-
-    // File was in 'some-other-folder', not monitored → no event
-    expect(mockEventBus.emit).not.toHaveBeenCalled();
-
-    // Simulate config:reloaded — find the registered handler
-    const configHandler = mockEventBus.on.mock.calls.find(
-      (call: any) => call[0] === 'config:reloaded',
-    )?.[1];
-    expect(configHandler).toBeDefined();
-
-    // Mock suites.json on disk with updated driveFolders
-    mockExistsSync.mockReturnValue(true);
-    mockReadFileSync.mockReturnValue(
-      JSON.stringify({
-        'google-workspace': {
-          enabled: true,
-          config: { driveFolders: ['some-other-folder'], drivePollingIntervalMs: 60_000 },
-        },
-      }),
-    );
-
-    // Fire config:reloaded event (single arg, like the real event bus)
-    configHandler({
-      type: 'config:reloaded',
-      payload: { configType: 'suites', timestamp: new Date().toISOString() },
-    });
-
-    // Next poll with file in now-monitored folder
-    queueSpawnResponses({ code: 0, stdout: CHANGES_NON_MONITORED + '\n', stderr: '' });
-
-    await vi.advanceTimersByTimeAsync(60_000);
-    await vi.advanceTimersByTimeAsync(0);
-
-    expect(mockEventBus.emit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: 'gdrive:new-file',
-        payload: expect.objectContaining({
-          fileId: 'file-xyz',
-          folderId: 'some-other-folder',
-        }),
-      }),
-    );
   });
 
   it('stop() clears poll timer and running state', async () => {

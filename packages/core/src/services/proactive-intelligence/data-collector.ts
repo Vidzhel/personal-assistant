@@ -2,7 +2,6 @@ import {
   createLogger,
   generateId,
   SUITE_PROACTIVE_INTELLIGENCE,
-  AGENT_PATTERN_ANALYZER,
   type EventBusInterface,
   type DatabaseInterface,
 } from '@raven/shared';
@@ -223,10 +222,19 @@ const service: RavenService = {
         payload: {
           taskId: generateId(),
           prompt: `Analyze the following data snapshot and identify actionable patterns:\n\n${snapshot}`,
-          skillName: SUITE_PROACTIVE_INTELLIGENCE,
-          actionName: 'intelligence:generate-insight',
+          // H3: must be the library skill name (library/skills/system/
+          // pattern-analysis/config.json) with its own matching actionName —
+          // 'proactive-intelligence'/'intelligence:generate-insight' aren't
+          // library-known, so resolveTier fell back to 'red' and the task
+          // was queued for an unactionable approval every run (4x/day nag).
+          // The library declares no agentDefinitions for this skill (mcps:
+          // [], vendorSkills: [], tools: []), so that key is dropped rather
+          // than handing the SDK an undefined definition for a deleted
+          // 'pattern-analyzer' agent.
+          skillName: 'pattern-analysis',
+          actionName: 'pattern-analysis:generate-insight',
           mcpServers: {},
-          agentDefinitions: { [AGENT_PATTERN_ANALYZER]: undefined },
+          agentDefinitions: {},
           priority: 'low' as const,
         },
       });

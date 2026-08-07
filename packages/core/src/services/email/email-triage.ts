@@ -26,7 +26,7 @@ let serviceConfig: Record<string, unknown>;
 let triageConfig: EmailTriageConfig | null = null;
 
 interface AgentManagerLike {
-  executeApprovedAction(params: {
+  executeAction(params: {
     actionName: string;
     skillName: string;
     details?: string;
@@ -94,10 +94,10 @@ async function applyLabelAction(
   label: string,
 ): Promise<string | null> {
   try {
-    await agentManager.executeApprovedAction({
+    await agentManager.executeAction({
       actionName: 'gmail:label-email',
       // Library skill name ('gmail'), not the pre-library SUITE_EMAIL label —
-      // executeApprovedAction resolves MCP servers/sub-agents from this via
+      // executeAction resolves MCP servers/sub-agents from this via
       // CapabilityLibrary.collectMcpServers, which only knows library names.
       skillName: 'gmail',
       details: `Apply the label "${label}" to email with messageId "${email.messageId}" from "${email.from}" with subject "${email.subject}".`,
@@ -116,10 +116,10 @@ async function applyArchiveAction(
   email: EmailPayload,
 ): Promise<string | null> {
   try {
-    await agentManager.executeApprovedAction({
+    await agentManager.executeAction({
       actionName: 'gmail:archive-email',
       // Library skill name ('gmail'), not the pre-library SUITE_EMAIL label —
-      // executeApprovedAction resolves MCP servers/sub-agents from this via
+      // executeAction resolves MCP servers/sub-agents from this via
       // CapabilityLibrary.collectMcpServers, which only knows library names.
       skillName: 'gmail',
       details: `Archive the email with messageId "${email.messageId}" from "${email.from}" with subject "${email.subject}".`,
@@ -138,10 +138,10 @@ async function applyMarkReadAction(
   email: EmailPayload,
 ): Promise<string | null> {
   try {
-    await agentManager.executeApprovedAction({
+    await agentManager.executeAction({
       actionName: 'gmail:mark-read',
       // Library skill name ('gmail'), not the pre-library SUITE_EMAIL label —
-      // executeApprovedAction resolves MCP servers/sub-agents from this via
+      // executeAction resolves MCP servers/sub-agents from this via
       // CapabilityLibrary.collectMcpServers, which only knows library names.
       skillName: 'gmail',
       details: `Mark the email with messageId "${email.messageId}" as read.`,

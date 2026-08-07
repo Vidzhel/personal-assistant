@@ -27,6 +27,12 @@ import ticktickSync from './task-management/ticktick-sync.ts';
  * gates startup declaratively (see `services/runner.ts`): all listed vars
  * must be present in `process.env` or the service is skipped with a log
  * line, exactly as suites with missing env vars failed to load today.
+ *
+ * `RAVEN_DISABLED_SERVICES` (comma-separated `name`s, checked BEFORE
+ * `requiresEnv`) is an operator kill switch for disabling one service by
+ * name — e.g. `RAVEN_DISABLED_SERVICES=autonomous-manager,drive-watcher` —
+ * without having to unset env vars that other services also depend on (see
+ * `services/runner.ts`'s `createServiceRunner`).
  */
 export interface ServiceDefinition {
   name: string;

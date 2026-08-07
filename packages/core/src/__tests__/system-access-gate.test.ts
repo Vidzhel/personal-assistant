@@ -33,7 +33,9 @@ describe('system-access-gate', () => {
     it('returns full access instructions for system_access=read-write', () => {
       const result = resolveSystemAccessInstructions(makeProject({ systemAccess: 'read-write' }));
       expect(result).toContain('may read and modify system files');
-      expect(result).toContain('Red tier');
+      // H2: file writes are gated by bash access + path lists, not a
+      // permission-tier/approval-queue lookup — see system-access-gate.ts.
+      expect(result).toContain('bash access level');
     });
 
     it('defaults to none when systemAccess is undefined', () => {

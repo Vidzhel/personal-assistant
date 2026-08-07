@@ -26,7 +26,7 @@ describe('reply-composer service', () => {
     eventHandlers = {};
 
     mockAgentManager = {
-      executeApprovedAction: vi.fn().mockResolvedValue({
+      executeAction: vi.fn().mockResolvedValue({
         success: true,
         result: JSON.stringify({
           emailId: 'email-123',
@@ -133,7 +133,7 @@ describe('reply-composer service', () => {
       });
 
       // Should call agent manager to fetch email and compose draft
-      expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith({
+      expect(mockAgentManager.executeAction).toHaveBeenCalledWith({
         actionName: 'gmail:get-email',
         skillName: 'gmail',
         details: expect.stringContaining('email-123'),
@@ -166,7 +166,7 @@ describe('reply-composer service', () => {
         topicName: 'Email',
       });
 
-      expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith({
+      expect(mockAgentManager.executeAction).toHaveBeenCalledWith({
         actionName: 'gmail:get-email',
         skillName: 'gmail',
         details: expect.stringContaining("tell them I'll have it ready by Thursday"),
@@ -190,7 +190,7 @@ describe('reply-composer service', () => {
     });
 
     it('emits failure notification when agent returns no result', async () => {
-      mockAgentManager.executeApprovedAction.mockResolvedValue({
+      mockAgentManager.executeAction.mockResolvedValue({
         success: false,
         error: 'Email not found',
       });
@@ -210,7 +210,7 @@ describe('reply-composer service', () => {
     });
 
     it('emits failure notification when draft parsing fails', async () => {
-      mockAgentManager.executeApprovedAction.mockResolvedValue({
+      mockAgentManager.executeAction.mockResolvedValue({
         success: true,
         result: 'This is not valid JSON for a draft',
       });
@@ -249,14 +249,14 @@ describe('reply-composer service', () => {
       const compositionId = sendAction.action.split(':')[2]; // er:s:{id}
 
       // Reset mock to check the send call
-      mockAgentManager.executeApprovedAction.mockClear();
-      mockAgentManager.executeApprovedAction.mockResolvedValue({ success: true });
+      mockAgentManager.executeAction.mockClear();
+      mockAgentManager.executeAction.mockResolvedValue({ success: true });
 
       // Trigger send
       await emitEventAsync('email:reply:send', { compositionId });
 
       // Should call agent manager with gmail:reply-email action
-      expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith({
+      expect(mockAgentManager.executeAction).toHaveBeenCalledWith({
         actionName: 'gmail:reply-email',
         skillName: 'gmail',
         details: expect.stringContaining('Reply to email'),
@@ -279,7 +279,7 @@ describe('reply-composer service', () => {
       const compositionId = sendAction.action.split(':')[2];
 
       mockEventBus.emit.mockClear();
-      mockAgentManager.executeApprovedAction.mockResolvedValue({ success: true });
+      mockAgentManager.executeAction.mockResolvedValue({ success: true });
 
       await emitEventAsync('email:reply:send', { compositionId });
 
@@ -305,7 +305,7 @@ describe('reply-composer service', () => {
       const sendAction = actions.find((a: any) => a.label === 'Send');
       const compositionId = sendAction.action.split(':')[2];
 
-      mockAgentManager.executeApprovedAction.mockResolvedValue({
+      mockAgentManager.executeAction.mockResolvedValue({
         success: false,
         error: 'Task did not complete successfully',
       });
@@ -322,7 +322,7 @@ describe('reply-composer service', () => {
 
       await emitEventAsync('email:reply:send', { compositionId: 'unknown-id' });
 
-      expect(mockAgentManager.executeApprovedAction).not.toHaveBeenCalled();
+      expect(mockAgentManager.executeAction).not.toHaveBeenCalled();
     });
   });
 
@@ -343,8 +343,8 @@ describe('reply-composer service', () => {
       const compositionId = editAction.action.split(':')[2];
 
       // Reset and reconfigure mock for the edit call
-      mockAgentManager.executeApprovedAction.mockClear();
-      mockAgentManager.executeApprovedAction.mockResolvedValue({
+      mockAgentManager.executeAction.mockClear();
+      mockAgentManager.executeAction.mockResolvedValue({
         success: true,
         result: JSON.stringify({
           emailId: 'email-123',
@@ -363,7 +363,7 @@ describe('reply-composer service', () => {
       });
 
       // Should call agent with new instructions
-      expect(mockAgentManager.executeApprovedAction).toHaveBeenCalledWith({
+      expect(mockAgentManager.executeAction).toHaveBeenCalledWith({
         actionName: 'gmail:get-email',
         skillName: 'gmail',
         details: expect.stringContaining('Change Thursday to Friday'),
@@ -393,7 +393,7 @@ describe('reply-composer service', () => {
       const editAction = actions.find((a: any) => a.label === 'Edit');
       const compositionId = editAction.action.split(':')[2];
 
-      mockAgentManager.executeApprovedAction.mockClear();
+      mockAgentManager.executeAction.mockClear();
 
       await emitEventAsync('email:reply:edit', {
         compositionId,
@@ -401,7 +401,7 @@ describe('reply-composer service', () => {
       });
 
       // Should NOT call agent manager — draft is marked as awaiting edit
-      expect(mockAgentManager.executeApprovedAction).not.toHaveBeenCalled();
+      expect(mockAgentManager.executeAction).not.toHaveBeenCalled();
 
       // Draft should be marked as awaiting edit
       const { pendingDrafts } = await import('../../../services/email/reply-composer.ts');
@@ -534,7 +534,7 @@ describe('reply-composer service', () => {
       const compositionId = sendAction.action.split(':')[2];
 
       // Trigger a failed send to populate pendingSendIds
-      mockAgentManager.executeApprovedAction.mockResolvedValue({
+      mockAgentManager.executeAction.mockResolvedValue({
         success: false,
         error: 'Task did not complete successfully',
       });
@@ -621,7 +621,7 @@ describe('reply-composer service', () => {
       const sendAction = actions.find((a: any) => a.label === 'Send');
       const compositionId = sendAction.action.split(':')[2];
 
-      mockAgentManager.executeApprovedAction.mockResolvedValue({
+      mockAgentManager.executeAction.mockResolvedValue({
         success: false,
         error: 'Task did not complete successfully',
       });
@@ -647,8 +647,8 @@ describe('reply-composer service', () => {
       const sendAction = actions.find((a: any) => a.label === 'Send');
       const compositionId = sendAction.action.split(':')[2];
 
-      mockAgentManager.executeApprovedAction.mockClear();
-      mockAgentManager.executeApprovedAction.mockResolvedValue({ success: true });
+      mockAgentManager.executeAction.mockClear();
+      mockAgentManager.executeAction.mockResolvedValue({ success: true });
 
       await emitEventAsync('email:reply:send', { compositionId });
 
@@ -665,11 +665,11 @@ describe('reply-composer service', () => {
       await emitEventAsync('email:reply:start', {});
 
       // Should not call agent manager
-      expect(mockAgentManager.executeApprovedAction).not.toHaveBeenCalled();
+      expect(mockAgentManager.executeAction).not.toHaveBeenCalled();
     });
 
     it('handles agent error during composition', async () => {
-      mockAgentManager.executeApprovedAction.mockRejectedValue(new Error('Network timeout'));
+      mockAgentManager.executeAction.mockRejectedValue(new Error('Network timeout'));
 
       await startService();
 

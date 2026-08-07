@@ -33,7 +33,7 @@ interface PendingDraft {
 }
 
 interface AgentManagerLike {
-  executeApprovedAction(params: {
+  executeAction(params: {
     actionName: string;
     skillName: string;
     details?: string;
@@ -219,10 +219,10 @@ async function handleReplyStart(event: unknown): Promise<void> {
   const prompt = buildComposePrompt(emailId, userIntent);
 
   try {
-    const result = await agentManager.executeApprovedAction({
+    const result = await agentManager.executeAction({
       actionName: 'gmail:get-email',
       // Library skill name ('gmail'), not the pre-library SUITE_EMAIL label —
-      // executeApprovedAction resolves MCP servers/sub-agents from this via
+      // executeAction resolves MCP servers/sub-agents from this via
       // CapabilityLibrary.collectMcpServers, which only knows library names.
       skillName: 'gmail',
       details: prompt,
@@ -269,10 +269,10 @@ async function handleReplySend(event: unknown): Promise<void> {
   const sendPrompt = buildSendPrompt(draft);
 
   try {
-    const result = await agentManager.executeApprovedAction({
+    const result = await agentManager.executeAction({
       actionName: 'gmail:reply-email',
       // Library skill name ('gmail'), not the pre-library SUITE_EMAIL label —
-      // executeApprovedAction resolves MCP servers/sub-agents from this via
+      // executeAction resolves MCP servers/sub-agents from this via
       // CapabilityLibrary.collectMcpServers, which only knows library names.
       skillName: 'gmail',
       details: sendPrompt,
@@ -372,10 +372,10 @@ async function handleReplyEdit(event: unknown): Promise<void> {
   const editPrompt = buildEditPrompt(draft, newInstructions);
 
   try {
-    const result = await agentManager.executeApprovedAction({
+    const result = await agentManager.executeAction({
       actionName: 'gmail:get-email',
       // Library skill name ('gmail'), not the pre-library SUITE_EMAIL label —
-      // executeApprovedAction resolves MCP servers/sub-agents from this via
+      // executeAction resolves MCP servers/sub-agents from this via
       // CapabilityLibrary.collectMcpServers, which only knows library names.
       skillName: 'gmail',
       details: editPrompt,

@@ -250,7 +250,7 @@ describe('handleCallback', () => {
         getById: vi.fn().mockReturnValue(undefined),
       },
       agentManager: {
-        executeApprovedAction: vi.fn().mockResolvedValue({ success: true }),
+        executeAction: vi.fn().mockResolvedValue({ success: true }),
       },
       auditLog: {
         insert: vi.fn(),
@@ -271,7 +271,7 @@ describe('handleCallback', () => {
       expect(result.success).toBe(true);
       expect(result.message).toBe('Done \u2713');
       expect(result.updatedKeyboard).toEqual([[{ text: 'Done \u2713', callback_data: 'noop' }]]);
-      expect(deps.agentManager.executeApprovedAction).toHaveBeenCalledWith({
+      expect(deps.agentManager.executeAction).toHaveBeenCalledWith({
         actionName: 'task:complete',
         skillName: 'ticktick',
         details: expect.stringContaining('tid1'),
@@ -289,7 +289,7 @@ describe('handleCallback', () => {
 
       expect(result.success).toBe(true);
       expect(result.message).toBe('Snoozed \u2713');
-      expect(deps.agentManager.executeApprovedAction).toHaveBeenCalledWith({
+      expect(deps.agentManager.executeAction).toHaveBeenCalledWith({
         actionName: 'task:snooze',
         skillName: 'ticktick',
         details: expect.stringContaining('1 day'),
@@ -305,7 +305,7 @@ describe('handleCallback', () => {
       };
       handleCallback(action, deps);
 
-      expect(deps.agentManager.executeApprovedAction).toHaveBeenCalledWith({
+      expect(deps.agentManager.executeAction).toHaveBeenCalledWith({
         actionName: 'task:snooze',
         skillName: 'ticktick',
         details: expect.stringContaining('1 week'),
@@ -318,7 +318,7 @@ describe('handleCallback', () => {
 
       expect(result.success).toBe(true);
       expect(result.message).toBe('Dropped');
-      expect(deps.agentManager.executeApprovedAction).toHaveBeenCalledWith({
+      expect(deps.agentManager.executeAction).toHaveBeenCalledWith({
         actionName: 'task:drop',
         skillName: 'ticktick',
         details: expect.stringContaining('tid4'),
@@ -326,7 +326,7 @@ describe('handleCallback', () => {
     });
 
     it('logs error when agent execution fails', async () => {
-      (deps.agentManager.executeApprovedAction as ReturnType<typeof vi.fn>).mockResolvedValue({
+      (deps.agentManager.executeAction as ReturnType<typeof vi.fn>).mockResolvedValue({
         success: false,
         error: 'MCP timeout',
       });
@@ -375,7 +375,7 @@ describe('handleCallback', () => {
 
       expect(result.success).toBe(true);
       expect(result.message).toBe('Archived \u2713');
-      expect(deps.agentManager.executeApprovedAction).toHaveBeenCalledWith({
+      expect(deps.agentManager.executeAction).toHaveBeenCalledWith({
         actionName: 'email:archive',
         skillName: 'gmail',
         details: expect.stringContaining('em2'),
@@ -388,7 +388,7 @@ describe('handleCallback', () => {
 
       expect(result.success).toBe(true);
       expect(result.message).toBe('Flagged \u2713');
-      expect(deps.agentManager.executeApprovedAction).toHaveBeenCalledWith({
+      expect(deps.agentManager.executeAction).toHaveBeenCalledWith({
         actionName: 'email:flag',
         skillName: 'gmail',
         details: expect.stringContaining('em3'),
@@ -555,11 +555,12 @@ describe('handleCallback', () => {
         permissionTier: 'red',
         outcome: 'approved',
       });
-      expect(deps.agentManager.executeApprovedAction).toHaveBeenCalledWith({
+      expect(deps.agentManager.executeAction).toHaveBeenCalledWith({
         actionName: 'gmail:send',
         skillName: 'email',
         details: 'Send email to bob',
         sessionId: 'sess1',
+        preApproved: true,
       });
       // Verify permission:approved event emitted
       expect(deps.eventBus.emit).toHaveBeenCalledWith(
@@ -595,7 +596,7 @@ describe('handleCallback', () => {
       expect(result.success).toBe(true);
       expect(result.message).toBe('Denied \u2717');
       expect(deps.pendingApprovals.resolve).toHaveBeenCalledWith('ap2', 'denied');
-      expect(deps.agentManager.executeApprovedAction).not.toHaveBeenCalled();
+      expect(deps.agentManager.executeAction).not.toHaveBeenCalled();
       expect(result.updatedKeyboard).toEqual([[{ text: 'Denied \u2717', callback_data: 'noop' }]]);
       // Verify permission:denied event emitted
       expect(deps.eventBus.emit).toHaveBeenCalledWith(

@@ -112,7 +112,12 @@ async function requestAgentAnalysis(prompt: string): Promise<string | null> {
     payload: {
       taskId: analysisTaskId,
       prompt,
-      skillName: 'orchestrator',
+      // L17: must match the library skill name (library/skills/system/
+      // orchestration/config.json) — 'orchestrator' isn't a library-known
+      // skill, so resolveTier(actionName) would fall back to 'red' if this
+      // task ever carried an actionName (it doesn't today, but skillName is
+      // also used for MCP/agent-definition resolution — see agent-manager.ts).
+      skillName: 'orchestration',
       mcpServers: {},
       priority: 'normal',
     },

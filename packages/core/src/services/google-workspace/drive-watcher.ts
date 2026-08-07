@@ -1,6 +1,5 @@
 import { spawn } from 'node:child_process';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { readFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import {
   generateId,
@@ -23,7 +22,6 @@ let monitoredFolderIds: string[];
 let pageToken: string;
 let pollIntervalMs: number;
 let projectRoot: string;
-let configReloadedHandler: ((event: unknown) => void) | null = null;
 
 function runGwsCommand(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -174,43 +172,6 @@ async function poll(): Promise<void> {
   }
 }
 
-// Re-reads config/suites.json on `config:reloaded` and applies any changes to
-// the monitored folder list / poll interval, restarting the poll timer if needed.
-function createConfigReloadedHandler(): (event: unknown) => void {
-  return (event: unknown) => {
-    const e = event as { payload?: { configType?: string } };
-    if (e.payload?.configType !== 'suites') return;
-
-    try {
-      const suitesPath = resolve(projectRoot, 'config', 'suites.json');
-      if (!existsSync(suitesPath)) return;
-      const raw = JSON.parse(readFileSync(suitesPath, 'utf-8')) as Record<
-        string,
-        { config?: Record<string, unknown> }
-      >;
-      const gwsConfig = raw['google-workspace']?.config;
-      if (!gwsConfig) return;
-
-      if (Array.isArray(gwsConfig.driveFolders)) {
-        monitoredFolderIds = gwsConfig.driveFolders as string[];
-        logger.info(`Drive watcher updated monitored folders: ${monitoredFolderIds.join(', ')}`);
-      }
-      if (typeof gwsConfig.drivePollingIntervalMs === 'number') {
-        pollIntervalMs = gwsConfig.drivePollingIntervalMs as number;
-        if (pollTimer) {
-          clearInterval(pollTimer);
-          pollTimer = setInterval(() => {
-            void poll();
-          }, pollIntervalMs);
-        }
-        logger.info(`Drive watcher updated poll interval: ${pollIntervalMs}ms`);
-      }
-    } catch (err) {
-      logger.warn(`Failed to reload drive config: ${(err as Error).message}`);
-    }
-  };
-}
-
 const service: RavenService = {
   async start(context: ServiceContext): Promise<void> {
     eventBus = context.eventBus;
@@ -260,10 +221,6 @@ const service: RavenService = {
       void poll();
     }, pollIntervalMs);
 
-    // Listen for config reloads — re-read suites.json from disk
-    configReloadedHandler = createConfigReloadedHandler();
-    eventBus.on('config:reloaded', configReloadedHandler);
-
     logger.info('GWS drive watcher service started');
   },
 
@@ -272,10 +229,6 @@ const service: RavenService = {
     if (pollTimer) {
       clearInterval(pollTimer);
       pollTimer = null;
-    }
-    if (configReloadedHandler && eventBus) {
-      eventBus.off('config:reloaded', configReloadedHandler);
-      configReloadedHandler = null;
     }
     if (pageToken) {
       await persistPageToken(pageToken).catch(() => {});

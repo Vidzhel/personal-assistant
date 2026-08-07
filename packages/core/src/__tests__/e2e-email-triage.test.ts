@@ -20,7 +20,7 @@ import {
  * shape) -> the REAL email-triage service (services/email/email-triage.ts,
  * started by services/runner.ts's env-gating, not a reimplementation)
  * matches the rule, and its rule actions (archive + markRead) run through
- * `AgentManager.executeApprovedAction` — a genuine agent task that reaches
+ * `AgentManager.executeAction` — a genuine agent task that reaches
  * the injected fake backend — then the service emits the real
  * `email:triage:processed` event.
  *
@@ -228,8 +228,8 @@ describe('e2e: email triage round-trip over the real composition root', () => {
     // Three genuine agent-task dispatches to the fake backend for this one
     // email:new event — the real, complete picture (see module docstring):
     // orchestrator.ts's independent "analyze this new email" dispatch, plus
-    // email-triage's two rule actions via AgentManager.executeApprovedAction
-    // (yellow-tier gmail:archive-email / gmail:mark-read; executeApprovedAction
+    // email-triage's two rule actions via AgentManager.executeAction
+    // (yellow-tier gmail:archive-email / gmail:mark-read; executeAction
     // marks its own re-dispatch pre-approved by construction, so neither
     // touches the approval queue).
     expect(calls.length).toBe(3);

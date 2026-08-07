@@ -215,11 +215,18 @@ export async function createRaven(
   // Create scaffolding API (project domain creation)
   const scaffoldingApi = createScaffoldingApi({ projectsDir, projectRegistry, agentYamlStore });
 
-  // Count declared services (IMAP watcher, Telegram bot, etc.) — "configured"
-  // here mirrors configuredSuiteCount's meaning: how many are declared,
-  // regardless of whether they were actually started (skipSuites, missing
-  // env, or a startup failure can make loaded < configured).
-  const configuredServiceCount = SERVICE_DEFINITIONS.length;
+  // L16: count only services whose requiresEnv is fully satisfied — NOT
+  // every declared ServiceDefinition. Most deployments only configure a few
+  // integrations (Gmail, TickTick, Telegram, ...) out of everything Raven
+  // CAN run, so counting all SERVICE_DEFINITIONS made /api/health's
+  // `services.configured` perpetually far above `services.loaded` even when
+  // every service that could possibly start already had. This count is what
+  // "loaded" (serviceRunner.getRunningCount()) is meaningfully compared
+  // against in health.ts — a startup failure is still the only way
+  // loaded < configured now.
+  const configuredServiceCount = SERVICE_DEFINITIONS.filter((def) =>
+    def.requiresEnv.every((v) => process.env[v]),
+  ).length;
 
   // 6. Start background services (IMAP watcher, Telegram bot, etc.) — now
   // compiled ServiceDefinitions rather than suite-declared dynamic imports.

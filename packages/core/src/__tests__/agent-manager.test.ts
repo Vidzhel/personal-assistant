@@ -559,7 +559,7 @@ describe('AgentManager', () => {
     });
   });
 
-  describe('executeApprovedAction loop-closure (Task 2)', () => {
+  describe('executeAction loop-closure (Task 2)', () => {
     let tmpDir: string;
     let localEventBus: EventBus;
     let auditLog: AuditLog;
@@ -603,17 +603,18 @@ describe('AgentManager', () => {
       rmSync(tmpDir, { recursive: true, force: true });
     });
 
-    it('re-dispatches a just-approved red-tier action without re-queuing it for approval', async () => {
+    it('preApproved: true re-dispatches a just-approved red-tier action without re-queuing it for approval', async () => {
       mockQuery.mockImplementation(async function* () {
         yield { type: 'result', subtype: 'success', result: 'sent' };
       } as unknown as typeof query);
 
       const before = pendingApprovals.query().length;
 
-      const result = await amWithPermissions.executeApprovedAction({
+      const result = await amWithPermissions.executeAction({
         actionName: 'gmail:send-email',
         skillName: 'gmail',
         details: 'Send to user@test.com',
+        preApproved: true,
       });
 
       expect(result.success).toBe(true);
@@ -621,6 +622,54 @@ describe('AgentManager', () => {
       // The re-dispatch must not have queued a fresh approval for the same
       // still-red tier — that's exactly the loop this closes.
       expect(pendingApprovals.query().length).toBe(before);
+    });
+
+    // C1 regression coverage: executeAction used to set approvedActionName
+    // unconditionally, which meant EVERY caller — including the ~16
+    // background-service call sites that never had human approval
+    // (autonomous-manager.ts's 6-hourly 'delete-task', etc.) — silently
+    // bypassed enforcePermissionGate. preApproved defaults to false, so a
+    // caller that omits it must still get blocked and queued like any other
+    // red-tier actionName-bearing task.
+    it('without preApproved, a red-tier action is blocked and queued for approval instead of executing', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield { type: 'result', subtype: 'success', result: 'sent' };
+      } as unknown as typeof query);
+
+      const before = pendingApprovals.query().length;
+
+      const result = await amWithPermissions.executeAction({
+        actionName: 'gmail:send-email',
+        skillName: 'gmail',
+        details: 'Send to user@test.com',
+        sessionId: 'sess-no-preapproval',
+      });
+
+      expect(result.success).toBe(false);
+      // Blocked by enforcePermissionGate before query() is ever reached.
+      expect(mockQuery).not.toHaveBeenCalled();
+
+      const approvals = pendingApprovals.query();
+      expect(approvals.length).toBe(before + 1);
+      const approval = approvals.find((a) => a.sessionId === 'sess-no-preapproval');
+      expect(approval).toBeDefined();
+      expect(approval?.actionName).toBe('gmail:send-email');
+    });
+
+    it('preApproved: false (explicit) behaves the same as omitting it — still blocked', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield { type: 'result', subtype: 'success', result: 'sent' };
+      } as unknown as typeof query);
+
+      const result = await amWithPermissions.executeAction({
+        actionName: 'gmail:send-email',
+        skillName: 'gmail',
+        details: 'Send to user@test.com',
+        preApproved: false,
+      });
+
+      expect(result.success).toBe(false);
+      expect(mockQuery).not.toHaveBeenCalled();
     });
   });
 });

@@ -106,11 +106,14 @@ async function resolveApproval(
     }
 
     if (resolution === 'approved') {
-      const execResult = await deps.agentManager.executeApprovedAction({
+      const execResult = await deps.agentManager.executeAction({
         actionName: approval.actionName,
         skillName: approval.skillName,
         details: approval.details,
         sessionId: approval.sessionId,
+        // A human just approved exactly this action via this route — see
+        // AgentManager.ApprovedActionParams.preApproved.
+        preApproved: true,
       });
 
       if (execResult.success) {

@@ -8,7 +8,12 @@ export function resolveSystemAccessInstructions(project: Project): string {
     case 'read':
       return 'You may READ system files (config/, packages/) for reference, but MUST NOT modify them. If modification is requested, explain the project only has read access.';
     case 'read-write':
-      return 'You may read and modify system files (config/, packages/). System file modifications are subject to permission tier enforcement — file changes default to Red tier and require approval.';
+      // H2 (permission-engine/tool-policy.ts's handleFileTool): Write/Edit/
+      // MultiEdit/NotebookEdit are gated by the agent's bashAccess level and
+      // path allow/deny lists — the SAME mechanism Bash commands use — not
+      // by a permission-tier/approval-queue lookup. A denied path is a hard
+      // block, not a queued approval.
+      return 'You may read and modify system files (config/, packages/). System file modifications are enforced by your bash access level and its allowed/denied path lists — a file write outside those paths (or with no write access) is blocked outright, not queued for approval.';
   }
 }
 

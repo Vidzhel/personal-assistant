@@ -387,17 +387,225 @@ describe('createToolPolicy', () => {
   });
 
   describe('everything else', () => {
-    it('allows base tools (Read, Glob, TodoWrite, Write) without auditing', async () => {
+    it('allows base tools (Read, Glob, TodoWrite) without auditing', async () => {
       const deps = baseDeps();
       const task = baseTask();
       const policy = createToolPolicy(deps, task);
 
-      for (const toolName of ['Read', 'Glob', 'TodoWrite', 'Write', 'Edit']) {
+      for (const toolName of ['Read', 'Glob', 'TodoWrite']) {
         const before = auditLog.query({ skillName: 'test-skill' }).length;
         const result = await policy(toolName, {}, FAKE_CAN_USE_TOOL_OPTIONS);
         expect(result.behavior).toBe('allow');
         expect(auditLog.query({ skillName: 'test-skill' }).length).toBe(before);
       }
+    });
+
+    it('echoes the tool input back as updatedInput on allow (SDK runtime requires it)', async () => {
+      const deps = baseDeps();
+      const task = baseTask();
+      const policy = createToolPolicy(deps, task);
+
+      const result = await policy('Read', { file_path: '/x.ts' }, FAKE_CAN_USE_TOOL_OPTIONS);
+      expect(result).toEqual({ behavior: 'allow', updatedInput: { file_path: '/x.ts' } });
+    });
+  });
+
+  // H2: Write/Edit/MultiEdit/NotebookEdit used to reach the "everything
+  // else" catch-all above and execute completely ungated, regardless of
+  // task.bashAccess. They're now gated with the same access/path semantics
+  // bash-gate.ts applies to Bash.
+  describe('file-writing tools (Write/Edit/MultiEdit/NotebookEdit)', () => {
+    it('denies and audits when bashAccess is none (including the default when unset)', async () => {
+      const deps = baseDeps();
+      const task = baseTask();
+      const policy = createToolPolicy(deps, task);
+
+      const result = await policy('Write', { file_path: '/tmp/x.ts' }, FAKE_CAN_USE_TOOL_OPTIONS);
+      expect(result.behavior).toBe('deny');
+
+      const entries = auditLog.query({ skillName: 'test-skill', outcome: 'denied' });
+      expect(entries.some((e) => e.actionName === 'fs:write' && e.permissionTier === 'red')).toBe(
+        true,
+      );
+    });
+
+    it('allows and audits executed when bashAccess is full', async () => {
+      const deps = baseDeps();
+      const task = baseTask({ bashAccess: FULL_BASH_ACCESS });
+      const policy = createToolPolicy(deps, task);
+
+      const result = await policy('Edit', { file_path: '/tmp/x.ts' }, FAKE_CAN_USE_TOOL_OPTIONS);
+      expect(result.behavior).toBe('allow');
+
+      const entries = auditLog.query({ skillName: 'test-skill', outcome: 'executed' });
+      expect(entries.some((e) => e.actionName === 'fs:edit' && e.permissionTier === 'green')).toBe(
+        true,
+      );
+    });
+
+    it('scoped: allows a path matching allowedPaths', async () => {
+      const deps = baseDeps();
+      const task = baseTask({
+        bashAccess: {
+          access: 'scoped',
+          allowedCommands: [],
+          deniedCommands: [],
+          allowedPaths: ['/workspace/**'],
+          deniedPaths: [],
+        },
+      });
+      const policy = createToolPolicy(deps, task);
+
+      const result = await policy(
+        'Write',
+        { file_path: '/workspace/notes.md' },
+        FAKE_CAN_USE_TOOL_OPTIONS,
+      );
+      expect(result.behavior).toBe('allow');
+    });
+
+    it('scoped: denies a path not matching allowedPaths', async () => {
+      const deps = baseDeps();
+      const task = baseTask({
+        bashAccess: {
+          access: 'scoped',
+          allowedCommands: [],
+          deniedCommands: [],
+          allowedPaths: ['/workspace/**'],
+          deniedPaths: [],
+        },
+      });
+      const policy = createToolPolicy(deps, task);
+
+      const result = await policy('Write', { file_path: '/etc/passwd' }, FAKE_CAN_USE_TOOL_OPTIONS);
+      expect(result.behavior).toBe('deny');
+      if (result.behavior === 'deny') {
+        expect(result.message).toContain('not in the allowed paths');
+      }
+    });
+
+    it('scoped: deniedPaths takes precedence over an otherwise-matching allowedPaths', async () => {
+      const deps = baseDeps();
+      const task = baseTask({
+        bashAccess: {
+          access: 'scoped',
+          allowedCommands: [],
+          deniedCommands: [],
+          allowedPaths: ['/workspace/**'],
+          deniedPaths: ['/workspace/secrets/**'],
+        },
+      });
+      const policy = createToolPolicy(deps, task);
+
+      const result = await policy(
+        'Edit',
+        { file_path: '/workspace/secrets/api-key.txt' },
+        FAKE_CAN_USE_TOOL_OPTIONS,
+      );
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('sandboxed: applies the same path rules as scoped', async () => {
+      const deps = baseDeps();
+      const task = baseTask({
+        bashAccess: {
+          access: 'sandboxed',
+          allowedCommands: [],
+          deniedCommands: [],
+          allowedPaths: ['/workspace/**'],
+          deniedPaths: [],
+        },
+      });
+      const policy = createToolPolicy(deps, task);
+
+      const result = await policy(
+        'MultiEdit',
+        { file_path: '/other/x.ts' },
+        FAKE_CAN_USE_TOOL_OPTIONS,
+      );
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('resolves NotebookEdit paths from notebook_path, not file_path', async () => {
+      const deps = baseDeps();
+      const task = baseTask({
+        bashAccess: {
+          access: 'scoped',
+          allowedCommands: [],
+          deniedCommands: [],
+          allowedPaths: ['/workspace/**'],
+          deniedPaths: [],
+        },
+      });
+      const policy = createToolPolicy(deps, task);
+
+      const result = await policy(
+        'NotebookEdit',
+        { notebook_path: '/workspace/analysis.ipynb' },
+        FAKE_CAN_USE_TOOL_OPTIONS,
+      );
+      expect(result.behavior).toBe('allow');
+    });
+  });
+
+  // M9: approvals must carry the tool's actual arguments so a post-approval
+  // re-dispatch has them, with sensitive-looking keys redacted.
+  describe('M9: approval details carry tool arguments', () => {
+    it('includes the (redacted) tool arguments in the pending approval details', async () => {
+      const deps = baseDeps({
+        permissionEngine: makeFakePermissionEngine({ 'gmail:send-email': 'red' }),
+      });
+      const task = baseTask({ skillName: 'gmail', sessionId: 'sess-m9-args' });
+      const policy = createToolPolicy(deps, task);
+
+      await policy(
+        'mcp__gmail__send_email',
+        { to: 'a@b.com', apiKey: 'sk-super-secret', body: 'hello' },
+        FAKE_CAN_USE_TOOL_OPTIONS,
+      );
+
+      const approval = pendingApprovals.query().find((a) => a.sessionId === 'sess-m9-args');
+      expect(approval?.details).toContain('a@b.com');
+      expect(approval?.details).toContain('[REDACTED]');
+      expect(approval?.details).not.toContain('sk-super-secret');
+    });
+  });
+
+  // M8: repeated attempts at the same still-blocked action within a session
+  // must dedup into one pending row instead of spamming approvals/events.
+  describe('M8: pending-approval dedup', () => {
+    it('reuses the existing unresolved approval id on a repeated attempt, without a second permission:blocked event', async () => {
+      const deps = baseDeps({
+        permissionEngine: makeFakePermissionEngine({ 'gmail:send-email': 'red' }),
+      });
+      const task = baseTask({ skillName: 'gmail', sessionId: 'sess-m8-dedup' });
+      const policy = createToolPolicy(deps, task);
+
+      const first = await policy(
+        'mcp__gmail__send_email',
+        { to: 'a@b.com' },
+        FAKE_CAN_USE_TOOL_OPTIONS,
+      );
+      const second = await policy(
+        'mcp__gmail__send_email',
+        { to: 'a@b.com' },
+        FAKE_CAN_USE_TOOL_OPTIONS,
+      );
+
+      expect(first.behavior).toBe('deny');
+      expect(second.behavior).toBe('deny');
+
+      const approvalsForSession = pendingApprovals
+        .query()
+        .filter((a) => a.sessionId === 'sess-m8-dedup');
+      expect(approvalsForSession).toHaveLength(1);
+
+      const blockedEvents = events.filter(
+        (e) =>
+          e.type === 'permission:blocked' &&
+          (e as { payload: { sessionId?: string } }).payload.sessionId === 'sess-m8-dedup',
+      );
+      expect(blockedEvents).toHaveLength(1);
     });
   });
 });
