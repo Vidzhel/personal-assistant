@@ -1,4 +1,5 @@
 import type { SubAgentDefinition } from '@raven/shared';
+import type { CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 
 export type AgentBackend = (opts: BackendOptions) => Promise<BackendResult>;
 
@@ -43,6 +44,11 @@ export interface BackendOptions {
    * tests point the backend at a fake executable instead of the real `claude`
    * CLI. Never set in production. */
   executablePathOverride?: string;
+  /** Per-tool-call permission callback — see permission-engine/tool-policy.ts.
+   * Threaded through with `permissionMode: 'default'` (sdk-backend.ts) in
+   * place of the old `bypassPermissions` mode. Undefined when the task has
+   * no permissionDeps (agent-session.ts), matching today's opt-in gating. */
+  canUseTool?: CanUseTool;
 }
 
 export interface BackendResult {

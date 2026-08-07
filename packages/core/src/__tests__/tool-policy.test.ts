@@ -1,0 +1,403 @@
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { initDatabase, getDb } from '../db/database.ts';
+import { createAuditLog } from '../permission-engine/audit-log.ts';
+import { createPendingApprovals } from '../permission-engine/pending-approvals.ts';
+import { createToolPolicy } from '../permission-engine/tool-policy.ts';
+import type { ToolPolicyDeps, ToolPolicyTaskContext } from '../permission-engine/tool-policy.ts';
+import type {
+  PermissionEngine,
+  ActionCatalogEntry,
+} from '../permission-engine/permission-engine.ts';
+import type { AuditLog } from '../permission-engine/audit-log.ts';
+import type { PendingApprovals } from '../permission-engine/pending-approvals.ts';
+import { EventBus } from '../event-bus/event-bus.ts';
+import type { CapabilityLibrary } from '../capability-library/capability-library.ts';
+import type { BashAccess, PermissionTier, RavenEvent } from '@raven/shared';
+
+function makeFakePermissionEngine(
+  tierMap: Record<string, PermissionTier>,
+  knownActionNames: string[] = Object.keys(tierMap),
+): PermissionEngine {
+  return {
+    initialize: () => undefined,
+    resolveTier: (actionName: string) => tierMap[actionName] ?? 'red',
+    getActionCatalog: (): ActionCatalogEntry[] =>
+      knownActionNames.map((name) => ({
+        name,
+        tier: tierMap[name] ?? 'red',
+        source: 'library' as const,
+      })),
+    shutdown: () => undefined,
+    getConfig: () => ({}),
+  };
+}
+
+interface FakeSkill {
+  name: string;
+  mcps: string[];
+  actions: Array<{ defaultTier: PermissionTier }>;
+}
+
+// CanUseTool's third parameter carries SDK-internal fields (signal,
+// toolUseID, ...) that the policy under test never reads — a minimal stub
+// satisfies the type without pulling in real SDK machinery.
+const FAKE_CAN_USE_TOOL_OPTIONS = {
+  signal: new AbortController().signal,
+  toolUseID: 'test-tool-use',
+};
+
+function makeFakeCapabilityLibrary(skills: FakeSkill[]): CapabilityLibrary {
+  const fake = {
+    getSkillNames: () => skills.map((s) => s.name),
+    getSkill: (name: string) => {
+      const skill = skills.find((s) => s.name === name);
+      return skill ? { config: { mcps: skill.mcps, actions: skill.actions } } : undefined;
+    },
+  };
+  return fake as unknown as CapabilityLibrary;
+}
+
+const FULL_BASH_ACCESS: BashAccess = {
+  access: 'full',
+  allowedCommands: [],
+  deniedCommands: [],
+  allowedPaths: [],
+  deniedPaths: [],
+};
+
+const NONE_BASH_ACCESS: BashAccess = {
+  access: 'none',
+  allowedCommands: [],
+  deniedCommands: [],
+  allowedPaths: [],
+  deniedPaths: [],
+};
+
+describe('createToolPolicy', () => {
+  let tmpDir: string;
+  let auditLog: AuditLog;
+  let pendingApprovals: PendingApprovals;
+  let eventBus: EventBus;
+  let events: RavenEvent[];
+
+  beforeAll(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'tool-policy-'));
+    initDatabase(join(tmpDir, 'test.db'));
+    auditLog = createAuditLog(getDb());
+    auditLog.initialize();
+    pendingApprovals = createPendingApprovals(getDb());
+    pendingApprovals.initialize();
+  });
+
+  afterAll(() => {
+    try {
+      getDb().close();
+    } catch {
+      /* already closed */
+    }
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  beforeEach(() => {
+    eventBus = new EventBus();
+    events = [];
+    eventBus.on('*', (event) => events.push(event));
+  });
+
+  function baseDeps(overrides: Partial<ToolPolicyDeps> = {}): ToolPolicyDeps {
+    return {
+      permissionEngine: makeFakePermissionEngine({}),
+      auditLog,
+      pendingApprovals,
+      eventBus,
+      ...overrides,
+    };
+  }
+
+  function baseTask(overrides: Partial<ToolPolicyTaskContext> = {}): ToolPolicyTaskContext {
+    return { skillName: 'test-skill', sessionId: 'sess-1', ...overrides };
+  }
+
+  describe('Bash', () => {
+    it('allows a command permitted by bashAccess and audits it green/executed', async () => {
+      const deps = baseDeps();
+      const task = baseTask({ bashAccess: FULL_BASH_ACCESS });
+      const policy = createToolPolicy(deps, task);
+
+      const result = await policy('Bash', { command: 'echo hello' }, FAKE_CAN_USE_TOOL_OPTIONS);
+      expect(result.behavior).toBe('allow');
+
+      const entries = auditLog.query({ skillName: 'test-skill', outcome: 'executed' });
+      expect(
+        entries.some((e) => e.actionName === 'bash:echo' && e.permissionTier === 'green'),
+      ).toBe(true);
+    });
+
+    it('denies a command blocked by bashAccess and audits it red/denied', async () => {
+      const deps = baseDeps();
+      const task = baseTask({ bashAccess: NONE_BASH_ACCESS });
+      const policy = createToolPolicy(deps, task);
+
+      const result = await policy('Bash', { command: 'ls -la' }, FAKE_CAN_USE_TOOL_OPTIONS);
+      expect(result.behavior).toBe('deny');
+      if (result.behavior === 'deny') {
+        expect(result.message).toContain('Bash access is disabled');
+      }
+
+      const entries = auditLog.query({ skillName: 'test-skill', outcome: 'denied' });
+      expect(entries.some((e) => e.actionName === 'bash:ls' && e.permissionTier === 'red')).toBe(
+        true,
+      );
+    });
+
+    it('defaults to none (deny) when the task has no bashAccess at all', async () => {
+      const deps = baseDeps();
+      const task = baseTask();
+      const policy = createToolPolicy(deps, task);
+
+      const result = await policy('Bash', { command: 'whoami' }, FAKE_CAN_USE_TOOL_OPTIONS);
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('does not queue a pending approval for a denied Bash command', async () => {
+      const deps = baseDeps();
+      const task = baseTask({ bashAccess: NONE_BASH_ACCESS, sessionId: 'sess-bash-noqueue' });
+      const policy = createToolPolicy(deps, task);
+
+      await policy('Bash', { command: 'rm -rf /' }, FAKE_CAN_USE_TOOL_OPTIONS);
+
+      const approvals = pendingApprovals.query();
+      expect(approvals.some((a) => a.sessionId === 'sess-bash-noqueue')).toBe(false);
+    });
+  });
+
+  describe('raven/memory MCP tools', () => {
+    it('always allows mcp__raven__* without auditing or emitting events', async () => {
+      const deps = baseDeps();
+      const task = baseTask();
+      const policy = createToolPolicy(deps, task);
+
+      const before = auditLog.query({ skillName: 'test-skill' }).length;
+      const result = await policy('mcp__raven__create_task', {}, FAKE_CAN_USE_TOOL_OPTIONS);
+
+      expect(result.behavior).toBe('allow');
+      expect(auditLog.query({ skillName: 'test-skill' }).length).toBe(before);
+      expect(events).toHaveLength(0);
+    });
+
+    it('always allows mcp__memory__*', async () => {
+      const deps = baseDeps();
+      const task = baseTask();
+      const policy = createToolPolicy(deps, task);
+
+      const result = await policy('mcp__memory__write_note', {}, FAKE_CAN_USE_TOOL_OPTIONS);
+      expect(result.behavior).toBe('allow');
+    });
+  });
+
+  describe('integration MCP tools — known action mapping', () => {
+    it('green tier: allows and audits executed, no event', async () => {
+      const deps = baseDeps({
+        permissionEngine: makeFakePermissionEngine({ 'ticktick:get-tasks': 'green' }),
+      });
+      const task = baseTask({ skillName: 'ticktick', sessionId: 'sess-green' });
+      const policy = createToolPolicy(deps, task);
+
+      const result = await policy('mcp__ticktick__get_tasks', {}, FAKE_CAN_USE_TOOL_OPTIONS);
+      expect(result.behavior).toBe('allow');
+
+      const entries = auditLog.query({ sessionId: 'sess-green' });
+      expect(
+        entries.some((e) => e.actionName === 'ticktick:get-tasks' && e.outcome === 'executed'),
+      ).toBe(true);
+      expect(events.filter((e) => e.type.startsWith('permission:'))).toHaveLength(0);
+    });
+
+    it('yellow tier: allows, audits executed, and emits permission:approved', async () => {
+      const deps = baseDeps({
+        permissionEngine: makeFakePermissionEngine({ 'ticktick:create-task': 'yellow' }),
+      });
+      const task = baseTask({ skillName: 'ticktick', sessionId: 'sess-yellow' });
+      const policy = createToolPolicy(deps, task);
+
+      const result = await policy('mcp__ticktick__create_task', {}, FAKE_CAN_USE_TOOL_OPTIONS);
+      expect(result.behavior).toBe('allow');
+
+      const approvedEvents = events.filter((e) => e.type === 'permission:approved');
+      expect(approvedEvents).toHaveLength(1);
+      const payload = (approvedEvents[0] as { payload: Record<string, unknown> }).payload;
+      expect(payload.actionName).toBe('ticktick:create-task');
+      expect(payload.tier).toBe('yellow');
+    });
+
+    it('red tier: denies, audits queued, inserts a pending approval, and emits permission:blocked', async () => {
+      const deps = baseDeps({
+        permissionEngine: makeFakePermissionEngine({ 'gmail:send-email': 'red' }),
+      });
+      const task = baseTask({ skillName: 'gmail', sessionId: 'sess-red' });
+      const policy = createToolPolicy(deps, task);
+
+      const result = await policy(
+        'mcp__gmail__send_email',
+        { to: 'a@b.com' },
+        FAKE_CAN_USE_TOOL_OPTIONS,
+      );
+      expect(result.behavior).toBe('deny');
+      if (result.behavior === 'deny') {
+        expect(result.message).toMatch(/Queued for approval \(id .+\)/);
+      }
+
+      // Integration test: policy denial -> audit row.
+      const queuedEntries = auditLog.query({ sessionId: 'sess-red', outcome: 'queued' });
+      expect(queuedEntries.some((e) => e.actionName === 'gmail:send-email')).toBe(true);
+
+      const approvals = pendingApprovals.query();
+      const approval = approvals.find((a) => a.sessionId === 'sess-red');
+      expect(approval).toBeDefined();
+      expect(approval?.actionName).toBe('gmail:send-email');
+
+      const blockedEvents = events.filter((e) => e.type === 'permission:blocked');
+      expect(blockedEvents).toHaveLength(1);
+      const payload = (blockedEvents[0] as { payload: Record<string, unknown> }).payload;
+      expect(payload.approvalId).toBe(approval?.id);
+    });
+  });
+
+  describe('integration MCP tools — unmapped tool name fallback', () => {
+    it('falls back to the max declared tier of skills owning the server (red)', async () => {
+      const capabilityLibrary = makeFakeCapabilityLibrary([
+        {
+          name: 'ticktick',
+          mcps: ['ticktick'],
+          actions: [{ defaultTier: 'green' }, { defaultTier: 'yellow' }, { defaultTier: 'red' }],
+        },
+      ]);
+      const deps = baseDeps({
+        permissionEngine: makeFakePermissionEngine({}, []),
+        capabilityLibrary,
+      });
+      const task = baseTask({ skillName: 'ticktick' });
+      const policy = createToolPolicy(deps, task);
+
+      // get_all_tasks has no declared ticktick:* action counterpart.
+      const result = await policy('mcp__ticktick__get_all_tasks', {}, FAKE_CAN_USE_TOOL_OPTIONS);
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('falls back to the max declared tier of skills owning the server (yellow, no red action)', async () => {
+      const capabilityLibrary = makeFakeCapabilityLibrary([
+        {
+          name: 'docs',
+          mcps: ['markdownify'],
+          actions: [{ defaultTier: 'green' }, { defaultTier: 'yellow' }],
+        },
+      ]);
+      const deps = baseDeps({
+        permissionEngine: makeFakePermissionEngine({}, []),
+        capabilityLibrary,
+      });
+      const task = baseTask({ skillName: 'docs', sessionId: 'sess-fallback-yellow' });
+      const policy = createToolPolicy(deps, task);
+
+      const result = await policy('mcp__markdownify__convert', {}, FAKE_CAN_USE_TOOL_OPTIONS);
+      expect(result.behavior).toBe('allow');
+      expect(events.filter((e) => e.type === 'permission:approved')).toHaveLength(1);
+    });
+
+    it('falls back to yellow when no capabilityLibrary is provided at all', async () => {
+      const deps = baseDeps({ permissionEngine: makeFakePermissionEngine({}, []) });
+      const task = baseTask({ skillName: 'unknown-skill' });
+      const policy = createToolPolicy(deps, task);
+
+      const result = await policy(
+        'mcp__unknown-server__do_something',
+        {},
+        FAKE_CAN_USE_TOOL_OPTIONS,
+      );
+      expect(result.behavior).toBe('allow');
+    });
+
+    it('falls back to yellow when no skill references the MCP server', async () => {
+      const capabilityLibrary = makeFakeCapabilityLibrary([
+        { name: 'gmail', mcps: ['gmail'], actions: [{ defaultTier: 'red' }] },
+      ]);
+      const deps = baseDeps({
+        permissionEngine: makeFakePermissionEngine({}, []),
+        capabilityLibrary,
+      });
+      const task = baseTask({ skillName: 'orphan' });
+      const policy = createToolPolicy(deps, task);
+
+      const result = await policy(
+        'mcp__orphan-server__do_something',
+        {},
+        FAKE_CAN_USE_TOOL_OPTIONS,
+      );
+      expect(result.behavior).toBe('allow');
+    });
+  });
+
+  describe('approvedActionName loop-closure', () => {
+    it('allows a red-tier action directly when it matches task.approvedActionName', async () => {
+      const deps = baseDeps({
+        permissionEngine: makeFakePermissionEngine({ 'gmail:send-email': 'red' }),
+      });
+      const task = baseTask({
+        skillName: 'gmail',
+        sessionId: 'sess-approved',
+        approvedActionName: 'gmail:send-email',
+      });
+      const policy = createToolPolicy(deps, task);
+
+      const result = await policy(
+        'mcp__gmail__send_email',
+        { to: 'a@b.com' },
+        FAKE_CAN_USE_TOOL_OPTIONS,
+      );
+      expect(result.behavior).toBe('allow');
+
+      // No new pending approval queued for the pre-approved re-run.
+      const approvals = pendingApprovals.query();
+      expect(approvals.some((a) => a.sessionId === 'sess-approved')).toBe(false);
+
+      const entries = auditLog.query({ sessionId: 'sess-approved', outcome: 'executed' });
+      expect(entries.some((e) => e.actionName === 'gmail:send-email')).toBe(true);
+    });
+
+    it('does not bypass tiering for a different action than the approved one', async () => {
+      const deps = baseDeps({
+        permissionEngine: makeFakePermissionEngine({ 'gmail:send-email': 'red' }),
+      });
+      const task = baseTask({
+        skillName: 'gmail',
+        approvedActionName: 'gmail:delete-email', // a different action was approved
+      });
+      const policy = createToolPolicy(deps, task);
+
+      const result = await policy(
+        'mcp__gmail__send_email',
+        { to: 'a@b.com' },
+        FAKE_CAN_USE_TOOL_OPTIONS,
+      );
+      expect(result.behavior).toBe('deny');
+    });
+  });
+
+  describe('everything else', () => {
+    it('allows base tools (Read, Glob, TodoWrite, Write) without auditing', async () => {
+      const deps = baseDeps();
+      const task = baseTask();
+      const policy = createToolPolicy(deps, task);
+
+      for (const toolName of ['Read', 'Glob', 'TodoWrite', 'Write', 'Edit']) {
+        const before = auditLog.query({ skillName: 'test-skill' }).length;
+        const result = await policy(toolName, {}, FAKE_CAN_USE_TOOL_OPTIONS);
+        expect(result.behavior).toBe('allow');
+        expect(auditLog.query({ skillName: 'test-skill' }).length).toBe(before);
+      }
+    });
+  });
+});

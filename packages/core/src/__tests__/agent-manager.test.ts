@@ -38,7 +38,12 @@ import { McpManager } from '../mcp-manager/mcp-manager.ts';
 import { createMessageStore, type MessageStore } from '../session-manager/message-store.ts';
 import { SessionManager } from '../session-manager/session-manager.ts';
 import { initDatabase, getDb } from '../db/database.ts';
-import type { RavenEvent, AgentTaskRequestEvent } from '@raven/shared';
+import { createAuditLog } from '../permission-engine/audit-log.ts';
+import type { AuditLog } from '../permission-engine/audit-log.ts';
+import { createPendingApprovals } from '../permission-engine/pending-approvals.ts';
+import type { PendingApprovals } from '../permission-engine/pending-approvals.ts';
+import type { PermissionEngine } from '../permission-engine/permission-engine.ts';
+import type { RavenEvent, AgentTaskRequestEvent, PermissionTier } from '@raven/shared';
 
 const mockQuery = vi.mocked(query);
 
@@ -559,6 +564,73 @@ describe('AgentManager', () => {
       gates[1]();
       await new Promise((r) => setTimeout(r, 30));
       expect(agentManager.getRunningCount()).toBe(0);
+    });
+  });
+
+  describe('executeApprovedAction loop-closure (Task 2)', () => {
+    let tmpDir: string;
+    let localEventBus: EventBus;
+    let auditLog: AuditLog;
+    let pendingApprovals: PendingApprovals;
+    let amWithPermissions: AgentManager;
+
+    function makeFakePermissionEngine(tierMap: Record<string, PermissionTier>): PermissionEngine {
+      return {
+        initialize: () => undefined,
+        resolveTier: (actionName: string) => tierMap[actionName] ?? 'red',
+        getActionCatalog: () => [],
+        shutdown: () => undefined,
+        getConfig: () => ({}),
+      };
+    }
+
+    beforeEach(() => {
+      tmpDir = mkdtempSync(join(tmpdir(), 'raven-am-approved-'));
+      initDatabase(join(tmpDir, 'test.db'));
+      auditLog = createAuditLog(getDb());
+      auditLog.initialize();
+      pendingApprovals = createPendingApprovals(getDb());
+      pendingApprovals.initialize();
+      localEventBus = new EventBus();
+
+      amWithPermissions = new AgentManager({
+        eventBus: localEventBus,
+        mcpManager,
+        suiteRegistry,
+        permissionEngine: makeFakePermissionEngine({ 'gmail:send-email': 'red' }),
+        auditLog,
+        pendingApprovals,
+      });
+    });
+
+    afterEach(() => {
+      localEventBus.removeAllListeners();
+      try {
+        getDb().close();
+      } catch {
+        /* already closed */
+      }
+      rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('re-dispatches a just-approved red-tier action without re-queuing it for approval', async () => {
+      mockQuery.mockImplementation(async function* () {
+        yield { type: 'result', subtype: 'success', result: 'sent' };
+      } as unknown as typeof query);
+
+      const before = pendingApprovals.query().length;
+
+      const result = await amWithPermissions.executeApprovedAction({
+        actionName: 'gmail:send-email',
+        skillName: 'gmail',
+        details: 'Send to user@test.com',
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockQuery).toHaveBeenCalled();
+      // The re-dispatch must not have queued a fresh approval for the same
+      // still-red tier — that's exactly the loop this closes.
+      expect(pendingApprovals.query().length).toBe(before);
     });
   });
 });

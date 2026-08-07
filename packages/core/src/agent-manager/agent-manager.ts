@@ -13,6 +13,7 @@ import type { PermissionDeps } from './agent-session.ts';
 import { runAgentTask } from './agent-session.ts';
 import type { RavenMcpDeps } from '../mcp-server/index.ts';
 import type { MemoryStore } from '../agent-memory/memory-store.ts';
+import type { CapabilityLibrary } from '../capability-library/capability-library.ts';
 import { getConfig } from '../config.ts';
 
 const log = createLogger('agent-manager');
@@ -31,6 +32,9 @@ export interface AgentManagerDeps {
   permissionEngine?: PermissionEngine;
   auditLog?: AuditLog;
   pendingApprovals?: PendingApprovals;
+  /** Threaded into PermissionDeps.capabilityLibrary — used only by the
+   * canUseTool policy's unmapped-MCP-tool fallback (tool-policy.ts). */
+  capabilityLibrary?: CapabilityLibrary;
   executionLogger?: ExecutionLogger;
   messageStore?: MessageStore;
   sessionManager?: SessionManager;
@@ -95,6 +99,7 @@ export class AgentManager {
         permissionEngine: deps.permissionEngine,
         auditLog: deps.auditLog,
         pendingApprovals: deps.pendingApprovals,
+        capabilityLibrary: deps.capabilityLibrary,
       };
     }
     this.maxConcurrent = getConfig().RAVEN_MAX_CONCURRENT_AGENTS;
@@ -432,6 +437,12 @@ export class AgentManager {
       agentDefinitions,
       createdAt: Date.now(),
       actionName: params.actionName,
+      // A human already approved exactly this action via the pending-approvals
+      // flow (see api/routes/approvals.ts's resolveApproval) — mark it so
+      // agent-session.ts's pre-check gate and the canUseTool policy both
+      // treat this re-dispatch as pre-approved instead of re-resolving the
+      // same (still red) tier and queuing it for approval again.
+      approvedActionName: params.actionName,
     };
 
     await this.runTask(task);

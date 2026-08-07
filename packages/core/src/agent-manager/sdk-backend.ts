@@ -45,7 +45,19 @@ export function createSdkBackend(): AgentBackend {
     const queryOptions: Record<string, unknown> = {
       systemPrompt: opts.systemPrompt,
       allowedTools: opts.allowedTools,
-      permissionMode: 'bypassPermissions' as const,
+      // 'default' (not 'bypassPermissions'): the SDK calls canUseTool for
+      // any tool it decides needs asking (its own risk heuristic for
+      // built-in tools; unconditionally for MCP tools not in allowedTools —
+      // see tool-policy.ts's module docstring for the evidence). Verified
+      // live against the real SDK that 'default' + an always-resolving
+      // canUseTool never blocks on an interactive prompt in this headless
+      // context — the callback IS the "user" being asked. 'dontAsk' was
+      // rejected: verified it auto-denies at the exact same decision point
+      // WITHOUT ever invoking canUseTool, which would make the policy below
+      // dead code. 'bypassPermissions' is gone entirely, along with the
+      // `allowDangerouslySkipPermissions` flag that mode requires (and
+      // which the code never set — see Phase 2 plan's Verified facts).
+      permissionMode: 'default' as const,
       model: opts.model,
       maxTurns: opts.maxTurns,
       stderr: opts.onStderr,
@@ -53,6 +65,10 @@ export function createSdkBackend(): AgentBackend {
       env,
       abortController,
     };
+
+    if (opts.canUseTool) {
+      queryOptions.canUseTool = opts.canUseTool;
+    }
 
     if (opts.resume) {
       queryOptions.resume = opts.resume;

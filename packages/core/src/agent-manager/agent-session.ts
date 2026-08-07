@@ -1,19 +1,13 @@
-import { createLogger, generateId, buildMcpToolPattern } from '@raven/shared';
-import type {
-  AgentTask,
-  McpServerConfig,
-  PermissionTier,
-  SubAgentDefinition,
-  BashAccess,
-} from '@raven/shared';
-import { checkBashAccess } from '../bash-gate/bash-gate.ts';
-import { parseCommand } from '../bash-gate/command-parser.ts';
+import { createLogger, generateId } from '@raven/shared';
+import type { AgentTask, McpServerConfig, PermissionTier, SubAgentDefinition } from '@raven/shared';
 import type { MessageStore } from '../session-manager/message-store.ts';
 import type { SessionManager } from '../session-manager/session-manager.ts';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { PermissionEngine } from '../permission-engine/permission-engine.ts';
 import type { AuditLog } from '../permission-engine/audit-log.ts';
 import type { PendingApprovals } from '../permission-engine/pending-approvals.ts';
+import type { CapabilityLibrary } from '../capability-library/capability-library.ts';
+import { createToolPolicy } from '../permission-engine/tool-policy.ts';
 import { buildSystemPrompt } from './prompt-builder.ts';
 import { getConfig, projectRoot } from '../config.ts';
 import type { AgentBackend, ToolUseMeta } from './agent-backend.ts';
@@ -74,6 +68,9 @@ export interface PermissionDeps {
   permissionEngine: PermissionEngine;
   auditLog: AuditLog;
   pendingApprovals: PendingApprovals;
+  /** Optional: only used by the canUseTool policy's unmapped-MCP-tool
+   * fallback (tool-policy.ts) — absent degrades that fallback to 'yellow'. */
+  capabilityLibrary?: CapabilityLibrary;
 }
 
 export interface RunOptions {
@@ -174,6 +171,30 @@ export function enforcePermissionGate(
   return { allowed: false, tier, reason: 'queued-for-approval' };
 }
 
+/** Records which sub-agent type a top-level `Agent` tool_use started, keyed
+ * by its tool_use id, so later tool_use/message events from that sub-agent
+ * (identified via `parentToolUseId`) can be attributed back to it — see
+ * resolveAgentName below. Only top-level Agent invocations are tracked
+ * (`!meta?.parentToolUseId`); a sub-agent's own nested Agent calls (if any)
+ * aren't attributed further. */
+function trackAgentToolUse(
+  agentToolMap: Map<string, string>,
+  toolUse: { toolName: string; toolInput: string; meta?: ToolUseMeta },
+): void {
+  const { toolName, toolInput, meta } = toolUse;
+  if (toolName !== 'Agent' || meta?.parentToolUseId || !meta?.toolUseId) return;
+
+  try {
+    const input = JSON.parse(toolInput) as Record<string, unknown>;
+    const subagentType = (input.subagent_type as string) ?? (input.description as string);
+    if (subagentType) {
+      agentToolMap.set(meta.toolUseId, subagentType);
+    }
+  } catch {
+    // toolInput may be truncated — ignore parse errors
+  }
+}
+
 function resolveAgentRole(task: AgentTask): ScopeContext['role'] {
   // Validators dispatched by create-validation-deps.ts carry
   // internal: 'validator' on the request — set only by that runtime
@@ -220,8 +241,16 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
 
   log.info(`Starting agent task ${task.id} for skill ${task.skillName}`);
 
-  // Permission gate: enforce before query() only when actionName is explicitly provided
-  if (permissionDeps && actionName) {
+  // Permission gate: enforce before query() only when actionName is
+  // explicitly provided, and skip it entirely when this task is the
+  // synthetic re-dispatch for an action a human already approved
+  // (AgentManager.executeApprovedAction sets task.approvedActionName ===
+  // actionName in that case) — otherwise resolveTier would report the same
+  // red tier again and the approve -> re-run loop would never close. The
+  // canUseTool policy built below carries the same approvedActionName
+  // forward so the actual tool call it gates during this run isn't
+  // re-blocked either.
+  if (permissionDeps && actionName && actionName !== task.approvedActionName) {
     const gateResult = enforcePermissionGate(
       actionName,
       { ...permissionDeps, eventBus },
@@ -292,27 +321,50 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       }
     }
 
-    // Compute allowed tools: base tools + MCP wildcards + Agent delegation
+    // Compute allowed tools: base tools + Agent delegation only. Bash and
+    // integration-MCP tool wildcards (buildMcpToolPattern for task.mcpServers)
+    // are deliberately NOT pre-authorized here: a tool name listed in
+    // allowedTools bypasses the canUseTool policy built below entirely —
+    // verified live against the real SDK (see tool-policy.ts's module
+    // docstring) — so Bash and mcp__<server>__* must fall through to the
+    // SDK's "ask" path where that policy actually gets to decide per call.
+    // Raven/memory MCP tools stay pre-authorized: the policy allows them
+    // unconditionally anyway (already role-scoped — mcp-server/index.ts's
+    // ScopeContext), so there's no enforcement value in round-tripping them.
     const allowedTools = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'];
 
-    // Conditionally enable Bash tool based on agent's bash access config
-    const bashAccess: BashAccess | undefined = task.bashAccess;
-    if (bashAccess && bashAccess.access !== 'none') {
-      allowedTools.push('Bash');
-    }
-
-    // Always include MCP wildcards — sub-agents inherit tools from the parent,
-    // so the parent must have MCP tools in its allowed list for sub-agents to use them.
-    for (const name of Object.keys(sdkMcpServers)) {
-      allowedTools.push(buildMcpToolPattern(name));
-    }
     if (opts.ravenMcpDeps) {
       allowedTools.push('mcp__raven__*');
+    }
+    if (opts.memoryStore && memoryAgentName) {
+      allowedTools.push('mcp__memory__*');
     }
     const hasSubAgents = Object.keys(agentDefinitions).length > 0;
     if (hasSubAgents) {
       allowedTools.push('Agent');
     }
+
+    // canUseTool: built per task (it has task.bashAccess + task.skillName +
+    // task.approvedActionName already) and threaded into the backend below.
+    // Undefined when this task has no permissionDeps, matching today's
+    // opt-in gating (see runAgentTask's pre-check above for the same guard).
+    const canUseTool = permissionDeps
+      ? createToolPolicy(
+          {
+            permissionEngine: permissionDeps.permissionEngine,
+            auditLog: permissionDeps.auditLog,
+            pendingApprovals: permissionDeps.pendingApprovals,
+            capabilityLibrary: permissionDeps.capabilityLibrary,
+            eventBus,
+          },
+          {
+            skillName: task.skillName,
+            sessionId: task.sessionId,
+            bashAccess: task.bashAccess,
+            approvedActionName: task.approvedActionName,
+          },
+        )
+      : undefined;
 
     const prompt = task.prompt;
 
@@ -345,6 +397,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       mcpServers: sdkMcpServers,
       agents: agentDefinitions,
       plugins: opts.plugins,
+      canUseTool,
       onAssistantMessage: (text: string, meta?: ToolUseMeta) => {
         const agentName = resolveAgentName(meta);
         let messageId: string | undefined;
@@ -372,49 +425,14 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
           },
         });
       },
-      // eslint-disable-next-line complexity, max-lines-per-function -- tool routing with sub-agent tracking, bash audit, and event dispatch
+      // Note: Bash commands are no longer audited here. Enforcement (and its
+      // audit trail) now happens PRE-execution in the canUseTool policy
+      // (tool-policy.ts) built above and threaded into the backend call —
+      // this callback only fires after the SDK already ran the tool, so it
+      // would be purely observational and redundant with that policy's own
+      // audit writes.
       onToolUse: (toolName: string, toolInput: string, meta?: ToolUseMeta) => {
-        // Track Agent tool invocations for sub-agent attribution
-        if (toolName === 'Agent' && !meta?.parentToolUseId && meta?.toolUseId) {
-          try {
-            const input = JSON.parse(toolInput) as Record<string, unknown>;
-            const subagentType = (input.subagent_type as string) ?? (input.description as string);
-            if (subagentType) {
-              agentToolMap.set(meta.toolUseId, subagentType);
-            }
-          } catch {
-            // toolInput may be truncated — ignore parse errors
-          }
-        }
-
-        // Audit Bash commands (observational — SDK already executed the command)
-        if (toolName === 'Bash' && bashAccess) {
-          try {
-            const input = JSON.parse(toolInput) as Record<string, unknown>;
-            const command = (input.command as string) ?? '';
-            if (command) {
-              const chain = parseCommand(command);
-              const gateResult = checkBashAccess(command, bashAccess);
-              const level = gateResult.allowed ? 'info' : 'warn';
-              log[level](
-                `Bash audit [${bashAccess.access}] task=${task.id}: ${gateResult.allowed ? 'OK' : 'VIOLATION'} cmd="${chain.allBinaries.join(' | ')}"${gateResult.reason ? ` reason=${gateResult.reason}` : ''}`,
-              );
-              if (permissionDeps) {
-                permissionDeps.auditLog.insert({
-                  skillName: task.skillName,
-                  actionName: `bash:${chain.allBinaries[0] ?? 'unknown'}`,
-                  permissionTier: gateResult.allowed ? 'green' : 'red',
-                  outcome: gateResult.allowed ? 'executed' : 'executed',
-                  sessionId: task.sessionId,
-                  // eslint-disable-next-line @typescript-eslint/no-magic-numbers -- reasonable truncation limit for audit log
-                  details: `access=${bashAccess.access} cmd="${command.slice(0, 200)}"${gateResult.reason ? ` reason=${gateResult.reason}` : ''}`,
-                });
-              }
-            }
-          } catch {
-            // toolInput may be truncated — ignore parse errors
-          }
-        }
+        trackAgentToolUse(agentToolMap, { toolName, toolInput, meta });
 
         const agentName = resolveAgentName(meta);
         let messageId: string | undefined;

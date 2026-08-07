@@ -434,4 +434,119 @@ describe('Permission Gate', () => {
     expect(redResult.allowed).toBe(false);
     expect(redResult.tier).toBe('red');
   });
+
+  describe('canUseTool policy threading (Task 2)', () => {
+    it('threads a canUseTool callback into the SDK query options when permissionDeps is provided', async () => {
+      vi.mocked(query).mockClear();
+      const engine = createMockPermissionEngine({ 'ticktick:get-tasks': 'green' });
+
+      const task = {
+        id: 'task-canusetool-present',
+        skillName: 'ticktick',
+        prompt: 'get tasks',
+        status: 'running' as const,
+        priority: 'normal' as const,
+        mcpServers: {},
+        agentDefinitions: {},
+        createdAt: Date.now(),
+      };
+
+      await runAgentTask({
+        task,
+        eventBus,
+        mcpServers: {},
+        agentDefinitions: {},
+        actionName: 'ticktick:get-tasks',
+        permissionDeps: { permissionEngine: engine, auditLog, pendingApprovals },
+      });
+
+      expect(vi.mocked(query)).toHaveBeenCalled();
+      const callArgs = vi.mocked(query).mock.calls[0][0] as { options: { canUseTool?: unknown } };
+      expect(typeof callArgs.options.canUseTool).toBe('function');
+    });
+
+    it('passes no canUseTool callback when the task has no permissionDeps at all', async () => {
+      vi.mocked(query).mockClear();
+
+      const task = {
+        id: 'task-canusetool-absent',
+        skillName: 'ticktick',
+        prompt: 'get tasks',
+        status: 'running' as const,
+        priority: 'normal' as const,
+        mcpServers: {},
+        agentDefinitions: {},
+        createdAt: Date.now(),
+      };
+
+      await runAgentTask({ task, eventBus, mcpServers: {}, agentDefinitions: {} });
+
+      expect(vi.mocked(query)).toHaveBeenCalled();
+      const callArgs = vi.mocked(query).mock.calls[0][0] as { options: { canUseTool?: unknown } };
+      expect(callArgs.options.canUseTool).toBeUndefined();
+    });
+  });
+
+  describe('approvedActionName loop-closure (Task 2)', () => {
+    it('skips the pre-check gate and calls the SDK when actionName matches task.approvedActionName, even for a red-tier action', async () => {
+      vi.mocked(query).mockClear();
+      const engine = createMockPermissionEngine({ 'gmail:send-email': 'red' });
+
+      const task = {
+        id: 'task-approved-redispatch',
+        skillName: 'gmail',
+        prompt: 'Execute approved action: gmail:send-email',
+        status: 'running' as const,
+        priority: 'high' as const,
+        mcpServers: {},
+        agentDefinitions: {},
+        createdAt: Date.now(),
+        actionName: 'gmail:send-email',
+        approvedActionName: 'gmail:send-email',
+      };
+
+      const result = await runAgentTask({
+        task,
+        eventBus,
+        mcpServers: {},
+        agentDefinitions: {},
+        actionName: 'gmail:send-email',
+        permissionDeps: { permissionEngine: engine, auditLog, pendingApprovals },
+      });
+
+      expect(result.blocked).toBeUndefined();
+      expect(result.success).toBe(true);
+      expect(vi.mocked(query)).toHaveBeenCalled();
+    });
+
+    it('still blocks a red-tier action when approvedActionName does not match', async () => {
+      vi.mocked(query).mockClear();
+      const engine = createMockPermissionEngine({ 'gmail:send-email': 'red' });
+
+      const task = {
+        id: 'task-not-approved-redispatch',
+        skillName: 'gmail',
+        prompt: 'Execute approved action: gmail:send-email',
+        status: 'running' as const,
+        priority: 'high' as const,
+        mcpServers: {},
+        agentDefinitions: {},
+        createdAt: Date.now(),
+        actionName: 'gmail:send-email',
+        approvedActionName: 'gmail:delete-email',
+      };
+
+      const result = await runAgentTask({
+        task,
+        eventBus,
+        mcpServers: {},
+        agentDefinitions: {},
+        actionName: 'gmail:send-email',
+        permissionDeps: { permissionEngine: engine, auditLog, pendingApprovals },
+      });
+
+      expect(result.blocked).toBe(true);
+      expect(vi.mocked(query)).not.toHaveBeenCalled();
+    });
+  });
 });

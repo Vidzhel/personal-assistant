@@ -127,6 +127,14 @@ export interface AgentTask {
   /** Set only by runtime-internal dispatchers (create-validation-deps.ts) —
    * see AgentTaskRequestEvent.payload.internal in events.ts. */
   internal?: 'validator';
+  /** Set only by AgentManager.executeApprovedAction on the synthetic
+   * re-dispatch task created after a human approves a red-tier action (see
+   * agent-manager.ts). Equals `actionName` on that one task. Both
+   * agent-session.ts's pre-execution gate and the canUseTool tool-policy
+   * (permission-engine/tool-policy.ts) treat a matching actionName as
+   * pre-approved rather than re-resolving its tier — otherwise the re-run
+   * would hit the same red tier and get queued for approval again, forever. */
+  approvedActionName?: string;
   result?: string;
   durationMs?: number;
   errors?: string[];

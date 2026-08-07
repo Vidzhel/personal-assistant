@@ -403,6 +403,7 @@ export async function createRaven(
     permissionEngine,
     auditLog,
     pendingApprovals,
+    capabilityLibrary,
     executionLogger,
     messageStore,
     sessionManager,
