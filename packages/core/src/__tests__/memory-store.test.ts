@@ -65,6 +65,21 @@ describe('MemoryStore', () => {
     await expect(store.read(AGENT, 'sub/note.md')).rejects.toThrow(/invalid path/i);
   });
 
+  it('rejects write/update/remove ops that target an existing directory', async () => {
+    // A bare path segment like "candidates" passes safePath (no slashes)
+    // but can collide with the real candidates/ subdirectory memory
+    // candidates live in — writing over it used to throw a raw EISDIR.
+    mkdirSync(join(projectsDir, 'agents', AGENT, 'memory', 'candidates'), { recursive: true });
+
+    const writeRes = await store.write(AGENT, 'candidates', 'x');
+    expect(writeRes.ok).toBe(false);
+    expect(writeRes.error).toMatch(/directory/i);
+
+    const removeRes = await store.remove(AGENT, 'candidates');
+    expect(removeRes.ok).toBe(false);
+    expect(removeRes.error).toMatch(/directory/i);
+  });
+
   it('enforces the maxFiles budget', async () => {
     await store.write(AGENT, 'a.md', 'a');
     await store.write(AGENT, 'b.md', 'b');

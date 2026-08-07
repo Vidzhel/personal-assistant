@@ -1,0 +1,14 @@
+name: canary
+displayName: Canary
+description: Minimal self-test probe that proves the schedule -> template -> task tree loop is alive, without sending a user-facing notification (see weekly-canary.yaml)
+
+plan:
+  approval: auto
+  parallel: false
+
+tasks:
+  - id: probe
+    type: agent
+    title: Canary probe
+    prompt: "Reply CANARY_OK"
+    blockedBy: []

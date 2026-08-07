@@ -7,7 +7,7 @@ import { runFileMigrations } from './migrations.ts';
 
 const log = createLogger('db');
 
-let db: Database.Database;
+let db: Database.Database | null = null;
 
 const defaultMigrationsDir = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -19,6 +19,10 @@ const defaultMigrationsDir = join(
 );
 
 export function initDatabase(dbPath: string, migrationsDir?: string): Database.Database {
+  if (db) {
+    log.warn('initDatabase called with an already-open handle — closing it first');
+    closeDatabase();
+  }
   log.info(`Opening database at ${dbPath}`);
   db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
@@ -30,6 +34,17 @@ export function initDatabase(dbPath: string, migrationsDir?: string): Database.D
 export function getDb(): Database.Database {
   if (!db) throw new Error('Database not initialized. Call initDatabase() first.');
   return db;
+}
+
+/** Closes the open handle (if any) and nulls the singleton so a subsequent
+ * initDatabase() starts clean. Idempotent — calling it with no open handle
+ * is a no-op, not an error, so shutdown paths and test afterEach hooks can
+ * call it unconditionally. */
+export function closeDatabase(): void {
+  if (!db) return;
+  db.close();
+  db = null;
+  log.info('Database closed');
 }
 
 export function createDbInterface(): DatabaseInterface {

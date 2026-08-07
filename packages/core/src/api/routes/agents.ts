@@ -6,7 +6,12 @@ import type { AgentManager } from '../../agent-manager/agent-manager.ts';
 import type { TaskStore } from '../../task-manager/task-store.ts';
 import type { MemoryStore } from '../../agent-memory/memory-store.ts';
 
-const HTTP_STATUS = { OK_CREATED: 201, BAD_REQUEST: 400, NOT_FOUND: 404 } as const;
+const HTTP_STATUS = {
+  OK_CREATED: 201,
+  BAD_REQUEST: 400,
+  NOT_FOUND: 404,
+  SERVICE_UNAVAILABLE: 503,
+} as const;
 
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
@@ -164,7 +169,14 @@ export function registerAgentRoutes(app: FastifyInstance, deps: AgentRouteDeps):
       return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Agent not found' });
     }
 
-    if (!memoryStore) return [];
+    // No memory store wired is "we don't know", not "this agent has no
+    // memory" — a bare [] here reads as a truthful empty result on the
+    // dashboard when it's actually a degraded backend.
+    if (!memoryStore) {
+      return reply
+        .status(HTTP_STATUS.SERVICE_UNAVAILABLE)
+        .send({ error: 'Memory store not available' });
+    }
 
     const files = await memoryStore.list(agent.name);
     const entries = await Promise.all(
@@ -172,7 +184,9 @@ export function registerAgentRoutes(app: FastifyInstance, deps: AgentRouteDeps):
         try {
           return { file, content: await memoryStore.read(agent.name, file) };
         } catch {
-          return { file, content: '' };
+          // Same distinction as above, at file granularity: a read failure
+          // is not an empty file — don't let it render as one.
+          return { file, content: '(unreadable)' };
         }
       }),
     );

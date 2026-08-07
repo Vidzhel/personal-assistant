@@ -440,7 +440,7 @@ describe('maintenance-report', () => {
     expect(emitted.length).toBe(1);
     expect(emitted[0].type).toBe('notification');
     expect(emitted[0].payload.channel).toBe('telegram');
-    expect(emitted[0].payload.topicName).toBe('Raven System');
+    expect(emitted[0].payload.topicName).toBe('System');
   });
 
   it('should truncate long reports for Telegram notification', async () => {

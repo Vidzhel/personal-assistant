@@ -4,10 +4,21 @@ import { EventBus } from '../event-bus/event-bus.ts';
 import { SessionManager } from '../session-manager/session-manager.ts';
 import { createMessageStore } from '../session-manager/message-store.ts';
 import { initDatabase, getDb } from '../db/database.ts';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { ProjectRegistry } from '../project-registry/project-registry.ts';
+import { createScaffoldingApi } from '../scaffolding/scaffolding-api.ts';
+import { createAgentYamlStore } from '../project-registry/agent-yaml-store.ts';
+import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { RavenEvent, McpServerConfig } from '@raven/shared';
+
+async function waitFor(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
+  const start = Date.now();
+  while (!predicate()) {
+    if (Date.now() - start > timeoutMs) throw new Error('waitFor: timed out');
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
 
 function makeMockCapabilityLibrary(mcpServers: Record<string, McpServerConfig> = {}): any {
   return {
@@ -144,5 +155,74 @@ describe('Orchestrator', () => {
     expect(payload.systemAccessInstructions).toContain('may read and modify system files');
     // The user prompt carries only the original message.
     expect(payload.prompt).toBe('Show me all projects');
+  });
+
+  it('ensureProject collision: two auto-created projects kebab to the same slug without losing either message', async () => {
+    const projectsDir = join(tmpDir, 'projects');
+    mkdirSync(projectsDir, { recursive: true });
+    const projectRegistry = new ProjectRegistry();
+    await projectRegistry.load(projectsDir);
+    const agentYamlStore = createAgentYamlStore();
+    const scaffoldingApi = createScaffoldingApi({ projectsDir, projectRegistry, agentYamlStore });
+
+    const sessionManager = new SessionManager();
+    const messageStore = createMessageStore({ basePath: join(tmpDir, 'sessions') });
+
+    _orchestrator = new Orchestrator({
+      eventBus,
+      sessionManager,
+      messageStore,
+      projectRegistry,
+      scaffoldingApi,
+      projectsDir,
+      port: 4000,
+    });
+
+    const taskRequests: RavenEvent[] = [];
+    eventBus.on('agent:task:request', (e) => taskRequests.push(e));
+
+    // Neither event carries a topicName, so both default to displayName
+    // "Inbox" and both kebab to fs_path "inbox" — simulating two unrelated
+    // auto-created projects (e.g. two direct-mode chats, or two Telegram
+    // topics literally named "Inbox") landing on the same slug.
+    eventBus.emit({
+      id: 'evt-a',
+      timestamp: Date.now(),
+      source: 'test',
+      type: 'user:chat:message',
+      payload: { projectId: 'chat-a', message: 'first message' },
+    } as RavenEvent);
+    await waitFor(() => taskRequests.length >= 1);
+
+    eventBus.emit({
+      id: 'evt-b',
+      timestamp: Date.now(),
+      source: 'test',
+      type: 'user:chat:message',
+      payload: { projectId: 'chat-b', message: 'second message' },
+    } as RavenEvent);
+    await waitFor(() => taskRequests.length >= 2);
+
+    const db = getDb();
+    const rowA = db.prepare('SELECT fs_path FROM projects WHERE id = ?').get('chat-a') as {
+      fs_path: string | null;
+    };
+    const rowB = db.prepare('SELECT fs_path FROM projects WHERE id = ?').get('chat-b') as {
+      fs_path: string | null;
+    };
+    // First claimant gets the real slug; the second is left unreconciled
+    // (fs_path: null) rather than throwing a UNIQUE violation.
+    expect(rowA.fs_path).toBe('inbox');
+    expect(rowB.fs_path).toBeNull();
+
+    // The actual bug this guards against: neither user message was lost.
+    const sessionA = sessionManager.getOrCreateSession('chat-a');
+    const sessionB = sessionManager.getOrCreateSession('chat-b');
+    expect(messageStore.getMessages(sessionA.id).some((m) => m.content === 'first message')).toBe(
+      true,
+    );
+    expect(messageStore.getMessages(sessionB.id).some((m) => m.content === 'second message')).toBe(
+      true,
+    );
   });
 });

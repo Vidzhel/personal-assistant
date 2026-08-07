@@ -200,4 +200,51 @@ describe('Agents API', () => {
       expect(res.statusCode).toBe(404);
     });
   });
+
+  describe('GET /api/agents/:id/memory', () => {
+    it('returns 503 (not an empty list) when no memory store is wired', async () => {
+      const created = await store.createAgent({ name: 'memory-503-test', skills: [] });
+      const res = await app.inject({ method: 'GET', url: `/api/agents/${created.id}/memory` });
+      expect(res.statusCode).toBe(503);
+    });
+
+    it('returns 404 for nonexistent agent', async () => {
+      const res = await app.inject({ method: 'GET', url: '/api/agents/nonexistent/memory' });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it('reports a per-file read failure as "(unreadable)" rather than an empty string', async () => {
+      const created = await store.createAgent({ name: 'memory-unreadable-test', skills: [] });
+
+      const mockMemoryStore = {
+        list: vi.fn().mockResolvedValue(['good.md', 'bad.md']),
+        read: vi.fn((_agentName: string, file: string) =>
+          file === 'bad.md' ? Promise.reject(new Error('boom')) : Promise.resolve('# ok'),
+        ),
+      } as any;
+
+      const localApp = Fastify({ logger: false });
+      registerAgentRoutes(localApp, {
+        namedAgentStore: store,
+        agentManager: makeMockAgentManager(),
+        memoryStore: mockMemoryStore,
+      });
+      await localApp.ready();
+
+      const res = await localApp.inject({
+        method: 'GET',
+        url: `/api/agents/${created.id}/memory`,
+      });
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.payload);
+      expect(body).toEqual(
+        expect.arrayContaining([
+          { file: 'good.md', content: '# ok' },
+          { file: 'bad.md', content: '(unreadable)' },
+        ]),
+      );
+
+      await localApp.close();
+    });
+  });
 });

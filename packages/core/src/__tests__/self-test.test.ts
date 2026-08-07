@@ -3,9 +3,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type Database from 'better-sqlite3';
-import { initDatabase } from '../db/database.ts';
+import { initDatabase, closeDatabase } from '../db/database.ts';
 import {
   checkStuckTrees,
+  checkFailedTrees,
   checkServicesLoaded,
   checkScheduleFires,
   checkErrorRate,
@@ -40,12 +41,20 @@ function insertTree(
     status: string;
     updatedAt: string;
     scheduleId?: string;
+    plan?: string;
   },
 ): void {
   db.prepare(
     `INSERT INTO task_trees (id, project_id, schedule_id, status, plan, created_at, updated_at)
-     VALUES (?, NULL, ?, ?, NULL, ?, ?)`,
-  ).run(opts.id, opts.scheduleId ?? null, opts.status, opts.updatedAt, opts.updatedAt);
+     VALUES (?, NULL, ?, ?, ?, ?, ?)`,
+  ).run(
+    opts.id,
+    opts.scheduleId ?? null,
+    opts.status,
+    opts.plan ?? null,
+    opts.updatedAt,
+    opts.updatedAt,
+  );
 }
 
 describe('self-test invariants (pure functions)', () => {
@@ -58,6 +67,7 @@ describe('self-test invariants (pure functions)', () => {
   });
 
   afterEach(() => {
+    closeDatabase();
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -95,6 +105,50 @@ describe('self-test invariants (pure functions)', () => {
       });
 
       expect(checkStuckTrees(db, now)).toEqual([]);
+    });
+  });
+
+  describe('checkFailedTrees', () => {
+    it('flags a tree that failed within the last 24h, naming it', () => {
+      const now = Date.now();
+      insertTree(db, {
+        id: 'failed-1',
+        status: 'failed',
+        updatedAt: new Date(now - MS_PER_HOUR).toISOString(),
+        plan: 'Run system maintenance',
+      });
+
+      const violations = checkFailedTrees(db, now);
+      expect(violations).toHaveLength(1);
+      expect(violations[0]).toContain('Run system maintenance');
+      expect(violations[0]).toContain('failed-1');
+    });
+
+    it('ignores a failed tree older than 24h', () => {
+      const now = Date.now();
+      insertTree(db, {
+        id: 'failed-old',
+        status: 'failed',
+        updatedAt: new Date(now - 25 * MS_PER_HOUR).toISOString(),
+      });
+
+      expect(checkFailedTrees(db, now)).toEqual([]);
+    });
+
+    it('ignores a running or completed tree', () => {
+      const now = Date.now();
+      insertTree(db, {
+        id: 'running-1',
+        status: 'running',
+        updatedAt: new Date(now).toISOString(),
+      });
+      insertTree(db, {
+        id: 'completed-1',
+        status: 'completed',
+        updatedAt: new Date(now).toISOString(),
+      });
+
+      expect(checkFailedTrees(db, now)).toEqual([]);
     });
   });
 
@@ -205,6 +259,9 @@ describe('self-test invariants (pure functions)', () => {
   });
 
   describe('checkCanary', () => {
+    const HOURS_PER_DAY = 24;
+    const CANARY_STALE_DAYS = 8;
+
     it('flags the most recent canary tree if it is not completed and past the grace period', () => {
       const now = Date.now();
       insertTree(db, {
@@ -214,7 +271,7 @@ describe('self-test invariants (pure functions)', () => {
         scheduleId: 'weekly-canary',
       });
 
-      expect(checkCanary(db, now)).toHaveLength(1);
+      expect(checkCanary(db, now, true)).toHaveLength(1);
     });
 
     it('does not flag a completed canary tree', () => {
@@ -226,7 +283,7 @@ describe('self-test invariants (pure functions)', () => {
         scheduleId: 'weekly-canary',
       });
 
-      expect(checkCanary(db, now)).toEqual([]);
+      expect(checkCanary(db, now, true)).toEqual([]);
     });
 
     it('gives a freshly-fired canary tree grace before judging it', () => {
@@ -238,11 +295,46 @@ describe('self-test invariants (pure functions)', () => {
         scheduleId: 'weekly-canary',
       });
 
-      expect(checkCanary(db, now)).toEqual([]);
+      expect(checkCanary(db, now, true)).toEqual([]);
     });
 
-    it('does not flag anything when the canary has never fired', () => {
-      expect(checkCanary(db, Date.now())).toEqual([]);
+    it('flags absence when the canary schedule is enabled', () => {
+      expect(checkCanary(db, Date.now(), true)).toHaveLength(1);
+      expect(checkCanary(db, Date.now(), true)[0]).toContain('never fired');
+    });
+
+    it('does not flag absence when the canary schedule is disabled', () => {
+      expect(checkCanary(db, Date.now(), false)).toEqual([]);
+    });
+
+    it('flags a canary tree older than 8 days while the schedule is enabled', () => {
+      const now = Date.now();
+      insertTree(db, {
+        id: 'canary-stale',
+        status: 'completed',
+        updatedAt: new Date(
+          now - (CANARY_STALE_DAYS + 1) * HOURS_PER_DAY * MS_PER_HOUR,
+        ).toISOString(),
+        scheduleId: 'weekly-canary',
+      });
+
+      const violations = checkCanary(db, now, true);
+      expect(violations).toHaveLength(1);
+      expect(violations[0]).toContain('canary-stale');
+    });
+
+    it('does not flag a stale canary tree when the schedule is disabled', () => {
+      const now = Date.now();
+      insertTree(db, {
+        id: 'canary-stale-disabled',
+        status: 'completed',
+        updatedAt: new Date(
+          now - (CANARY_STALE_DAYS + 1) * HOURS_PER_DAY * MS_PER_HOUR,
+        ).toISOString(),
+        scheduleId: 'weekly-canary',
+      });
+
+      expect(checkCanary(db, now, false)).toEqual([]);
     });
   });
 });
@@ -259,6 +351,7 @@ describe('runSelfTestJob + getSelfTestStatus', () => {
   });
 
   afterEach(() => {
+    closeDatabase();
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -320,6 +413,38 @@ describe('runSelfTestJob + getSelfTestStatus', () => {
     expect(status.ok).toBe(false);
     expect(status.violations.some((v) => v.includes('stuck-job-1'))).toBe(true);
   });
+
+  it('does not re-notify a standing violation on a second run, and dedupes new from standing', async () => {
+    const now = Date.now();
+    insertTree(db, {
+      id: 'standing-tree',
+      status: 'running',
+      updatedAt: new Date(now - 25 * MS_PER_HOUR).toISOString(),
+    });
+
+    const deps = makeDeps();
+    await runSelfTestJob(deps);
+    expect(deps.eventBus.emit).toHaveBeenCalledTimes(1);
+
+    // Second run: same standing violation, nothing new — no re-notification.
+    (deps.eventBus.emit as ReturnType<typeof vi.fn>).mockClear();
+    await runSelfTestJob(deps);
+    expect(deps.eventBus.emit).not.toHaveBeenCalled();
+
+    // Third run: a genuinely new violation joins the still-standing one —
+    // notify, but only call out the new one plus a "still failing" count.
+    insertTree(db, {
+      id: 'new-tree',
+      status: 'running',
+      updatedAt: new Date(now - 26 * MS_PER_HOUR).toISOString(),
+    });
+    await runSelfTestJob(deps);
+    expect(deps.eventBus.emit).toHaveBeenCalledTimes(1);
+    const emitted = (deps.eventBus.emit as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(emitted.payload.body).toContain('new-tree');
+    expect(emitted.payload.body).not.toContain('standing-tree');
+    expect(emitted.payload.body).toContain('still failing: 1');
+  });
 });
 
 describe('getSelfTestStatus', () => {
@@ -330,6 +455,25 @@ describe('getSelfTestStatus', () => {
       const status = getSelfTestStatus(makeDbInterface(db));
       expect(status).toEqual({ lastRun: null, ok: true, violations: [] });
     } finally {
+      closeDatabase();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('surfaces a violation when a failed run has unreadable persisted violations', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'raven-self-test-status-'));
+    try {
+      const db = initDatabase(join(dir, 'test.db'));
+      db.prepare(
+        `INSERT INTO self_test_results (id, ran_at, ok, violations_json) VALUES (?, ?, ?, ?)`,
+      ).run('r1', new Date().toISOString(), 0, 'not valid json');
+
+      const status = getSelfTestStatus(makeDbInterface(db));
+      expect(status.ok).toBe(false);
+      expect(status.violations).toHaveLength(1);
+      expect(status.violations[0]).toMatch(/unreadable/i);
+    } finally {
+      closeDatabase();
       rmSync(dir, { recursive: true, force: true });
     }
   });

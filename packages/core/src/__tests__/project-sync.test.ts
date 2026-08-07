@@ -145,6 +145,101 @@ describe('runProjectSync', () => {
     expect(row).toBeUndefined();
   });
 
+  it('scaffolds (does not drop) an orphan row only referenced by an events row', async () => {
+    const now = Date.now();
+    db.prepare(
+      "INSERT INTO projects (id, name, description, skills, created_at, updated_at) VALUES ('orphan-event-ref', 'Orphan Event Ref', NULL, '[]', ?, ?)",
+    ).run(now, now);
+    db.prepare(
+      "INSERT INTO events (id, type, source, project_id, payload, timestamp) VALUES ('evt-1', 'user:chat:message', 'test', 'orphan-event-ref', '{}', ?)",
+    ).run(now);
+
+    const deps = await buildDeps(projectsDir);
+    const result = await runProjectSync(deps);
+
+    expect(result.scaffolded).toBeGreaterThanOrEqual(1);
+    const row = db.prepare('SELECT fs_path FROM projects WHERE id = ?').get('orphan-event-ref') as
+      | { fs_path: string | null }
+      | undefined;
+    expect(row?.fs_path).toBe('orphan-event-ref');
+  });
+
+  it('scaffolds (does not drop) an orphan row only referenced by a knowledge_rejections row', async () => {
+    const now = Date.now();
+    db.prepare(
+      "INSERT INTO projects (id, name, description, skills, created_at, updated_at) VALUES ('orphan-rejection-ref', 'Orphan Rejection Ref', NULL, '[]', ?, ?)",
+    ).run(now, now);
+    db.prepare(
+      "INSERT INTO knowledge_rejections (id, project_id, session_id, content_hash, reason, created_at) VALUES ('rej-1', 'orphan-rejection-ref', 'sess-1', 'hash1', NULL, ?)",
+    ).run(new Date(now).toISOString());
+
+    const deps = await buildDeps(projectsDir);
+    const result = await runProjectSync(deps);
+
+    expect(result.scaffolded).toBeGreaterThanOrEqual(1);
+    const row = db
+      .prepare('SELECT fs_path FROM projects WHERE id = ?')
+      .get('orphan-rejection-ref') as { fs_path: string | null } | undefined;
+    expect(row?.fs_path).toBe('orphan-rejection-ref');
+  });
+
+  it('scaffolds (does not drop) an unreferenced orphan row that carries its own config', async () => {
+    const now = Date.now();
+    db.prepare(
+      "INSERT INTO projects (id, name, description, skills, system_prompt, created_at, updated_at) VALUES ('orphan-with-config', 'Orphan With Config', 'has a description', '[]', NULL, ?, ?)",
+    ).run(now, now);
+
+    const deps = await buildDeps(projectsDir);
+    const result = await runProjectSync(deps);
+
+    expect(result.scaffolded).toBeGreaterThanOrEqual(1);
+    expect(result.dropped).toBe(0);
+    const row = db
+      .prepare('SELECT fs_path, description FROM projects WHERE id = ?')
+      .get('orphan-with-config') as { fs_path: string | null; description: string } | undefined;
+    expect(row?.fs_path).toBe('orphan-with-config');
+    // The original config text survives — scaffolding only links fs_path,
+    // it never overwrites the row's own config columns.
+    expect(row?.description).toBe('has a description');
+  });
+
+  it('does not silently lose one of two legacy rows that collide on the same kebab slug', async () => {
+    mkdirSync(join(projectsDir, 'legacy-project'));
+    writeFileSync(join(projectsDir, 'legacy-project', 'context.md'), '# Legacy Project\n');
+
+    const now = Date.now();
+    // Both kebab to "legacy-project" — only the exact-name match should
+    // link to the registry node; the other must survive the sync pass
+    // (referenced, so it gets scaffolded its own directory) rather than
+    // vanish from the Map silently.
+    db.prepare(
+      "INSERT INTO projects (id, name, description, skills, created_at, updated_at) VALUES ('legacy-exact', 'Legacy Project', NULL, '[]', ?, ?)",
+    ).run(now, now);
+    db.prepare(
+      "INSERT INTO projects (id, name, description, skills, created_at, updated_at) VALUES ('legacy-other', 'legacy   project', NULL, '[]', ?, ?)",
+    ).run(now, now);
+    db.prepare(
+      "INSERT INTO sessions (id, project_id, status, created_at, last_active_at, turn_count) VALUES ('sess-collision', 'legacy-other', 'idle', ?, ?, 0)",
+    ).run(now, now);
+
+    const deps = await buildDeps(projectsDir);
+    const result = await runProjectSync(deps);
+
+    const exact = db.prepare('SELECT fs_path FROM projects WHERE id = ?').get('legacy-exact') as {
+      fs_path: string | null;
+    };
+    expect(exact.fs_path).toBe('legacy-project');
+
+    // The colliding row is not dropped and not silently forgotten — it
+    // still exists, linked to its own scaffolded directory.
+    const other = db.prepare('SELECT fs_path FROM projects WHERE id = ?').get('legacy-other') as {
+      fs_path: string | null;
+    };
+    expect(other.fs_path).not.toBeNull();
+    expect(other.fs_path).not.toBe('legacy-project');
+    expect(result.dropped).toBe(0);
+  });
+
   it('is idempotent — running twice does not duplicate or error', async () => {
     const deps = await buildDeps(projectsDir);
     await runProjectSync(deps);

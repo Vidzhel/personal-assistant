@@ -14,6 +14,10 @@ interface AgentState {
   availableProjects: Project[];
   selectedAgentTasks: RavenTaskRecord[];
   selectedAgentMemory: AgentMemoryFile[];
+  /** Set when the memory fetch itself failed (e.g. the backend's memory
+   * store isn't wired, or the request errored) — distinct from a
+   * successful fetch that simply returned no files. */
+  selectedAgentMemoryError: string | null;
   showForm: boolean;
   editingAgentId: string | null;
   showTaskHistory: string | null;
@@ -63,6 +67,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   availableProjects: [],
   selectedAgentTasks: [],
   selectedAgentMemory: [],
+  selectedAgentMemoryError: null,
   showForm: false,
   editingAgentId: null,
   showTaskHistory: null,
@@ -114,16 +119,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   closeHistory: () => set({ showTaskHistory: null, selectedAgentTasks: [] }),
 
   showMemoryPanel: async (agentId) => {
-    set({ showMemory: agentId, selectedAgentMemory: [] });
+    set({ showMemory: agentId, selectedAgentMemory: [], selectedAgentMemoryError: null });
     try {
       const memory = await api.getAgentMemory(agentId);
       set({ selectedAgentMemory: memory });
-    } catch {
-      /* polling failure — panel shows empty */
+    } catch (err) {
+      // A failed fetch must not render the same as "this agent has no
+      // memory yet" — surface it so the panel can show it distinctly.
+      set({ selectedAgentMemoryError: (err as Error).message });
     }
   },
 
-  closeMemoryPanel: () => set({ showMemory: null, selectedAgentMemory: [] }),
+  closeMemoryPanel: () =>
+    set({ showMemory: null, selectedAgentMemory: [], selectedAgentMemoryError: null }),
 
   createAgent: async (data) => {
     set({ loading: true, error: null });

@@ -118,7 +118,11 @@ export interface ScheduleInfo {
 
 export interface ScheduleEngine {
   start(): void;
-  stop(): void;
+  /** Stops every cron job, then awaits any fireDef() calls already in
+   * flight (cron-triggered fires are fire-and-forget, so without this a
+   * shutdown could tear down the DB/event bus out from under a fire that's
+   * still mid-flight). */
+  stop(): Promise<void>;
   list(): ScheduleInfo[];
   setEnabled(name: string, enabled: boolean): boolean;
   runNow(name: string): Promise<boolean>;
@@ -132,6 +136,14 @@ export interface ScheduleEngine {
 }
 
 type EntryMap = Map<string, { def: ScheduleYaml; job: Cron | null }>;
+
+/** entries + inFlight are created together and threaded through together —
+ * bundled into one param so startEntry (which needs both, plus name and
+ * deps) stays under the max-params guardrail. */
+interface EngineState {
+  entries: EntryMap;
+  inFlight: Set<Promise<void>>;
+}
 
 function checkRegistered(def: ScheduleYaml, deps: ScheduleEngineDeps): boolean {
   if (def.run.kind === 'job') return deps.jobRegistry.has(def.run.ref);
@@ -151,7 +163,9 @@ async function fireDef(def: ScheduleYaml, deps: ScheduleEngineDeps): Promise<voi
       taskStore: deps.taskStore,
       scheduleFireLog: deps.scheduleFireLog,
     }).catch((err: unknown) => log.error(`runScheduledJob(${def.name}) failed: ${String(err)}`));
-  } else if (def.run.kind === 'template' && deps.fireTemplate) {
+    return;
+  }
+  if (def.run.kind === 'template' && deps.fireTemplate) {
     const fireTemplate = deps.fireTemplate;
     await runScheduledTemplate(def, {
       fireTemplate,
@@ -159,10 +173,37 @@ async function fireDef(def: ScheduleYaml, deps: ScheduleEngineDeps): Promise<voi
     }).catch((err: unknown) =>
       log.error(`runScheduledTemplate(${def.name}) failed: ${String(err)}`),
     );
+    return;
   }
+
+  // Neither branch matched: a template-kind schedule with no fireTemplate
+  // handler configured, or a run.kind (e.g. 'agent') nothing here handles
+  // yet. Previously this fell through silently — runNow() has no
+  // registration gate, so calling it on such a schedule did nothing and
+  // reported success. Log it and leave a durable 'blocked' fire record so
+  // self-test's checkScheduleFires can see it too.
+  const reason =
+    def.run.kind === 'template'
+      ? `Schedule "${def.name}" is template-kind but no fireTemplate handler is configured`
+      : `Schedule "${def.name}" has unsupported run.kind "${def.run.kind}" — nothing fired`;
+  log.error(reason);
+  deps.scheduleFireLog?.record(def.name, 'blocked', reason);
 }
 
-function startEntry(name: string, entries: EntryMap, deps: ScheduleEngineDeps): void {
+/** Fires def and tracks the resulting promise in `inFlight` for the
+ * duration of the call, so stop() can await anything already running when
+ * it's invoked instead of abandoning it mid-flight. */
+function trackedFire(
+  def: ScheduleYaml,
+  deps: ScheduleEngineDeps,
+  inFlight: Set<Promise<void>>,
+): void {
+  const promise = fireDef(def, deps).finally(() => inFlight.delete(promise));
+  inFlight.add(promise);
+}
+
+function startEntry(name: string, state: EngineState, deps: ScheduleEngineDeps): void {
+  const { entries, inFlight } = state;
   const entry = entries.get(name);
   if (!entry || entry.job) return;
   if (!checkRegistered(entry.def, deps)) {
@@ -174,7 +215,7 @@ function startEntry(name: string, entries: EntryMap, deps: ScheduleEngineDeps): 
     return;
   }
   entry.job = new Cron(entry.def.cron, { timezone: entry.def.timezone }, () => {
-    void fireDef(entry.def, deps);
+    trackedFire(entry.def, deps, inFlight);
   });
   log.info(
     `Scheduled "${name}" (${entry.def.cron}) → next ${entry.job.nextRun()?.toISOString() ?? 'n/a'}`,
@@ -225,51 +266,56 @@ function buildUpcoming(
  * are "throw away and rebuild," which is simpler and safer than diffing
  * added/removed/changed schedules for what is, in practice, a handful of
  * cron jobs. */
-function resync(entries: EntryMap, deps: ScheduleEngineDeps): number {
+function resync(state: EngineState, deps: ScheduleEngineDeps): number {
+  const { entries } = state;
   for (const name of entries.keys()) stopEntry(name, entries);
   entries.clear();
   for (const def of deps.schedules) entries.set(def.name, { def, job: null });
-  for (const name of entries.keys()) startEntry(name, entries, deps);
+  for (const name of entries.keys()) startEntry(name, state, deps);
   return [...entries.values()].filter((e) => e.job).length;
 }
 
 export function createScheduleEngine(deps: ScheduleEngineDeps): ScheduleEngine {
-  const entries: EntryMap = new Map();
+  const state: EngineState = { entries: new Map(), inFlight: new Set() };
 
   return {
     start(): void {
-      const active = resync(entries, deps);
+      const active = resync(state, deps);
       log.info(`Schedule engine started with ${active} active schedules`);
     },
     reload(schedules: ScheduleYaml[]): void {
       deps.schedules = schedules;
-      const active = resync(entries, deps);
+      const active = resync(state, deps);
       log.info(`Schedule engine reloaded with ${active} active schedules`);
     },
-    stop(): void {
-      for (const name of entries.keys()) stopEntry(name, entries);
+    async stop(): Promise<void> {
+      for (const name of state.entries.keys()) stopEntry(name, state.entries);
+      if (state.inFlight.size > 0) {
+        log.info(`Schedule engine stop: awaiting ${String(state.inFlight.size)} in-flight fire(s)`);
+        await Promise.allSettled([...state.inFlight]);
+      }
     },
     list(): ScheduleInfo[] {
-      return buildList(entries, deps);
+      return buildList(state.entries, deps);
     },
     setEnabled(name: string, enabled: boolean): boolean {
-      if (!entries.has(name)) return false;
+      if (!state.entries.has(name)) return false;
       deps.schedulePrefs?.setEnabledOverride(name, enabled);
-      if (enabled) startEntry(name, entries, deps);
-      else stopEntry(name, entries);
+      if (enabled) startEntry(name, state, deps);
+      else stopEntry(name, state.entries);
       return true;
     },
     async runNow(name: string): Promise<boolean> {
-      const entry = entries.get(name);
+      const entry = state.entries.get(name);
       if (!entry) return false;
       await fireDef(entry.def, deps);
       return true;
     },
     getActiveCount(): number {
-      return [...entries.values()].filter((e) => e.job).length;
+      return [...state.entries.values()].filter((e) => e.job).length;
     },
     getUpcoming(limit: number): Array<{ name: string; scheduledAt: string; kind: string }> {
-      return buildUpcoming(entries, limit);
+      return buildUpcoming(state.entries, limit);
     },
   };
 }

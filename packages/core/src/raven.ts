@@ -12,7 +12,7 @@ import {
 } from '@raven/shared';
 import { projectRoot, setConfig, type AppConfig } from './config.ts';
 import { loadIntegrationsConfig } from './config/integrations-config.ts';
-import { initDatabase, createDbInterface, getDb } from './db/database.ts';
+import { initDatabase, createDbInterface, getDb, closeDatabase } from './db/database.ts';
 import { EventBus } from './event-bus/event-bus.ts';
 import { createServiceRunner } from './services/runner.ts';
 import { SERVICE_DEFINITIONS } from './services/registry.ts';
@@ -79,6 +79,7 @@ import { createMemoryConsolidation } from './agent-memory/memory-consolidation.t
 import { createJobRegistry } from './scheduler/job-registry.ts';
 import { registerCoreJobs } from './scheduler/core-jobs.ts';
 import { createScheduleEngine } from './scheduler/schedule-engine.ts';
+import type { SelfTestJobDeps } from './services/system/self-test.ts';
 import { createSchedulePrefs } from './scheduler/schedule-prefs.ts';
 import { createScheduleFireLog } from './scheduler/schedule-fire-log.ts';
 
@@ -639,7 +640,11 @@ export async function createRaven(
 
   // 11a-4. Self-test deps (Phase 3): deterministic invariants over the same
   // subsystems raven.ts already wired — no model call, no Neo4j dep.
-  const selfTestDeps = {
+  // scheduleEngine is added below via Object.assign once it exists — the
+  // canary check needs it to tell "never fired, but disabled" apart from
+  // "never fired, but enabled" — and selfTestDeps must be constructed here
+  // (before registerCoreJobs) while scheduleEngine isn't built until after.
+  const selfTestDeps: SelfTestJobDeps = {
     db: getDb(),
     executionLogger,
     pendingApprovals,
@@ -672,6 +677,10 @@ export async function createRaven(
     scheduleFireLog,
   });
   scheduleEngine.start();
+  // Lazy-extend selfTestDeps now that scheduleEngine exists (same pattern
+  // as ravenMcpDeps above) — checkCanary uses it to distinguish an enabled
+  // canary schedule that's gone quiet from one that's simply turned off.
+  Object.assign(selfTestDeps, { scheduleEngine });
 
   // Scaffold-and-activate: the single write->reload->commit path per
   // artifact kind (project/agent/template/schedule/skill) that makes
@@ -790,11 +799,16 @@ export async function createRaven(
     taskLifecycle.stop();
     configCommitter.stop();
     permissionEngine.shutdown();
-    scheduleEngine.stop();
+    await scheduleEngine.stop();
     await serviceRunner.stopAll();
     if (neo4jClient) await neo4jClient.close();
     if (server) await server.close();
     log.info('Goodbye!');
+    // Close the DB handle after everything that might still touch it (audit
+    // log, permission engine, schedule fire log, etc. all shut down above)
+    // but before the logging worker below — see its own comment for why
+    // that one has to be the true last step.
+    closeDatabase();
     // Last step, deliberately: the file-logging worker thread must finish
     // flushing (including the "Goodbye!" line above) before we hand control
     // back to the caller — test cleanup that deletes the log directory

@@ -9,6 +9,7 @@ import { LifeSummary } from '@/components/dashboard/LifeSummary';
 import { InsightsPanel } from '@/components/dashboard/InsightsPanel';
 import { UpcomingEvents } from '@/components/dashboard/UpcomingEvents';
 import { ApprovalsInbox } from '@/components/approvals/ApprovalsInbox';
+import { buildSystemHealthCard } from '@/components/dashboard/system-health-helpers';
 import type { LifeDashboardData } from '@raven/shared';
 
 const HEALTH_REFRESH_INTERVAL_MS = 10000;
@@ -22,23 +23,6 @@ interface HealthResponse {
     agentManager: { queueLength: number; runningCount: number };
   };
   selfTest?: { lastRun: string | null; ok: boolean; violations: string[] };
-}
-
-/** Folds the self-test result into the "System Health" summary card: red +
- * an issue count when self-test found violations, otherwise the dashboard's
- * own systemHealth.status as before. */
-function buildSystemHealthCard(
-  systemHealthStatus: string,
-  selfTest: HealthResponse['selfTest'],
-): { label: string; value: string; href: string; color: string; title: string | undefined } {
-  const hasViolations = selfTest !== undefined && !selfTest.ok;
-  return {
-    label: 'System Health',
-    value: hasViolations ? `${selfTest.violations.length} issue(s)` : systemHealthStatus,
-    href: '/settings',
-    color: hasViolations || systemHealthStatus !== 'ok' ? 'var(--error)' : 'var(--success)',
-    title: hasViolations ? selfTest.violations.join('\n') : undefined,
-  };
 }
 
 // eslint-disable-next-line max-lines-per-function -- life dashboard page with multiple data sources
@@ -114,7 +98,7 @@ export default function DashboardPage() {
           href: '#approvals',
           color: dashboardData.pendingApprovalsCount > 0 ? 'var(--warning, #f59e0b)' : undefined,
         },
-        buildSystemHealthCard(dashboardData.systemHealth.status, healthData?.selfTest),
+        buildSystemHealthCard(healthData?.status, healthData?.selfTest),
       ]
     : [];
 

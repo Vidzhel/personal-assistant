@@ -31,7 +31,7 @@ const DEFAULT_CONSOLIDATION_CRON = '0 3 * * 0'; // Sunday 3am
 
 const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().default(''), // Empty = use `claude` CLI auth (MAX plan)
-  CLAUDE_MODEL: z.string().default('claude-sonnet-4-6'),
+  CLAUDE_MODEL: z.string().default('claude-sonnet-5'),
   RAVEN_PORT: z.coerce.number().default(DEFAULT_PORT),
   RAVEN_TIMEZONE: z.string().default('UTC'),
   RAVEN_DIGEST_TIME: z.string().default('08:00'),

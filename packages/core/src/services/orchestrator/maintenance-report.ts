@@ -74,7 +74,7 @@ export function sendReportNotification(eventBus: EventBusInterface, report: Comp
       channel: 'telegram' as const,
       title: `System Maintenance Report — ${report.date}`,
       body,
-      topicName: 'Raven System',
+      topicName: 'System',
     },
   });
 

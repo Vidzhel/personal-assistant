@@ -4,4 +4,4 @@ timezone: UTC
 enabled: true
 run:
   kind: template
-  ref: morning-digest
+  ref: canary

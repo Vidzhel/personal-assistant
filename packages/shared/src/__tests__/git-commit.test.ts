@@ -10,30 +10,23 @@ import { gitAutoCommit } from '../utils/git-commit.ts';
 
 const mockExecFile = execFile as any;
 
+// The mocked execFile may be invoked with or without an options object
+// (gitAutoCommit only passes one when a cwd is given), so these helpers grab
+// the callback positionally as the last argument rather than assuming arity.
 function simulateSuccess(): void {
-  mockExecFile.mockImplementation(
-    (
-      _cmd: string,
-      _args: string[],
-      cb: (err: Error | null, stdout: string, stderr: string) => void,
-    ) => {
-      cb(null, '', '');
-    },
-  );
+  mockExecFile.mockImplementation((...args: unknown[]) => {
+    const cb = args[args.length - 1] as (err: Error | null, stdout: string, stderr: string) => void;
+    cb(null, '', '');
+  });
 }
 
 function simulateError(message: string, code?: string): void {
-  mockExecFile.mockImplementation(
-    (
-      _cmd: string,
-      _args: string[],
-      cb: (err: Error | null, stdout: string, stderr: string) => void,
-    ) => {
-      const err: NodeJS.ErrnoException = new Error(message);
-      if (code) err.code = code;
-      cb(err, '', '');
-    },
-  );
+  mockExecFile.mockImplementation((...args: unknown[]) => {
+    const cb = args[args.length - 1] as (err: Error | null, stdout: string, stderr: string) => void;
+    const err: NodeJS.ErrnoException = new Error(message);
+    if (code) err.code = code;
+    cb(err, '', '');
+  });
 }
 
 describe('gitAutoCommit', () => {
@@ -56,12 +49,12 @@ describe('gitAutoCommit', () => {
     expect(mockExecFile).toHaveBeenNthCalledWith(
       2,
       'git',
-      ['commit', '-m', 'chore: update pipeline'],
+      ['commit', '-m', 'chore: update pipeline', '--', '/tmp/test.yaml'],
       expect.any(Function),
     );
   });
 
-  it('handles multiple file paths in git add', async () => {
+  it('handles multiple file paths in git add and restricts the commit to them', async () => {
     simulateSuccess();
 
     await gitAutoCommit(['/tmp/a.yaml', '/tmp/b.yaml'], 'chore: update');
@@ -70,6 +63,33 @@ describe('gitAutoCommit', () => {
       1,
       'git',
       ['add', '/tmp/a.yaml', '/tmp/b.yaml'],
+      expect.any(Function),
+    );
+    expect(mockExecFile).toHaveBeenNthCalledWith(
+      2,
+      'git',
+      ['commit', '-m', 'chore: update', '--', '/tmp/a.yaml', '/tmp/b.yaml'],
+      expect.any(Function),
+    );
+  });
+
+  it('passes cwd through to both git invocations when provided', async () => {
+    simulateSuccess();
+
+    await gitAutoCommit(['/tmp/test.yaml'], 'chore: update', '/repo');
+
+    expect(mockExecFile).toHaveBeenNthCalledWith(
+      1,
+      'git',
+      ['add', '/tmp/test.yaml'],
+      { cwd: '/repo' },
+      expect.any(Function),
+    );
+    expect(mockExecFile).toHaveBeenNthCalledWith(
+      2,
+      'git',
+      ['commit', '-m', 'chore: update', '--', '/tmp/test.yaml'],
+      { cwd: '/repo' },
       expect.any(Function),
     );
   });

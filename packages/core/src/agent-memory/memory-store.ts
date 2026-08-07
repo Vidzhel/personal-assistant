@@ -158,14 +158,20 @@ async function atomicWrite(absPath: string, content: string): Promise<void> {
   await rename(tmp, absPath);
 }
 
-async function checkAndWrite(opts: WriteOpts): Promise<MemoryWriteResult> {
-  const { agentName, relPath, content, mustExist, projectsDir } = opts;
-  const absPath = safePath(projectsDir, agentName, relPath);
-  const fileExists = existsSync(absPath);
-  if (mustExist && !fileExists) {
-    return { ok: false, error: `memory file does not exist: ${relPath}` };
-  }
+interface BudgetCheckInput {
+  projectsDir: string;
+  agentName: string;
+  absPath: string;
+  content: string;
+  fileExists: boolean;
+}
 
+/** Isolated from checkAndWrite so that function's own complexity stays
+ * under the guardrail threshold — this holds the two budget-limit branches,
+ * checkAndWrite holds the existence/directory branches. Returns null when
+ * the write is within budget. */
+async function checkBudgetLimits(input: BudgetCheckInput): Promise<MemoryWriteResult | null> {
+  const { projectsDir, agentName, absPath, content, fileExists } = input;
   const budget = await readBudget(projectsDir, agentName);
   const files = await listMemoryFiles(projectsDir, agentName);
   const dir = resolveMemoryDir(projectsDir, agentName);
@@ -190,9 +196,62 @@ async function checkAndWrite(opts: WriteOpts): Promise<MemoryWriteResult> {
       usage,
     };
   }
+  return null;
+}
+
+async function checkAndWrite(opts: WriteOpts): Promise<MemoryWriteResult> {
+  const { agentName, relPath, content, mustExist, projectsDir } = opts;
+  const absPath = safePath(projectsDir, agentName, relPath);
+  const fileExists = existsSync(absPath);
+  // A single path segment like "candidates" passes safePath (no slashes)
+  // but can resolve to a real subdirectory (memory-candidates.ts creates
+  // memory/<agent>/candidates/) — writing/renaming a file over that throws
+  // a noisy EISDIR further down in atomicWrite. Reject it here with a clear
+  // error instead.
+  if (fileExists && (await stat(absPath)).isDirectory()) {
+    return { ok: false, error: `memory path is a directory, not a file: ${relPath}` };
+  }
+  if (mustExist && !fileExists) {
+    return { ok: false, error: `memory file does not exist: ${relPath}` };
+  }
+
+  const budgetError = await checkBudgetLimits({
+    projectsDir,
+    agentName,
+    absPath,
+    content,
+    fileExists,
+  });
+  if (budgetError) return budgetError;
 
   await atomicWrite(absPath, content);
   log.info(`memory ${mustExist ? 'updated' : 'written'}: ${agentName}/${relPath}`);
+  const budget = await readBudget(projectsDir, agentName);
+  return { ok: true, usage: await computeUsage(projectsDir, agentName, budget) };
+}
+
+/** Standalone (not a createMemoryStore closure member) so remove()'s body
+ * doesn't push createMemoryStore over the max-lines-per-function guardrail
+ * — mirrors checkAndWrite's relationship to write()/update(). */
+async function removeMemoryFile(
+  projectsDir: string,
+  agentName: string,
+  relPath: string,
+): Promise<MemoryWriteResult> {
+  const absPath = safePath(projectsDir, agentName, relPath);
+  if (!existsSync(absPath)) {
+    return { ok: false, error: `memory file does not exist: ${relPath}` };
+  }
+  if ((await stat(absPath)).isDirectory()) {
+    return { ok: false, error: `memory path is a directory, not a file: ${relPath}` };
+  }
+  try {
+    await unlink(absPath);
+    log.info(`memory removed: ${agentName}/${relPath}`);
+  } catch (err) {
+    return { ok: false, error: `failed to remove memory file: ${(err as Error).message}` };
+  }
+  const budget = await readBudget(projectsDir, agentName);
   return { ok: true, usage: await computeUsage(projectsDir, agentName, budget) };
 }
 
@@ -227,18 +286,7 @@ export function createMemoryStore(deps: { projectsDir: string }): MemoryStore {
 
     async remove(agentName: string, relPath: string): Promise<MemoryWriteResult> {
       validateAgentName(agentName);
-      const absPath = safePath(projectsDir, agentName, relPath);
-      if (!existsSync(absPath)) {
-        return { ok: false, error: `memory file does not exist: ${relPath}` };
-      }
-      try {
-        await unlink(absPath);
-        log.info(`memory removed: ${agentName}/${relPath}`);
-      } catch (err) {
-        return { ok: false, error: `failed to remove memory file: ${(err as Error).message}` };
-      }
-      const budget = await readBudget(projectsDir, agentName);
-      return { ok: true, usage: await computeUsage(projectsDir, agentName, budget) };
+      return removeMemoryFile(projectsDir, agentName, relPath);
     },
 
     async list(agentName: string): Promise<string[]> {

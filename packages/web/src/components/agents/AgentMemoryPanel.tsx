@@ -1,9 +1,46 @@
 'use client';
 
 import { useAgentStore } from '@/stores/agent-store';
+import type { AgentMemoryFile } from '@/lib/api-client';
+
+/** Distinct from an empty list: a fetch failure must never render as "this
+ * agent simply has no memory yet." */
+function MemoryPanelBody({ error, files }: { error: string | null; files: AgentMemoryFile[] }) {
+  if (error) {
+    return (
+      <p className="text-sm" style={{ color: 'var(--error)' }}>
+        Could not load memory: {error}
+      </p>
+    );
+  }
+  if (files.length === 0) {
+    return (
+      <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+        No memory files yet.
+      </p>
+    );
+  }
+  return (
+    <>
+      {files.map((file) => (
+        <div
+          key={file.file}
+          className="rounded border p-3 text-xs space-y-1"
+          style={{ borderColor: 'var(--border)' }}
+        >
+          <div className="font-medium">{file.file}</div>
+          <pre className="whitespace-pre-wrap font-sans" style={{ color: 'var(--text-muted)' }}>
+            {file.content}
+          </pre>
+        </div>
+      ))}
+    </>
+  );
+}
 
 export function AgentMemoryPanel() {
-  const { showMemory, selectedAgentMemory, agents, closeMemoryPanel } = useAgentStore();
+  const { showMemory, selectedAgentMemory, selectedAgentMemoryError, agents, closeMemoryPanel } =
+    useAgentStore();
   const agent = agents.find((a) => a.id === showMemory);
 
   return (
@@ -29,23 +66,7 @@ export function AgentMemoryPanel() {
         <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
           What this agent actually remembers — read-only, git-committed, human-editable on disk.
         </p>
-        {selectedAgentMemory.length === 0 && (
-          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-            No memory files yet.
-          </p>
-        )}
-        {selectedAgentMemory.map((file) => (
-          <div
-            key={file.file}
-            className="rounded border p-3 text-xs space-y-1"
-            style={{ borderColor: 'var(--border)' }}
-          >
-            <div className="font-medium">{file.file}</div>
-            <pre className="whitespace-pre-wrap font-sans" style={{ color: 'var(--text-muted)' }}>
-              {file.content}
-            </pre>
-          </div>
-        ))}
+        <MemoryPanelBody error={selectedAgentMemoryError} files={selectedAgentMemory} />
       </div>
     </div>
   );

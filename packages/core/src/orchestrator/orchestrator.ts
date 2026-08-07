@@ -26,7 +26,7 @@ import { createKnowledgeAgentDefinition } from '../knowledge-engine/knowledge-ag
 import { getDb } from '../db/database.ts';
 import { resolveSystemAccessInstructions } from '../project-manager/system-access-gate.ts';
 import { createAuditLog } from '../permission-engine/audit-log.ts';
-import { kebabCase, upsertCacheRow } from '../project-manager/project-sync.ts';
+import { kebabCase, uniqueFsPath, upsertCacheRow } from '../project-manager/project-sync.ts';
 
 const log = createLogger('orchestrator');
 
@@ -62,7 +62,13 @@ interface ResolveProjectNodeInput {
 /** Looks up the registry node for `fsPath`, scaffolding a real directory
  * (and reloading the registry) when none exists yet. Returns undefined only
  * when the scaffold attempt itself fails — the caller still upserts a
- * cache row in that case, just without an fs_path link. */
+ * cache row in that case, just without an fs_path link.
+ *
+ * Scaffolding uses uniqueFsPath rather than the raw kebab-cased `fsPath` —
+ * two unrelated auto-created projects can legitimately kebab to the same
+ * slug (two Telegram topics both named "Inbox", or two direct-mode chats
+ * that both fall back to the 'Inbox' default) — so a brand-new node never
+ * collides with one this same slug already produced. */
 async function resolveOrScaffoldProjectNode(
   input: ResolveProjectNodeInput,
 ): Promise<ProjectNode | undefined> {
@@ -70,20 +76,45 @@ async function resolveOrScaffoldProjectNode(
   const existing = projectRegistry.getProject(fsPath);
   if (existing) return existing;
 
+  const scaffoldPath = uniqueFsPath(projectRegistry, fsPath);
   try {
     await scaffoldingApi.createProject({
-      path: fsPath,
+      path: scaffoldPath,
       displayName,
       description: topicName
         ? `Auto-created from Telegram topic "${topicName}"`
         : 'Auto-created catch-all for unnamed sources',
     });
     await projectRegistry.load(projectsDir);
-    return projectRegistry.getProject(fsPath);
+    return projectRegistry.getProject(scaffoldPath);
   } catch (err) {
-    log.error(`Failed to scaffold project directory "${fsPath}": ${err}`);
+    log.error(`Failed to scaffold project directory "${scaffoldPath}": ${err}`);
     return undefined;
   }
+}
+
+/** A node found/scaffolded for this fsPath might already be claimed by a
+ * DIFFERENT project row (e.g. a prior ensureProject call for another
+ * projectId already linked fs_path="inbox" — same kebab-derived slug,
+ * different id — and resolveOrScaffoldProjectNode's `existing` branch
+ * returns that same node without ever attempting to scaffold a fresh one).
+ * Writing this node's id as fs_path for a second row would violate the
+ * partial UNIQUE index (idx_projects_fs_path) and, left uncaught, would
+ * abort handleUserChat before the user's message is ever persisted (see
+ * project-sync.ts's fs_path invariant). Falling back to fsPath: null keeps
+ * ensureProject itself impossible to throw on this path — the row is left
+ * unreconciled for project-sync's boot-time reconciler to scaffold its own
+ * directory for, same as any other referenced-but-unlinked row. */
+function resolveSafeFsPath(db: Database.Database, node: ProjectNode | undefined): string | null {
+  if (!node) return null;
+  const owner = db.prepare('SELECT 1 FROM projects WHERE fs_path = ?').get(node.id);
+  if (owner) {
+    log.warn(
+      `fs_path "${node.id}" is already owned by another project row — linking this one unreconciled instead of colliding`,
+    );
+    return null;
+  }
+  return node.id;
 }
 
 export interface OrchestratorDeps {
@@ -226,8 +257,9 @@ export class Orchestrator {
       topicName,
     });
 
-    upsertCacheRow(db, { id: projectId, name: displayName, fsPath: node?.id ?? null });
-    log.info(`Auto-created project "${projectId}" (fs_path: ${node?.id ?? 'none'})`);
+    const safeFsPath = resolveSafeFsPath(db, node);
+    upsertCacheRow(db, { id: projectId, name: displayName, fsPath: safeFsPath });
+    log.info(`Auto-created project "${projectId}" (fs_path: ${safeFsPath ?? 'none'})`);
   }
 
   // eslint-disable-next-line max-lines-per-function, complexity -- async handler with context injection, named agent resolution, and knowledge agent merging
@@ -235,7 +267,17 @@ export class Orchestrator {
     const { projectId, sessionId, message, topicId, topicName } = event.payload;
     log.info(`User chat in project ${projectId}: ${message.slice(0, LOG_MESSAGE_PREVIEW_LENGTH)}`);
 
-    // Ensure the project exists (Telegram messages may reference auto-generated project IDs)
+    // Ensure the project exists (Telegram messages may reference
+    // auto-generated project IDs). This has to stay ahead of session
+    // creation, not just message persistence: sessions.project_id is a hard
+    // FK to projects(id) (foreign_keys=ON), so getOrCreateSession's INSERT
+    // for a brand-new project would itself throw before appendMessage ever
+    // ran if the project row didn't exist yet — appendMessage can't be
+    // moved ahead of ensureProject without first solving that. What *can*
+    // move is making ensureProject itself unable to throw, which is the
+    // actual fix here (see resolveSafeFsPath) — a collision on the derived
+    // fs_path no longer escapes to the caller and aborts the handler before
+    // the user's message is stored.
     await this.ensureProject(projectId, topicName);
 
     // Use the specific session if provided, otherwise fall back to getOrCreateSession
