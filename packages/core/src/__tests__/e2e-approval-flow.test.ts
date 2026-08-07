@@ -97,6 +97,7 @@ describe('e2e: approval flow round-trip over the real composition root', () => {
     const FAKE_CAN_USE_TOOL_OPTIONS = {
       signal: new AbortController().signal,
       toolUseID: 'test-tool-use',
+      requestId: 'test-request-id',
     };
     const fakeBackend: AgentBackend = async (opts) => {
       calls.push(opts);

@@ -94,5 +94,6 @@ export function createMemoryMcp(deps: MemoryToolDeps): McpSdkServerConfigWithIns
     name: 'memory',
     version: '1.0.0',
     tools: buildMemoryTools(deps),
+    alwaysLoad: true,
   });
 }

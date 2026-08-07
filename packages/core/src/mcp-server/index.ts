@@ -31,5 +31,10 @@ export function createRavenMcp(
 
   const scopedTools = allTools.filter((t) => isToolAllowed(scope, t.name));
 
-  return createSdkMcpServer({ name: 'raven', version: '1.0.0', tools: scopedTools });
+  return createSdkMcpServer({
+    name: 'raven',
+    version: '1.0.0',
+    tools: scopedTools,
+    alwaysLoad: true,
+  });
 }

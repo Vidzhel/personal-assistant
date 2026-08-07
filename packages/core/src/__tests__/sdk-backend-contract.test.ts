@@ -100,14 +100,14 @@ describe('SDK backend contract (real subprocess spawn via fake executable)', () 
     expect(entry.argv).not.toContain('--resume');
   });
 
-  it('passes --resume <id> through to the subprocess when resuming', async () => {
+  it('passes --resume=<id> through to the subprocess when resuming', async () => {
+    // As of SDK 0.3.212, --resume is emitted in equals-form (`--resume=<id>`)
+    // rather than as two separate argv entries (`--resume`, `<id>`).
     const backend = createSdkBackend();
     await backend(baseOpts({ resume: 'fake-123' }));
 
     const [entry] = readLogEntries(argvLogPath);
-    const resumeIdx = entry.argv.indexOf('--resume');
-    expect(resumeIdx).toBeGreaterThanOrEqual(0);
-    expect(entry.argv[resumeIdx + 1]).toBe('fake-123');
+    expect(entry.argv).toContain('--resume=fake-123');
   });
 
   it('strips CLAUDECODE from the subprocess env (nesting guard)', async () => {

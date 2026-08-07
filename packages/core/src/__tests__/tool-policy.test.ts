@@ -16,6 +16,7 @@ import type { PendingApprovals } from '../permission-engine/pending-approvals.ts
 import { EventBus } from '../event-bus/event-bus.ts';
 import type { CapabilityLibrary } from '../capability-library/capability-library.ts';
 import type { BashAccess, PermissionTier, RavenEvent } from '@raven/shared';
+import type { CanUseTool, PermissionResult } from '@anthropic-ai/claude-agent-sdk';
 
 function makeFakePermissionEngine(
   tierMap: Record<string, PermissionTier>,
@@ -47,7 +48,25 @@ interface FakeSkill {
 const FAKE_CAN_USE_TOOL_OPTIONS = {
   signal: new AbortController().signal,
   toolUseID: 'test-tool-use',
+  requestId: 'test-request-id',
 };
+
+// CanUseTool's return type is `PermissionResult | null` (SDK 0.3.x reserves
+// null for callers that answer the permission request out-of-band). Raven's
+// tool policy never does that — it always returns a real result, see
+// tool-policy.ts — so tests assert that once here instead of a null check
+// at every call site below.
+async function callPolicy(
+  policy: CanUseTool,
+  toolName: string,
+  input: Record<string, unknown>,
+): Promise<PermissionResult> {
+  const result = await policy(toolName, input, FAKE_CAN_USE_TOOL_OPTIONS);
+  if (result === null) {
+    throw new Error('expected a non-null PermissionResult from the tool policy under test');
+  }
+  return result;
+}
 
 function makeFakeCapabilityLibrary(skills: FakeSkill[]): CapabilityLibrary {
   const fake = {
@@ -127,7 +146,7 @@ describe('createToolPolicy', () => {
       const task = baseTask({ bashAccess: FULL_BASH_ACCESS });
       const policy = createToolPolicy(deps, task);
 
-      const result = await policy('Bash', { command: 'echo hello' }, FAKE_CAN_USE_TOOL_OPTIONS);
+      const result = await callPolicy(policy, 'Bash', { command: 'echo hello' });
       expect(result.behavior).toBe('allow');
 
       const entries = auditLog.query({ skillName: 'test-skill', outcome: 'executed' });
@@ -141,7 +160,7 @@ describe('createToolPolicy', () => {
       const task = baseTask({ bashAccess: NONE_BASH_ACCESS });
       const policy = createToolPolicy(deps, task);
 
-      const result = await policy('Bash', { command: 'ls -la' }, FAKE_CAN_USE_TOOL_OPTIONS);
+      const result = await callPolicy(policy, 'Bash', { command: 'ls -la' });
       expect(result.behavior).toBe('deny');
       if (result.behavior === 'deny') {
         expect(result.message).toContain('Bash access is disabled');
@@ -158,7 +177,7 @@ describe('createToolPolicy', () => {
       const task = baseTask();
       const policy = createToolPolicy(deps, task);
 
-      const result = await policy('Bash', { command: 'whoami' }, FAKE_CAN_USE_TOOL_OPTIONS);
+      const result = await callPolicy(policy, 'Bash', { command: 'whoami' });
       expect(result.behavior).toBe('deny');
     });
 
@@ -167,7 +186,7 @@ describe('createToolPolicy', () => {
       const task = baseTask({ bashAccess: NONE_BASH_ACCESS, sessionId: 'sess-bash-noqueue' });
       const policy = createToolPolicy(deps, task);
 
-      await policy('Bash', { command: 'rm -rf /' }, FAKE_CAN_USE_TOOL_OPTIONS);
+      await callPolicy(policy, 'Bash', { command: 'rm -rf /' });
 
       const approvals = pendingApprovals.query();
       expect(approvals.some((a) => a.sessionId === 'sess-bash-noqueue')).toBe(false);
@@ -181,7 +200,7 @@ describe('createToolPolicy', () => {
       const policy = createToolPolicy(deps, task);
 
       const before = auditLog.query({ skillName: 'test-skill' }).length;
-      const result = await policy('mcp__raven__create_task', {}, FAKE_CAN_USE_TOOL_OPTIONS);
+      const result = await callPolicy(policy, 'mcp__raven__create_task', {});
 
       expect(result.behavior).toBe('allow');
       expect(auditLog.query({ skillName: 'test-skill' }).length).toBe(before);
@@ -193,7 +212,7 @@ describe('createToolPolicy', () => {
       const task = baseTask();
       const policy = createToolPolicy(deps, task);
 
-      const result = await policy('mcp__memory__write_note', {}, FAKE_CAN_USE_TOOL_OPTIONS);
+      const result = await callPolicy(policy, 'mcp__memory__write_note', {});
       expect(result.behavior).toBe('allow');
     });
   });
@@ -206,7 +225,7 @@ describe('createToolPolicy', () => {
       const task = baseTask({ skillName: 'ticktick', sessionId: 'sess-green' });
       const policy = createToolPolicy(deps, task);
 
-      const result = await policy('mcp__ticktick__get_tasks', {}, FAKE_CAN_USE_TOOL_OPTIONS);
+      const result = await callPolicy(policy, 'mcp__ticktick__get_tasks', {});
       expect(result.behavior).toBe('allow');
 
       const entries = auditLog.query({ sessionId: 'sess-green' });
@@ -223,7 +242,7 @@ describe('createToolPolicy', () => {
       const task = baseTask({ skillName: 'ticktick', sessionId: 'sess-yellow' });
       const policy = createToolPolicy(deps, task);
 
-      const result = await policy('mcp__ticktick__create_task', {}, FAKE_CAN_USE_TOOL_OPTIONS);
+      const result = await callPolicy(policy, 'mcp__ticktick__create_task', {});
       expect(result.behavior).toBe('allow');
 
       const approvedEvents = events.filter((e) => e.type === 'permission:approved');
@@ -240,11 +259,7 @@ describe('createToolPolicy', () => {
       const task = baseTask({ skillName: 'gmail', sessionId: 'sess-red' });
       const policy = createToolPolicy(deps, task);
 
-      const result = await policy(
-        'mcp__gmail__send_email',
-        { to: 'a@b.com' },
-        FAKE_CAN_USE_TOOL_OPTIONS,
-      );
+      const result = await callPolicy(policy, 'mcp__gmail__send_email', { to: 'a@b.com' });
       expect(result.behavior).toBe('deny');
       if (result.behavior === 'deny') {
         expect(result.message).toMatch(/Queued for approval \(id .+\)/);
@@ -283,7 +298,7 @@ describe('createToolPolicy', () => {
       const policy = createToolPolicy(deps, task);
 
       // get_all_tasks has no declared ticktick:* action counterpart.
-      const result = await policy('mcp__ticktick__get_all_tasks', {}, FAKE_CAN_USE_TOOL_OPTIONS);
+      const result = await callPolicy(policy, 'mcp__ticktick__get_all_tasks', {});
       expect(result.behavior).toBe('deny');
     });
 
@@ -302,7 +317,7 @@ describe('createToolPolicy', () => {
       const task = baseTask({ skillName: 'docs', sessionId: 'sess-fallback-yellow' });
       const policy = createToolPolicy(deps, task);
 
-      const result = await policy('mcp__markdownify__convert', {}, FAKE_CAN_USE_TOOL_OPTIONS);
+      const result = await callPolicy(policy, 'mcp__markdownify__convert', {});
       expect(result.behavior).toBe('allow');
       expect(events.filter((e) => e.type === 'permission:approved')).toHaveLength(1);
     });
@@ -312,11 +327,7 @@ describe('createToolPolicy', () => {
       const task = baseTask({ skillName: 'unknown-skill' });
       const policy = createToolPolicy(deps, task);
 
-      const result = await policy(
-        'mcp__unknown-server__do_something',
-        {},
-        FAKE_CAN_USE_TOOL_OPTIONS,
-      );
+      const result = await callPolicy(policy, 'mcp__unknown-server__do_something', {});
       expect(result.behavior).toBe('allow');
     });
 
@@ -331,11 +342,7 @@ describe('createToolPolicy', () => {
       const task = baseTask({ skillName: 'orphan' });
       const policy = createToolPolicy(deps, task);
 
-      const result = await policy(
-        'mcp__orphan-server__do_something',
-        {},
-        FAKE_CAN_USE_TOOL_OPTIONS,
-      );
+      const result = await callPolicy(policy, 'mcp__orphan-server__do_something', {});
       expect(result.behavior).toBe('allow');
     });
   });
@@ -352,11 +359,7 @@ describe('createToolPolicy', () => {
       });
       const policy = createToolPolicy(deps, task);
 
-      const result = await policy(
-        'mcp__gmail__send_email',
-        { to: 'a@b.com' },
-        FAKE_CAN_USE_TOOL_OPTIONS,
-      );
+      const result = await callPolicy(policy, 'mcp__gmail__send_email', { to: 'a@b.com' });
       expect(result.behavior).toBe('allow');
 
       // No new pending approval queued for the pre-approved re-run.
@@ -377,11 +380,7 @@ describe('createToolPolicy', () => {
       });
       const policy = createToolPolicy(deps, task);
 
-      const result = await policy(
-        'mcp__gmail__send_email',
-        { to: 'a@b.com' },
-        FAKE_CAN_USE_TOOL_OPTIONS,
-      );
+      const result = await callPolicy(policy, 'mcp__gmail__send_email', { to: 'a@b.com' });
       expect(result.behavior).toBe('deny');
     });
   });
@@ -394,7 +393,7 @@ describe('createToolPolicy', () => {
 
       for (const toolName of ['Read', 'Glob', 'TodoWrite']) {
         const before = auditLog.query({ skillName: 'test-skill' }).length;
-        const result = await policy(toolName, {}, FAKE_CAN_USE_TOOL_OPTIONS);
+        const result = await callPolicy(policy, toolName, {});
         expect(result.behavior).toBe('allow');
         expect(auditLog.query({ skillName: 'test-skill' }).length).toBe(before);
       }
@@ -405,7 +404,7 @@ describe('createToolPolicy', () => {
       const task = baseTask();
       const policy = createToolPolicy(deps, task);
 
-      const result = await policy('Read', { file_path: '/x.ts' }, FAKE_CAN_USE_TOOL_OPTIONS);
+      const result = await callPolicy(policy, 'Read', { file_path: '/x.ts' });
       expect(result).toEqual({ behavior: 'allow', updatedInput: { file_path: '/x.ts' } });
     });
   });
@@ -420,7 +419,7 @@ describe('createToolPolicy', () => {
       const task = baseTask();
       const policy = createToolPolicy(deps, task);
 
-      const result = await policy('Write', { file_path: '/tmp/x.ts' }, FAKE_CAN_USE_TOOL_OPTIONS);
+      const result = await callPolicy(policy, 'Write', { file_path: '/tmp/x.ts' });
       expect(result.behavior).toBe('deny');
 
       const entries = auditLog.query({ skillName: 'test-skill', outcome: 'denied' });
@@ -434,7 +433,7 @@ describe('createToolPolicy', () => {
       const task = baseTask({ bashAccess: FULL_BASH_ACCESS });
       const policy = createToolPolicy(deps, task);
 
-      const result = await policy('Edit', { file_path: '/tmp/x.ts' }, FAKE_CAN_USE_TOOL_OPTIONS);
+      const result = await callPolicy(policy, 'Edit', { file_path: '/tmp/x.ts' });
       expect(result.behavior).toBe('allow');
 
       const entries = auditLog.query({ skillName: 'test-skill', outcome: 'executed' });
@@ -456,11 +455,7 @@ describe('createToolPolicy', () => {
       });
       const policy = createToolPolicy(deps, task);
 
-      const result = await policy(
-        'Write',
-        { file_path: '/workspace/notes.md' },
-        FAKE_CAN_USE_TOOL_OPTIONS,
-      );
+      const result = await callPolicy(policy, 'Write', { file_path: '/workspace/notes.md' });
       expect(result.behavior).toBe('allow');
     });
 
@@ -477,7 +472,7 @@ describe('createToolPolicy', () => {
       });
       const policy = createToolPolicy(deps, task);
 
-      const result = await policy('Write', { file_path: '/etc/passwd' }, FAKE_CAN_USE_TOOL_OPTIONS);
+      const result = await callPolicy(policy, 'Write', { file_path: '/etc/passwd' });
       expect(result.behavior).toBe('deny');
       if (result.behavior === 'deny') {
         expect(result.message).toContain('not in the allowed paths');
@@ -497,11 +492,9 @@ describe('createToolPolicy', () => {
       });
       const policy = createToolPolicy(deps, task);
 
-      const result = await policy(
-        'Edit',
-        { file_path: '/workspace/secrets/api-key.txt' },
-        FAKE_CAN_USE_TOOL_OPTIONS,
-      );
+      const result = await callPolicy(policy, 'Edit', {
+        file_path: '/workspace/secrets/api-key.txt',
+      });
       expect(result.behavior).toBe('deny');
     });
 
@@ -518,11 +511,7 @@ describe('createToolPolicy', () => {
       });
       const policy = createToolPolicy(deps, task);
 
-      const result = await policy(
-        'MultiEdit',
-        { file_path: '/other/x.ts' },
-        FAKE_CAN_USE_TOOL_OPTIONS,
-      );
+      const result = await callPolicy(policy, 'MultiEdit', { file_path: '/other/x.ts' });
       expect(result.behavior).toBe('deny');
     });
 
@@ -539,11 +528,9 @@ describe('createToolPolicy', () => {
       });
       const policy = createToolPolicy(deps, task);
 
-      const result = await policy(
-        'NotebookEdit',
-        { notebook_path: '/workspace/analysis.ipynb' },
-        FAKE_CAN_USE_TOOL_OPTIONS,
-      );
+      const result = await callPolicy(policy, 'NotebookEdit', {
+        notebook_path: '/workspace/analysis.ipynb',
+      });
       expect(result.behavior).toBe('allow');
     });
   });
@@ -558,11 +545,11 @@ describe('createToolPolicy', () => {
       const task = baseTask({ skillName: 'gmail', sessionId: 'sess-m9-args' });
       const policy = createToolPolicy(deps, task);
 
-      await policy(
-        'mcp__gmail__send_email',
-        { to: 'a@b.com', apiKey: 'sk-super-secret', body: 'hello' },
-        FAKE_CAN_USE_TOOL_OPTIONS,
-      );
+      await callPolicy(policy, 'mcp__gmail__send_email', {
+        to: 'a@b.com',
+        apiKey: 'sk-super-secret',
+        body: 'hello',
+      });
 
       const approval = pendingApprovals.query().find((a) => a.sessionId === 'sess-m9-args');
       expect(approval?.details).toContain('a@b.com');
@@ -581,16 +568,8 @@ describe('createToolPolicy', () => {
       const task = baseTask({ skillName: 'gmail', sessionId: 'sess-m8-dedup' });
       const policy = createToolPolicy(deps, task);
 
-      const first = await policy(
-        'mcp__gmail__send_email',
-        { to: 'a@b.com' },
-        FAKE_CAN_USE_TOOL_OPTIONS,
-      );
-      const second = await policy(
-        'mcp__gmail__send_email',
-        { to: 'a@b.com' },
-        FAKE_CAN_USE_TOOL_OPTIONS,
-      );
+      const first = await callPolicy(policy, 'mcp__gmail__send_email', { to: 'a@b.com' });
+      const second = await callPolicy(policy, 'mcp__gmail__send_email', { to: 'a@b.com' });
 
       expect(first.behavior).toBe('deny');
       expect(second.behavior).toBe('deny');
