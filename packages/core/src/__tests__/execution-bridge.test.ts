@@ -730,8 +730,7 @@ describe('execution flow integration (real engine + real event bus)', () => {
     const complete = completions.find(
       (e) => (e as unknown as { payload: { taskId: string } }).payload.taskId === 'queued-task',
     ) as unknown as
-      | { payload: { success: boolean; errors?: string[]; cancelled?: boolean } }
-      | undefined;
+      { payload: { success: boolean; errors?: string[]; cancelled?: boolean } } | undefined;
     expect(complete).toBeDefined();
     expect(complete!.payload.success).toBe(false);
     expect(complete!.payload.errors).toEqual(['cancelled']);

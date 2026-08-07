@@ -56,8 +56,7 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
     // name match and direct id lookup are fallbacks for unreconciled rows.
     const db = getDb();
     const dbRow = db.prepare('SELECT name, fs_path FROM projects WHERE id = ?').get(id) as
-      | { name: string; fs_path: string | null }
-      | undefined;
+      { name: string; fs_path: string | null } | undefined;
 
     const registryNode = dbRow?.fs_path
       ? deps.projectRegistry.getProject(dbRow.fs_path)
@@ -152,8 +151,7 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
 
     // Prevent deletion of meta-project
     const row = db.prepare('SELECT is_meta FROM projects WHERE id = ?').get(req.params.id) as
-      | { is_meta: number }
-      | undefined;
+      { is_meta: number } | undefined;
     if (row?.is_meta === 1) {
       return reply.status(BAD_REQUEST).send({ error: 'Cannot delete the system meta-project' });
     }

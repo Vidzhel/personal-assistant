@@ -159,8 +159,7 @@ describe('runProjectSync', () => {
 
     expect(result.scaffolded).toBeGreaterThanOrEqual(1);
     const row = db.prepare('SELECT fs_path FROM projects WHERE id = ?').get('orphan-event-ref') as
-      | { fs_path: string | null }
-      | undefined;
+      { fs_path: string | null } | undefined;
     expect(row?.fs_path).toBe('orphan-event-ref');
   });
 

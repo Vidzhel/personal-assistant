@@ -54,8 +54,7 @@ export class SessionManager {
   getSdkSessionId(sessionId: string): string | undefined {
     const db = getDb();
     const row = db.prepare('SELECT sdk_session_id FROM sessions WHERE id = ?').get(sessionId) as
-      | { sdk_session_id: string | null }
-      | undefined;
+      { sdk_session_id: string | null } | undefined;
     return row?.sdk_session_id ?? undefined;
   }
 
@@ -110,8 +109,7 @@ export class SessionManager {
   getSession(sessionId: string): AgentSession | undefined {
     const db = getDb();
     const row = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId) as
-      | SessionRow
-      | undefined;
+      SessionRow | undefined;
     return row ? rowToSession(row) : undefined;
   }
 
@@ -163,8 +161,7 @@ export class SessionManager {
   autoGenerateName(sessionId: string, firstMessage: string): void {
     const db = getDb();
     const row = db.prepare('SELECT name FROM sessions WHERE id = ?').get(sessionId) as
-      | { name: string | null }
-      | undefined;
+      { name: string | null } | undefined;
 
     if (!row || row.name !== null) return;
 

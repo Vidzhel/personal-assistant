@@ -190,8 +190,7 @@ export function createExecutionLogger(deps: { db: Database.Database }): Executio
 
     getTaskById(id: string): TaskRecord | undefined {
       const row = db.prepare('SELECT * FROM agent_tasks WHERE id = ?').get(id) as
-        | AgentTaskRow
-        | undefined;
+        AgentTaskRow | undefined;
       return row ? rowToTaskRecord(row) : undefined;
     },
 

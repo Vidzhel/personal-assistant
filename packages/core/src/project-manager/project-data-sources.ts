@@ -71,8 +71,7 @@ export function getDataSources(projectId: string): ProjectDataSource[] {
 export function getDataSource(id: string): ProjectDataSource | undefined {
   const db = getDb();
   const row = db.prepare('SELECT * FROM project_data_sources WHERE id = ?').get(id) as
-    | DataSourceRow
-    | undefined;
+    DataSourceRow | undefined;
   return row ? rowToDataSource(row) : undefined;
 }
 

@@ -37,20 +37,20 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@modelcontextprotocol/sdk": "^1.12.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@types/js-yaml": "^4.0.9",
     "concurrently": "^9.2.1",
-    "eslint": "^10.0.3",
+    "eslint": "^10.8.0",
     "eslint-config-prettier": "^10.1.8",
-    "globals": "^17.4.0",
-    "prettier": "^3.8.1",
-    "typescript-eslint": "^8.56.1",
+    "globals": "^17.9.0",
+    "prettier": "^3.9.6",
+    "typescript-eslint": "^8.66.0",
     "vitest": "^4.0.18"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
-    "grammy": "^1.41.1",
+    "grammy": "^1.45.1",
     "imapflow": "^1.2.15",
-    "ynab": "^4.0.0"
+    "ynab": "^4.5.0"
   }
 }

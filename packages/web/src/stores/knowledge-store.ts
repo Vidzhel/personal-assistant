@@ -2,12 +2,7 @@ import { create } from 'zustand';
 
 export type GraphViewMode = 'links' | 'tags' | 'timeline' | 'clusters' | 'domains';
 export type ColorDimension =
-  | 'domain'
-  | 'permanence'
-  | 'connectionDegree'
-  | 'recency'
-  | 'cluster'
-  | 'relevance';
+  'domain' | 'permanence' | 'connectionDegree' | 'recency' | 'cluster' | 'relevance';
 
 export interface GraphNode {
   id: string;

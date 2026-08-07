@@ -111,8 +111,7 @@ export function createPendingApprovals(db: Database.Database): PendingApprovals 
 
     getById(id: string): PendingApproval | undefined {
       const row = db.prepare('SELECT * FROM pending_approvals WHERE id = ?').get(id) as
-        | PendingApprovalRow
-        | undefined;
+        PendingApprovalRow | undefined;
 
       return row ? rowToApproval(row) : undefined;
     },
@@ -140,8 +139,7 @@ export function createPendingApprovals(db: Database.Database): PendingApprovals 
 
       if (result.changes === 0) {
         const existing = db.prepare('SELECT id FROM pending_approvals WHERE id = ?').get(id) as
-          | { id: string }
-          | undefined;
+          { id: string } | undefined;
         if (!existing) {
           const err = new Error(`Pending approval not found: ${id}`);
           (err as Error & { code: string }).code = 'APPROVAL_NOT_FOUND';

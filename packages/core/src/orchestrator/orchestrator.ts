@@ -368,8 +368,7 @@ export class Orchestrator {
     const projectRow = db
       .prepare('SELECT name, system_access, fs_path FROM projects WHERE id = ?')
       .get(projectId) as
-      | { name: string; system_access: string; fs_path: string | null }
-      | undefined;
+      { name: string; system_access: string; fs_path: string | null } | undefined;
     const systemAccess = (projectRow?.system_access ?? 'none') as SystemAccessLevel;
     const projectForAccess: Project = {
       id: projectId,

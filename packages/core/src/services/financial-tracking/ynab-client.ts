@@ -129,6 +129,7 @@ async function fetchCategorizedTransactionsImpl(
     planId,
     accountId,
     sinceDate,
+    undefined, // untilDate
     undefined, // type
     serverKnowledge,
   );

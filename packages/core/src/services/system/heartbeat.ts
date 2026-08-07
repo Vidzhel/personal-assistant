@@ -147,8 +147,7 @@ function resolveCapabilities(deps: HeartbeatDeps): ResolvedHeartbeatCapabilities
 
 function resolveTargetSystemAccessInstructions(db: Database.Database, projectId: string): string {
   const row = db.prepare('SELECT name, system_access FROM projects WHERE id = ?').get(projectId) as
-    | { name: string; system_access: string }
-    | undefined;
+    { name: string; system_access: string } | undefined;
   const project: Project = {
     id: projectId,
     name: row?.name ?? 'Raven System',

@@ -32,8 +32,7 @@ function rowToProject(row: ProjectRow): Project {
 export function getMetaProject(): Project {
   const db = getDb();
   const row = db.prepare('SELECT * FROM projects WHERE is_meta = 1').get() as
-    | ProjectRow
-    | undefined;
+    ProjectRow | undefined;
   if (!row) {
     throw new Error('Meta-project not found in database — migration 017 may not have run');
   }
