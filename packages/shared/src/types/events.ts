@@ -49,9 +49,6 @@ export interface AgentTaskRequestEvent extends BaseEvent {
     mcpServers: Record<string, McpServerConfig>;
     agentDefinitions?: Record<string, SubAgentDefinition>;
     knowledgeContext?: string;
-    sessionReferencesContext?: string;
-    projectDataSourcesContext?: string;
-    skillCatalogContext?: string;
     projectContextChain?: string;
     priority: Priority;
     sessionId?: string;
@@ -679,15 +676,6 @@ export interface SessionRetrospectiveCompleteEvent extends BaseEvent {
   };
 }
 
-export interface SessionCompactedEvent extends BaseEvent {
-  type: 'session:compacted';
-  payload: {
-    sessionId: string;
-    messagesCompacted: number;
-    summaryLength: number;
-  };
-}
-
 export interface SystemHealthAlertEvent extends BaseEvent {
   type: 'system:health:alert';
   payload: {
@@ -935,7 +923,6 @@ export type RavenEvent =
   | ConfigVersionRevertedEvent
   | SessionIdleEvent
   | SessionRetrospectiveCompleteEvent
-  | SessionCompactedEvent
   | TranscriptionRequestEvent
   | TranscriptionCompleteEvent
   | TranscriptionFailedEvent

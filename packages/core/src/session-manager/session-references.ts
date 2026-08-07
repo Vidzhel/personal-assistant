@@ -55,37 +55,6 @@ export function deleteReference(referenceId: string): boolean {
   return result.changes > 0;
 }
 
-export function buildSessionReferencesContext(sessionId: string): string | undefined {
-  const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT sr.context, s.name, s.summary
-       FROM session_references sr
-       JOIN sessions s ON s.id = sr.target_session_id
-       WHERE sr.source_session_id = ?
-       ORDER BY sr.created_at`,
-    )
-    .all(sessionId) as Array<{
-    context: string | null;
-    name: string | null;
-    summary: string | null;
-  }>;
-
-  if (rows.length === 0) return undefined;
-
-  const lines = rows.map((row) => {
-    const name = row.name ?? 'Unnamed session';
-    const summary = row.summary ?? 'No summary available';
-    let line = `- **${name}**: ${summary}`;
-    if (row.context) {
-      line += `\n  Context: ${row.context}`;
-    }
-    return line;
-  });
-
-  return lines.join('\n');
-}
-
 interface ReferenceRow {
   id: string;
   source_session_id: string;

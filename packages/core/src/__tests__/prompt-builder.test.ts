@@ -63,13 +63,6 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('## Relevant Knowledge');
   });
 
-  it('does not include session references (agents use MCP get_session_history instead)', () => {
-    const prompt = buildSystemPrompt(
-      makeTask({ sessionReferencesContext: '- **Session A**: Summary here' }),
-    );
-    expect(prompt).not.toContain('## Related Sessions');
-  });
-
   it('includes task board context when set', () => {
     const prompt = buildSystemPrompt(
       makeTask({ taskBoardContext: 'You are working task-1 under parent root.' }),

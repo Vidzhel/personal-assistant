@@ -1,12 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { initDatabase, getDb } from '../db/database.ts';
 import { SessionManager } from '../session-manager/session-manager.ts';
 import { createMessageStore } from '../session-manager/message-store.ts';
 import { createIdleDetector } from '../session-manager/idle-detector.ts';
-import { createSessionCompaction } from '../session-manager/session-compaction.ts';
 import { EventBus } from '../event-bus/event-bus.ts';
 import type { RavenEvent } from '@raven/shared';
 
@@ -343,74 +342,6 @@ describe('Session Auto-Compaction & Background Retrospective (10.10)', () => {
 
       // Knowledge store should NOT be called for rejected content
       expect(mockKnowledgeStore.insert).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('Session Compaction', () => {
-    it('compacts sessions exceeding threshold', async () => {
-      const messageStore = createMessageStore({ basePath: sessionPath });
-      const session = sm.createSession('proj-1');
-
-      // Add messages over threshold
-      const threshold = 5;
-      for (let i = 0; i < 15; i++) {
-        messageStore.appendMessage(session.id, {
-          role: i % 2 === 0 ? 'user' : 'assistant',
-          content: `Message ${i}`,
-        });
-      }
-
-      vi.mocked(runAgentTask).mockResolvedValue({
-        taskId: 'mock-task',
-        result: 'Summary of older messages discussing various topics.',
-        durationMs: 500,
-        success: true,
-      });
-
-      const events: RavenEvent[] = [];
-      const localBus = new EventBus();
-      localBus.on('session:compacted', (e) => events.push(e));
-
-      const compaction = createSessionCompaction({
-        messageStore,
-        eventBus: localBus,
-        config: { RAVEN_SESSION_COMPACTION_THRESHOLD: threshold } as any,
-      });
-
-      const compacted = await compaction.checkAndCompact(session.id);
-      expect(compacted).toBe(true);
-
-      // Verify event emitted
-      expect(events.length).toBe(1);
-      expect((events[0] as any).payload.sessionId).toBe(session.id);
-
-      // Verify transcript was rewritten with compaction block
-      const messages = messageStore.getMessages(session.id);
-      expect(messages[0].role).toBe('context');
-      expect(messages[0].content).toContain('[Compacted Context');
-
-      // Verify archive file exists
-      const sessionDir = join(sessionPath, session.id);
-      const files = readdirSync(sessionDir);
-      const archiveFiles = files.filter((f) => f.startsWith('transcript-archived-'));
-      expect(archiveFiles.length).toBeGreaterThanOrEqual(1);
-    });
-
-    it('skips compaction when below threshold', async () => {
-      const messageStore = createMessageStore({ basePath: sessionPath });
-      const session = sm.createSession('proj-1');
-
-      messageStore.appendMessage(session.id, { role: 'user', content: 'Hello' });
-      messageStore.appendMessage(session.id, { role: 'assistant', content: 'Hi' });
-
-      const compaction = createSessionCompaction({
-        messageStore,
-        eventBus,
-        config: { RAVEN_SESSION_COMPACTION_THRESHOLD: 40 } as any,
-      });
-
-      const compacted = await compaction.checkAndCompact(session.id);
-      expect(compacted).toBe(false);
     });
   });
 

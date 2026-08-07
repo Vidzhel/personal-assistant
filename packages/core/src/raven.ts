@@ -60,7 +60,6 @@ import { syncProjectNodes } from './knowledge-engine/project-knowledge.ts';
 import { getMetaProject } from './project-manager/meta-project.ts';
 import { createIdleDetector } from './session-manager/idle-detector.ts';
 import { createSessionRetrospective } from './session-manager/session-retrospective.ts';
-import { createSessionCompaction } from './session-manager/session-compaction.ts';
 import { createKnowledgeConsolidation } from './knowledge-engine/knowledge-consolidation.ts';
 import type { KnowledgeConsolidation } from './knowledge-engine/knowledge-consolidation.ts';
 import { TaskExecutionEngine } from './task-execution/task-execution-engine.ts';
@@ -591,12 +590,6 @@ export async function createRaven(
         })
       : undefined;
 
-  const sessionCompaction = createSessionCompaction({
-    messageStore,
-    eventBus,
-    config,
-  });
-
   // Unified schedule engine (job-kind schedules; template/agent kinds land in Plan 1b)
   registerCoreJobs(jobRegistry, { taskStore, retrospective, knowledgeConsolidation });
   const schedulePrefs = createSchedulePrefs(getDb());
@@ -630,7 +623,6 @@ export async function createRaven(
     suiteRegistry,
     sessionManager,
     messageStore,
-    sessionCompaction,
     sessionRetrospective,
     namedAgentStore,
     agentResolver,

@@ -10,7 +10,6 @@ import {
   getReferencesTo,
   getAllReferences,
   deleteReference,
-  buildSessionReferencesContext,
 } from '../session-manager/session-references.ts';
 
 describe('Session Management (10.8)', () => {
@@ -166,34 +165,6 @@ describe('Session Management (10.8)', () => {
 
     it('returns false when deleting non-existent reference', () => {
       expect(deleteReference('non-existent-id')).toBe(false);
-    });
-  });
-
-  describe('buildSessionReferencesContext', () => {
-    it('returns undefined when no references exist', () => {
-      const session = sm.createSession('proj-1');
-      expect(buildSessionReferencesContext(session.id)).toBeUndefined();
-    });
-
-    it('returns formatted markdown with referenced session info', () => {
-      const db = getDb();
-      const now = Date.now();
-
-      // Create source and target sessions directly
-      db.prepare(
-        'INSERT INTO sessions (id, project_id, status, created_at, last_active_at, turn_count, pinned, name, summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      ).run('ctx-src', 'proj-1', 'idle', now, now, 0, 0, 'Source', null);
-      db.prepare(
-        'INSERT INTO sessions (id, project_id, status, created_at, last_active_at, turn_count, pinned, name, summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      ).run('ctx-tgt', 'proj-1', 'idle', now, now, 0, 0, 'Target Session', 'Key findings about X');
-
-      createReference('ctx-src', 'ctx-tgt', 'Discussed X');
-
-      const result = buildSessionReferencesContext('ctx-src');
-      expect(result).toBeDefined();
-      expect(result).toContain('Target Session');
-      expect(result).toContain('Key findings about X');
-      expect(result).toContain('Discussed X');
     });
   });
 });

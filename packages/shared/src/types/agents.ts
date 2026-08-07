@@ -96,14 +96,6 @@ export interface SessionRetrospectiveResult {
   bubblesDrafted: number;
 }
 
-export interface CompactionBlock {
-  id: string;
-  sessionId: string;
-  summarizedMessageIds: string[];
-  summary: string;
-  createdAt: number;
-}
-
 export interface AgentTask {
   id: string;
   sessionId?: string;
@@ -116,9 +108,6 @@ export interface AgentTask {
   mcpServers: Record<string, McpServerConfig>;
   agentDefinitions: Record<string, SubAgentDefinition>;
   knowledgeContext?: string;
-  sessionReferencesContext?: string;
-  projectDataSourcesContext?: string;
-  skillCatalogContext?: string;
   projectContextChain?: string;
   taskBoardContext?: string;
   /** Named agent's persona instructions, rendered into the system prompt by

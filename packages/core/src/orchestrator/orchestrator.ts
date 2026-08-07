@@ -16,9 +16,7 @@ import type { EventBus } from '../event-bus/event-bus.ts';
 import type { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 import type { SessionManager } from '../session-manager/session-manager.ts';
 import type { MessageStore } from '../session-manager/message-store.ts';
-import type { SessionCompaction } from '../session-manager/session-compaction.ts';
 import type { SessionRetrospective } from '../session-manager/session-retrospective.ts';
-import type { AgentTaskCompleteEvent } from '@raven/shared';
 import type { NamedAgentStore } from '../agent-registry/yaml-named-agent-store.ts';
 import type { AgentResolver } from '../agent-registry/agent-resolver.ts';
 import type { CapabilityLibrary } from '../capability-library/capability-library.ts';
@@ -27,8 +25,6 @@ import { createKnowledgeAgentDefinition } from '../knowledge-engine/knowledge-ag
 import { getDb } from '../db/database.ts';
 import { resolveSystemAccessInstructions } from '../project-manager/system-access-gate.ts';
 import { createAuditLog } from '../permission-engine/audit-log.ts';
-import { buildSessionReferencesContext } from '../session-manager/session-references.ts';
-import { buildProjectDataSourcesContext } from '../project-manager/project-data-sources.ts';
 
 const log = createLogger('orchestrator');
 
@@ -39,7 +35,6 @@ export interface OrchestratorDeps {
   suiteRegistry: SuiteRegistry;
   sessionManager: SessionManager;
   messageStore: MessageStore;
-  sessionCompaction?: SessionCompaction;
   sessionRetrospective?: SessionRetrospective;
   namedAgentStore?: NamedAgentStore;
   agentResolver?: AgentResolver;
@@ -59,7 +54,6 @@ export class Orchestrator {
   private suiteRegistry: SuiteRegistry;
   private sessionManager: SessionManager;
   private messageStore: MessageStore;
-  private sessionCompaction?: SessionCompaction;
   private sessionRetrospective?: SessionRetrospective;
   private namedAgentStore?: NamedAgentStore;
   private agentResolver?: AgentResolver;
@@ -72,7 +66,6 @@ export class Orchestrator {
     this.suiteRegistry = deps.suiteRegistry;
     this.sessionManager = deps.sessionManager;
     this.messageStore = deps.messageStore;
-    this.sessionCompaction = deps.sessionCompaction;
     this.sessionRetrospective = deps.sessionRetrospective;
     this.namedAgentStore = deps.namedAgentStore;
     this.agentResolver = deps.agentResolver;
@@ -84,11 +77,6 @@ export class Orchestrator {
     });
     this.eventBus.on<UserChatMessageEvent>('user:chat:message', (e) => {
       this.handleUserChat(e).catch((err: unknown) => log.error(`handleUserChat failed: ${err}`));
-    });
-    this.eventBus.on<AgentTaskCompleteEvent>('agent:task:complete', (e) => {
-      this.handleTaskCompleteCompaction(e).catch((err: unknown) =>
-        log.error(`handleTaskCompleteCompaction failed: ${err}`),
-      );
     });
 
     log.info('Orchestrator initialized');
@@ -193,22 +181,6 @@ export class Orchestrator {
       this.sessionManager.autoGenerateName(session.id, message);
     }
 
-    // Session cross-references context for agent prompt
-    let sessionReferencesContext: string | undefined;
-    try {
-      sessionReferencesContext = buildSessionReferencesContext(session.id);
-    } catch (err) {
-      log.warn(`Session references context retrieval failed: ${err}`);
-    }
-
-    // Project data sources context for agent prompt
-    let projectDataSourcesContext: string | undefined;
-    try {
-      projectDataSourcesContext = buildProjectDataSourcesContext(projectId);
-    } catch (err) {
-      log.warn(`Project data sources context retrieval failed: ${err}`);
-    }
-
     // Resolve capabilities from named agent (if configured) or fall back to all suites
     let agentDefinitions: Record<string, SubAgentDefinition>;
     let mcpServers: Record<string, McpServerConfig>;
@@ -252,20 +224,6 @@ export class Orchestrator {
         }
       } catch (err) {
         log.debug(`Bash access resolution skipped: ${err}`);
-      }
-    }
-
-    // Inject skill catalog from capability library (v2) into agent context
-    let skillCatalogContext: string | undefined;
-    if (this.capabilityLibrary) {
-      try {
-        const skillNames = Object.keys(agentDefinitions);
-        const catalog = this.capabilityLibrary.getSkillCatalog(skillNames);
-        if (catalog) {
-          skillCatalogContext = catalog;
-        }
-      } catch (err) {
-        log.warn(`Skill catalog generation failed: ${err}`);
       }
     }
 
@@ -358,9 +316,6 @@ export class Orchestrator {
         mcpServers, // Resolved from named agent or all suites
         agentDefinitions, // Sub-agents carry the MCPs + knowledge agent
         plugins,
-        sessionReferencesContext,
-        projectDataSourcesContext,
-        skillCatalogContext,
         projectContextChain,
         namedAgentInstructions,
         systemAccessInstructions,
@@ -371,15 +326,5 @@ export class Orchestrator {
         bashAccess,
       },
     });
-  }
-
-  private async handleTaskCompleteCompaction(event: AgentTaskCompleteEvent): Promise<void> {
-    if (!this.sessionCompaction || !event.payload.sessionId) return;
-
-    try {
-      await this.sessionCompaction.checkAndCompact(event.payload.sessionId);
-    } catch (err) {
-      log.warn(`Session compaction check failed for ${event.payload.sessionId}: ${err}`);
-    }
   }
 }
