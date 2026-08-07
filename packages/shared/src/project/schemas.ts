@@ -65,7 +65,7 @@ export const AgentYamlSchema = z.object({
 // --- Schedule YAML ---
 
 export const ScheduleRunSchema = z.object({
-  kind: z.enum(['template', 'job', 'agent']),
+  kind: z.enum(['template', 'job', 'agent', 'heartbeat']),
   ref: z.string().min(1),
 });
 

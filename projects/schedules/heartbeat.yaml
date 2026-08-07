@@ -1,0 +1,7 @@
+name: heartbeat
+cron: "0 * * * *"
+timezone: UTC
+enabled: false
+run:
+  kind: heartbeat
+  ref: heartbeat

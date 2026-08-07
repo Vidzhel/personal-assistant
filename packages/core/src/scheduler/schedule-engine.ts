@@ -95,12 +95,41 @@ export async function runScheduledTemplate(
   }
 }
 
+/** Ambient check-in dispatch — see services/system/heartbeat.ts. Returns a
+ * short summary (e.g. "HEARTBEAT_OK (swallowed)" or "notified owner") for
+ * the fire log; the handler itself owns the silence-contract decision of
+ * whether a notification actually went out. */
+export type FireHeartbeat = () => Promise<{ summary: string }>;
+
+export interface RunHeartbeatDeps {
+  fireHeartbeat: FireHeartbeat;
+  scheduleFireLog?: ScheduleFireLog;
+}
+
+/** Fire a heartbeat-kind schedule. Unlike job/template, this never touches
+ * the task board — an ambient check-in is not owner-visible work, only its
+ * (rare) notification is. */
+export async function runScheduledHeartbeat(
+  def: ScheduleYaml,
+  deps: RunHeartbeatDeps,
+): Promise<void> {
+  try {
+    const result = await deps.fireHeartbeat();
+    log.info(`Schedule "${def.name}" heartbeat: ${result.summary}`);
+    deps.scheduleFireLog?.record(def.name, 'completed', result.summary);
+  } catch (err) {
+    log.error(`Schedule "${def.name}" heartbeat failed: ${String(err)}`);
+    deps.scheduleFireLog?.record(def.name, 'failed', String(err));
+  }
+}
+
 export interface ScheduleEngineDeps {
   schedules: ScheduleYaml[];
   jobRegistry: JobRegistry;
   taskStore: TaskStoreLike;
   timezone: string;
   fireTemplate?: FireTemplate;
+  fireHeartbeat?: FireHeartbeat;
   schedulePrefs?: SchedulePrefs;
   scheduleFireLog?: ScheduleFireLog;
 }
@@ -109,7 +138,7 @@ export interface ScheduleInfo {
   name: string;
   cron: string;
   timezone: string;
-  kind: 'job' | 'template' | 'agent';
+  kind: 'job' | 'template' | 'agent' | 'heartbeat';
   ref: string;
   enabled: boolean;
   registered: boolean;
@@ -148,6 +177,7 @@ interface EngineState {
 function checkRegistered(def: ScheduleYaml, deps: ScheduleEngineDeps): boolean {
   if (def.run.kind === 'job') return deps.jobRegistry.has(def.run.ref);
   if (def.run.kind === 'template') return deps.fireTemplate !== undefined;
+  if (def.run.kind === 'heartbeat') return deps.fireHeartbeat !== undefined;
   return false;
 }
 
@@ -175,8 +205,19 @@ async function fireDef(def: ScheduleYaml, deps: ScheduleEngineDeps): Promise<voi
     );
     return;
   }
+  if (def.run.kind === 'heartbeat' && deps.fireHeartbeat) {
+    const fireHeartbeat = deps.fireHeartbeat;
+    await runScheduledHeartbeat(def, {
+      fireHeartbeat,
+      scheduleFireLog: deps.scheduleFireLog,
+    }).catch((err: unknown) =>
+      log.error(`runScheduledHeartbeat(${def.name}) failed: ${String(err)}`),
+    );
+    return;
+  }
 
-  // Neither branch matched: a template-kind schedule with no fireTemplate
+  // No branch matched: a template-kind schedule with no fireTemplate
+  // handler configured, a heartbeat-kind schedule with no fireHeartbeat
   // handler configured, or a run.kind (e.g. 'agent') nothing here handles
   // yet. Previously this fell through silently — runNow() has no
   // registration gate, so calling it on such a schedule did nothing and
@@ -185,7 +226,9 @@ async function fireDef(def: ScheduleYaml, deps: ScheduleEngineDeps): Promise<voi
   const reason =
     def.run.kind === 'template'
       ? `Schedule "${def.name}" is template-kind but no fireTemplate handler is configured`
-      : `Schedule "${def.name}" has unsupported run.kind "${def.run.kind}" — nothing fired`;
+      : def.run.kind === 'heartbeat'
+        ? `Schedule "${def.name}" is heartbeat-kind but no fireHeartbeat handler is configured`
+        : `Schedule "${def.name}" has unsupported run.kind "${def.run.kind}" — nothing fired`;
   log.error(reason);
   deps.scheduleFireLog?.record(def.name, 'blocked', reason);
 }

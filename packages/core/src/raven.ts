@@ -83,6 +83,7 @@ import type { SelfTestJobDeps } from './services/system/self-test.ts';
 import { createSchedulePrefs } from './scheduler/schedule-prefs.ts';
 import { createScheduleFireLog } from './scheduler/schedule-fire-log.ts';
 import { createIntentStore } from './intents/intent-store.ts';
+import { createHeartbeat } from './services/system/heartbeat.ts';
 
 const log = createLogger('raven');
 
@@ -677,12 +678,31 @@ export async function createRaven(
     selfTestDeps,
   });
   const schedulePrefs = createSchedulePrefs(getDb());
+
+  // Heartbeat (Phase 4 Task 3): ambient check-in, off by default (see
+  // projects/schedules/heartbeat.yaml). Reuses the same capability/session
+  // deps a real chat turn gets — see heartbeat.ts for why it dispatches via
+  // runAgentTask directly rather than through agent-manager's event queue.
+  const heartbeat = createHeartbeat({
+    db: getDb(),
+    eventBus,
+    sessionManager,
+    config,
+    namedAgentStore,
+    agentResolver,
+    capabilityLibrary,
+    ravenMcpDeps,
+    memoryStore,
+    permissionDeps: { permissionEngine, auditLog, pendingApprovals, capabilityLibrary },
+  });
+
   const scheduleEngine = createScheduleEngine({
     schedules: projectRegistry.getGlobal().schedules,
     jobRegistry,
     taskStore,
     timezone: config.RAVEN_TIMEZONE,
     fireTemplate: (ref, options) => templateScheduler.triggerTemplate(ref, options),
+    fireHeartbeat: heartbeat.fireHeartbeat,
     schedulePrefs,
     scheduleFireLog,
   });

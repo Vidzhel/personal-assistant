@@ -91,6 +91,12 @@ export interface RunOptions {
    * caller today (session-retrospective.ts, knowledge-consolidation.ts),
    * which keep using the global default unchanged. */
   model?: string;
+  /** Overrides `config.RAVEN_AGENT_MAX_TURNS` for this one dispatch — e.g.
+   * heartbeat.ts caps its ambient check-in turn low (8) since it's an
+   * unattended background dispatch, not an interactive chat turn where the
+   * owner's own patience is the real limiter. Omitted by every other
+   * caller, which keep using the global default unchanged. */
+  maxTurns?: number;
   /** Used to resume the SDK session for chat turns (task.sessionId set) and
    * to record the session id the backend returns. Execution/validation
    * tasks never carry task.sessionId (see orchestrator.ts vs
@@ -399,7 +405,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       systemPrompt,
       allowedTools,
       model: opts.model ?? config.CLAUDE_MODEL,
-      maxTurns: config.RAVEN_AGENT_MAX_TURNS,
+      maxTurns: opts.maxTurns ?? config.RAVEN_AGENT_MAX_TURNS,
       mcpServers: sdkMcpServers,
       agents: agentDefinitions,
       plugins: opts.plugins,

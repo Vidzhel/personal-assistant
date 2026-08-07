@@ -70,6 +70,14 @@ const envSchema = z.object({
     .enum(['true', 'false'])
     .default('true')
     .transform((v) => v === 'true'),
+
+  // Heartbeat (Phase 4 Task 3): ambient check-in schedule kind, off by
+  // default (see projects/schedules/heartbeat.yaml). "HH-HH" local hours,
+  // interpreted in RAVEN_TIMEZONE — e.g. "08-22" means active 08:00-21:59.
+  RAVEN_HEARTBEAT_ACTIVE_HOURS: z
+    .string()
+    .regex(/^\d{1,2}-\d{1,2}$/, 'Must be "HH-HH" (e.g. "08-22")')
+    .default('08-22'),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

@@ -31,4 +31,14 @@ describe('ScheduleYamlSchema', () => {
       ScheduleYamlSchema.parse({ name: 'x', cron: '0 0 * * *', run: { kind: 'nope', ref: 'y' } }),
     ).toThrow();
   });
+
+  it('accepts the heartbeat run kind (Phase 4 Task 3)', () => {
+    const s = ScheduleYamlSchema.parse({
+      name: 'heartbeat',
+      cron: '0 * * * *',
+      enabled: false,
+      run: { kind: 'heartbeat', ref: 'heartbeat' },
+    });
+    expect(s.run).toEqual({ kind: 'heartbeat', ref: 'heartbeat' });
+  });
 });
