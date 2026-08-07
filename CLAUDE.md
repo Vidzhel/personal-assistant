@@ -61,9 +61,11 @@ docker-compose up --build    # full stack
 
 ## Extending Raven
 
-Two ways to add capability today:
+**Primary path — ask Raven in chat.** "Learn to do X", "remind me when Y", "run Z every morning" are handled by the agent's own MCP tools (`create_skill`, `create_template`, `create_schedule`, `create_agent`, `create_intent` — `packages/core/src/mcp-server/tools/scaffold.ts` and `intents.ts`). Each writes the definition file, hot-reloads the affected registry, and git-commits it — live with no restart (`scaffolding/scaffold-and-activate.ts`). Tool-created skill actions are capped at the `yellow` permission tier; granting a `red` (destructive/irreversible) action requires editing the file by hand — deliberate friction.
 
-**1. Capability library skills (primary path).** Add `library/skills/<domain>/<sub>/<name>/config.json` + `skill.md`:
+The file-editing paths below still work and are the source of truth the chat tools write to; reach for them when you want precise control or are adding something structural.
+
+**1. Capability library skills.** Add `library/skills/<domain>/<sub>/<name>/config.json` + `skill.md`:
 - `config.json` — `name`, `description`, `mcps` (references into `library/mcps/*.json`), `vendorSkills`, `tools`, `model`, `maxTurns`, `actions` (each with a permission `defaultTier`)
 - `skill.md` — the prompt/instructions text for the skill
 - Loaded at boot by `CapabilityLibrary.load()` (`packages/core/src/capability-library/`) from the `library/` directory

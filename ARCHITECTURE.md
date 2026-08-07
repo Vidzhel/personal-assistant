@@ -237,13 +237,21 @@ Server → Client:
 
 ## Scheduler
 
-Uses `croner` for timezone-aware cron. Schedules stored in DB, configurable via API.
-Default: morning digest at 8am local time.
+Uses `croner` for timezone-aware cron. Schedules are YAML files under `projects/schedules/*.yaml` (filesystem is source of truth; the DB holds only per-schedule enable/disable overrides). `ScheduleEngine` (`scheduler/schedule-engine.ts`) supports three kinds:
+- `job` — a named handler from the job registry (`core-jobs.ts`): task archival, memory consolidation, weekly system retrospective, nightly self-test.
+- `template` — instantiates a task template (`projects/templates/*.yaml`) into a task tree; used by the morning digest and the weekly canary.
+- `heartbeat` — an ambient check-in turn with a silence contract (`HEARTBEAT_OK` → swallowed), off by default.
+
+Every fire is recorded in `schedule_fires`; the nightly self-test reads it to detect schedules that stopped firing. `scheduleEngine.reload()` re-syncs the cron set after a schedule is scaffolded from chat, with no restart.
+
+**Intents (prospective memory).** `intents/intent-matcher.ts` is a service that turns owner requests like "remind me when X arrives" into deterministic rows (`intents` table, migration 033): keyword/event-type matches with a fire budget, cooldown, and expiry — no LLM inference at match time. Created via the `create_intent` MCP tool, listed/cancelled from the Schedules page.
+
+**Self-verification.** A nightly self-test job (`services/system/self-test.ts`) checks deterministic invariants — no task tree stuck >24h, no failed trees in 24h, services loaded == env-eligible, every schedule's last fire terminal, agent-task error rate under threshold, no stale approvals, DB integrity — and batches any violations into one Telegram alert plus `/api/health`. A weekly canary fires a minimal template and the next self-test confirms it completed.
 
 ## Docker Deployment
 
 Three containers (`docker-compose.yml`):
-- `raven-core` (port 4001) - orchestrator, agents, capability library, suites, scheduler
+- `raven-core` (port 4001) - orchestrator, agents, capability library, background services, scheduler
 - `raven-web` (port 4000) - Next.js dashboard
 - `neo4j` (ports 7474/7687) - backs the knowledge engine
 
