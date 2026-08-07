@@ -33,8 +33,6 @@ import { tmpdir } from 'node:os';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { AgentManager } from '../agent-manager/agent-manager.ts';
 import { EventBus } from '../event-bus/event-bus.ts';
-import { SuiteRegistry } from '../suite-registry/suite-registry.ts';
-import { McpManager } from '../mcp-manager/mcp-manager.ts';
 import { createMessageStore, type MessageStore } from '../session-manager/message-store.ts';
 import { SessionManager } from '../session-manager/session-manager.ts';
 import { initDatabase, getDb } from '../db/database.ts';
@@ -49,15 +47,11 @@ const mockQuery = vi.mocked(query);
 
 describe('AgentManager', () => {
   let eventBus: EventBus;
-  let suiteRegistry: SuiteRegistry;
-  let mcpManager: McpManager;
   let agentManager: AgentManager;
 
   beforeEach(() => {
     eventBus = new EventBus();
-    suiteRegistry = new SuiteRegistry();
-    mcpManager = new McpManager(suiteRegistry);
-    agentManager = new AgentManager({ eventBus, mcpManager, suiteRegistry });
+    agentManager = new AgentManager({ eventBus });
     mockQuery.mockReset();
   });
 
@@ -205,7 +199,7 @@ describe('AgentManager', () => {
     beforeEach(() => {
       tmpDir = mkdtempSync(join(tmpdir(), 'raven-am-'));
       messageStore = createMessageStore({ basePath: tmpDir });
-      _amWithStore = new AgentManager({ eventBus, mcpManager, suiteRegistry, messageStore });
+      _amWithStore = new AgentManager({ eventBus, messageStore });
     });
 
     afterEach(() => {
@@ -279,8 +273,6 @@ describe('AgentManager', () => {
       sessionManager = new SessionManager();
       _amWithSession = new AgentManager({
         eventBus: localEventBus,
-        mcpManager,
-        suiteRegistry,
         sessionManager,
       });
     });
@@ -595,8 +587,6 @@ describe('AgentManager', () => {
 
       amWithPermissions = new AgentManager({
         eventBus: localEventBus,
-        mcpManager,
-        suiteRegistry,
         permissionEngine: makeFakePermissionEngine({ 'gmail:send-email': 'red' }),
         auditLog,
         pendingApprovals,

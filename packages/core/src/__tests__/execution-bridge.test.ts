@@ -43,8 +43,6 @@ import { EventBus } from '../event-bus/event-bus.ts';
 import { createExecutionBridge } from '../task-execution/execution-bridge.ts';
 import { TaskExecutionEngine } from '../task-execution/task-execution-engine.ts';
 import { AgentManager } from '../agent-manager/agent-manager.ts';
-import { SuiteRegistry } from '../suite-registry/suite-registry.ts';
-import { McpManager } from '../mcp-manager/mcp-manager.ts';
 import { initDatabase, getDb } from '../db/database.ts';
 
 const mockQuery = vi.mocked(query);
@@ -688,8 +686,6 @@ describe('execution flow integration (real engine + real event bus)', () => {
 
   it('(5) AgentManager.cancelTask on a queued task emits agent:task:complete with success:false (S8a)', async () => {
     const eventBus = new EventBus();
-    const suiteRegistry = new SuiteRegistry();
-    const mcpManager = new McpManager(suiteRegistry);
 
     // Gate the SDK query so the first dispatched task never resolves,
     // forcing the second (maxConcurrent=1) to sit in the queue.
@@ -700,7 +696,7 @@ describe('execution flow integration (real engine + real event bus)', () => {
       });
     } as unknown as typeof query);
 
-    const agentManager = new AgentManager({ eventBus, mcpManager, suiteRegistry });
+    const agentManager = new AgentManager({ eventBus });
 
     const completions: RavenEvent[] = [];
     eventBus.on('agent:task:complete', (e) => completions.push(e));

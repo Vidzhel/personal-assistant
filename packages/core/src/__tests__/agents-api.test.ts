@@ -35,16 +35,6 @@ function makeMockAgentManager() {
   } as any;
 }
 
-function makeMockSuiteRegistry() {
-  return {
-    getSuite: vi.fn(() => null),
-    getAllSuites: vi.fn(() => []),
-    getEnabledSuiteNames: vi.fn(() => []),
-    collectMcpServers: vi.fn(() => ({})),
-    collectAgentDefinitions: vi.fn(() => ({})),
-  } as any;
-}
-
 describe('Agents API', () => {
   let projectsDir: string;
   let app: FastifyInstance;
@@ -69,7 +59,6 @@ describe('Agents API', () => {
     registerAgentRoutes(app, {
       namedAgentStore: store,
       agentManager: makeMockAgentManager(),
-      suiteRegistry: makeMockSuiteRegistry(),
     });
     await app.ready();
   });
@@ -97,7 +86,7 @@ describe('Agents API', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/agents',
-        payload: { name: 'api-test', description: 'API test agent', suiteIds: [] },
+        payload: { name: 'api-test', description: 'API test agent' },
       });
       expect(res.statusCode).toBe(201);
       const body = JSON.parse(res.payload);
@@ -110,7 +99,7 @@ describe('Agents API', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/agents',
-        payload: { name: 'raven', suiteIds: [] },
+        payload: { name: 'raven' },
       });
       expect(res.statusCode).toBe(400);
       expect(JSON.parse(res.payload).error).toContain('already exists');
@@ -120,7 +109,7 @@ describe('Agents API', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/agents',
-        payload: { name: 'Invalid Name', suiteIds: [] },
+        payload: { name: 'Invalid Name' },
       });
       expect(res.statusCode).toBe(400);
     });
@@ -129,7 +118,7 @@ describe('Agents API', () => {
       const res = await app.inject({
         method: 'POST',
         url: '/api/agents',
-        payload: { suiteIds: [] },
+        payload: {},
       });
       expect(res.statusCode).toBe(400);
     });
@@ -137,7 +126,7 @@ describe('Agents API', () => {
 
   describe('GET /api/agents/:id', () => {
     it('returns agent by id (= name)', async () => {
-      const created = await store.createAgent({ name: 'get-api-test', suiteIds: [], skills: [] });
+      const created = await store.createAgent({ name: 'get-api-test', skills: [] });
       const res = await app.inject({ method: 'GET', url: `/api/agents/${created.id}` });
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.payload);
@@ -152,7 +141,7 @@ describe('Agents API', () => {
 
   describe('PATCH /api/agents/:id', () => {
     it('updates agent fields', async () => {
-      const created = await store.createAgent({ name: 'patch-test', suiteIds: [], skills: [] });
+      const created = await store.createAgent({ name: 'patch-test', skills: [] });
       const res = await app.inject({
         method: 'PATCH',
         url: `/api/agents/${created.id}`,
@@ -177,7 +166,6 @@ describe('Agents API', () => {
     it('deletes a non-default agent', async () => {
       const created = await store.createAgent({
         name: 'delete-api-test',
-        suiteIds: [],
         skills: [],
       });
       const res = await app.inject({ method: 'DELETE', url: `/api/agents/${created.id}` });
@@ -196,7 +184,6 @@ describe('Agents API', () => {
     it('returns empty array when no task store', async () => {
       const created = await store.createAgent({
         name: 'tasks-api-test',
-        suiteIds: [],
         skills: [],
       });
       const res = await app.inject({

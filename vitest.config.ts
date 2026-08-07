@@ -5,7 +5,6 @@ const projects = [
   'packages/core/vitest.config.ts',
   'packages/mcp-ticktick/vitest.config.ts',
   'packages/web/vitest.config.ts',
-  'suites/vitest.config.ts',
 ];
 
 // The knowledge-neo4j project spins up a real Neo4j container via

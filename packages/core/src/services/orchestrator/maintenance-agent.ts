@@ -2,7 +2,6 @@ import { createLogger } from '@raven/shared';
 import type { LogAnalysisResult } from './log-analyzer.ts';
 import type { DependencyReport } from './dependency-checker.ts';
 import type { ResourceReport } from './resource-monitor.ts';
-import type { SuiteUpdateReport } from './suite-update-checker.ts';
 import type { ConventionAuditReport } from './convention-auditor.ts';
 
 const log = createLogger('maintenance-agent');
@@ -14,7 +13,6 @@ export interface MaintenanceData {
   logAnalysis: LogAnalysisResult;
   dependencyReport: DependencyReport;
   resourceReport: ResourceReport;
-  suiteUpdateReport: SuiteUpdateReport;
   conventionAuditReport?: ConventionAuditReport;
   runDate: string;
 }
@@ -27,7 +25,6 @@ export function buildMaintenancePrompt(data: MaintenanceData): string {
     buildLogSection(data.logAnalysis),
     buildDependencySection(data.dependencyReport),
     buildResourceSection(data.resourceReport),
-    buildSuiteSection(data.suiteUpdateReport),
     buildConventionSection(data.conventionAuditReport),
     buildOutputInstructions(),
   ];
@@ -40,7 +37,7 @@ function buildRoleSection(): string {
 
 You MUST use web search to:
 1. Look up fixes for any recurring errors you find — search Stack Overflow, GitHub issues, and relevant documentation
-2. Search GitHub for MCP servers and integration tools that could extend Raven's capabilities based on installed suites
+2. Search GitHub for MCP servers and integration tools that could extend Raven's capabilities based on installed library skills
 3. Find migration guides and changelog highlights for any outdated packages before recommending upgrades
 4. Search for community reports of breaking changes for major version updates
 
@@ -136,29 +133,6 @@ function buildResourceSection(report: ResourceReport): string {
   return lines.join('\n');
 }
 
-function buildSuiteSection(report: SuiteUpdateReport): string {
-  const lines: string[] = ['## Suite Ecosystem'];
-
-  if (report.suitesWithUpdates.length > 0) {
-    lines.push('### Suites with UPDATE.md');
-    for (const suite of report.suitesWithUpdates) {
-      lines.push(`- **${suite.name}**: ${suite.checkInstructions}`);
-    }
-  }
-
-  if (report.suitesWithoutUpdates.length > 0) {
-    lines.push('### Suites Missing UPDATE.md');
-    for (const name of report.suitesWithoutUpdates) {
-      lines.push(`- ${name}`);
-    }
-  }
-
-  lines.push(`\nInstalled suites: ${report.installedSuites.join(', ')}`);
-  lines.push('\nSearch GitHub for MCP servers and tools that complement the installed suites.');
-
-  return lines.join('\n');
-}
-
 function buildConventionSection(report?: ConventionAuditReport): string {
   const lines: string[] = ['## Convention Compliance'];
 
@@ -227,7 +201,7 @@ For each outdated package:
 
 If all up to date: "All packages are current."
 
-## 💡 Suite Suggestions
+## 💡 Capability Suggestions
 - New MCP servers or tools found on GitHub that could extend capabilities
 - Suggestions based on detected usage patterns
 - Links to repositories

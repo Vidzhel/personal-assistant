@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Orchestrator } from '../orchestrator/orchestrator.ts';
 import { EventBus } from '../event-bus/event-bus.ts';
-import { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 import { SessionManager } from '../session-manager/session-manager.ts';
 import { createMessageStore } from '../session-manager/message-store.ts';
 import { initDatabase, getDb } from '../db/database.ts';
@@ -10,49 +9,12 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { RavenEvent, McpServerConfig } from '@raven/shared';
 
-function makeSuiteRegistry(
-  suites: Array<{
-    name: string;
-    mcpServers?: Record<string, McpServerConfig>;
-    agents?: Array<{ name: string; description: string; prompt: string; tools: string[] }>;
-    schedules?: Array<{
-      id: string;
-      name: string;
-      cron: string;
-      taskType: string;
-      enabled: boolean;
-    }>;
-  }> = [],
-): SuiteRegistry {
-  const registry = new SuiteRegistry();
-  // Manually populate the internal map for testing
-  for (const suite of suites) {
-    (registry as any).suites.set(suite.name, {
-      manifest: {
-        name: suite.name,
-        displayName: suite.name,
-        version: '1.0.0',
-        description: `${suite.name} suite`,
-        capabilities: [],
-        requiresEnv: [],
-        services: [],
-      },
-      agents: (suite.agents ?? []).map((a) => ({
-        name: a.name,
-        description: a.description,
-        model: 'sonnet',
-        tools: a.tools,
-        maxTurns: 10,
-        prompt: a.prompt,
-      })),
-      mcpServers: suite.mcpServers ?? {},
-      actions: [],
-      schedules: suite.schedules ?? [],
-      vendorPlugins: [],
-      suiteDir: '/tmp/test',
-    });
-  }
-  return registry;
+function makeMockCapabilityLibrary(mcpServers: Record<string, McpServerConfig> = {}): any {
+  return {
+    collectMcpServers: (): Record<string, McpServerConfig> => mcpServers,
+    collectAgentDefinitions: (): Record<string, unknown> => ({}),
+    resolveVendorPlugins: (): unknown[] => [],
+  };
 }
 
 describe('Orchestrator', () => {
@@ -77,10 +39,8 @@ describe('Orchestrator', () => {
   });
 
   it('user:chat:message emits agent:task:request with empty mcpServers', async () => {
-    const suiteRegistry = makeSuiteRegistry();
     _orchestrator = new Orchestrator({
       eventBus,
-      suiteRegistry,
       sessionManager: new SessionManager(),
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
       port: 4000,
@@ -117,19 +77,14 @@ describe('Orchestrator', () => {
     expect(payload.priority).toBe('high');
   });
 
-  it('email:new emits agent:task:request with email MCPs', async () => {
-    const suiteRegistry = makeSuiteRegistry([
-      {
-        name: 'email',
-        mcpServers: {
-          email_gmail: { command: 'node', args: ['gmail-mcp.js'] },
-        },
-      },
-    ]);
+  it('email:new emits agent:task:request with the gmail library skill MCPs', async () => {
+    const capabilityLibrary = makeMockCapabilityLibrary({
+      gmail: { command: 'node', args: ['gmail-mcp.js'] },
+    });
 
     _orchestrator = new Orchestrator({
       eventBus,
-      suiteRegistry,
+      capabilityLibrary,
       sessionManager: new SessionManager(),
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
       port: 4000,
@@ -155,15 +110,13 @@ describe('Orchestrator', () => {
 
     const event = await taskRequestPromise;
     const payload = (event as unknown as { payload: Record<string, unknown> }).payload;
-    expect(payload.skillName).toBe('email');
-    expect(payload.mcpServers).toHaveProperty('email_gmail');
+    expect(payload.skillName).toBe('gmail');
+    expect(payload.mcpServers).toHaveProperty('gmail');
   });
 
   it('meta-project chat resolves read-write system access', async () => {
-    const suiteRegistry = makeSuiteRegistry();
     _orchestrator = new Orchestrator({
       eventBus,
-      suiteRegistry,
       sessionManager: new SessionManager(),
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
       port: 4000,

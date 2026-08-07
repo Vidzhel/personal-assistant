@@ -478,49 +478,14 @@ function reloadIntegrationsConfig(): void {
   logger.info('Integrations config reloaded');
 }
 
-function reloadSuitesConfig(): void {
-  const suitesPath = resolve(projectRoot, 'config', 'suites.json');
-  if (!existsSync(suitesPath)) return;
-  const raw = JSON.parse(readFileSync(suitesPath, 'utf-8')) as Record<
-    string,
-    { config?: Record<string, unknown> }
-  >;
-  const ftConfig = raw['financial-tracking']?.config;
-  if (!ftConfig) return;
-
-  if (typeof ftConfig.syncIntervalMs === 'number') {
-    syncIntervalMs = ftConfig.syncIntervalMs;
-    if (bankPollTimer) {
-      clearInterval(bankPollTimer);
-      bankPollTimer = setInterval(() => {
-        void bankPoll();
-      }, syncIntervalMs);
-    }
-  }
-  if (typeof ftConfig.categorySyncIntervalMs === 'number') {
-    categorySyncIntervalMs = ftConfig.categorySyncIntervalMs;
-    if (categorySyncTimer) {
-      clearInterval(categorySyncTimer);
-      categorySyncTimer = setInterval(() => {
-        void categorySync();
-      }, categorySyncIntervalMs);
-    }
-  }
-  logger.info('Financial tracking config reloaded from suites.json');
-}
-
 function buildConfigReloadedHandler(): (event: unknown) => void {
   return (event: unknown) => {
     const e = event as { payload?: { configType?: string } };
     const configType = e.payload?.configType;
-    if (configType !== 'suites' && configType !== 'integrations') return;
+    if (configType !== 'integrations') return;
 
     try {
-      if (configType === 'integrations') {
-        reloadIntegrationsConfig();
-      } else {
-        reloadSuitesConfig();
-      }
+      reloadIntegrationsConfig();
     } catch (err) {
       logger.warn(`Failed to reload config: ${(err as Error).message}`);
     }

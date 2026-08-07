@@ -30,8 +30,6 @@
     "validate:library": "node --experimental-strip-types scripts/validate-library.ts",
     "validate:projects": "node --experimental-strip-types scripts/validate-projects.ts",
     "test:ticktick": "node --experimental-strip-types scripts/test-ticktick-manual.ts",
-    "test:suite": "node --experimental-strip-types scripts/test-suite.ts",
-    "test:suite:list": "node --experimental-strip-types scripts/test-suite.ts --list",
     "update:gws": "bash scripts/update-gws-skills.sh"
   },
   "engines": {

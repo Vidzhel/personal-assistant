@@ -60,7 +60,6 @@ describe('YamlNamedAgentStore', () => {
     expect(agents[0].id).toBe('raven');
     expect(agents[0].name).toBe('raven');
     expect(agents[0].isDefault).toBe(true);
-    expect(agents[0].suiteIds).toEqual([]);
   });
 
   it('returns the default agent', () => {
@@ -71,7 +70,6 @@ describe('YamlNamedAgentStore', () => {
     const agent = await store.createAgent({
       name: 'researcher',
       description: 'Research things',
-      suiteIds: [],
       skills: ['web-search'],
     });
 
@@ -87,13 +85,13 @@ describe('YamlNamedAgentStore', () => {
   });
 
   it('rejects duplicate names', async () => {
-    await expect(store.createAgent({ name: 'raven', suiteIds: [], skills: [] })).rejects.toThrow(
+    await expect(store.createAgent({ name: 'raven', skills: [] })).rejects.toThrow(
       /already exists/,
     );
   });
 
   it('updates fields and persists to YAML', async () => {
-    await store.createAgent({ name: 'temp-agent', suiteIds: [], skills: [] });
+    await store.createAgent({ name: 'temp-agent', skills: [] });
     const updated = await store.updateAgent('temp-agent', {
       description: 'New desc',
       model: 'haiku',
@@ -106,7 +104,7 @@ describe('YamlNamedAgentStore', () => {
   });
 
   it('renames an agent (new file created, old removed, id follows name)', async () => {
-    await store.createAgent({ name: 'old-name', suiteIds: [], skills: [] });
+    await store.createAgent({ name: 'old-name', skills: [] });
     const renamed = await store.updateAgent('old-name', { name: 'new-name' });
     expect(renamed.id).toBe('new-name');
     expect(store.getAgent('old-name')).toBeUndefined();
@@ -121,7 +119,7 @@ describe('YamlNamedAgentStore', () => {
   });
 
   it('deletes a non-default agent and emits deleted event', async () => {
-    await store.createAgent({ name: 'doomed', suiteIds: [], skills: [] });
+    await store.createAgent({ name: 'doomed', skills: [] });
     await store.deleteAgent('doomed');
     expect(store.getAgent('doomed')).toBeUndefined();
     expect(eventBus.events.some((e) => e.type === 'agent:config:deleted')).toBe(true);

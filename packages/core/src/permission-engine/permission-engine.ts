@@ -10,14 +10,13 @@ import {
   type SkillAction,
 } from '@raven/shared';
 import type { EventBus } from '../event-bus/event-bus.ts';
-import type { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 import type { CapabilityLibrary } from '../capability-library/capability-library.ts';
 
 const log = createLogger('permission-engine');
 const CONFIG_FILENAME = 'permissions.json';
 const FILE_CHANGE_DEBOUNCE_MS = 100;
 
-export type ActionSource = 'library' | 'suite';
+export type ActionSource = 'library';
 
 export interface ActionCatalogEntry {
   name: string;
@@ -34,14 +33,13 @@ export interface PermissionEngine {
 }
 
 interface PermissionEngineDeps {
-  suiteRegistry: SuiteRegistry;
   capabilityLibrary: CapabilityLibrary;
   eventBus: EventBus;
 }
 
 // eslint-disable-next-line max-lines-per-function -- factory function that initializes permission engine with config loading and file watching
 export function createPermissionEngine(deps: PermissionEngineDeps): PermissionEngine {
-  const { suiteRegistry, capabilityLibrary, eventBus } = deps;
+  const { capabilityLibrary, eventBus } = deps;
   let currentConfig: PermissionConfig = {};
   let actionMap: Map<string, SkillAction> = new Map();
   let actionSourceMap: Map<string, ActionSource> = new Map();
@@ -88,33 +86,22 @@ export function createPermissionEngine(deps: PermissionEngineDeps): PermissionEn
     }
   }
 
-  // Merges the two action sources during the suites -> library migration
-  // (Phase 2 Task 3b deletes suiteRegistry as an action source entirely).
-  // Both sources describe the same shape (SkillAction / ActionDefinition are
-  // structurally identical — see @raven/shared's suites/define.ts). Where an
-  // action name is declared by both (16 byte-identical dupes exist today —
-  // suites/*/actions.json mirrors library/skills/*/config.json), the
-  // library's declaration wins: it is the surviving capability system going
-  // forward, so its tier is authoritative even before suiteRegistry is
-  // deleted.
+  // Loads the action catalog from the capability library — the sole action
+  // source now that suiteRegistry is gone.
   function refreshActionMap(): void {
     const merged = new Map<string, { action: SkillAction; source: ActionSource }>();
 
-    for (const action of suiteRegistry.collectActions()) {
-      merged.set(action.name, { action, source: 'suite' });
-    }
-
     // capabilityLibrary.collectActions() throws if the library failed to
-    // load (raven.ts's boot sequence tolerates that and continues with the
-    // suite registry only — see the try/catch around capabilityLibrary.load
-    // there) — mirror that tolerance here rather than crashing engine init.
+    // load (raven.ts's boot sequence tolerates that and continues without
+    // it — see the try/catch around capabilityLibrary.load there) — mirror
+    // that tolerance here rather than crashing engine init.
     try {
       for (const action of capabilityLibrary.collectActions()) {
         merged.set(action.name, { action, source: 'library' });
       }
     } catch (err) {
       log.warn(
-        `Capability library actions unavailable, using suite registry only: ${err instanceof Error ? err.message : String(err)}`,
+        `Capability library actions unavailable: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
 
@@ -179,7 +166,7 @@ export function createPermissionEngine(deps: PermissionEngineDeps): PermissionEn
         // resolveTier() is the single source of truth for "what tier does
         // this action actually resolve to right now".
         tier: currentConfig[name] ?? action.defaultTier,
-        source: actionSourceMap.get(name) ?? 'suite',
+        source: actionSourceMap.get(name) ?? 'library',
       }));
     },
 

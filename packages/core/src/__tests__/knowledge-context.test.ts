@@ -6,7 +6,6 @@ import type { MessageStore } from '../session-manager/message-store.ts';
 import { createKnowledgeAgentDefinition } from '../knowledge-engine/knowledge-agent.ts';
 import { Orchestrator } from '../orchestrator/orchestrator.ts';
 import { EventBus } from '../event-bus/event-bus.ts';
-import { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 import { SessionManager } from '../session-manager/session-manager.ts';
 import { createMessageStore } from '../session-manager/message-store.ts';
 import { initDatabase, getDb } from '../db/database.ts';
@@ -250,48 +249,12 @@ describe('createContextInjector', () => {
   });
 });
 
-function makeSuiteRegistry(
-  suites: Array<{
-    name: string;
-    mcpServers?: Record<string, McpServerConfig>;
-    agents?: Array<{ name: string; description: string; prompt: string; tools: string[] }>;
-    schedules?: Array<{
-      id: string;
-      name: string;
-      cron: string;
-      taskType: string;
-      enabled: boolean;
-    }>;
-  }> = [],
-): SuiteRegistry {
-  const registry = new SuiteRegistry();
-  for (const suite of suites) {
-    (registry as any).suites.set(suite.name, {
-      manifest: {
-        name: suite.name,
-        displayName: suite.name,
-        version: '1.0.0',
-        description: `${suite.name} suite`,
-        capabilities: [],
-        requiresEnv: [],
-        services: [],
-      },
-      agents: (suite.agents ?? []).map((a) => ({
-        name: a.name,
-        description: a.description,
-        model: 'sonnet',
-        tools: a.tools,
-        maxTurns: 10,
-        prompt: a.prompt,
-      })),
-      mcpServers: suite.mcpServers ?? {},
-      actions: [],
-      schedules: suite.schedules ?? [],
-      vendorPlugins: [],
-      suiteDir: '/tmp/test',
-    });
-  }
-  return registry;
+function makeMockCapabilityLibrary(mcpServers: Record<string, McpServerConfig> = {}): any {
+  return {
+    collectMcpServers: vi.fn(() => mcpServers),
+    collectAgentDefinitions: vi.fn(() => ({})),
+    resolveVendorPlugins: vi.fn(() => []),
+  };
 }
 
 describe('Orchestrator context injection integration', () => {
@@ -325,7 +288,6 @@ describe('Orchestrator context injection integration', () => {
 
     const _orchestrator = new Orchestrator({
       eventBus,
-      suiteRegistry: makeSuiteRegistry(),
       sessionManager: new SessionManager(),
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
       port: 4000,
@@ -359,7 +321,6 @@ describe('Orchestrator context injection integration', () => {
 
     const _orchestrator = new Orchestrator({
       eventBus,
-      suiteRegistry: makeSuiteRegistry(),
       sessionManager: new SessionManager(),
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
       port: 4000,
@@ -388,16 +349,13 @@ describe('Orchestrator context injection integration', () => {
   });
 
   it('email:new does not inject knowledgeContext (agents use MCP tools instead)', async () => {
-    const suiteRegistry = makeSuiteRegistry([
-      {
-        name: 'email',
-        mcpServers: { email_gmail: { command: 'node', args: ['gmail.js'] } },
-      },
-    ]);
+    const capabilityLibrary = makeMockCapabilityLibrary({
+      gmail: { command: 'node', args: ['gmail.js'] },
+    });
 
     const _orchestrator = new Orchestrator({
       eventBus,
-      suiteRegistry,
+      capabilityLibrary,
       sessionManager: new SessionManager(),
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
       port: 4000,

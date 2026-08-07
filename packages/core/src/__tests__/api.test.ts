@@ -2,7 +2,6 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import { EventBus } from '../event-bus/event-bus.ts';
-import { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 import { SessionManager } from '../session-manager/session-manager.ts';
 import type { ScheduleEngine } from '../scheduler/schedule-engine.ts';
 import { initDatabase, getDb } from '../db/database.ts';
@@ -36,7 +35,6 @@ describe('API routes', () => {
   let tmpDir: string;
   let app: ReturnType<typeof Fastify>;
   let eventBus: EventBus;
-  let suiteRegistry: SuiteRegistry;
   let scheduleEngine: ScheduleEngine;
 
   beforeAll(async () => {
@@ -44,7 +42,6 @@ describe('API routes', () => {
     initDatabase(join(tmpDir, 'test.db'));
 
     eventBus = new EventBus();
-    suiteRegistry = new SuiteRegistry();
     const sessionManager = new SessionManager();
     scheduleEngine = {
       list: () => [],
@@ -69,7 +66,6 @@ describe('API routes', () => {
 
     const deps = {
       eventBus,
-      suiteRegistry,
       sessionManager,
       scheduleEngine,
       agentManager: makeMockAgentManager() as any,
@@ -77,7 +73,6 @@ describe('API routes', () => {
       pendingApprovals,
       executionLogger,
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
-      configuredSuiteCount: 0,
       serviceRunner: { getRunningCount: () => 0 },
       configuredServiceCount: 0,
     } as any;
@@ -210,7 +205,7 @@ describe('API routes', () => {
   });
 
   describe('GET /api/skills', () => {
-    it('returns empty array when no suites registered', async () => {
+    it('returns empty array when no capability library is provided', async () => {
       const res = await app.inject({ method: 'GET', url: '/api/skills' });
       expect(res.statusCode).toBe(200);
       expect(JSON.parse(res.payload)).toEqual([]);
@@ -218,10 +213,9 @@ describe('API routes', () => {
   });
 
   describe('GET /api/suites', () => {
-    it('returns empty array when no suites registered', async () => {
+    it('returns 410 Gone — suites were retired in favor of /api/skills', async () => {
       const res = await app.inject({ method: 'GET', url: '/api/suites' });
-      expect(res.statusCode).toBe(200);
-      expect(JSON.parse(res.payload)).toEqual([]);
+      expect(res.statusCode).toBe(410);
     });
   });
 

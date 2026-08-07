@@ -61,7 +61,6 @@ function yamlToNamedAgent(loc: AgentLocation): NamedAgent {
     name: loc.yaml.name,
     description: loc.yaml.description === '' ? null : (loc.yaml.description ?? null),
     instructions: loc.yaml.instructions ?? null,
-    suiteIds: [], // deprecated — YAML agents have no suite bindings
     skills: loc.yaml.skills,
     model: loc.yaml.model ?? null,
     maxTurns: loc.yaml.maxTurns ?? null,
@@ -157,7 +156,6 @@ export function createYamlNamedAgentStore(deps: StoreDeps): NamedAgentStore {
       payload: {
         agentId: agent.id,
         name: agent.name,
-        suiteIds: agent.suiteIds,
         skills: agent.skills,
         filePath,
         ...extra,

@@ -1,8 +1,0 @@
-[
-  {
-    "name": "gemini:transcribe-voice",
-    "description": "Transcribe a voice message using Google Gemini",
-    "defaultTier": "green",
-    "reversible": false
-  }
-]

@@ -72,7 +72,6 @@ export function buildSystemTools(
         instructions: args.instructions,
         model: args.model,
         maxTurns: args.maxTurns,
-        suiteIds: [],
         skills: [],
       });
       return okResult({ agentId: agent.id });

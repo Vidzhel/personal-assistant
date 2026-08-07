@@ -1032,7 +1032,6 @@ export interface AgentConfigCreatedEvent extends BaseEvent {
   payload: {
     agentId: string;
     name: string;
-    suiteIds: string[];
   };
 }
 
@@ -1041,7 +1040,6 @@ export interface AgentConfigUpdatedEvent extends BaseEvent {
   payload: {
     agentId: string;
     name: string;
-    suiteIds: string[];
     changes: string[];
   };
 }
@@ -1151,7 +1149,7 @@ export const MaintenanceReportGeneratedPayloadSchema = z.object({
 });
 
 export type ConfigChangeAction = 'create' | 'update' | 'delete' | 'view';
-export type ConfigResourceType = 'suite' | 'agent' | 'schedule';
+export type ConfigResourceType = 'agent' | 'schedule';
 
 export interface ConfigVersionRevertedEvent extends BaseEvent {
   type: 'config:version:reverted';
@@ -1185,7 +1183,7 @@ export interface ConfigChangeProposedEvent extends BaseEvent {
 export const ConfigChangeProposedPayloadSchema = z.object({
   changeId: z.string(),
   action: z.enum(['create', 'update', 'delete', 'view']),
-  resourceType: z.enum(['suite', 'agent', 'schedule']),
+  resourceType: z.enum(['agent', 'schedule']),
   resourceName: z.string(),
   description: z.string(),
   sessionId: z.string().optional(),
@@ -1204,7 +1202,7 @@ export interface ConfigChangeAppliedEvent extends BaseEvent {
 export const ConfigChangeAppliedPayloadSchema = z.object({
   changeId: z.string(),
   action: z.enum(['create', 'update', 'delete', 'view']),
-  resourceType: z.enum(['suite', 'agent', 'schedule']),
+  resourceType: z.enum(['agent', 'schedule']),
   resourceName: z.string(),
 });
 
@@ -1221,7 +1219,7 @@ export interface ConfigChangeRejectedEvent extends BaseEvent {
 export const ConfigChangeRejectedPayloadSchema = z.object({
   changeId: z.string(),
   action: z.enum(['create', 'update', 'delete', 'view']),
-  resourceType: z.enum(['suite', 'agent', 'schedule']),
+  resourceType: z.enum(['agent', 'schedule']),
   resourceName: z.string(),
 });
 

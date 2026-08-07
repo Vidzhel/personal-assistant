@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createLogger } from '@raven/shared';
 
@@ -7,7 +7,7 @@ const log = createLogger('convention-auditor');
 const KEBAB_CASE_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 
 export interface ConventionViolation {
-  resourceType: 'suite' | 'agent' | 'schedule';
+  resourceType: 'agent' | 'schedule';
   resourceName: string;
   rule: string;
   severity: 'error' | 'warning';
@@ -25,17 +25,9 @@ export interface ConventionAuditReport {
 /**
  * Scans all resources against convention rules and returns a structured report.
  */
-export async function auditConventions(
-  suitesDir: string,
-  configDir: string,
-): Promise<ConventionAuditReport> {
+export async function auditConventions(configDir: string): Promise<ConventionAuditReport> {
   const violations: ConventionViolation[] = [];
   let totalChecked = 0;
-
-  // Audit suites
-  const suiteViolations = auditSuites(suitesDir);
-  violations.push(...suiteViolations.violations);
-  totalChecked += suiteViolations.checked;
 
   // Audit agents
   const agentViolations = auditAgents(configDir);
@@ -65,125 +57,6 @@ export async function auditConventions(
 interface AuditResult {
   violations: ConventionViolation[];
   checked: number;
-}
-
-function auditSuiteNamingAndManifest(suitePath: string, suiteName: string): ConventionViolation[] {
-  const violations: ConventionViolation[] = [];
-
-  // Check kebab-case naming (allow _ prefix for _orchestrator)
-  if (!suiteName.startsWith('_') && !KEBAB_CASE_RE.test(suiteName)) {
-    violations.push({
-      resourceType: 'suite',
-      resourceName: suiteName,
-      rule: 'kebab-case-name',
-      severity: 'error',
-      message: `Suite directory "${suiteName}" is not kebab-case`,
-      fix: `Rename directory to kebab-case format`,
-    });
-  }
-
-  // Check required files
-  if (!existsSync(join(suitePath, 'suite.ts'))) {
-    violations.push({
-      resourceType: 'suite',
-      resourceName: suiteName,
-      rule: 'has-suite-ts',
-      severity: 'error',
-      message: `Missing suite.ts with defineSuite()`,
-      fix: `Create suite.ts with defineSuite({ name: "${suiteName}", ... })`,
-    });
-  } else {
-    // Check that suite.ts uses defineSuite()
-    const content = readFileSync(join(suitePath, 'suite.ts'), 'utf-8');
-    if (!content.includes('defineSuite')) {
-      violations.push({
-        resourceType: 'suite',
-        resourceName: suiteName,
-        rule: 'uses-define-suite',
-        severity: 'error',
-        message: `suite.ts does not use defineSuite()`,
-        fix: `Export default using defineSuite({ ... })`,
-      });
-    }
-  }
-
-  return violations;
-}
-
-function auditSuiteRecommendedFiles(suitePath: string, suiteName: string): ConventionViolation[] {
-  const violations: ConventionViolation[] = [];
-
-  if (!existsSync(join(suitePath, 'mcp.json'))) {
-    violations.push({
-      resourceType: 'suite',
-      resourceName: suiteName,
-      rule: 'has-mcp-json',
-      severity: 'warning',
-      message: `Missing mcp.json (even empty suites should have { "mcpServers": {} })`,
-      fix: `Create mcp.json with { "mcpServers": {} }`,
-    });
-  }
-
-  if (!existsSync(join(suitePath, 'actions.json'))) {
-    violations.push({
-      resourceType: 'suite',
-      resourceName: suiteName,
-      rule: 'has-actions-json',
-      severity: 'warning',
-      message: `Missing actions.json`,
-      fix: `Create actions.json with action declarations`,
-    });
-  }
-
-  if (!existsSync(join(suitePath, 'agents'))) {
-    violations.push({
-      resourceType: 'suite',
-      resourceName: suiteName,
-      rule: 'has-agents-dir',
-      severity: 'warning',
-      message: `Missing agents/ directory`,
-      fix: `Create agents/ directory for agent definitions`,
-    });
-  }
-
-  if (!existsSync(join(suitePath, 'UPDATE.md'))) {
-    violations.push({
-      resourceType: 'suite',
-      resourceName: suiteName,
-      rule: 'has-update-md',
-      severity: 'warning',
-      message: `Missing UPDATE.md for dependency monitoring`,
-      fix: `Create UPDATE.md with dependency monitoring instructions`,
-    });
-  }
-
-  return violations;
-}
-
-function auditSingleSuite(suitePath: string, suiteName: string): ConventionViolation[] {
-  return [
-    ...auditSuiteNamingAndManifest(suitePath, suiteName),
-    ...auditSuiteRecommendedFiles(suitePath, suiteName),
-  ];
-}
-
-function auditSuites(suitesDir: string): AuditResult {
-  const violations: ConventionViolation[] = [];
-  let checked = 0;
-
-  if (!existsSync(suitesDir)) return { violations, checked };
-
-  const entries = readdirSync(suitesDir, { withFileTypes: true });
-  const suiteDirs = entries.filter((e) => e.isDirectory() && !e.name.startsWith('.'));
-
-  for (const dir of suiteDirs) {
-    checked++;
-    const suiteName = dir.name;
-    const suitePath = join(suitesDir, suiteName);
-    violations.push(...auditSingleSuite(suitePath, suiteName));
-  }
-
-  return { violations, checked };
 }
 
 interface AgentEntry {
@@ -348,7 +221,7 @@ function auditSingleSchedule(schedule: ScheduleEntry, seenIds: Set<string>): Con
       rule: 'has-skill-name',
       severity: 'warning',
       message: `Schedule missing skillName`,
-      fix: `Add skillName referencing a registered suite`,
+      fix: `Add skillName referencing a registered library skill`,
     });
   }
 

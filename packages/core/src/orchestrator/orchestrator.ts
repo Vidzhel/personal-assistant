@@ -1,7 +1,6 @@
 import {
   createLogger,
   generateId,
-  SUITE_EMAIL,
   SOURCE_ORCHESTRATOR,
   SKILL_ORCHESTRATOR,
   type McpServerConfig,
@@ -13,7 +12,6 @@ import {
   type BashAccess,
 } from '@raven/shared';
 import type { EventBus } from '../event-bus/event-bus.ts';
-import type { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 import type { SessionManager } from '../session-manager/session-manager.ts';
 import type { MessageStore } from '../session-manager/message-store.ts';
 import type { SessionRetrospective } from '../session-manager/session-retrospective.ts';
@@ -29,10 +27,12 @@ import { createAuditLog } from '../permission-engine/audit-log.ts';
 const log = createLogger('orchestrator');
 
 const LOG_MESSAGE_PREVIEW_LENGTH = 100;
+// Library skill name for Gmail (library/skills/communication/email/gmail/config.json) —
+// distinct from the retired suite name 'email'.
+const GMAIL_SKILL = 'gmail';
 
 export interface OrchestratorDeps {
   eventBus: EventBus;
-  suiteRegistry: SuiteRegistry;
   sessionManager: SessionManager;
   messageStore: MessageStore;
   sessionRetrospective?: SessionRetrospective;
@@ -51,7 +51,6 @@ export interface OrchestratorDeps {
  */
 export class Orchestrator {
   private eventBus: EventBus;
-  private suiteRegistry: SuiteRegistry;
   private sessionManager: SessionManager;
   private messageStore: MessageStore;
   private sessionRetrospective?: SessionRetrospective;
@@ -63,7 +62,6 @@ export class Orchestrator {
 
   constructor(deps: OrchestratorDeps) {
     this.eventBus = deps.eventBus;
-    this.suiteRegistry = deps.suiteRegistry;
     this.sessionManager = deps.sessionManager;
     this.messageStore = deps.messageStore;
     this.sessionRetrospective = deps.sessionRetrospective;
@@ -86,14 +84,14 @@ export class Orchestrator {
     const { from, subject, snippet } = event.payload;
     log.info(`New email from ${from}: ${subject}`);
 
-    const emailSuite = this.suiteRegistry.getSuite(SUITE_EMAIL);
-    if (!emailSuite) {
-      log.warn('Email suite not available, ignoring email event');
+    if (!this.capabilityLibrary) {
+      log.warn('Capability library not available, ignoring email event');
       return;
     }
 
-    const mcpServers = emailSuite.mcpServers;
-    const plugins = emailSuite.vendorPlugins;
+    // Library skill name for Gmail — see library/skills/communication/email/gmail
+    const mcpServers = this.capabilityLibrary.collectMcpServers([GMAIL_SKILL]);
+    const plugins = this.capabilityLibrary.resolveVendorPlugins([GMAIL_SKILL]);
     const taskId = generateId();
 
     this.eventBus.emit({
@@ -113,13 +111,29 @@ export class Orchestrator {
           `Use the Gmail tools to read the full email if needed.`,
           `Provide a brief summary and indicate if this requires user action.`,
         ].join('\n'),
-        skillName: SUITE_EMAIL,
+        skillName: GMAIL_SKILL,
         mcpServers,
         plugins,
         priority: 'normal',
         projectId: event.projectId,
       },
     });
+  }
+
+  /** Fallback when no named agent could be resolved: the full capability library. */
+  private resolveFullLibraryCapabilities(): {
+    agentDefinitions: Record<string, SubAgentDefinition>;
+    mcpServers: Record<string, McpServerConfig>;
+    plugins: Array<{ type: 'local'; path: string }>;
+  } {
+    if (!this.capabilityLibrary) {
+      return { agentDefinitions: {}, mcpServers: {}, plugins: [] };
+    }
+    return {
+      agentDefinitions: this.capabilityLibrary.collectAgentDefinitions(),
+      mcpServers: this.capabilityLibrary.collectMcpServers(),
+      plugins: this.capabilityLibrary.resolveVendorPlugins(),
+    };
   }
 
   /** Ensure a project row exists for auto-created project IDs (e.g. Telegram topics). */
@@ -202,15 +216,11 @@ export class Orchestrator {
           namedAgentInstructions = namedAgent.instructions;
         }
       } catch (err) {
-        log.warn(`Named agent resolution failed, falling back to all suites: ${err}`);
-        agentDefinitions = this.suiteRegistry.collectAgentDefinitions();
-        mcpServers = this.suiteRegistry.collectMcpServers();
-        plugins = this.suiteRegistry.collectVendorPlugins();
+        log.warn(`Named agent resolution failed, falling back to the full library: ${err}`);
+        ({ agentDefinitions, mcpServers, plugins } = this.resolveFullLibraryCapabilities());
       }
     } else {
-      agentDefinitions = this.suiteRegistry.collectAgentDefinitions();
-      mcpServers = this.suiteRegistry.collectMcpServers();
-      plugins = this.suiteRegistry.collectVendorPlugins();
+      ({ agentDefinitions, mcpServers, plugins } = this.resolveFullLibraryCapabilities());
     }
 
     // Resolve bash access config from project registry agent YAML

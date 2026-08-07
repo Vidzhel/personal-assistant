@@ -17,132 +17,20 @@ vi.mock('@raven/shared', async () => {
   };
 });
 
-// ---------- convention-auditor: suite checks ----------
-
-describe('convention-auditor: suite checks', () => {
-  let suitesDir: string;
-  let configDir: string;
-
-  beforeEach(() => {
-    const tmpDir = mkdtempSync(join(tmpdir(), 'raven-audit-'));
-    suitesDir = join(tmpDir, 'suites');
-    configDir = join(tmpDir, 'config');
-    mkdirSync(suitesDir, { recursive: true });
-    mkdirSync(configDir, { recursive: true });
-  });
-
-  afterEach(() => {
-    // Clean up both dirs (parent of suitesDir)
-    rmSync(join(suitesDir, '..'), { recursive: true, force: true });
-  });
-
-  it('should report no violations for a fully compliant suite', async () => {
-    const suitePath = join(suitesDir, 'my-suite');
-    mkdirSync(suitePath, { recursive: true });
-    mkdirSync(join(suitePath, 'agents'), { recursive: true });
-    writeFileSync(
-      join(suitePath, 'suite.ts'),
-      'import { defineSuite } from "@raven/shared"; export default defineSuite({ name: "my-suite" });',
-    );
-    writeFileSync(join(suitePath, 'mcp.json'), '{ "mcpServers": {} }');
-    writeFileSync(join(suitePath, 'actions.json'), '[]');
-    writeFileSync(join(suitePath, 'UPDATE.md'), '# My Suite Update Guide');
-
-    const { auditConventions } =
-      await import('../../../services/orchestrator/convention-auditor.ts');
-    const report = await auditConventions(suitesDir, configDir);
-
-    const suiteViolations = report.violations.filter((v) => v.resourceName === 'my-suite');
-    expect(suiteViolations).toEqual([]);
-    expect(report.totalChecked).toBeGreaterThanOrEqual(1);
-  });
-
-  it('should detect missing suite.ts', async () => {
-    const suitePath = join(suitesDir, 'bad-suite');
-    mkdirSync(suitePath, { recursive: true });
-
-    const { auditConventions } =
-      await import('../../../services/orchestrator/convention-auditor.ts');
-    const report = await auditConventions(suitesDir, configDir);
-
-    const missingFile = report.violations.find(
-      (v) => v.resourceName === 'bad-suite' && v.rule === 'has-suite-ts',
-    );
-    expect(missingFile).toBeDefined();
-    expect(missingFile!.severity).toBe('error');
-  });
-
-  it('should detect suite.ts without defineSuite()', async () => {
-    const suitePath = join(suitesDir, 'no-define');
-    mkdirSync(suitePath, { recursive: true });
-    writeFileSync(join(suitePath, 'suite.ts'), 'export default { name: "no-define" };');
-
-    const { auditConventions } =
-      await import('../../../services/orchestrator/convention-auditor.ts');
-    const report = await auditConventions(suitesDir, configDir);
-
-    const noDefine = report.violations.find(
-      (v) => v.resourceName === 'no-define' && v.rule === 'uses-define-suite',
-    );
-    expect(noDefine).toBeDefined();
-  });
-
-  it('should detect missing mcp.json, actions.json, agents/, UPDATE.md', async () => {
-    const suitePath = join(suitesDir, 'minimal');
-    mkdirSync(suitePath, { recursive: true });
-    writeFileSync(
-      join(suitePath, 'suite.ts'),
-      'import { defineSuite } from "@raven/shared"; export default defineSuite({ name: "minimal" });',
-    );
-
-    const { auditConventions } =
-      await import('../../../services/orchestrator/convention-auditor.ts');
-    const report = await auditConventions(suitesDir, configDir);
-
-    const minimalViolations = report.violations.filter((v) => v.resourceName === 'minimal');
-    const rules = minimalViolations.map((v) => v.rule);
-    expect(rules).toContain('has-mcp-json');
-    expect(rules).toContain('has-actions-json');
-    expect(rules).toContain('has-agents-dir');
-    expect(rules).toContain('has-update-md');
-  });
-
-  it('should detect non-kebab-case suite directory name', async () => {
-    const suitePath = join(suitesDir, 'MyBadName');
-    mkdirSync(suitePath, { recursive: true });
-    writeFileSync(
-      join(suitePath, 'suite.ts'),
-      'import { defineSuite } from "@raven/shared"; export default defineSuite({ name: "MyBadName" });',
-    );
-
-    const { auditConventions } =
-      await import('../../../services/orchestrator/convention-auditor.ts');
-    const report = await auditConventions(suitesDir, configDir);
-
-    const naming = report.violations.find(
-      (v) => v.resourceName === 'MyBadName' && v.rule === 'kebab-case-name',
-    );
-    expect(naming).toBeDefined();
-    expect(naming!.severity).toBe('error');
-  });
-});
-
 // ---------- convention-auditor: agent checks ----------
 
 describe('convention-auditor: agent checks', () => {
-  let suitesDir: string;
+  let tmpDir: string;
   let configDir: string;
 
   beforeEach(() => {
-    const tmpDir = mkdtempSync(join(tmpdir(), 'raven-agent-audit-'));
-    suitesDir = join(tmpDir, 'suites');
+    tmpDir = mkdtempSync(join(tmpdir(), 'raven-agent-audit-'));
     configDir = join(tmpDir, 'config');
-    mkdirSync(suitesDir, { recursive: true });
     mkdirSync(configDir, { recursive: true });
   });
 
   afterEach(() => {
-    rmSync(join(suitesDir, '..'), { recursive: true, force: true });
+    rmSync(tmpDir, { recursive: true, force: true });
   });
 
   it('should report no violations for valid agents.json', async () => {
@@ -155,7 +43,7 @@ describe('convention-auditor: agent checks', () => {
 
     const { auditConventions } =
       await import('../../../services/orchestrator/convention-auditor.ts');
-    const report = await auditConventions(suitesDir, configDir);
+    const report = await auditConventions(configDir);
 
     const agentViolations = report.violations.filter((v) => v.resourceType === 'agent');
     expect(agentViolations).toEqual([]);
@@ -169,7 +57,7 @@ describe('convention-auditor: agent checks', () => {
 
     const { auditConventions } =
       await import('../../../services/orchestrator/convention-auditor.ts');
-    const report = await auditConventions(suitesDir, configDir);
+    const report = await auditConventions(configDir);
 
     const naming = report.violations.find(
       (v) => v.rule === 'kebab-case-name' && v.resourceType === 'agent',
@@ -188,7 +76,7 @@ describe('convention-auditor: agent checks', () => {
 
     const { auditConventions } =
       await import('../../../services/orchestrator/convention-auditor.ts');
-    const report = await auditConventions(suitesDir, configDir);
+    const report = await auditConventions(configDir);
 
     const noDefault = report.violations.find((v) => v.rule === 'has-default-agent');
     expect(noDefault).toBeDefined();
@@ -199,19 +87,17 @@ describe('convention-auditor: agent checks', () => {
 // ---------- convention-auditor: schedule checks ----------
 
 describe('convention-auditor: schedule checks', () => {
-  let suitesDir: string;
+  let tmpDir: string;
   let configDir: string;
 
   beforeEach(() => {
-    const tmpDir = mkdtempSync(join(tmpdir(), 'raven-sched-audit-'));
-    suitesDir = join(tmpDir, 'suites');
+    tmpDir = mkdtempSync(join(tmpdir(), 'raven-sched-audit-'));
     configDir = join(tmpDir, 'config');
-    mkdirSync(suitesDir, { recursive: true });
     mkdirSync(configDir, { recursive: true });
   });
 
   afterEach(() => {
-    rmSync(join(suitesDir, '..'), { recursive: true, force: true });
+    rmSync(tmpDir, { recursive: true, force: true });
   });
 
   it('should report no violations for valid schedules.json', async () => {
@@ -231,7 +117,7 @@ describe('convention-auditor: schedule checks', () => {
 
     const { auditConventions } =
       await import('../../../services/orchestrator/convention-auditor.ts');
-    const report = await auditConventions(suitesDir, configDir);
+    const report = await auditConventions(configDir);
 
     const schedViolations = report.violations.filter((v) => v.resourceType === 'schedule');
     expect(schedViolations).toEqual([]);
@@ -255,7 +141,7 @@ describe('convention-auditor: schedule checks', () => {
 
     const { auditConventions } =
       await import('../../../services/orchestrator/convention-auditor.ts');
-    const report = await auditConventions(suitesDir, configDir);
+    const report = await auditConventions(configDir);
 
     const schedViolations = report.violations.filter((v) => v.resourceType === 'schedule');
     const rules = schedViolations.map((v) => v.rule);
@@ -282,21 +168,15 @@ describe('convention-auditor: maintenance integration', () => {
         healthStatus: null,
         checkedAt: new Date().toISOString(),
       },
-      suiteUpdateReport: {
-        installedSuites: [],
-        suitesWithUpdates: [],
-        suitesWithoutUpdates: [],
-        checkedAt: new Date().toISOString(),
-      },
       conventionAuditReport: {
         violations: [
           {
-            resourceType: 'suite',
-            resourceName: 'test-suite',
-            rule: 'has-update-md',
+            resourceType: 'agent',
+            resourceName: 'test-agent',
+            rule: 'has-description',
             severity: 'warning',
-            message: 'Missing UPDATE.md',
-            fix: 'Create UPDATE.md',
+            message: 'Agent missing description',
+            fix: 'Add a description explaining what this agent does',
           },
         ],
         compliantCount: 2,
@@ -307,9 +187,9 @@ describe('convention-auditor: maintenance integration', () => {
     });
 
     expect(prompt).toContain('Convention Compliance');
-    expect(prompt).toContain('test-suite');
-    expect(prompt).toContain('has-update-md');
-    expect(prompt).toContain('Missing UPDATE.md');
+    expect(prompt).toContain('test-agent');
+    expect(prompt).toContain('has-description');
+    expect(prompt).toContain('Agent missing description');
   });
 
   it('should show "All resources are compliant" when no violations', async () => {
@@ -325,12 +205,6 @@ describe('convention-auditor: maintenance integration', () => {
         sessionSizeMB: 0.1,
         concerns: [],
         healthStatus: null,
-        checkedAt: new Date().toISOString(),
-      },
-      suiteUpdateReport: {
-        installedSuites: [],
-        suitesWithUpdates: [],
-        suitesWithoutUpdates: [],
         checkedAt: new Date().toISOString(),
       },
       conventionAuditReport: {

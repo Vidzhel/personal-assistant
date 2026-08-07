@@ -11,7 +11,6 @@ function makeAgent(overrides: Partial<NamedAgent> = {}): NamedAgent {
     name: 'test-agent',
     description: null,
     instructions: null,
-    suiteIds: [],
     skills: [],
     model: null,
     maxTurns: null,
@@ -189,7 +188,6 @@ describe('buildSystemTools', () => {
         expect.objectContaining({
           name: 'my-bot',
           description: 'A bot',
-          suiteIds: [],
           skills: [],
         }),
       );

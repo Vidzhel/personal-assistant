@@ -5,18 +5,17 @@ import {
   generateId,
   initFileLogging,
   closeFileLogging,
+  UNSNOOZABLE_CATEGORIES,
   type DatabaseInterface,
   type RavenEvent,
   type RavenEventType,
 } from '@raven/shared';
-import { loadSuitesConfig, projectRoot, setConfig, type AppConfig } from './config.ts';
+import { projectRoot, setConfig, type AppConfig } from './config.ts';
 import { loadIntegrationsConfig } from './config/integrations-config.ts';
 import { initDatabase, createDbInterface, getDb } from './db/database.ts';
 import { EventBus } from './event-bus/event-bus.ts';
-import { SuiteRegistry } from './suite-registry/suite-registry.ts';
 import { createServiceRunner } from './services/runner.ts';
 import { SERVICE_DEFINITIONS } from './services/registry.ts';
-import { McpManager } from './mcp-manager/mcp-manager.ts';
 import { AgentManager } from './agent-manager/agent-manager.ts';
 import { SessionManager } from './session-manager/session-manager.ts';
 import { Orchestrator } from './orchestrator/orchestrator.ts';
@@ -36,7 +35,6 @@ import { CapabilityLibrary } from './capability-library/capability-library.ts';
 import { ProjectRegistry } from './project-registry/project-registry.ts';
 import { createAgentYamlStore } from './project-registry/agent-yaml-store.ts';
 import { createConfigCommitter } from './agent-registry/config-committer.ts';
-import { createSuiteScaffolder } from './suite-registry/suite-scaffolder.ts';
 import { createScaffoldingApi } from './scaffolding/scaffolding-api.ts';
 import { createKnowledgeStore } from './knowledge-engine/knowledge-store.ts';
 import type { KnowledgeStore } from './knowledge-engine/knowledge-store.ts';
@@ -86,9 +84,8 @@ const log = createLogger('raven');
  * - `dbPath`: point at a temp SQLite file instead of `data/raven.db`.
  * - `dataDir`: redirect all `data/*` runtime directories (logs, sessions,
  *   knowledge, media) away from the real project tree.
- * - `skipSuites`: skip starting real suite services (Telegram bot, IMAP
- *   watcher, etc.) — suite *loading* still happens, only service startup
- *   is skipped.
+ * - `skipSuites`: skip starting real background services (Telegram bot,
+ *   IMAP watcher, etc.) at boot.
  */
 export interface RavenOverrides {
   agentBackend?: AgentBackend;
@@ -185,18 +182,12 @@ export async function createRaven(
     );
   });
 
-  // 5. Init suite registry and load suites
-  const suiteRegistry = new SuiteRegistry();
+  // 5. Init config dir + integrations config
   const configDir = resolve(projectRoot, 'config');
-  const suitesConfig = loadSuitesConfig(configDir);
-  const suitesDir = resolve(projectRoot, 'suites');
-
   const integrationsConfig = loadIntegrationsConfig(configDir);
 
-  await suiteRegistry.loadSuites(suitesDir, suitesConfig);
-  suiteRegistry.validateAgentTools();
-
-  // Load capability library (v2 — runs alongside suite registry during migration)
+  // Load capability library — the sole capability system (skills, MCPs,
+  // agent definitions, actions all come from library/).
   const capabilityLibrary = new CapabilityLibrary();
   const libraryDir = resolve(projectRoot, 'library');
   try {
@@ -205,7 +196,7 @@ export async function createRaven(
       `Capability library loaded (${String(capabilityLibrary.getSkillNames().length)} skills)`,
     );
   } catch (err) {
-    log.warn(`Capability library not found or failed to load, using suite registry only: ${err}`);
+    log.warn(`Capability library failed to load: ${err}`);
   }
 
   // Load project registry (filesystem-based project hierarchy)
@@ -223,9 +214,6 @@ export async function createRaven(
 
   // Create scaffolding API (project domain creation)
   const scaffoldingApi = createScaffoldingApi({ projectsDir, projectRegistry, agentYamlStore });
-
-  // Count configured (enabled) suites
-  const configuredSuiteCount = Object.values(suitesConfig).filter((s) => s?.enabled).length;
 
   // Count declared services (IMAP watcher, Telegram bot, etc.) — "configured"
   // here mirrors configuredSuiteCount's meaning: how many are declared,
@@ -258,7 +246,7 @@ export async function createRaven(
   }
 
   // 7. Init permission engine
-  const permissionEngine = createPermissionEngine({ suiteRegistry, capabilityLibrary, eventBus });
+  const permissionEngine = createPermissionEngine({ capabilityLibrary, eventBus });
   permissionEngine.initialize(configDir);
   log.info('Permission engine initialized');
 
@@ -290,10 +278,9 @@ export async function createRaven(
     projectsDir,
     eventBus: baseContext.eventBus,
   });
-  const agentResolver = createAgentResolver({ capabilityLibrary, suiteRegistry });
+  const agentResolver = createAgentResolver({ capabilityLibrary });
   const configCommitter = createConfigCommitter({ eventBus });
   configCommitter.start();
-  const suiteScaffolder = createSuiteScaffolder({ suitesDir, configDir });
   log.info(`Named agent registry initialized (${namedAgentStore.listAgents().length} agents)`);
 
   // 7g. Task lifecycle bridge — connects agent events to RavenTask lifecycle
@@ -367,9 +354,6 @@ export async function createRaven(
   // 7h. Inject permission deps into service context for callback handler (lazy resolution)
   Object.assign(baseContext.config, { pendingApprovals, auditLog });
 
-  // 8. Init MCP manager
-  const mcpManager = new McpManager(suiteRegistry);
-
   // 9. Init session manager + message store
   const sessionManager = new SessionManager();
   const messageStore = createMessageStore({ basePath: sessionPath });
@@ -398,8 +382,6 @@ export async function createRaven(
   };
   const agentManager = new AgentManager({
     eventBus,
-    mcpManager,
-    suiteRegistry,
     permissionEngine,
     auditLog,
     pendingApprovals,
@@ -622,7 +604,6 @@ export async function createRaven(
   // 11c. Init orchestrator (after knowledge engine for context injection)
   const _orchestrator = new Orchestrator({
     eventBus,
-    suiteRegistry,
     sessionManager,
     messageStore,
     sessionRetrospective,
@@ -649,7 +630,7 @@ export async function createRaven(
     server = await createApiServer(
       {
         eventBus,
-        suiteRegistry,
+        capabilityLibrary,
         sessionManager,
         scheduleEngine,
         agentManager,
@@ -669,12 +650,9 @@ export async function createRaven(
         db: dbInterface,
         taskStore,
         namedAgentStore,
-        suiteScaffolder,
-        configuredSuiteCount,
         serviceRunner,
         configuredServiceCount,
-        unsnoozableCategories: (suitesConfig['notifications']?.config?.unsnoozableCategories ??
-          []) as string[],
+        unsnoozableCategories: [...UNSNOOZABLE_CATEGORIES],
         sessionRetrospective,
         dataDir: resolve(dataRoot, 'data'),
         projectRegistry,

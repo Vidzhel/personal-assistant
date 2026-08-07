@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import { createLogger } from '@raven/shared';
 import type { EventBus } from '../event-bus/event-bus.ts';
-import type { SuiteRegistry } from '../suite-registry/suite-registry.ts';
+import type { CapabilityLibrary } from '../capability-library/capability-library.ts';
 import type { ServiceRunner } from '../services/runner.ts';
 import type { SessionManager } from '../session-manager/session-manager.ts';
 import type { ScheduleEngine } from '../scheduler/schedule-engine.ts';
@@ -42,7 +42,6 @@ import { registerTaskRoutes } from './routes/tasks.ts';
 import { registerAgentRoutes } from './routes/agents.ts';
 import type { TaskStore } from '../task-manager/task-store.ts';
 import type { NamedAgentStore } from '../agent-registry/yaml-named-agent-store.ts';
-import type { SuiteScaffolder } from '../suite-registry/suite-scaffolder.ts';
 import type { ProjectRegistry } from '../project-registry/project-registry.ts';
 import type { AgentYamlStore } from '../project-registry/agent-yaml-store.ts';
 import { registerSSERoutes } from './sse/stream.ts';
@@ -64,7 +63,7 @@ const log = createLogger('api');
 
 export interface ApiDeps {
   eventBus: EventBus;
-  suiteRegistry: SuiteRegistry;
+  capabilityLibrary?: CapabilityLibrary;
   sessionManager: SessionManager;
   scheduleEngine: ScheduleEngine;
   agentManager: AgentManager;
@@ -82,13 +81,11 @@ export interface ApiDeps {
   knowledgeLifecycle?: KnowledgeLifecycle;
   retrospective?: Retrospective;
   db?: DatabaseInterface;
-  configuredSuiteCount: number;
   serviceRunner: ServiceRunner;
   configuredServiceCount: number;
   unsnoozableCategories?: string[];
   taskStore?: TaskStore;
   namedAgentStore?: NamedAgentStore;
-  suiteScaffolder?: SuiteScaffolder;
   configChangeResolver?: ConfigChangeResolver;
   sessionRetrospective?: SessionRetrospective;
   dataDir?: string;
@@ -124,7 +121,7 @@ export async function createApiServer(
   });
   registerSessionRoutes(app, deps);
   registerChatRoute(app, deps);
-  registerSuiteRoutes(app, { ...deps, suiteScaffolder: deps.suiteScaffolder });
+  registerSuiteRoutes(app, deps);
   registerScheduleRoutes(app, deps);
   registerEventRoutes(app);
   registerAuditLogRoutes(app, deps.auditLog);
@@ -188,7 +185,6 @@ export async function createApiServer(
     registerAgentRoutes(app, {
       namedAgentStore: deps.namedAgentStore,
       agentManager: deps.agentManager,
-      suiteRegistry: deps.suiteRegistry,
       taskStore: deps.taskStore,
     });
   }

@@ -5,11 +5,23 @@ const ONE_HOUR_MS = 3_600_000;
 const FAILURE_RATE_THRESHOLD = 0.2;
 const BYTES_PER_MB = 1_048_576;
 
+// Reads the library's skill names, degrading to an empty (error-status) list
+// rather than throwing when the library never loaded — getSkillNames()
+// throws if load() hasn't succeeded.
+function readSkillNames(deps: ApiDeps): { names: string[]; status: 'ok' | 'error' } {
+  if (!deps.capabilityLibrary) return { names: [], status: 'error' };
+  try {
+    return { names: deps.capabilityLibrary.getSkillNames(), status: 'ok' };
+  } catch {
+    return { names: [], status: 'error' };
+  }
+}
+
 // eslint-disable-next-line max-lines-per-function -- health endpoint aggregates all subsystem statuses
 export function registerHealthRoute(app: FastifyInstance, deps: ApiDeps): void {
   // eslint-disable-next-line max-lines-per-function -- health endpoint aggregates all subsystem statuses
   app.get('/api/health', async () => {
-    const suiteNames = deps.suiteRegistry.getEnabledSuiteNames();
+    const { names: skillNames, status: skillsStatus } = readSkillNames(deps);
     const taskStats = deps.executionLogger.getTaskStats(ONE_HOUR_MS);
     const mem = process.memoryUsage();
 
@@ -25,12 +37,10 @@ export function registerHealthRoute(app: FastifyInstance, deps: ApiDeps): void {
       dbStatus = 'error';
     }
 
-    const configuredCount = deps.configuredSuiteCount;
-    const suitesDegraded = configuredCount > 0 && suiteNames.length < configuredCount;
     const overallStatus: 'ok' | 'degraded' | 'error' =
       dbStatus === 'error'
         ? 'error'
-        : suitesDegraded || failureRate >= FAILURE_RATE_THRESHOLD
+        : skillsStatus === 'error' || failureRate >= FAILURE_RATE_THRESHOLD
           ? 'degraded'
           : 'ok';
 
@@ -47,10 +57,10 @@ export function registerHealthRoute(app: FastifyInstance, deps: ApiDeps): void {
         database: { status: dbStatus, latencyMs: dbLatencyMs },
         eventBus: { status: 'ok', listenerCount: deps.eventBus.listenerCount() },
         skills: {
-          status: suitesDegraded ? 'degraded' : 'ok',
-          loaded: suiteNames.length,
-          configured: configuredCount,
-          names: suiteNames,
+          status: skillsStatus,
+          loaded: skillNames.length,
+          configured: skillNames.length,
+          names: skillNames,
         },
         scheduler: { status: 'ok', activeJobs: deps.scheduleEngine.getActiveCount() },
         agentManager: {

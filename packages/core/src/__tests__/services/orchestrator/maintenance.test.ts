@@ -327,64 +327,6 @@ describe('resource-monitor', () => {
   });
 });
 
-// ---------- suite-update-checker ----------
-
-describe('suite-update-checker', () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'raven-suite-test-'));
-  });
-
-  afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('should detect suites with and without UPDATE.md', async () => {
-    // Suite with UPDATE.md
-    mkdirSync(join(tmpDir, 'notifications'), { recursive: true });
-    writeFileSync(
-      join(tmpDir, 'notifications', 'UPDATE.md'),
-      '# Notifications Update\nCheck grammy releases',
-    );
-
-    // Suite without UPDATE.md
-    mkdirSync(join(tmpDir, 'email'), { recursive: true });
-
-    const { checkSuiteUpdates } =
-      await import('../../../services/orchestrator/suite-update-checker.ts');
-    const result = await checkSuiteUpdates(tmpDir);
-
-    expect(result.installedSuites).toContain('notifications');
-    expect(result.installedSuites).toContain('email');
-    expect(result.suitesWithUpdates.length).toBe(1);
-    expect(result.suitesWithUpdates[0].name).toBe('notifications');
-    expect(result.suitesWithUpdates[0].checkInstructions).toBe('Notifications Update');
-    expect(result.suitesWithoutUpdates).toContain('email');
-  });
-
-  it('should return empty report for empty directory', async () => {
-    const { checkSuiteUpdates } =
-      await import('../../../services/orchestrator/suite-update-checker.ts');
-    const result = await checkSuiteUpdates(tmpDir);
-
-    expect(result.installedSuites).toEqual([]);
-    expect(result.suitesWithUpdates).toEqual([]);
-    expect(result.suitesWithoutUpdates).toEqual([]);
-  });
-
-  it('should skip non-directory entries', async () => {
-    writeFileSync(join(tmpDir, 'vitest.config.ts'), 'export default {}');
-    mkdirSync(join(tmpDir, 'real-suite'), { recursive: true });
-
-    const { checkSuiteUpdates } =
-      await import('../../../services/orchestrator/suite-update-checker.ts');
-    const result = await checkSuiteUpdates(tmpDir);
-
-    expect(result.installedSuites).toEqual(['real-suite']);
-  });
-});
-
 // ---------- maintenance-report ----------
 
 describe('maintenance-report', () => {
@@ -417,12 +359,6 @@ describe('maintenance-report', () => {
           concerns: [],
           checkedAt: new Date().toISOString(),
         },
-        suiteUpdateReport: {
-          suitesWithUpdates: [],
-          suitesWithoutUpdates: [],
-          installedSuites: ['notifications'],
-          checkedAt: new Date().toISOString(),
-        },
       },
       join(tmpDir, 'reports'),
     );
@@ -453,12 +389,6 @@ describe('maintenance-report', () => {
           sessionSizeMB: 0,
           healthStatus: null,
           concerns: [],
-          checkedAt: new Date().toISOString(),
-        },
-        suiteUpdateReport: {
-          suitesWithUpdates: [],
-          suitesWithoutUpdates: [],
-          installedSuites: [],
           checkedAt: new Date().toISOString(),
         },
         agentAnalysis: agentReport,
@@ -585,12 +515,6 @@ describe('maintenance-agent prompt builder', () => {
         concerns: [],
         checkedAt: '2026-03-22T00:00:00Z',
       },
-      suiteUpdateReport: {
-        suitesWithUpdates: [{ name: 'notifications', checkInstructions: 'Check grammy releases' }],
-        suitesWithoutUpdates: ['email'],
-        installedSuites: ['notifications', 'email'],
-        checkedAt: '2026-03-22T00:00:00Z',
-      },
       runDate: '2026-03-22T02:00:00Z',
     });
 
@@ -602,7 +526,6 @@ describe('maintenance-agent prompt builder', () => {
     expect(prompt).toContain('4.18.0');
     expect(prompt).toContain('XSS');
     expect(prompt).toContain('50.0 MB');
-    expect(prompt).toContain('notifications');
     expect(prompt).toContain('web search');
   });
 
@@ -619,12 +542,6 @@ describe('maintenance-agent prompt builder', () => {
         sessionSizeMB: 0,
         healthStatus: null,
         concerns: [],
-        checkedAt: '2026-03-22T00:00:00Z',
-      },
-      suiteUpdateReport: {
-        suitesWithUpdates: [],
-        suitesWithoutUpdates: [],
-        installedSuites: [],
         checkedAt: '2026-03-22T00:00:00Z',
       },
       runDate: '2026-03-22T02:00:00Z',

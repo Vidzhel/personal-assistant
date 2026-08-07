@@ -1,8 +1,11 @@
 import { createLogger, generateId } from '@raven/shared';
-import type { AgentTask, AgentTaskRequestEvent } from '@raven/shared';
+import type {
+  AgentTask,
+  AgentTaskRequestEvent,
+  McpServerConfig,
+  SubAgentDefinition,
+} from '@raven/shared';
 import type { EventBus } from '../event-bus/event-bus.ts';
-import type { McpManager } from '../mcp-manager/mcp-manager.ts';
-import type { SuiteRegistry } from '../suite-registry/suite-registry.ts';
 import type { PermissionEngine } from '../permission-engine/permission-engine.ts';
 import type { AuditLog } from '../permission-engine/audit-log.ts';
 import type { PendingApprovals } from '../permission-engine/pending-approvals.ts';
@@ -27,13 +30,12 @@ const log = createLogger('agent-manager');
  */
 export interface AgentManagerDeps {
   eventBus: EventBus;
-  mcpManager: McpManager;
-  suiteRegistry: SuiteRegistry;
   permissionEngine?: PermissionEngine;
   auditLog?: AuditLog;
   pendingApprovals?: PendingApprovals;
-  /** Threaded into PermissionDeps.capabilityLibrary — used only by the
-   * canUseTool policy's unmapped-MCP-tool fallback (tool-policy.ts). */
+  /** Threaded into PermissionDeps.capabilityLibrary (canUseTool policy's
+   * unmapped-MCP-tool fallback) AND used directly by executeApprovedAction
+   * to resolve a skillName's mcpServers/agentDefinitions. */
   capabilityLibrary?: CapabilityLibrary;
   executionLogger?: ExecutionLogger;
   messageStore?: MessageStore;
@@ -76,8 +78,7 @@ export class AgentManager {
   private taskMeta = new Map<string, AgentTask>();
   private maxConcurrent: number;
   private eventBus: EventBus;
-  private mcpManager: McpManager;
-  private suiteRegistry: SuiteRegistry;
+  private capabilityLibrary?: CapabilityLibrary;
   private permissionDeps?: PermissionDeps;
   private executionLogger?: ExecutionLogger;
   private messageStore?: MessageStore;
@@ -87,8 +88,7 @@ export class AgentManager {
 
   constructor(deps: AgentManagerDeps) {
     this.eventBus = deps.eventBus;
-    this.mcpManager = deps.mcpManager;
-    this.suiteRegistry = deps.suiteRegistry;
+    this.capabilityLibrary = deps.capabilityLibrary;
     this.executionLogger = deps.executionLogger;
     this.messageStore = deps.messageStore;
     this.sessionManager = deps.sessionManager;
@@ -423,8 +423,22 @@ export class AgentManager {
   async executeApprovedAction(
     params: ApprovedActionParams,
   ): Promise<{ success: boolean; result?: string; error?: string }> {
-    const mcpServers = this.mcpManager.resolveForSuite(params.skillName);
-    const agentDefinitions = this.suiteRegistry.collectAgentDefinitions([params.skillName]);
+    // Resolve capabilities for this skill from the library. An unknown
+    // skillName (e.g. a legacy suite name that predates the library) resolves
+    // to empty collections rather than throwing — same for a library that
+    // failed to load (collectMcpServers/collectAgentDefinitions throw when
+    // unloaded) — the task still runs, just without skill-specific MCP
+    // tools/sub-agents.
+    let mcpServers: Record<string, McpServerConfig> = {};
+    let agentDefinitions: Record<string, SubAgentDefinition> = {};
+    try {
+      if (this.capabilityLibrary) {
+        mcpServers = this.capabilityLibrary.collectMcpServers([params.skillName]);
+        agentDefinitions = this.capabilityLibrary.collectAgentDefinitions([params.skillName]);
+      }
+    } catch (err) {
+      log.warn(`Capability resolution failed for skill "${params.skillName}": ${err}`);
+    }
 
     const task: AgentTask = {
       id: generateId(),

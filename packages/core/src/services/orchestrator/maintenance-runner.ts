@@ -10,7 +10,6 @@ import type { ServiceContext, RavenService } from '../types.ts';
 import { analyzeLogs } from './log-analyzer.ts';
 import { checkDependencies } from './dependency-checker.ts';
 import { checkResources } from './resource-monitor.ts';
-import { checkSuiteUpdates } from './suite-update-checker.ts';
 import { auditConventions } from './convention-auditor.ts';
 import { buildMaintenancePrompt } from './maintenance-agent.ts';
 import { compileReport, emitReportEvent, sendReportNotification } from './maintenance-report.ts';
@@ -76,31 +75,26 @@ interface GatheredMaintenanceData {
   logAnalysis: Awaited<ReturnType<typeof analyzeLogs>>;
   dependencyReport: Awaited<ReturnType<typeof checkDependencies>>;
   resourceReport: Awaited<ReturnType<typeof checkResources>>;
-  suiteUpdateReport: Awaited<ReturnType<typeof checkSuiteUpdates>>;
   conventionAuditReport: Awaited<ReturnType<typeof auditConventions>>;
 }
 
 async function gatherMaintenanceData(): Promise<GatheredMaintenanceData> {
   const logDir = getLogDir() ?? resolve(projectRoot, 'data/logs');
   const dataDir = resolve(projectRoot, 'data');
-  const suitesDir = resolve(projectRoot, 'suites');
   const healthUrl = `http://localhost:${String(port)}/api/health`;
   const configDir = resolve(projectRoot, 'config');
 
-  const [logAnalysis, dependencyReport, resourceReport, suiteUpdateReport, conventionAuditReport] =
-    await Promise.all([
-      analyzeLogs(logDir),
-      checkDependencies(projectRoot),
-      checkResources(dataDir, healthUrl),
-      checkSuiteUpdates(suitesDir),
-      auditConventions(suitesDir, configDir),
-    ]);
+  const [logAnalysis, dependencyReport, resourceReport, conventionAuditReport] = await Promise.all([
+    analyzeLogs(logDir),
+    checkDependencies(projectRoot),
+    checkResources(dataDir, healthUrl),
+    auditConventions(configDir),
+  ]);
 
   return {
     logAnalysis,
     dependencyReport,
     resourceReport,
-    suiteUpdateReport,
     conventionAuditReport,
   };
 }

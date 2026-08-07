@@ -5,7 +5,6 @@ import type { EventBusInterface } from '@raven/shared';
 import type { LogAnalysisResult } from './log-analyzer.ts';
 import type { DependencyReport } from './dependency-checker.ts';
 import type { ResourceReport } from './resource-monitor.ts';
-import type { SuiteUpdateReport } from './suite-update-checker.ts';
 import type { ConventionAuditReport } from './convention-auditor.ts';
 
 const log = createLogger('maintenance-report');
@@ -14,7 +13,6 @@ export interface MaintenanceReportData {
   logAnalysis: LogAnalysisResult;
   dependencyReport: DependencyReport;
   resourceReport: ResourceReport;
-  suiteUpdateReport: SuiteUpdateReport;
   conventionAuditReport?: ConventionAuditReport;
   agentAnalysis?: string;
 }
@@ -120,20 +118,6 @@ function buildPackageUpdatesSection(dependencyReport: DependencyReport): string[
   return lines;
 }
 
-function buildSuiteSuggestionsSection(suiteUpdateReport: SuiteUpdateReport): string[] {
-  const lines: string[] = ['## 💡 Suite Suggestions'];
-  if (suiteUpdateReport.suitesWithoutUpdates.length > 0) {
-    lines.push('Suites missing UPDATE.md:');
-    for (const name of suiteUpdateReport.suitesWithoutUpdates) {
-      lines.push(`- ${name}`);
-    }
-  } else {
-    lines.push('No new suggestions at this time.');
-  }
-  lines.push('');
-  return lines;
-}
-
 function buildConventionComplianceSection(conventionAuditReport?: ConventionAuditReport): string[] {
   const lines: string[] = ['## 🔍 Convention Compliance'];
   if (conventionAuditReport && conventionAuditReport.violations.length > 0) {
@@ -185,7 +169,6 @@ function buildFallbackReport(data: MaintenanceReportData, date: string): string 
     '',
     ...buildIssuesSection(data.logAnalysis),
     ...buildPackageUpdatesSection(data.dependencyReport),
-    ...buildSuiteSuggestionsSection(data.suiteUpdateReport),
     ...buildConventionComplianceSection(data.conventionAuditReport),
     ...buildResourceStatusSection(data.resourceReport),
   ];
