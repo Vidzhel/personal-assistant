@@ -61,6 +61,8 @@ import type { TemplateScheduler } from '../template-engine/template-scheduler.ts
 import type { ScaffoldingApi } from '../scaffolding/scaffolding-api.ts';
 import type { ScaffoldAndActivateFn } from '../scaffolding/scaffold-and-activate.ts';
 import { registerScaffoldingRoutes } from '../scaffolding/scaffolding-routes.ts';
+import type { IntentStore } from '../intents/intent-store.ts';
+import { registerIntentRoutes } from './routes/intents.ts';
 
 const log = createLogger('api');
 
@@ -101,6 +103,7 @@ export interface ApiDeps {
   templateScheduler?: TemplateScheduler;
   scaffoldingApi?: ScaffoldingApi;
   scaffoldAndActivate?: ScaffoldAndActivateFn;
+  intentStore?: IntentStore;
 }
 
 // eslint-disable-next-line max-lines-per-function, complexity -- server setup registers all route groups
@@ -226,6 +229,11 @@ export async function createApiServer(
       db: deps.db,
       unsnoozableCategories: deps.unsnoozableCategories,
     });
+  }
+
+  // Intents (deterministic prospective memory) — list + cancel only
+  if (deps.intentStore) {
+    registerIntentRoutes(app, { intentStore: deps.intentStore });
   }
 
   // Config version history (git-based)

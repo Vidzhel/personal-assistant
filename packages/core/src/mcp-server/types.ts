@@ -13,6 +13,7 @@ import type {
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { DatabaseInterface } from '@raven/shared';
 import type { PendingApprovals } from '../permission-engine/pending-approvals.ts';
+import type { IntentStore } from '../intents/intent-store.ts';
 
 export interface RavenMcpDeps {
   executionEngine?: TaskExecutionEngine;
@@ -33,4 +34,7 @@ export interface RavenMcpDeps {
   eventBus: EventBus;
   db?: DatabaseInterface;
   pendingApprovals?: PendingApprovals;
+  /** Powers create_intent/list_intents/cancel_intent (chat scope) — see
+   * mcp-server/tools/intents.ts and intents/intent-store.ts. */
+  intentStore?: IntentStore;
 }

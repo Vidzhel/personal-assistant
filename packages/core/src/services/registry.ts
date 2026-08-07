@@ -19,6 +19,7 @@ import insightProcessor from './proactive-intelligence/insight-processor.ts';
 import crossDomainDetector from './proactive-intelligence/cross-domain-detector.ts';
 import autonomousManager from './task-management/autonomous-manager.ts';
 import ticktickSync from './task-management/ticktick-sync.ts';
+import intentMatcher from '../intents/intent-matcher.ts';
 
 /**
  * A background service Raven starts at boot. Replaces the former
@@ -182,5 +183,12 @@ export const SERVICE_DEFINITIONS: ServiceDefinition[] = [
     description: 'Syncs TickTick tasks into the local task store',
     requiresEnv: TICKTICK_ENV,
     service: ticktickSync,
+  }),
+  fromService({
+    name: 'intent-matcher',
+    description:
+      'Deterministic prospective-memory matcher: fires owner-created intents (event keyword matches, time sweeps) with budget/cooldown/expiry — zero model calls',
+    requiresEnv: [],
+    service: intentMatcher,
   }),
 ];

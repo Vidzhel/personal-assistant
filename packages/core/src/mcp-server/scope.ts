@@ -39,6 +39,12 @@ const SCOPE_TOOLS: Record<ScopeContext['role'], Set<string>> = {
     'create_schedule',
     'create_skill',
     'reload_registries',
+    // Intents — deterministic prospective memory ("remind me when X" /
+    // "remind me at TIME"), compiled from the owner's explicit ask only.
+    // See mcp-server/tools/intents.ts.
+    'create_intent',
+    'list_intents',
+    'cancel_intent',
   ]),
   system: new Set(['*']),
   validation: new Set(['submit_validation_score', 'get_task_context']),

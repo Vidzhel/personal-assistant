@@ -82,6 +82,7 @@ import { createScheduleEngine } from './scheduler/schedule-engine.ts';
 import type { SelfTestJobDeps } from './services/system/self-test.ts';
 import { createSchedulePrefs } from './scheduler/schedule-prefs.ts';
 import { createScheduleFireLog } from './scheduler/schedule-fire-log.ts';
+import { createIntentStore } from './intents/intent-store.ts';
 
 const log = createLogger('raven');
 
@@ -263,6 +264,14 @@ export async function createRaven(
     def.requiresEnv.every((v) => process.env[v]),
   ).length;
 
+  // Intents (deterministic prospective memory): one shared store instance
+  // threaded into the intent-matcher service (via baseContext.config, same
+  // pattern as agentManager/pendingApprovals below), the Raven MCP tools
+  // (create_intent/list_intents/cancel_intent), and the REST API — so a
+  // cancel from the web UI and a fire from the matcher are never racing two
+  // separate views of the same table.
+  const intentStore = createIntentStore(getDb());
+
   // 6. Start background services (IMAP watcher, Telegram bot, etc.) — now
   // compiled ServiceDefinitions rather than suite-declared dynamic imports.
   const serviceRunner = createServiceRunner();
@@ -277,7 +286,7 @@ export async function createRaven(
     },
     db: dbInterface,
     logger: log,
-    config: {},
+    config: { intentStore } as Record<string, unknown>,
     projectRoot,
     integrationsConfig,
     jobRegistry,
@@ -422,6 +431,7 @@ export async function createRaven(
     capabilityLibrary,
     db: dbInterface,
     pendingApprovals,
+    intentStore,
   };
   const agentManager = new AgentManager({
     eventBus,
@@ -780,6 +790,7 @@ export async function createRaven(
         templateScheduler,
         scaffoldingApi,
         scaffoldAndActivate,
+        intentStore,
       },
       config.RAVEN_PORT,
     );

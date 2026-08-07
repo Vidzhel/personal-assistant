@@ -46,6 +46,11 @@ export const api = {
     request<{ triggered: boolean }>(`/schedules/${encodeURIComponent(name)}/trigger`, {
       method: 'POST',
     }),
+  getIntents: () => request<Intent[]>('/intents'),
+  cancelIntent: (id: string) =>
+    request<{ id: string; status: string }>(`/intents/${encodeURIComponent(id)}/cancel`, {
+      method: 'POST',
+    }),
   getEvents: (params?: { since?: number; type?: string; source?: string; limit?: number }) => {
     const qs = new URLSearchParams();
     if (params?.since) qs.set('since', String(params.since));
@@ -354,11 +359,29 @@ export interface Schedule {
   name: string;
   cron: string;
   timezone: string;
-  kind: 'job' | 'template' | 'agent';
+  kind: 'job' | 'template' | 'agent' | 'heartbeat';
   ref: string;
   enabled: boolean;
   registered: boolean;
   nextRun: string | null;
+}
+
+/** Deterministic prospective memory — see intents/intent-store.ts. */
+export interface Intent {
+  id: string;
+  kind: 'event' | 'time';
+  keywords: string[];
+  eventTypes: string[];
+  message: string;
+  nextFireAt: number | null;
+  fireBudget: number;
+  firesUsed: number;
+  cooldownHours: number;
+  lastFiredAt: number | null;
+  expiresAt: number | null;
+  status: 'active' | 'exhausted' | 'expired' | 'cancelled';
+  createdAt: number;
+  sourceSession: string | null;
 }
 
 export interface Session {
