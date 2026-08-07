@@ -27,7 +27,6 @@ const DEFAULT_MAX_CONCURRENT = 3;
 const DEFAULT_MAX_TURNS = 25;
 const DEFAULT_BUDGET_USD = 5.0;
 const DEFAULT_IDLE_TIMEOUT_MS = 1800000; // 30 minutes
-const DEFAULT_COMPACTION_THRESHOLD = 40; // message count
 const DEFAULT_CONSOLIDATION_CRON = '0 3 * * 0'; // Sunday 3am
 
 const envSchema = z.object({
@@ -66,7 +65,6 @@ const envSchema = z.object({
 
   // Session auto-compaction & retrospective
   RAVEN_SESSION_IDLE_TIMEOUT_MS: z.coerce.number().default(DEFAULT_IDLE_TIMEOUT_MS),
-  RAVEN_SESSION_COMPACTION_THRESHOLD: z.coerce.number().default(DEFAULT_COMPACTION_THRESHOLD),
   RAVEN_CONSOLIDATION_CRON: z.string().default(DEFAULT_CONSOLIDATION_CRON),
   RAVEN_AUTO_RETROSPECTIVE_ENABLED: z
     .enum(['true', 'false'])

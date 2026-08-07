@@ -31,9 +31,9 @@ export default tseslint.config(
   // Disable formatting rules (Prettier handles those)
   eslintConfigPrettier,
 
-  // Shared/core/skills: Node globals
+  // Shared/core: Node globals
   {
-    files: ['packages/shared/src/**/*.ts', 'packages/core/src/**/*.ts', 'packages/skills/*/src/**/*.ts', 'packages/mcp-ticktick/src/**/*.ts'],
+    files: ['packages/shared/src/**/*.ts', 'packages/core/src/**/*.ts', 'packages/mcp-ticktick/src/**/*.ts'],
     languageOptions: {
       globals: globals.node,
     },
@@ -69,7 +69,7 @@ export default tseslint.config(
 
   // All TypeScript files: custom rules (NO projectService here)
   {
-    files: ['packages/*/src/**/*.ts', 'packages/skills/*/src/**/*.ts', 'packages/web/**/*.{ts,tsx}'],
+    files: ['packages/*/src/**/*.ts', 'packages/web/**/*.{ts,tsx}'],
     rules: {
       // Ban .js extensions in imports — use .ts instead
       // Ban TS parameter properties — not supported by Node strip-types

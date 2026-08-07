@@ -42,7 +42,6 @@ function buildTestConfig(): AppConfig {
     NEO4J_USER: 'neo4j',
     NEO4J_PASSWORD: 'ravenpassword',
     RAVEN_SESSION_IDLE_TIMEOUT_MS: 1_800_000,
-    RAVEN_SESSION_COMPACTION_THRESHOLD: 40,
     RAVEN_CONSOLIDATION_CRON: '0 3 * * 0',
     RAVEN_AUTO_RETROSPECTIVE_ENABLED: true,
   };

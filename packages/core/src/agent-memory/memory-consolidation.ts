@@ -30,7 +30,7 @@ const INDEX_LINE_MAX_LENGTH = 120;
  * sonnet id that could drift from the global default. */
 const MODEL_TIER_IDS: Record<string, string> = {
   haiku: 'claude-haiku-4-5',
-  opus: 'claude-opus-4-6',
+  opus: 'claude-opus-5',
 };
 
 function resolveModel(config: AppConfig, agentModel: string | null): string {

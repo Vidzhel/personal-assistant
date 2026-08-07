@@ -26,8 +26,6 @@ describe('buildSessionTools', () => {
         getMessages: vi.fn().mockReturnValue([]),
         appendRawMessage: vi.fn(),
         getRawMessages: vi.fn().mockReturnValue([]),
-        archiveTranscript: vi.fn(),
-        replaceTranscript: vi.fn(),
       },
     } as any;
     scope = { role: 'chat', sessionId: 'sess-abc' };
