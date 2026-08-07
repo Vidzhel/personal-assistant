@@ -142,6 +142,7 @@ describe('Permission Gate', () => {
     return {
       initialize: vi.fn(),
       resolveTier: (actionName: string) => tierMap[actionName] ?? 'red',
+      getActionCatalog: vi.fn().mockReturnValue([]),
       shutdown: vi.fn(),
       getConfig: vi.fn().mockReturnValue({}),
     };

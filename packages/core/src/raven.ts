@@ -258,7 +258,7 @@ export async function createRaven(
   }
 
   // 7. Init permission engine
-  const permissionEngine = createPermissionEngine({ suiteRegistry, eventBus });
+  const permissionEngine = createPermissionEngine({ suiteRegistry, capabilityLibrary, eventBus });
   permissionEngine.initialize(configDir);
   log.info('Permission engine initialized');
 
