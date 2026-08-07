@@ -15,6 +15,43 @@ const MCP_TOOL_INSTRUCTIONS = [
   'Never output raw JSON task trees. Always use the create_task_tree tool.',
 ].join('\n');
 
+// Stable per-turn prompt layers for orchestrator chat turns (see the module
+// comment above and orchestrator.ts's handleUserChat, which computes
+// namedAgentInstructions and systemAccessInstructions per project/agent but
+// no longer prepends them to the user message). Split out of
+// buildSystemPrompt to keep that function's complexity/length under the
+// project's lint guardrails.
+function pushOrchestratorLayers(task: AgentTask, parts: string[]): void {
+  parts.push(
+    '',
+    '## Delegation',
+    'You have specialized sub-agents available via the Agent tool.',
+    'Always delegate domain-specific work (tasks, email, etc.) to the appropriate sub-agent.',
+    'Do NOT try to use ToolSearch or load MCP tools directly — your sub-agents already have the right tools.',
+  );
+
+  if (task.systemAccessInstructions) {
+    parts.push('', '## System Access Control', task.systemAccessInstructions);
+  }
+
+  // Tool Use / MCP Tools are chat-turn layers: they instruct the model on
+  // how to handle an incoming user message (classify_request, delegate,
+  // send_message, create_task_tree). Validator dispatches
+  // (internal: 'validator', see create-validation-deps.ts) share
+  // skillName: SKILL_ORCHESTRATOR but are not chat turns — they must return
+  // raw JSON as their entire answer, which MCP_TOOL_INSTRUCTIONS's "Never
+  // output raw JSON task trees" directly contradicts, and their scope is
+  // validation, not tool use. Gate both blocks out for them.
+  if (task.internal !== 'validator') {
+    parts.push('', '## Tool Use', resolveToolUseInstructions());
+    parts.push('', '## MCP Tools', MCP_TOOL_INSTRUCTIONS);
+  }
+
+  if (task.namedAgentInstructions) {
+    parts.push('', '## Agent Instructions', task.namedAgentInstructions);
+  }
+}
+
 export function buildSystemPrompt(task: AgentTask, project?: Project): string {
   const parts: string[] = [
     'You are Raven, a personal assistant agent. You help the user manage tasks, emails, schedules, and daily planning.',
@@ -27,26 +64,7 @@ export function buildSystemPrompt(task: AgentTask, project?: Project): string {
   ];
 
   if (task.skillName === SKILL_ORCHESTRATOR) {
-    parts.push(
-      '',
-      '## Delegation',
-      'You have specialized sub-agents available via the Agent tool.',
-      'Always delegate domain-specific work (tasks, email, etc.) to the appropriate sub-agent.',
-      'Do NOT try to use ToolSearch or load MCP tools directly — your sub-agents already have the right tools.',
-    );
-
-    // Stable per-turn prompt layers (see the module comment above and
-    // orchestrator.ts's handleUserChat, which computes namedAgentInstructions
-    // and systemAccessInstructions per project/agent but no longer prepends
-    // them to the user message).
-    if (task.systemAccessInstructions) {
-      parts.push('', '## System Access Control', task.systemAccessInstructions);
-    }
-    parts.push('', '## Tool Use', resolveToolUseInstructions());
-    parts.push('', '## MCP Tools', MCP_TOOL_INSTRUCTIONS);
-    if (task.namedAgentInstructions) {
-      parts.push('', '## Agent Instructions', task.namedAgentInstructions);
-    }
+    pushOrchestratorLayers(task, parts);
   } else {
     parts.push('- When using tools from MCP servers, prefer structured data over free-form text');
   }

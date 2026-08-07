@@ -16,7 +16,9 @@ export default tseslint.config(
       '*.json',
       // Plain-JS test fixtures spawned as fake subprocesses (not TypeScript,
       // no node globals config applies to them) — see sdk-backend-contract.test.ts.
-      '**/__tests__/fixtures/**',
+      // Narrowed to *.mjs only so a stray .ts file dropped into the same
+      // fixtures directory doesn't silently escape linting.
+      '**/__tests__/fixtures/**/*.mjs',
     ],
   },
 

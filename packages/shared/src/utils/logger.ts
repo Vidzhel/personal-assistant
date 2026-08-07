@@ -3,6 +3,12 @@ import pino from 'pino';
 
 let pinoInstance: pino.Logger | null = null;
 let logDir: string | null = null;
+// The thread-stream worker behind pino.transport() — tracked so it can be
+// end()ed on re-init or shutdown. Nobody was closing this before: the worker
+// thread outlived process teardown, and in tests it raced rmSync() deleting
+// the log directory out from under it (unhandled ENOENT). See
+// closeFileLogging() and raven.ts's stop().
+let transportStream: ReturnType<typeof pino.transport> | null = null;
 
 export interface FileLoggingOptions {
   logDir: string;
@@ -16,6 +22,12 @@ export interface FileLoggingOptions {
  * Pre-init loggers (console-based) continue to work; post-init they delegate to Pino.
  */
 export function initFileLogging(opts: FileLoggingOptions): void {
+  // A previous transport's worker thread must be told to shut down before
+  // we replace the singleton, or it leaks for the life of the process.
+  if (transportStream) {
+    transportStream.end();
+  }
+
   logDir = opts.logDir;
   const DEFAULT_RETENTION_DAYS = 7;
   const maxDays = opts.maxDays ?? DEFAULT_RETENTION_DAYS;
@@ -40,12 +52,35 @@ export function initFileLogging(opts: FileLoggingOptions): void {
     });
   }
 
-  pinoInstance = pino({ level: 'debug' }, pino.transport({ targets }));
+  transportStream = pino.transport({ targets });
+  pinoInstance = pino({ level: 'debug' }, transportStream);
 }
 
 /** Returns the configured log directory, or null if file logging is not initialized. */
 export function getLogDir(): string | null {
   return logDir;
+}
+
+/**
+ * Gracefully shuts down the file-logging transport's worker thread. Ends the
+ * stream and waits for its 'close' event before nulling the singleton
+ * state, so callers (raven.ts's stop(), as its last step) can be certain no
+ * async writes are still in flight before anything deletes the log
+ * directory. A no-op if file logging was never initialized.
+ */
+export function closeFileLogging(): Promise<void> {
+  const stream = transportStream;
+  if (!stream) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    stream.once('close', () => {
+      pinoInstance = null;
+      logDir = null;
+      transportStream = null;
+      resolve();
+    });
+    stream.end();
+  });
 }
 
 /* eslint-disable no-console -- logger wraps console on purpose */

@@ -25,6 +25,23 @@ export function createSdkBackend(): AgentBackend {
     delete env.CLAUDECODE;
     delete env.CLAUDE_CODE_ENTRYPOINT;
 
+    // Bridge the caller's AbortSignal (agent-manager.ts's cancelTask, via
+    // agent-session.ts) into an SDK-native AbortController. Previously
+    // cancellation was only checked between yielded messages (see the
+    // opts.signal?.aborted check in the loop below) — a message with no
+    // further output (a long tool call, a slow turn) meant an abort could
+    // sit unnoticed for the query's full duration. Passing the SDK's own
+    // abortController lets it cancel deterministically, including killing
+    // the underlying subprocess.
+    const abortController = new AbortController();
+    if (opts.signal) {
+      if (opts.signal.aborted) {
+        abortController.abort();
+      } else {
+        opts.signal.addEventListener('abort', () => abortController.abort(), { once: true });
+      }
+    }
+
     const queryOptions: Record<string, unknown> = {
       systemPrompt: opts.systemPrompt,
       allowedTools: opts.allowedTools,
@@ -34,6 +51,7 @@ export function createSdkBackend(): AgentBackend {
       stderr: opts.onStderr,
       cwd: opts.cwd,
       env,
+      abortController,
     };
 
     if (opts.resume) {
@@ -70,6 +88,7 @@ export function createSdkBackend(): AgentBackend {
 
       if (msg.type === 'system' && msg.subtype === 'init') {
         sessionId = msg.session_id as string;
+        opts.onSessionId?.(sessionId);
       }
 
       if (msg.type === 'assistant') {

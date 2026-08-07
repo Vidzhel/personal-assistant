@@ -76,7 +76,15 @@ export interface AgentTaskCompleteEvent extends BaseEvent {
   type: 'agent:task:complete';
   payload: {
     taskId: string;
+    /** The Raven session id (AgentTask.sessionId) this task ran under, for
+     * chat turns — the id consumers should use to correlate this event with
+     * a Raven session. Not the SDK's own session id (see sdkSessionId). */
     sessionId?: string;
+    /** The id the underlying `claude` CLI/SDK assigned to this query
+     * (AgentSessionResult.sdkSessionId in agent-session.ts) — used to
+     * resume the *next* turn of the same Raven session, not a substitute
+     * for sessionId above. */
+    sdkSessionId?: string;
     result: string;
     durationMs: number;
     success: boolean;

@@ -118,6 +118,38 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('## Agent Instructions');
   });
 
+  // F4: validator dispatches (create-validation-deps.ts) share
+  // skillName: 'orchestrator' with real chat turns but set
+  // internal: 'validator' — they must return raw JSON, which the MCP Tools
+  // block's "Never output raw JSON" line directly contradicts, and Tool Use
+  // is scoped to chat handling they don't do. Both must be suppressed.
+  it('omits Tool Use and MCP Tools blocks for internal validator tasks', () => {
+    const prompt = buildSystemPrompt(makeTask({ internal: 'validator' }));
+    expect(prompt).not.toContain('## Tool Use');
+    expect(prompt).not.toContain('## MCP Tools');
+    expect(prompt).not.toContain('Raven MCP tools');
+    expect(prompt).not.toContain('Never output raw JSON');
+  });
+
+  it('still includes the Delegation block for internal validator tasks (unaffected by the F4 gate)', () => {
+    const prompt = buildSystemPrompt(makeTask({ internal: 'validator' }));
+    expect(prompt).toContain('## Delegation');
+  });
+
+  it('includes systemAccessInstructions for internal validator tasks when set (unaffected by the F4 gate)', () => {
+    const prompt = buildSystemPrompt(
+      makeTask({ internal: 'validator', systemAccessInstructions: 'No system file access' }),
+    );
+    expect(prompt).toContain('## System Access Control');
+    expect(prompt).toContain('No system file access');
+  });
+
+  it('includes Tool Use and MCP Tools blocks for non-internal orchestrator tasks (gate does not over-suppress)', () => {
+    const prompt = buildSystemPrompt(makeTask());
+    expect(prompt).toContain('## Tool Use');
+    expect(prompt).toContain('## MCP Tools');
+  });
+
   it('omits stable prompt layers for non-orchestrator skills', () => {
     const prompt = buildSystemPrompt(
       makeTask({

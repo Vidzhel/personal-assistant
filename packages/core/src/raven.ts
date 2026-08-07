@@ -4,6 +4,7 @@ import {
   createLogger,
   generateId,
   initFileLogging,
+  closeFileLogging,
   type DatabaseInterface,
   type RavenEvent,
   type RavenEventType,
@@ -698,12 +699,20 @@ export async function createRaven(
     idleDetector.stop();
     executionBridge.stop();
     templateScheduler.stop();
+    taskLifecycle.stop();
+    configCommitter.stop();
     permissionEngine.shutdown();
     scheduleEngine.stop();
     await serviceRunner.stopAll();
     if (neo4jClient) await neo4jClient.close();
     if (server) await server.close();
     log.info('Goodbye!');
+    // Last step, deliberately: the file-logging worker thread must finish
+    // flushing (including the "Goodbye!" line above) before we hand control
+    // back to the caller — test cleanup that deletes the log directory
+    // right after stop() resolves (see boot-smoke.test.ts) would otherwise
+    // race the worker thread and throw an unhandled ENOENT.
+    await closeFileLogging();
   }
 
   return {

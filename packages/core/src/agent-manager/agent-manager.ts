@@ -62,6 +62,12 @@ export interface ActiveTaskInfo {
 export class AgentManager {
   private queue: AgentTask[] = [];
   private running = new Map<string, Promise<void>>();
+  // sessionIds with a currently-running task — checked by processQueue so a
+  // second chat turn for the same Raven session never gets admitted while
+  // the first is still in flight (both would `claude --resume <same id>`
+  // concurrently; last-write-wins linkSdkSession would corrupt continuity).
+  // Populated/cleared in admitTask, synchronously with running.set/delete.
+  private runningSessionIds = new Set<string>();
   private abortControllers = new Map<string, AbortController>();
   private taskMeta = new Map<string, AgentTask>();
   private maxConcurrent: number;
@@ -144,31 +150,62 @@ export class AgentManager {
   }
 
   private admitTask(task: AgentTask): void {
+    // Mark the session as occupied *before* runTask does any real work —
+    // admitTask runs synchronously up to runTask's first await, so a second
+    // processQueue call later in this same tick (e.g. from another admitted
+    // task's turn through the loop) already sees this session as taken.
+    if (task.sessionId) this.runningSessionIds.add(task.sessionId);
     const promise = this.runTask(task).finally(() => {
       this.running.delete(task.id);
+      if (task.sessionId) this.runningSessionIds.delete(task.sessionId);
       this.processQueue();
     });
     this.running.set(task.id, promise);
   }
 
-  private processQueue(): void {
-    // Validator headroom: complete_task's handler awaits validation while
-    // holding a running slot, so at maxConcurrent saturation the evaluator/
-    // quality-reviewer would queue behind the very task it's validating and
-    // starve until it times out. Admit validator tasks regardless of the
-    // concurrency cap so they never starve behind normal task traffic.
+  // Validator headroom: complete_task's handler awaits validation while
+  // holding a running slot, so at maxConcurrent saturation the evaluator/
+  // quality-reviewer would queue behind the very task it's validating and
+  // starve until it times out. Admit validator tasks regardless of the
+  // concurrency cap so they never starve behind normal task traffic.
+  // (Validator tasks never carry sessionId — see agent-session.ts's resume
+  // comment — so they never collide with the session-skip pass below.)
+  private admitValidatorTasks(): void {
     let validatorIdx = this.queue.findIndex((t) => AgentManager.isValidatorTask(t));
     while (validatorIdx !== -1) {
       const task = this.queue.splice(validatorIdx, 1)[0];
       this.admitTask(task);
       validatorIdx = this.queue.findIndex((t) => AgentManager.isValidatorTask(t));
     }
+  }
 
-    while (this.running.size < this.maxConcurrent && this.queue.length > 0) {
-      const task = this.queue.shift();
-      if (!task) break;
+  // Serialize chat turns per session (F1): two tasks sharing a sessionId
+  // must never run concurrently — both would `claude --resume <same id>` at
+  // once, and the last one to finish would win the race to
+  // linkSdkSession, corrupting continuity. A task whose session is already
+  // running is skipped in place (left queued) rather than removed, and —
+  // critically — skipping it must not stop *other*, admissible tasks
+  // further back in the queue from being admitted. We walk the queue by
+  // index: admitting a task splices it out (so the next item shifts into
+  // the same index and gets examined next iteration); skipping one only
+  // advances the index. Either branch strictly shrinks "queue.length -
+  // idx", so the loop always terminates.
+  private admitFromQueue(): void {
+    let idx = 0;
+    while (this.running.size < this.maxConcurrent && idx < this.queue.length) {
+      const task = this.queue[idx];
+      if (task.sessionId && this.runningSessionIds.has(task.sessionId)) {
+        idx++;
+        continue;
+      }
+      this.queue.splice(idx, 1);
       this.admitTask(task);
     }
+  }
+
+  private processQueue(): void {
+    this.admitValidatorTasks();
+    this.admitFromQueue();
   }
 
   // eslint-disable-next-line max-lines-per-function, complexity -- core agent task runner with many state transitions
@@ -273,7 +310,12 @@ export class AgentManager {
       type: 'agent:task:complete',
       payload: {
         taskId: task.id,
-        sessionId: result.sdkSessionId,
+        // The Raven session id (F3): this is what consumers actually key
+        // on for session correlation. The SDK's own session id — needed
+        // only to resume the *next* turn — travels separately below; it
+        // must never be aliased into this field again.
+        sessionId: task.sessionId,
+        sdkSessionId: result.sdkSessionId,
         result: result.result,
         durationMs: result.durationMs,
         success: result.success,
@@ -309,6 +351,7 @@ export class AgentManager {
         type: 'agent:task:complete',
         payload: {
           taskId: task.id,
+          sessionId: task.sessionId,
           result: '',
           durationMs: 0,
           success: false,

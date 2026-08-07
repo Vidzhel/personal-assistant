@@ -366,6 +366,34 @@ describe('AgentManager', () => {
       expect(secondCallOptions.resume).toBe('sdk-resume-2');
     });
 
+    it('links the SDK session id even when the backend throws mid-stream after session init (F2)', async () => {
+      // Regression test for F2: sdkSessionId used to only be captured from
+      // backendResult.sessionId on the try block's success path — a throw
+      // between session init and the backend's `return` meant that path
+      // never ran, and the session id the SDK *did* assign was lost. The
+      // fix threads it out via BackendOptions.onSessionId as soon as it's
+      // known, then links it from a `finally`, independent of throw-vs-
+      // return.
+      makeProject('proj-resume-3');
+      const session = sessionManager.getOrCreateSession('proj-resume-3');
+
+      mockQuery.mockImplementation(async function* () {
+        yield { type: 'system', subtype: 'init', session_id: 'sdk-resume-3' };
+        throw new Error('simulated mid-stream SDK failure');
+      } as unknown as typeof query);
+
+      const completionPromise = new Promise<RavenEvent>((resolve) => {
+        localEventBus.once('agent:task:complete', (e) => resolve(e));
+      });
+
+      emitChatTurn('task-resume-3', session.id);
+      const event = await completionPromise;
+
+      const payload = (event as AgentTaskRequestEvent).payload as unknown as { success: boolean };
+      expect(payload.success).toBe(false);
+      expect(sessionManager.getSdkSessionId(session.id)).toBe('sdk-resume-3');
+    });
+
     it('does not resume a task with no sessionId (execution/validator tasks stay cold)', async () => {
       mockQuery.mockImplementation(async function* () {
         yield { type: 'result', subtype: 'success', result: 'done' };
@@ -426,5 +454,111 @@ describe('AgentManager', () => {
     await new Promise((r) => setTimeout(r, 100));
     expect(agentManager.getRunningCount()).toBe(0);
     expect(agentManager.getQueueLength()).toBe(0);
+  });
+
+  it('emits agent:task:complete with the Raven sessionId, not the SDK session id (F3)', async () => {
+    mockQuery.mockImplementation(async function* () {
+      yield { type: 'system', subtype: 'init', session_id: 'sdk-f3-999' };
+      yield { type: 'result', subtype: 'success', result: 'done' };
+    } as unknown as typeof query);
+
+    const completionPromise = new Promise<RavenEvent>((resolve) => {
+      eventBus.on('agent:task:complete', (e) => resolve(e));
+    });
+
+    emitTaskRequest({ taskId: 'task-f3', sessionId: 'raven-sess-f3' });
+
+    const event = await completionPromise;
+    const payload = (event as AgentTaskRequestEvent).payload as unknown as {
+      sessionId?: string;
+      sdkSessionId?: string;
+    };
+    expect(payload.sessionId).toBe('raven-sess-f3');
+    expect(payload.sdkSessionId).toBe('sdk-f3-999');
+  });
+
+  describe('F1: per-session turn serialization', () => {
+    it('two tasks with the same sessionId run one at a time, never concurrently', async () => {
+      const gates: Array<() => void> = [];
+      mockQuery.mockImplementation(async function* () {
+        await new Promise<void>((resolve) => gates.push(resolve));
+        yield { type: 'result', subtype: 'success', result: 'done' };
+      } as unknown as typeof query);
+
+      emitTaskRequest({ taskId: 'task-serial-a', sessionId: 'sess-serial-1' });
+      emitTaskRequest({ taskId: 'task-serial-b', sessionId: 'sess-serial-1' });
+
+      // The second task's sessionId collides with the first, still-running
+      // task's — it must be skipped and left queued, not admitted alongside it.
+      await new Promise((r) => setTimeout(r, 10));
+      expect(agentManager.getRunningCount()).toBe(1);
+      expect(agentManager.getQueueLength()).toBe(1);
+      expect(mockQuery.mock.calls.length).toBe(1);
+
+      // Completing the first task re-drives the queue via admitTask's
+      // .finally(() => this.processQueue()) — only then should the second,
+      // same-session task actually start.
+      gates[0]();
+      await new Promise((r) => setTimeout(r, 30));
+      expect(mockQuery.mock.calls.length).toBe(2);
+      expect(agentManager.getRunningCount()).toBe(1);
+      expect(agentManager.getQueueLength()).toBe(0);
+
+      gates[1]();
+      await new Promise((r) => setTimeout(r, 30));
+      expect(agentManager.getRunningCount()).toBe(0);
+    });
+
+    it('a same-session task queued behind an unrelated task does not block that other task', async () => {
+      const gates: Array<() => void> = [];
+      mockQuery.mockImplementation(async function* () {
+        await new Promise<void>((resolve) => gates.push(resolve));
+        yield { type: 'result', subtype: 'success', result: 'done' };
+      } as unknown as typeof query);
+
+      // task-a and task-c share a session; task-b is unrelated. task-c must
+      // be skipped in place without preventing task-b (behind it) from
+      // being admitted — this is the "iterate a copy / careful indexing"
+      // requirement: a skip must not livelock or block admissible tasks.
+      emitTaskRequest({ taskId: 'task-a', sessionId: 'sess-shared' });
+      emitTaskRequest({ taskId: 'task-b', sessionId: 'sess-other' });
+      emitTaskRequest({ taskId: 'task-c', sessionId: 'sess-shared' });
+
+      await new Promise((r) => setTimeout(r, 10));
+      expect(agentManager.getRunningCount()).toBe(2);
+      expect(agentManager.getQueueLength()).toBe(1);
+      expect(mockQuery.mock.calls.length).toBe(2);
+
+      gates[0]();
+      gates[1]();
+      await new Promise((r) => setTimeout(r, 30));
+      expect(mockQuery.mock.calls.length).toBe(3);
+
+      gates[2]();
+      await new Promise((r) => setTimeout(r, 30));
+      expect(agentManager.getRunningCount()).toBe(0);
+      expect(agentManager.getQueueLength()).toBe(0);
+    });
+
+    it('two tasks with different sessionIds run in parallel', async () => {
+      const gates: Array<() => void> = [];
+      mockQuery.mockImplementation(async function* () {
+        await new Promise<void>((resolve) => gates.push(resolve));
+        yield { type: 'result', subtype: 'success', result: 'done' };
+      } as unknown as typeof query);
+
+      emitTaskRequest({ taskId: 'task-par-a', sessionId: 'sess-par-1' });
+      emitTaskRequest({ taskId: 'task-par-b', sessionId: 'sess-par-2' });
+
+      await new Promise((r) => setTimeout(r, 10));
+      expect(agentManager.getRunningCount()).toBe(2);
+      expect(agentManager.getQueueLength()).toBe(0);
+      expect(mockQuery.mock.calls.length).toBe(2);
+
+      gates[0]();
+      gates[1]();
+      await new Promise((r) => setTimeout(r, 30));
+      expect(agentManager.getRunningCount()).toBe(0);
+    });
   });
 });

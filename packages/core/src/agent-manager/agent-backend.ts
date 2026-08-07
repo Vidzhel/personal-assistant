@@ -25,6 +25,14 @@ export interface BackendOptions {
     meta?: ToolUseMeta;
   }) => void;
   onRawMessage?: (rawJson: string) => void;
+  /** Called with the SDK-assigned session id as soon as it's known (the
+   * `system`/`init` message), independent of whether the query eventually
+   * succeeds, fails, or throws mid-stream. BackendResult.sessionId only
+   * carries the id on a clean return — a mid-stream throw skips that
+   * `return` entirely, so this callback is the only way the caller can
+   * still observe (and link) a session id from a query that errored out
+   * after establishing one. See agent-session.ts's runAgentTask. */
+  onSessionId?: (id: string) => void;
   signal?: AbortSignal;
   onStderr: (data: string) => void;
   cwd?: string;

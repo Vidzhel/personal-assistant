@@ -5,14 +5,24 @@ const log = createLogger('config-committer');
 
 export interface ConfigCommitter {
   start: () => void;
+  stop: () => void;
 }
+
+const CONFIG_EVENT_TYPES = [
+  'agent:config:created',
+  'agent:config:updated',
+  'agent:config:deleted',
+] as const;
 
 export function createConfigCommitter(deps: { eventBus: EventBus }): ConfigCommitter {
   const { eventBus } = deps;
+  // Held so stop() can unsubscribe the exact handler start() registered —
+  // this is the only resource the committer holds (no timers, no files).
+  let handler: ((event: RavenEvent) => void) | null = null;
 
   return {
     start(): void {
-      const handler = (event: RavenEvent): void => {
+      handler = (event: RavenEvent): void => {
         if (
           event.type !== 'agent:config:created' &&
           event.type !== 'agent:config:updated' &&
@@ -30,15 +40,20 @@ export function createConfigCommitter(deps: { eventBus: EventBus }): ConfigCommi
         );
       };
 
-      for (const eventType of [
-        'agent:config:created',
-        'agent:config:updated',
-        'agent:config:deleted',
-      ] as const) {
+      for (const eventType of CONFIG_EVENT_TYPES) {
         eventBus.on(eventType, handler);
       }
 
       log.info('Config committer listening for agent config changes');
+    },
+
+    stop(): void {
+      if (!handler) return;
+      for (const eventType of CONFIG_EVENT_TYPES) {
+        eventBus.off(eventType, handler);
+      }
+      handler = null;
+      log.info('Config committer stopped');
     },
   };
 }

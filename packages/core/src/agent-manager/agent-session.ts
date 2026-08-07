@@ -462,6 +462,14 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
           messageStore.appendRawMessage(task.sessionId, rawJson);
         }
       },
+      // Captured as soon as the backend observes the SDK's `system`/`init`
+      // message — independent of whether the query goes on to succeed,
+      // fail, or throw mid-stream. This is the only source of sdkSessionId
+      // on a throw (backendResult.sessionId is never assigned in that case,
+      // since the throw skips the backend's `return` entirely).
+      onSessionId: (id: string) => {
+        sdkSessionId = id;
+      },
       signal,
       onStderr: (data: string) => {
         stderrChunks.push(data);
@@ -470,18 +478,10 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       cwd: projectRoot,
     });
 
-    sdkSessionId = backendResult.sessionId;
+    sdkSessionId = backendResult.sessionId ?? sdkSessionId;
     resultText = backendResult.result;
     success = backendResult.success;
     errors.push(...backendResult.errors);
-
-    // Always update, even when resuming: if the SDK continues the same
-    // session id this is a no-op, but resume can also fork to a new id, in
-    // which case the next turn must resume from the latest one, not the one
-    // we started this turn with.
-    if (task.sessionId && opts.sessionManager && sdkSessionId) {
-      opts.sessionManager.linkSdkSession(task.sessionId, sdkSessionId);
-    }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     const stderrOutput = stderrChunks.join('');
@@ -492,6 +492,18 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
     errors.push(errMsg);
     if (stderrOutput) {
       errors.push(`stderr: ${stderrOutput.slice(STDERR_ERROR_TAIL_LENGTH)}`);
+    }
+  } finally {
+    // Always link, even when resuming and even on a mid-stream throw: if
+    // the SDK continues the same session id this is a no-op, but resume
+    // can also fork to a new id, in which case the next turn must resume
+    // from the latest one, not the one we started this turn with. Linking
+    // from `finally` (F2) — rather than only on the try block's success
+    // path — means a session id observed via onSessionId above still gets
+    // persisted even when the query throws right after establishing it;
+    // otherwise the next turn would have no sdk session to resume at all.
+    if (task.sessionId && opts.sessionManager && sdkSessionId) {
+      opts.sessionManager.linkSdkSession(task.sessionId, sdkSessionId);
     }
   }
 
