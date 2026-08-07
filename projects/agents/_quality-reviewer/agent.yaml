@@ -2,6 +2,8 @@ name: _quality-reviewer
 displayName: Quality Reviewer
 description: Adversarial quality review for high-stakes tasks — scored 1-5
 isDefault: false
+# Deliberately empty: reviews the task output it's given, no library
+# integration skills needed.
 skills: []
 bash:
   access: none

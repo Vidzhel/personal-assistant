@@ -2,6 +2,8 @@ name: _agent-builder
 displayName: Agent Builder
 description: Scaffolds entire project domains — creates projects, agents, templates, and schedules from natural language descriptions
 isDefault: false
+# Deliberately empty: this agent scaffolds projects/agents/templates via the
+# Raven scaffolding API (raven MCP), not via library integration skills.
 skills: []
 model: sonnet
 maxTurns: 30

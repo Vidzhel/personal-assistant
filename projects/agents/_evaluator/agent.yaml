@@ -2,6 +2,8 @@ name: _evaluator
 displayName: Task Evaluator
 description: Validates task completion with binary PASS/FAIL judgment
 isDefault: false
+# Deliberately empty: judges completion from the task context it's given, no
+# library integration skills needed.
 skills: []
 bash:
   access: none

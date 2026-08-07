@@ -2,6 +2,21 @@ name: raven
 displayName: Raven
 description: General-purpose assistant — handles all requests when no specialized agent is assigned
 isDefault: true
-skills: []
+skills:
+  - gmail
+  - telegram
+  - docx
+  - pdf
+  - pptx
+  - xlsx
+  - ffmpeg
+  - transcription
+  - transactions
+  - daily-digest
+  - calendar
+  - ticktick
+  - config-management
+  - orchestration
+  - pattern-analysis
 model: sonnet
 maxTurns: 20

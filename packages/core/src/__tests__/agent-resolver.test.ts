@@ -94,29 +94,31 @@ function makeMockCapabilityLibrary() {
 }
 
 describe('AgentResolver', () => {
+  describe('empty skills + empty suiteIds means NOTHING', () => {
+    it('returns empty capabilities for a default agent with no bindings', () => {
+      const registry = makeMockSuiteRegistry();
+      const resolver = createAgentResolver({ suiteRegistry: registry });
+      const agent = makeAgent({ isDefault: true, suiteIds: [], skills: [] });
+
+      const caps = resolver.resolveAgentCapabilities(agent);
+      expect(registry.collectMcpServers).not.toHaveBeenCalled();
+      expect(caps.mcpServers).toEqual({});
+      expect(caps.agentDefinitions).toEqual({});
+      expect(caps.plugins).toEqual([]);
+    });
+
+    it('returns empty capabilities for a non-default agent with no bindings', () => {
+      const registry = makeMockSuiteRegistry();
+      const resolver = createAgentResolver({ suiteRegistry: registry });
+      const agent = makeAgent({ isDefault: false, suiteIds: [], skills: [] });
+
+      const caps = resolver.resolveAgentCapabilities(agent);
+      expect(registry.collectMcpServers).not.toHaveBeenCalled();
+      expect(caps.mcpServers).toEqual({});
+    });
+  });
+
   describe('SuiteRegistry fallback (legacy)', () => {
-    it('returns all suites for default agent', () => {
-      const registry = makeMockSuiteRegistry();
-      const resolver = createAgentResolver({ suiteRegistry: registry });
-      const agent = makeAgent({ isDefault: true, suiteIds: [] });
-
-      const caps = resolver.resolveAgentCapabilities(agent);
-      expect(registry.collectMcpServers).toHaveBeenCalledWith();
-      expect(registry.collectAgentDefinitions).toHaveBeenCalledWith();
-      expect(Object.keys(caps.mcpServers).length).toBe(3);
-      expect(Object.keys(caps.agentDefinitions).length).toBe(3);
-    });
-
-    it('returns all suites when suiteIds is empty', () => {
-      const registry = makeMockSuiteRegistry();
-      const resolver = createAgentResolver({ suiteRegistry: registry });
-      const agent = makeAgent({ isDefault: false, suiteIds: [] });
-
-      const caps = resolver.resolveAgentCapabilities(agent);
-      expect(registry.collectMcpServers).toHaveBeenCalledWith();
-      expect(Object.keys(caps.mcpServers).length).toBe(3);
-    });
-
     it('filters to bound suites only', () => {
       const registry = makeMockSuiteRegistry();
       const resolver = createAgentResolver({ suiteRegistry: registry });
@@ -159,10 +161,9 @@ describe('AgentResolver', () => {
       const agent = makeAgent({ suiteIds: ['email'], skills: [] });
 
       resolver.resolveAgentCapabilities(agent);
-      // capabilityLibrary should NOT be used — the default/all path catches this
-      // since skills is empty and suiteIds is populated, but isDefault is false,
-      // the default path won't fire (skills.length===0 && suiteIds.length===0 is false)
-      // so it falls through to suiteRegistry
+      // capabilityLibrary should NOT be used — skills is empty so the
+      // explicit-skills path doesn't fire, and suiteIds is populated so
+      // hasNoBindings is false, so it falls through to suiteRegistry
       expect(registry.collectMcpServers).toHaveBeenCalledWith(['email']);
       expect(library.collectMcpServers).not.toHaveBeenCalled();
     });
@@ -193,27 +194,26 @@ describe('AgentResolver', () => {
       expect(Object.keys(caps.agentDefinitions)).toEqual(['ticktick']);
     });
 
-    it('resolves ALL capabilities for default agent with empty skills', () => {
+    it('resolves NOTHING for a default agent with empty skills (empty skills means none)', () => {
       const library = makeMockCapabilityLibrary();
       const resolver = createAgentResolver({ capabilityLibrary: library });
       const agent = makeAgent({ isDefault: true, skills: [] });
 
       const caps = resolver.resolveAgentCapabilities(agent);
-      expect(library.collectMcpServers).toHaveBeenCalledWith(undefined);
-      expect(library.collectAgentDefinitions).toHaveBeenCalledWith(undefined);
-      expect(library.resolveVendorPlugins).toHaveBeenCalledWith(undefined);
-      expect(Object.keys(caps.mcpServers).length).toBe(2);
-      expect(Object.keys(caps.agentDefinitions).length).toBe(2);
+      expect(library.collectMcpServers).not.toHaveBeenCalled();
+      expect(caps.mcpServers).toEqual({});
+      expect(caps.agentDefinitions).toEqual({});
+      expect(caps.plugins).toEqual([]);
     });
 
-    it('resolves ALL capabilities when both skills and suiteIds are empty', () => {
+    it('resolves NOTHING when both skills and suiteIds are empty', () => {
       const library = makeMockCapabilityLibrary();
       const resolver = createAgentResolver({ capabilityLibrary: library });
       const agent = makeAgent({ skills: [], suiteIds: [] });
 
       const caps = resolver.resolveAgentCapabilities(agent);
-      expect(library.collectMcpServers).toHaveBeenCalledWith(undefined);
-      expect(Object.keys(caps.mcpServers).length).toBe(2);
+      expect(library.collectMcpServers).not.toHaveBeenCalled();
+      expect(caps.mcpServers).toEqual({});
     });
 
     it('skills take priority over suiteIds when both are present', () => {

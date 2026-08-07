@@ -1,6 +1,8 @@
 name: system-admin
 displayName: System Administrator
 description: Full system access for configuration and maintenance
+# Deliberately empty: this agent works via scoped bash file access, not via
+# library integration skills.
 skills: []
 model: sonnet
 maxTurns: 20

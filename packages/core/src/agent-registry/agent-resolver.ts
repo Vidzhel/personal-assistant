@@ -74,18 +74,24 @@ export function createAgentResolver(deps: {
 
   return {
     resolveAgentCapabilities(agent: NamedAgent): ResolvedCapabilities {
-      // NEW PATH: if agent has skills populated, use CapabilityLibrary
+      // EXPLICIT PATH: agent has skills populated — resolve exactly those
+      // from the CapabilityLibrary. This is now the main path; skills: []
+      // no longer means "give me everything."
       if (capabilityLibrary && agent.skills.length > 0) {
         return resolveFromLibrary(capabilityLibrary, agent.skills);
       }
 
-      // DEFAULT/ALL: if agent is default or has empty skills+suiteIds, use all capabilities
+      // NOTHING: empty skills + empty suiteIds means the agent has no
+      // capability bindings at all — not "resolve everything." Agents that
+      // want the full library must list it explicitly (see
+      // projects/agents/raven/agent.yaml).
       const hasNoBindings = agent.skills.length === 0 && agent.suiteIds.length === 0;
-      if (capabilityLibrary && (agent.isDefault || hasNoBindings)) {
-        return resolveFromLibrary(capabilityLibrary);
+      if (hasNoBindings) {
+        return EMPTY_CAPABILITIES;
       }
 
-      // LEGACY PATH: fall back to suiteIds via SuiteRegistry
+      // LEGACY PATH: fall back to suiteIds via SuiteRegistry (pre-library
+      // agents bound to suites instead of skills). Phase 2 deletes this.
       if (suiteRegistry) {
         return resolveFromSuiteRegistry(suiteRegistry, agent);
       }
