@@ -257,12 +257,30 @@ function startEntry(name: string, state: EngineState, deps: ScheduleEngineDeps):
     log.info(`Schedule "${name}" disabled — not scheduled`);
     return;
   }
-  entry.job = new Cron(entry.def.cron, { timezone: entry.def.timezone }, () => {
-    trackedFire(entry.def, deps, inFlight);
-  });
-  log.info(
-    `Scheduled "${name}" (${entry.def.cron}) → next ${entry.job.nextRun()?.toISOString() ?? 'n/a'}`,
-  );
+  // F1 defense-in-depth: croner throws SYNCHRONOUSLY on a bad cron pattern
+  // (at construction) or bad IANA timezone (as soon as it computes the
+  // first run, which happens here too since a callback is supplied). The
+  // write path (scaffolding-api.ts's createSchedule) already validates
+  // before anything hits disk, but a schedule file can still reach this
+  // point some other way (hand-edited YAML, a future write path, a stale
+  // file from before that guard existed) — resync() calls startEntry for
+  // every schedule in one unguarded loop, so one bad entry throwing here
+  // would previously abort every schedule iterated after it. Catching here
+  // means the bad entry is logged and left unscheduled (entry.job stays
+  // null) while every other schedule starts normally.
+  try {
+    entry.job = new Cron(entry.def.cron, { timezone: entry.def.timezone }, () => {
+      trackedFire(entry.def, deps, inFlight);
+    });
+    log.info(
+      `Scheduled "${name}" (${entry.def.cron}) → next ${entry.job.nextRun()?.toISOString() ?? 'n/a'}`,
+    );
+  } catch (err) {
+    entry.job = null;
+    log.error(
+      `Schedule "${name}" has an invalid cron ("${entry.def.cron}") or timezone ("${entry.def.timezone}") — skipping: ${String(err)}`,
+    );
+  }
 }
 
 function stopEntry(name: string, entries: EntryMap): void {

@@ -189,6 +189,48 @@ describe('createHeartbeat', () => {
     expect(notifications).toHaveLength(0);
   });
 
+  // F5: exact `=== HEARTBEAT_OK` matching was brittle — a model wrapping the
+  // sentinel in markdown, trailing punctuation, or different case spuriously
+  // notified the owner. These deviant-but-equivalent forms must all swallow.
+  it.each(['**HEARTBEAT_OK**', 'HEARTBEAT_OK.', 'heartbeat_ok', '"HEARTBEAT_OK"'])(
+    'swallows the deviant HEARTBEAT_OK form %j and emits no notification',
+    async (reply) => {
+      vi.mocked(runAgentTask).mockResolvedValue({
+        taskId: 'mock-task',
+        result: reply,
+        durationMs: 5,
+        success: true,
+      });
+      const deps = makeDeps();
+      const notifications: NotificationEvent[] = [];
+      deps.eventBus.on<NotificationEvent>('notification', (e) => notifications.push(e));
+
+      const heartbeat = createHeartbeat(deps);
+      const result = await heartbeat.fireHeartbeat();
+
+      expect(result.summary).toContain('HEARTBEAT_OK');
+      expect(notifications).toHaveLength(0);
+    },
+  );
+
+  it('does not swallow real content that merely starts with HEARTBEAT_OK', async () => {
+    vi.mocked(runAgentTask).mockResolvedValue({
+      taskId: 'mock-task',
+      result: 'HEARTBEAT_OK, nothing else to report',
+      durationMs: 5,
+      success: true,
+    });
+    const deps = makeDeps();
+    const notifications: NotificationEvent[] = [];
+    deps.eventBus.on<NotificationEvent>('notification', (e) => notifications.push(e));
+
+    const heartbeat = createHeartbeat(deps);
+    const result = await heartbeat.fireHeartbeat();
+
+    expect(result.summary).toBe('notified owner');
+    expect(notifications).toHaveLength(1);
+  });
+
   it('notifies the owner on topicName "System" when the reply is not HEARTBEAT_OK', async () => {
     vi.mocked(runAgentTask).mockResolvedValue({
       taskId: 'mock-task',
@@ -210,7 +252,7 @@ describe('createHeartbeat', () => {
     expect(notifications[0].payload.body).toContain('pending approval');
   });
 
-  it('dispatches with a capped maxTurns, resuming the target session', async () => {
+  it('dispatches with a capped maxTurns, on a fresh throwaway session', async () => {
     vi.mocked(runAgentTask).mockResolvedValue({
       taskId: 'mock-task',
       result: 'HEARTBEAT_OK',
@@ -225,8 +267,34 @@ describe('createHeartbeat', () => {
     expect(runAgentTask).toHaveBeenCalledTimes(1);
     const call = vi.mocked(runAgentTask).mock.calls[0][0];
     expect(call.maxTurns).toBe(8);
-    expect(call.task.sessionId).toBe('sess-1');
+    // F4: never touches the project's live chat session — getOrCreateSession
+    // would return whichever session a real chat turn on this project is
+    // currently using, and two concurrent runAgentTask resumes of the same
+    // sdkSessionId would corrupt continuity. task.sessionId must instead be
+    // a freshly generated id, never fetched from sessionManager.
+    expect(deps.sessionManager.getOrCreateSession).not.toHaveBeenCalled();
+    expect(typeof call.task.sessionId).toBe('string');
+    expect(call.task.sessionId?.length).toBeGreaterThan(0);
     expect(call.sessionManager).toBe(deps.sessionManager);
+  });
+
+  it('uses a different throwaway session id on every fire (F4: fresh each time, no cross-fire continuity)', async () => {
+    vi.mocked(runAgentTask).mockResolvedValue({
+      taskId: 'mock-task',
+      result: 'HEARTBEAT_OK',
+      durationMs: 5,
+      success: true,
+    });
+    const deps = makeDeps();
+    const heartbeat = createHeartbeat(deps);
+
+    await heartbeat.fireHeartbeat();
+    await heartbeat.fireHeartbeat();
+
+    expect(runAgentTask).toHaveBeenCalledTimes(2);
+    const firstSessionId = vi.mocked(runAgentTask).mock.calls[0][0].task.sessionId;
+    const secondSessionId = vi.mocked(runAgentTask).mock.calls[1][0].task.sessionId;
+    expect(firstSessionId).not.toBe(secondSessionId);
   });
 
   it('skips a second concurrent fire while the first is still running', async () => {

@@ -234,10 +234,41 @@ describe('scaffoldAndActivate', () => {
         expect.stringContaining('new-cron'),
       );
     });
+
+    // F1: an invalid cron/timezone must be rejected BEFORE anything is
+    // written — the poisoned YAML must never reach disk, and therefore
+    // never reach the next boot's resync() loop either. Nothing should be
+    // registered, reloaded, or committed.
+    it('rejects an invalid cron and writes/commits/registers nothing', async () => {
+      await expect(
+        scaffoldAndActivate({
+          kind: 'schedule',
+          input: {
+            projectPath: '',
+            schedule: {
+              name: 'poison-cron',
+              cron: 'not a cron expression',
+              timezone: 'UTC',
+              enabled: true,
+              params: undefined,
+              run: { kind: 'job', ref: 'test-job' },
+            },
+          },
+        }),
+      ).rejects.toThrow(/poison-cron/);
+
+      const filePath = join(projectsDir, 'schedules', 'poison-cron.yaml');
+      expect(existsSync(filePath)).toBe(false);
+      expect(deps.projectRegistry.getGlobal().schedules.some((s) => s.name === 'poison-cron')).toBe(
+        false,
+      );
+      expect(deps.scheduleEngine.getActiveCount()).toBe(0);
+      expect(gitAutoCommitMock).not.toHaveBeenCalled();
+    });
   });
 
   describe('kind: skill', () => {
-    it('writes config.json + skill.md, reloads the capability library, and commits', async () => {
+    it('writes config.json + skill.md, reloads the capability library, and commits the skill dir AND the new domain _index.md together (F2)', async () => {
       const result = await scaffoldAndActivate({
         kind: 'skill',
         input: {
@@ -247,12 +278,42 @@ describe('scaffoldAndActivate', () => {
         },
       });
 
+      const indexMdPath = join(libraryDir, 'skills', 'new-domain', '_index.md');
       expect(result.live).toBe(true);
       expect(deps.capabilityLibrary.getSkill('new-skill')).toBeDefined();
-      expect(existsSync(join(libraryDir, 'skills', 'new-domain', '_index.md'))).toBe(true);
+      expect(existsSync(indexMdPath)).toBe(true);
+      // Regression guard for F2: the _index.md library-validator.ts requires
+      // for a brand-new domain folder must land in the SAME commit as the
+      // skill dir, or it ships outside the committed pathspec.
+      expect(gitAutoCommitMock).toHaveBeenCalledWith(
+        [result.path, indexMdPath],
+        expect.stringContaining('new-domain/new-skill'),
+      );
+    });
+
+    it('does not re-add _index.md to the pathspec for a second skill in an already-indexed domain', async () => {
+      await scaffoldAndActivate({
+        kind: 'skill',
+        input: {
+          domain: 'shared-domain',
+          skill: makeSkill({ name: 'first-skill' }),
+          skillMd: '# First Skill',
+        },
+      });
+      gitAutoCommitMock.mockClear();
+
+      const result = await scaffoldAndActivate({
+        kind: 'skill',
+        input: {
+          domain: 'shared-domain',
+          skill: makeSkill({ name: 'second-skill' }),
+          skillMd: '# Second Skill',
+        },
+      });
+
       expect(gitAutoCommitMock).toHaveBeenCalledWith(
         [result.path],
-        expect.stringContaining('new-domain/new-skill'),
+        expect.stringContaining('shared-domain/second-skill'),
       );
     });
 

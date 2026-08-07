@@ -108,4 +108,40 @@ describe('config', () => {
     expect(config.TELEGRAM_TOPIC_SYSTEM).toBeUndefined();
     expect(config.TELEGRAM_TOPIC_MAP).toBeUndefined();
   });
+
+  describe('RAVEN_HEARTBEAT_ACTIVE_HOURS (F6)', () => {
+    it('accepts a valid "HH-HH" value unchanged', async () => {
+      process.env.RAVEN_HEARTBEAT_ACTIVE_HOURS = '22-06';
+      const { loadConfig } = await import('../config.ts');
+      const config = loadConfig();
+      expect(config.RAVEN_HEARTBEAT_ACTIVE_HOURS).toBe('22-06');
+    });
+
+    it('defaults to "08-22" when unset', async () => {
+      delete process.env.RAVEN_HEARTBEAT_ACTIVE_HOURS;
+      const { loadConfig } = await import('../config.ts');
+      const config = loadConfig();
+      expect(config.RAVEN_HEARTBEAT_ACTIVE_HOURS).toBe('08-22');
+    });
+
+    // The old /^\d{1,2}-\d{1,2}$/ pattern let hours >23 through (e.g.
+    // "25-30"), which isWithinActiveHours could then never match against a
+    // 0-23 local hour — a fail-CLOSED outcome (heartbeat silently never
+    // fires) contradicting that function's documented fail-open intent. The
+    // tightened regex rejects it outright, and `.catch()` means rejection
+    // falls back to the default instead of crashing config load entirely.
+    it('falls back to the default on an out-of-range hour value rather than crashing config load', async () => {
+      process.env.RAVEN_HEARTBEAT_ACTIVE_HOURS = '25-30';
+      const { loadConfig } = await import('../config.ts');
+      const config = loadConfig();
+      expect(config.RAVEN_HEARTBEAT_ACTIVE_HOURS).toBe('08-22');
+    });
+
+    it('falls back to the default on a malformed value', async () => {
+      process.env.RAVEN_HEARTBEAT_ACTIVE_HOURS = 'garbage';
+      const { loadConfig } = await import('../config.ts');
+      const config = loadConfig();
+      expect(config.RAVEN_HEARTBEAT_ACTIVE_HOURS).toBe('08-22');
+    });
+  });
 });

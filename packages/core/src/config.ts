@@ -74,10 +74,18 @@ const envSchema = z.object({
   // Heartbeat (Phase 4 Task 3): ambient check-in schedule kind, off by
   // default (see projects/schedules/heartbeat.yaml). "HH-HH" local hours,
   // interpreted in RAVEN_TIMEZONE — e.g. "08-22" means active 08:00-21:59.
+  // Bounded to 0-23 (F6): the old /^\d{1,2}-\d{1,2}$/ pattern admitted
+  // hour values like "25-30" that pass this regex but can never match
+  // isWithinActiveHours' 0-23 local hour — a config typo would silently
+  // mute the heartbeat forever, the exact fail-CLOSED outcome that
+  // function's own fail-open design is supposed to prevent. `.catch()`
+  // means a value that still fails this tighter regex falls back to the
+  // default rather than crashing the entire config load over one knob.
   RAVEN_HEARTBEAT_ACTIVE_HOURS: z
     .string()
-    .regex(/^\d{1,2}-\d{1,2}$/, 'Must be "HH-HH" (e.g. "08-22")')
-    .default('08-22'),
+    .regex(/^([01]?\d|2[0-3])-([01]?\d|2[0-3])$/, 'Must be "HH-HH" with hours 0-23 (e.g. "08-22")')
+    .default('08-22')
+    .catch('08-22'),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

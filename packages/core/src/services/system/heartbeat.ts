@@ -25,6 +25,15 @@ const log = createLogger('heartbeat');
 
 const HEARTBEAT_SKILL_NAME = 'heartbeat';
 const HEARTBEAT_OK = 'HEARTBEAT_OK';
+/** Matched against the trimmed model reply instead of an exact `===`
+ * comparison (F5): a model can wrap the sentinel in markdown emphasis
+ * (**HEARTBEAT_OK**), trailing punctuation (HEARTBEAT_OK.), or different
+ * case without changing its meaning — none of that should turn a swallowed
+ * check-in into a spurious owner notification. \W* only eats *surrounding*
+ * non-word characters, so real content appended after the sentinel (e.g.
+ * "HEARTBEAT_OK, nothing else to report") still fails to match and is
+ * correctly treated as a real notification. */
+const HEARTBEAT_OK_RE = /^\W*heartbeat_ok\W*$/i;
 /** Unattended background dispatch, not an interactive turn — capped well
  * below config.RAVEN_AGENT_MAX_TURNS so a confused run can't burn budget
  * silently overnight. */
@@ -151,8 +160,8 @@ function resolveTargetSystemAccessInstructions(db: Database.Database, projectId:
   return resolveSystemAccessInstructions(project);
 }
 
-/** Dispatches ONE synthetic chat-style turn on the target project's
- * existing session — reuses runAgentTask directly (same primitive
+/** Dispatches ONE synthetic chat-style turn on a dedicated, throwaway
+ * session — reuses runAgentTask directly (same primitive
  * session-retrospective.ts/memory-consolidation.ts use for their own
  * internal dispatches) rather than emitting `agent:task:request` through
  * the event bus. That distinction matters here specifically: every
@@ -165,17 +174,27 @@ function resolveTargetSystemAccessInstructions(db: Database.Database, projectId:
  * the result synchronously so this module — not a generic completion
  * broadcast — is what decides swallow vs. notify.
  *
- * Session continuity ("resume the default agent's current session") comes
- * from passing sessionManager + task.sessionId: runAgentTask resumes the
- * same SDK session a real chat turn would and re-links the new SDK session
- * id afterward, so the next real user turn continues from here forward.
- * messageStore is deliberately NOT passed, so this synthetic turn never
- * shows up in the owner's own chat transcript — only its (rare)
+ * Session id is a fresh generateId() each fire, deliberately NOT looked up
+ * via sessionManager.getOrCreateSession(projectId) (F4): that call returns
+ * whichever session is currently idle/running for the project — the SAME
+ * row a real chat turn on META could be mid-turn on right now. The
+ * heartbeat's cron cadence has no visibility into (and no serialization
+ * with) agent-manager's own task dispatch, so two runAgentTask calls
+ * resuming/linking the same sdkSessionId concurrently would corrupt SDK
+ * session continuity for the owner's real conversation. A fresh, never-
+ * persisted session id sidesteps that entirely: getSdkSessionId(freshId)
+ * always misses (cold start, no resume), and the finally-block
+ * linkSdkSession(freshId, ...) is a harmless no-op UPDATE against a row
+ * that was never inserted. The heartbeat doesn't need chat history or
+ * cross-fire continuity — only memory/approvals/task-board tool access,
+ * which resolveCapabilities below provides independently of any session.
+ * messageStore is deliberately NOT passed either, so this synthetic turn
+ * never shows up in the owner's own chat transcript — only its (rare)
  * notification is owner-visible, per the silence contract. */
 async function dispatchHeartbeatTurn(deps: HeartbeatDeps): Promise<string> {
   const { db, eventBus, sessionManager, ravenMcpDeps, memoryStore, permissionDeps, config } = deps;
   const projectId = deps.targetProjectId ?? META_PROJECT_ID;
-  const session = sessionManager.getOrCreateSession(projectId);
+  const sessionId = generateId();
   const capabilities = resolveCapabilities(deps);
   // Every real chat turn carries the knowledge-agent sub-agent (see
   // orchestrator.ts) — heartbeat mirrors that for parity.
@@ -183,7 +202,7 @@ async function dispatchHeartbeatTurn(deps: HeartbeatDeps): Promise<string> {
 
   const task: AgentTask = {
     id: generateId(),
-    sessionId: session.id,
+    sessionId,
     projectId,
     skillName: HEARTBEAT_SKILL_NAME,
     prompt: HEARTBEAT_PROMPT,
@@ -272,7 +291,7 @@ export function createHeartbeat(deps: HeartbeatDeps): Heartbeat {
     running = true;
     try {
       const response = await dispatchHeartbeatTurn(deps);
-      if (response.trim() === HEARTBEAT_OK) {
+      if (HEARTBEAT_OK_RE.test(response.trim())) {
         log.info(`${HEARTBEAT_OK} — swallowed`);
         return { summary: `${HEARTBEAT_OK} (swallowed)` };
       }

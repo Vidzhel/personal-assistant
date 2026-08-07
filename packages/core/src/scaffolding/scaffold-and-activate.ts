@@ -60,11 +60,19 @@ export interface ScaffoldAndActivateDeps {
 
 export type ScaffoldAndActivateFn = (spec: ScaffoldSpec) => Promise<ScaffoldActivateResult>;
 
-async function commit(path: string, message: string): Promise<ScaffoldActivateResult> {
-  await gitAutoCommit([path], message).catch((err: unknown) => {
+/** `paths` accepts more than one entry so activateSkill (F2) can fold a
+ * brand-new domain's _index.md into the SAME commit as the skill it was
+ * created alongside — committing only the skill dir would leave _index.md
+ * (required by library-validator.ts whenever a domain folder has
+ * subdirectories but no config.json of its own) outside the committed
+ * pathspec. The returned `path` is always the primary artifact path (the
+ * first entry), matching every other kind's single-path result. */
+async function commit(paths: string | string[], message: string): Promise<ScaffoldActivateResult> {
+  const pathList = Array.isArray(paths) ? paths : [paths];
+  await gitAutoCommit(pathList, message).catch((err: unknown) => {
     log.warn(`gitAutoCommit failed (non-blocking): ${String(err)}`);
   });
-  return { path, live: true };
+  return { path: pathList[0], live: true };
 }
 
 /** Re-sync the cron engine against the global project's schedule set —
@@ -134,10 +142,11 @@ async function activateSkill(
   input: ScaffoldSkillInput,
   deps: ScaffoldAndActivateDeps,
 ): Promise<ScaffoldActivateResult> {
-  const name = await deps.scaffoldingApi.createSkill(input);
+  const { name, indexMdPath } = await deps.scaffoldingApi.createSkill(input);
   await deps.capabilityLibrary.load(deps.libraryDir);
   const filePath = join(deps.libraryDir, 'skills', input.domain, name);
-  return commit(filePath, `feat(skill): scaffold "${input.domain}/${name}"`);
+  const paths = indexMdPath ? [filePath, indexMdPath] : filePath;
+  return commit(paths, `feat(skill): scaffold "${input.domain}/${name}"`);
 }
 
 export function createScaffoldAndActivate(deps: ScaffoldAndActivateDeps): ScaffoldAndActivateFn {

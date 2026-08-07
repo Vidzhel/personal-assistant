@@ -1,8 +1,10 @@
 import { mkdir, writeFile, access } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, isAbsolute } from 'node:path';
 
 import yaml from 'js-yaml';
 const { dump } = yaml;
+
+import { Cron } from 'croner';
 
 import {
   createLogger,
@@ -53,6 +55,17 @@ export interface ScaffoldSkillInput {
   skillMd: string;
 }
 
+export interface CreateSkillResult {
+  name: string;
+  /** Set only when this call also created a brand-new domain folder's
+   * _index.md (library-validator.ts requires one on any directory that has
+   * subdirectories but no config.json of its own). Callers must include
+   * this path in their git-commit pathspec alongside the skill dir, or the
+   * new domain's required index file ships outside the commit that
+   * introduced it — see scaffold-and-activate.ts's activateSkill. */
+  indexMdPath?: string;
+}
+
 export interface ScaffoldPlan {
   projects: ScaffoldProjectInput[];
   agents: ScaffoldAgentInput[];
@@ -89,7 +102,7 @@ export interface ScaffoldingApi {
   createAgent(input: ScaffoldAgentInput): Promise<string>;
   createTemplate(input: ScaffoldTemplateInput): Promise<string>;
   createSchedule(input: ScaffoldScheduleInput): Promise<string>;
-  createSkill(input: ScaffoldSkillInput): Promise<string>;
+  createSkill(input: ScaffoldSkillInput): Promise<CreateSkillResult>;
   scaffoldDomain(plan: ScaffoldPlan): Promise<ScaffoldResult>;
 }
 
@@ -118,11 +131,76 @@ function domainTitle(domain: string): string {
     .join(' ');
 }
 
+/** Traversal guard shared by every artifact-creating function via
+ * projectDirFor below (F3): '' is the one allowed non-relative value (it
+ * means "global scope" — see resolveProjectDir), everything else must be a
+ * plain relative path with no ".." segment. Chat hardcodes projectPath:'' and
+ * kebab-validates project names, so this is unreachable from chat — but the
+ * REST scaffold routes and scaffoldDomain forward owner/caller-supplied
+ * path/projectPath values straight through, so a value like
+ * "../../../etc" must be rejected here rather than silently resolving
+ * outside projectsDir. */
+function assertSafeRelativePath(relativePath: string, label: string): void {
+  if (relativePath === '') return;
+  const hasDotDotSegment = relativePath.split(/[/\\]+/).some((segment) => segment === '..');
+  if (hasDotDotSegment || isAbsolute(relativePath) || relativePath.startsWith('/')) {
+    throw new Error(
+      `Invalid ${label}: must be a relative path with no ".." segments (got "${relativePath}")`,
+    );
+  }
+}
+
+/** Throwaway construction to force croner to validate the cron pattern and
+ * IANA timezone SYNCHRONOUSLY, before anything is written to disk (F1).
+ * Croner throws at construction for a malformed pattern, and at nextRun()
+ * for an invalid timezone (see schedule-engine.ts's startEntry, which hits
+ * the exact same throw shape once a function callback is supplied) — no
+ * callback is passed here, so no timer is ever armed by this check. */
+function validateCronSchedule(schedule: ScheduleYaml): void {
+  try {
+    new Cron(schedule.cron, { timezone: schedule.timezone }).nextRun();
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `Invalid cron "${schedule.cron}" or timezone "${schedule.timezone}" for schedule "${schedule.name}": ${reason}`,
+      { cause: err },
+    );
+  }
+}
+
+/** Split out of createSkill purely to keep that function's cyclomatic
+ * complexity under the guardrail — these three checks (domain casing,
+ * red-tier cap, mcp-ref existence) are independent validations with no
+ * shared state beyond `deps`/`input`/`validated`, already in scope. */
+function assertSkillCreatable(
+  input: ScaffoldSkillInput,
+  validated: SkillConfig,
+  deps: ScaffoldingDeps,
+): void {
+  if (!DOMAIN_RE.test(input.domain)) {
+    throw new Error(`Skill domain must be lowercase kebab-case: ${input.domain}`);
+  }
+  for (const action of validated.actions) {
+    if (action.defaultTier === 'red') {
+      throw new Error(
+        `Tool-created skills cannot set action "${action.name}" to red tier — ` +
+          `red requires the owner to edit library/skills/${input.domain}/${validated.name}/config.json directly`,
+      );
+    }
+  }
+  for (const mcpRef of validated.mcps) {
+    if (!deps.capabilityLibrary?.getMcp(mcpRef)) {
+      throw new Error(`MCP reference "${mcpRef}" not found in library/mcps/`);
+    }
+  }
+}
+
 // eslint-disable-next-line max-lines-per-function -- factory with project/agent/template/schedule/skill creation methods
 export function createScaffoldingApi(deps: ScaffoldingDeps): ScaffoldingApi {
   const { projectsDir, projectRegistry, agentYamlStore: _agentYamlStore } = deps;
 
   function projectDirFor(relativePath: string): string {
+    assertSafeRelativePath(relativePath, 'project path');
     return resolveProjectDir(projectsDir, relativePath);
   }
 
@@ -169,6 +247,13 @@ export function createScaffoldingApi(deps: ScaffoldingDeps): ScaffoldingApi {
 
   async function createSchedule(input: ScaffoldScheduleInput): Promise<string> {
     const validated = ScheduleYamlSchema.parse(input.schedule);
+    // F1: validate the cron/timezone BEFORE anything is written — croner
+    // throws synchronously on a bad pattern/timezone, and if that throw
+    // happened only after the YAML hit disk, the poisoned file would still
+    // be there for the next boot's resync to choke on (see
+    // schedule-engine.ts's startEntry for the defense-in-depth half of this
+    // fix).
+    validateCronSchedule(validated);
     const projectDir = projectDirFor(input.projectPath);
     const schedulesDir = join(projectDir, 'schedules');
     await mkdir(schedulesDir, { recursive: true });
@@ -181,28 +266,13 @@ export function createScaffoldingApi(deps: ScaffoldingDeps): ScaffoldingApi {
     return validated.name;
   }
 
-  async function createSkill(input: ScaffoldSkillInput): Promise<string> {
-    if (!DOMAIN_RE.test(input.domain)) {
-      throw new Error(`Skill domain must be lowercase kebab-case: ${input.domain}`);
-    }
+  async function createSkill(input: ScaffoldSkillInput): Promise<CreateSkillResult> {
     if (!deps.capabilityLibrary || !deps.libraryDir) {
       throw new Error('createSkill requires capabilityLibrary + libraryDir to be configured');
     }
 
     const validated = SkillConfigSchema.parse(input.skill);
-    for (const action of validated.actions) {
-      if (action.defaultTier === 'red') {
-        throw new Error(
-          `Tool-created skills cannot set action "${action.name}" to red tier — ` +
-            `red requires the owner to edit library/skills/${input.domain}/${validated.name}/config.json directly`,
-        );
-      }
-    }
-    for (const mcpRef of validated.mcps) {
-      if (!deps.capabilityLibrary.getMcp(mcpRef)) {
-        throw new Error(`MCP reference "${mcpRef}" not found in library/mcps/`);
-      }
-    }
+    assertSkillCreatable(input, validated, deps);
 
     const domainDir = join(deps.libraryDir, 'skills', input.domain);
     const skillDir = join(domainDir, validated.name);
@@ -220,16 +290,18 @@ export function createScaffoldingApi(deps: ScaffoldingDeps): ScaffoldingApi {
     // subdirectories but no config.json of its own — a brand new domain
     // folder needs one or `npm run validate:library` fails.
     const domainIndexPath = join(domainDir, '_index.md');
+    let indexMdPath: string | undefined;
     if (!(await pathExists(domainIndexPath))) {
       await writeFile(
         domainIndexPath,
         `# ${domainTitle(input.domain)} Skills\n\n- **${validated.name}/** — ${validated.description}\n`,
         'utf-8',
       );
+      indexMdPath = domainIndexPath;
     }
 
     log.info(`Created skill: ${input.domain}/${validated.name}`);
-    return validated.name;
+    return { name: validated.name, ...(indexMdPath !== undefined && { indexMdPath }) };
   }
 
   // eslint-disable-next-line max-lines-per-function, complexity -- sequential scaffolding with error collection

@@ -201,6 +201,78 @@ describe('ScaffoldingApi', () => {
         api.createSchedule({ projectPath: 'test', schedule: invalid }),
       ).rejects.toThrow();
     });
+
+    // F1: croner throws synchronously on a bad pattern/timezone — this must
+    // be caught and turned into a clean rejection BEFORE anything is
+    // written, so a poisoned schedule never reaches disk (and therefore
+    // never reaches the next boot's resync either).
+    it('rejects an invalid cron pattern and writes nothing to disk', async () => {
+      const schedule = makeSchedule({ name: 'bad-cron', cron: 'not a cron expression' });
+      await expect(api.createSchedule({ projectPath: 'test-project', schedule })).rejects.toThrow(
+        /bad-cron/,
+      );
+
+      expect(existsSync(join(tmpDir, 'test-project', 'schedules', 'bad-cron.yaml'))).toBe(false);
+    });
+
+    it('rejects an invalid IANA timezone and writes nothing to disk', async () => {
+      const schedule = makeSchedule({ name: 'bad-tz', timezone: 'Not/AZone' });
+      await expect(api.createSchedule({ projectPath: 'test-project', schedule })).rejects.toThrow(
+        /bad-tz/,
+      );
+
+      expect(existsSync(join(tmpDir, 'test-project', 'schedules', 'bad-tz.yaml'))).toBe(false);
+    });
+
+    it('accepts a valid cron/timezone (control case)', async () => {
+      const schedule = makeSchedule({ name: 'good-cron', cron: '0 9 * * *', timezone: 'UTC' });
+      await expect(api.createSchedule({ projectPath: 'test-project', schedule })).resolves.toBe(
+        'good-cron',
+      );
+    });
+  });
+
+  // F3: path/projectPath traversal guard, shared by every artifact-creating
+  // function via projectDirFor. Not chat-reachable (chat hardcodes
+  // projectPath:'' and kebab-validates names) but REST POST
+  // /api/scaffold/project|agent|template|schedule and scaffoldDomain forward
+  // caller-supplied values straight through.
+  describe('path traversal guard (F3)', () => {
+    it('createProject rejects a path containing ".."', async () => {
+      await expect(api.createProject({ path: '../../etc/evil' })).rejects.toThrow(/\.\./);
+    });
+
+    it('createProject rejects a leading-slash absolute path', async () => {
+      await expect(api.createProject({ path: '/etc/evil' })).rejects.toThrow();
+    });
+
+    it('createAgent rejects a projectPath containing ".." and writes nothing', async () => {
+      const agent = makeAgent({ name: 'evil-agent' });
+      await expect(api.createAgent({ projectPath: '../../etc', agent })).rejects.toThrow(/\.\./);
+    });
+
+    it('createTemplate rejects a projectPath containing ".."', async () => {
+      const template = makeTemplate({ name: 'evil-template' });
+      await expect(api.createTemplate({ projectPath: '../outside', template })).rejects.toThrow(
+        /\.\./,
+      );
+    });
+
+    it('createSchedule rejects a projectPath containing ".."', async () => {
+      const schedule = makeSchedule({ name: 'evil-schedule' });
+      await expect(api.createSchedule({ projectPath: '../outside', schedule })).rejects.toThrow(
+        /\.\./,
+      );
+    });
+
+    it('still allows the empty projectPath (global scope)', async () => {
+      const agent = makeAgent({ name: 'global-ok' });
+      await expect(api.createAgent({ projectPath: '', agent })).resolves.toBe('global-ok');
+    });
+
+    it('still allows an ordinary nested relative path', async () => {
+      await expect(api.createProject({ path: 'a/b/c' })).resolves.toBe('a/b/c');
+    });
   });
 
   describe('scaffoldDomain', () => {

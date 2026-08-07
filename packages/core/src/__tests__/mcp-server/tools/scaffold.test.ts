@@ -119,6 +119,27 @@ describe('buildScaffoldTools', () => {
       });
       expect(result.isError).toBeFalsy();
     });
+
+    // F1: the tool must surface scaffoldingApi's cron/timezone rejection as
+    // an error result rather than let it bubble as an unhandled rejection —
+    // the model needs the error text back to retry with a valid cron, and
+    // this proves nothing about "success" leaks through when the write
+    // never happened.
+    it('surfaces an invalid-cron rejection from scaffoldAndActivate as an error result', async () => {
+      scaffoldAndActivate.mockRejectedValue(
+        new Error('Invalid cron "not a cron" or timezone "UTC" for schedule "daily-check": boom'),
+      );
+      const tools = buildScaffoldTools(deps, scope);
+      const tool = tools.find((t) => t.name === 'create_schedule')!;
+
+      const result = await tool.handler(
+        { name: 'daily-check', cron: 'not a cron', kind: 'job', target: 'task-archival' },
+        {},
+      );
+
+      expect(result.isError).toBe(true);
+      expect((result.content[0] as { text: string }).text).toContain('Invalid cron');
+    });
   });
 
   describe('create_skill', () => {
