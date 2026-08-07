@@ -1,0 +1,7 @@
+name: memory-consolidation
+cron: "0 4 * * *"
+timezone: UTC
+enabled: true
+run:
+  kind: job
+  ref: memory-consolidation

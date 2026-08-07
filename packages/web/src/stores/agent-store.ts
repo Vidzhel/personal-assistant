@@ -5,6 +5,7 @@ import {
   type RavenTaskRecord,
   type Skill,
   type Project,
+  type AgentMemoryFile,
 } from '@/lib/api-client';
 
 interface AgentState {
@@ -12,9 +13,11 @@ interface AgentState {
   availableSkills: Skill[];
   availableProjects: Project[];
   selectedAgentTasks: RavenTaskRecord[];
+  selectedAgentMemory: AgentMemoryFile[];
   showForm: boolean;
   editingAgentId: string | null;
   showTaskHistory: string | null;
+  showMemory: string | null;
   loading: boolean;
   error: string | null;
 
@@ -26,6 +29,8 @@ interface AgentState {
   closeForm: () => void;
   showHistory: (agentId: string) => Promise<void>;
   closeHistory: () => void;
+  showMemoryPanel: (agentId: string) => Promise<void>;
+  closeMemoryPanel: () => void;
   createAgent: (data: {
     name: string;
     description?: string;
@@ -57,9 +62,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   availableSkills: [],
   availableProjects: [],
   selectedAgentTasks: [],
+  selectedAgentMemory: [],
   showForm: false,
   editingAgentId: null,
   showTaskHistory: null,
+  showMemory: null,
   loading: false,
   error: null,
 
@@ -105,6 +112,18 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   closeHistory: () => set({ showTaskHistory: null, selectedAgentTasks: [] }),
+
+  showMemoryPanel: async (agentId) => {
+    set({ showMemory: agentId, selectedAgentMemory: [] });
+    try {
+      const memory = await api.getAgentMemory(agentId);
+      set({ selectedAgentMemory: memory });
+    } catch {
+      /* polling failure — panel shows empty */
+    }
+  },
+
+  closeMemoryPanel: () => set({ showMemory: null, selectedAgentMemory: [] }),
 
   createAgent: async (data) => {
     set({ loading: true, error: null });

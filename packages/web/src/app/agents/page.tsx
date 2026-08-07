@@ -3,21 +3,12 @@
 import { useEffect, useRef } from 'react';
 import { useAgentStore } from '@/stores/agent-store';
 import { AgentCard } from '@/components/agents/AgentCard';
-import { AgentFormModal } from '@/components/agents/AgentFormModal';
-import { AgentTaskHistory } from '@/components/agents/AgentTaskHistory';
+import { AgentOverlays } from '@/components/agents/AgentOverlays';
 
 const POLL_INTERVAL_MS = 5000;
 
 export default function AgentsPage() {
-  const {
-    agents,
-    showForm,
-    showTaskHistory,
-    fetchAgents,
-    fetchSkills,
-    fetchProjects,
-    openCreateForm,
-  } = useAgentStore();
+  const { agents, fetchAgents, fetchSkills, fetchProjects, openCreateForm } = useAgentStore();
   const timerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   useEffect(() => {
@@ -58,8 +49,7 @@ export default function AgentsPage() {
         </div>
       )}
 
-      {showForm && <AgentFormModal />}
-      {showTaskHistory && <AgentTaskHistory />}
+      <AgentOverlays />
     </div>
   );
 }

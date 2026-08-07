@@ -23,6 +23,7 @@ import type { Neo4jClient } from '../knowledge-engine/neo4j-client.ts';
 import type { KnowledgeLifecycle } from '../knowledge-engine/knowledge-lifecycle.ts';
 import type { Retrospective } from '../knowledge-engine/retrospective.ts';
 import type { SessionRetrospective } from '../session-manager/session-retrospective.ts';
+import type { MemoryStore } from '../agent-memory/memory-store.ts';
 import type { DatabaseInterface } from '@raven/shared';
 import { registerHealthRoute } from './routes/health.ts';
 import { registerProjectRoutes } from './routes/projects.ts';
@@ -88,6 +89,7 @@ export interface ApiDeps {
   unsnoozableCategories?: string[];
   taskStore?: TaskStore;
   namedAgentStore?: NamedAgentStore;
+  memoryStore?: MemoryStore;
   sessionRetrospective?: SessionRetrospective;
   dataDir?: string;
   projectRegistry?: ProjectRegistry;
@@ -192,6 +194,7 @@ export async function createApiServer(
       namedAgentStore: deps.namedAgentStore,
       agentManager: deps.agentManager,
       taskStore: deps.taskStore,
+      memoryStore: deps.memoryStore,
     });
   }
 

@@ -71,6 +71,7 @@ import { createTemplateScheduler } from './template-engine/template-scheduler.ts
 import type { SessionIdleEvent } from '@raven/shared';
 import type { RavenMcpDeps } from './mcp-server/index.ts';
 import { createMemoryStore } from './agent-memory/memory-store.ts';
+import { createMemoryConsolidation } from './agent-memory/memory-consolidation.ts';
 import { createJobRegistry } from './scheduler/job-registry.ts';
 import { registerCoreJobs } from './scheduler/core-jobs.ts';
 import { createScheduleEngine } from './scheduler/schedule-engine.ts';
@@ -587,23 +588,50 @@ export async function createRaven(
     }
   }
 
-  // 11a. Init session retrospective — its factory requires knowledgeStore +
-  // neo4j (both non-optional), so only construct it when the knowledge
-  // engine came up. Compaction has no Neo4j dependency and is unaffected.
-  const sessionRetrospective =
-    knowledgeStore && neo4jClient
-      ? createSessionRetrospective({
-          messageStore,
-          sessionManager,
-          eventBus,
-          config,
-          knowledgeStore,
-          neo4j: neo4jClient,
-        })
-      : undefined;
+  // 11a. Init session retrospective — always constructed now (Phase 3): the
+  // memory-candidate write path has no Neo4j dependency, so degraded mode
+  // (Neo4j unreachable) still runs retrospectives and still writes memory
+  // candidates. Only the additive knowledge-bubble half of the pipeline is
+  // conditional on knowledgeStore+neo4jClient (see SessionRetrospectiveDeps).
+  const sessionRetrospective = createSessionRetrospective({
+    messageStore,
+    sessionManager,
+    eventBus,
+    config,
+    projectsDir,
+    namedAgentStore,
+    ...(knowledgeStore && neo4jClient ? { knowledgeStore, neo4j: neo4jClient } : {}),
+  });
+
+  // 11a-2. Memory consolidation (Phase 3): promotes pending memory
+  // candidates written by retrospectives into an agent's actual memory
+  // files, then regenerates MEMORY.md and git-commits. No Neo4j dependency.
+  const memoryConsolidation = createMemoryConsolidation({
+    projectsDir,
+    memoryStore,
+    namedAgentStore,
+    eventBus,
+    config,
+  });
+
+  // 11a-3. Weekly system retrospective deps (Phase 3): deterministic
+  // aggregation of agent_tasks failures + stuck task trees over 7d into one
+  // memory candidate for the default agent. No model call, no Neo4j dep.
+  const systemRetrospectiveDeps = {
+    projectsDir,
+    db: getDb(),
+    executionLogger,
+    namedAgentStore,
+  };
 
   // Unified schedule engine (job-kind schedules; template/agent kinds land in Plan 1b)
-  registerCoreJobs(jobRegistry, { taskStore, retrospective, knowledgeConsolidation });
+  registerCoreJobs(jobRegistry, {
+    taskStore,
+    retrospective,
+    knowledgeConsolidation,
+    memoryConsolidation,
+    systemRetrospectiveDeps,
+  });
   const schedulePrefs = createSchedulePrefs(getDb());
   const scheduleEngine = createScheduleEngine({
     schedules: projectRegistry.getGlobal().schedules,
@@ -615,17 +643,14 @@ export async function createRaven(
   });
   scheduleEngine.start();
 
-  // 11b. Init idle detector + register session:idle handler (only when the
-  // knowledge engine came up — sessionRetrospective is undefined otherwise)
+  // 11b. Init idle detector + register session:idle handler — sessionRetrospective
+  // is unconditionally constructed now (Phase 3), so this always wires up.
   const idleDetector = createIdleDetector({ eventBus, config });
-  if (sessionRetrospective) {
-    const retrospectiveOnIdle = sessionRetrospective;
-    eventBus.on<SessionIdleEvent>('session:idle', (e) => {
-      retrospectiveOnIdle
-        .runRetrospective(e.payload.sessionId, e.payload.projectId)
-        .catch((err: unknown) => log.error(`Session retrospective failed: ${err}`));
-    });
-  }
+  eventBus.on<SessionIdleEvent>('session:idle', (e) => {
+    sessionRetrospective
+      .runRetrospective(e.payload.sessionId, e.payload.projectId)
+      .catch((err: unknown) => log.error(`Session retrospective failed: ${err}`));
+  });
   idleDetector.start();
   log.info('Session idle detector started');
 
@@ -681,6 +706,7 @@ export async function createRaven(
         db: dbInterface,
         taskStore,
         namedAgentStore,
+        memoryStore,
         serviceRunner,
         configuredServiceCount,
         unsnoozableCategories: [...UNSNOOZABLE_CATEGORIES],

@@ -1,0 +1,7 @@
+name: system-retrospective
+cron: "0 5 * * 1"
+timezone: UTC
+enabled: true
+run:
+  kind: job
+  ref: system-retrospective

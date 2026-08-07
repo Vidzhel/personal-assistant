@@ -91,6 +91,7 @@ export interface SessionRetrospectiveResult {
   candidateBubbles: CandidateBubble[];
   bubblesCreated: number;
   bubblesDrafted: number;
+  memoryCandidatesWritten: number;
 }
 
 export interface AgentTask {

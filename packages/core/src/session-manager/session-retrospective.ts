@@ -16,6 +16,12 @@ import { linkBubbleToProject } from '../knowledge-engine/project-knowledge.ts';
 import { getProjectKnowledgeLinks } from '../knowledge-engine/project-knowledge.ts';
 import { isContentRejected } from '../knowledge-engine/knowledge-rejections.ts';
 import { runAgentTask } from '../agent-manager/agent-session.ts';
+import type { NamedAgentStore } from '../agent-registry/yaml-named-agent-store.ts';
+import type { MemoryCandidateProposal } from '../agent-memory/memory-candidates.ts';
+import {
+  parseMemoryCandidateProposals,
+  writeMemoryCandidate,
+} from '../agent-memory/memory-candidates.ts';
 
 const log = createLogger('session-retrospective');
 
@@ -27,8 +33,15 @@ interface SessionRetrospectiveDeps {
   sessionManager: SessionManager;
   eventBus: EventBus;
   config: AppConfig;
-  knowledgeStore: KnowledgeStore;
-  neo4j: Neo4jClient;
+  projectsDir: string;
+  namedAgentStore: NamedAgentStore;
+  // Knowledge-bubble writes stay conditional on the Neo4j-backed knowledge
+  // engine being up (see raven.ts) — degraded mode (Neo4j unreachable)
+  // still runs the retrospective and still writes memory candidates below,
+  // it just skips this half of the pipeline. This is the decoupling this
+  // phase's plan calls for: memory candidates work in both modes.
+  knowledgeStore?: KnowledgeStore;
+  neo4j?: Neo4jClient;
 }
 
 export interface SessionRetrospective {
@@ -54,6 +67,9 @@ const RETROSPECTIVE_SYSTEM_PROMPT = `You are a session retrospective agent. Anal
   "actionItems": ["action 1", "action 2"],
   "candidateBubbles": [
     { "title": "...", "content": "...", "tags": ["..."], "confidence": "high|low", "sourceDescription": "..." }
+  ],
+  "memoryCandidates": [
+    { "title": "...", "content": "..." }
   ]
 }
 
@@ -64,40 +80,110 @@ Guidelines:
 - Action items: Tasks or follow-ups identified but not completed
 - Candidate bubbles: Reusable knowledge nuggets. Use "high" confidence for clear factual findings and explicit decisions. Use "low" confidence for subjective interpretations or tentative conclusions.
 - Compare against the existing project knowledge (provided below) to avoid duplicates — do NOT propose bubbles that repeat existing knowledge.
+- Memory candidates: 0-3 DURABLE facts worth the assistant remembering across future sessions — owner preferences, standing facts, or explicit corrections. NOT a recap of this session's work. Skip this entirely (empty array) if nothing durable came up. Each candidate is a short, self-contained note: "title" is a few words, "content" is 1-3 sentences.
 
 Only output valid JSON. No markdown code fences, no explanation.`;
 
+/** Defensive JSON parse of the retrospective agent's raw output. A parse
+ * failure never fails the retrospective as a whole — it falls back to a
+ * bare summary (the raw text) with every structured field empty. A
+ * malformed `memoryCandidates` field is dropped independently (see
+ * parseMemoryCandidateProposals) without affecting the rest of the parse. */
+function parseRetrospectiveResult(
+  rawResult: string,
+  sessionId: string,
+  projectId: string,
+): { parsed: SessionRetrospectiveResult; memoryCandidateProposals: MemoryCandidateProposal[] } {
+  try {
+    const raw = JSON.parse(rawResult) as Omit<
+      SessionRetrospectiveResult,
+      'sessionId' | 'projectId'
+    > & {
+      memoryCandidates?: unknown;
+    };
+    const parsed: SessionRetrospectiveResult = {
+      sessionId,
+      projectId,
+      summary: raw.summary ?? '',
+      decisions: raw.decisions ?? [],
+      findings: raw.findings ?? [],
+      actionItems: raw.actionItems ?? [],
+      candidateBubbles: raw.candidateBubbles ?? [],
+      bubblesCreated: 0,
+      bubblesDrafted: 0,
+      memoryCandidatesWritten: 0,
+    };
+    return {
+      parsed,
+      memoryCandidateProposals: parseMemoryCandidateProposals(raw.memoryCandidates),
+    };
+  } catch (err) {
+    log.error(`Failed to parse retrospective result: ${err}`);
+    const parsed: SessionRetrospectiveResult = {
+      sessionId,
+      projectId,
+      summary: rawResult,
+      decisions: [],
+      findings: [],
+      actionItems: [],
+      candidateBubbles: [],
+      bubblesCreated: 0,
+      bubblesDrafted: 0,
+      memoryCandidatesWritten: 0,
+    };
+    return { parsed, memoryCandidateProposals: [] };
+  }
+}
+
 // eslint-disable-next-line max-lines-per-function -- orchestrates retrospective flow: transcript loading, agent spawning, result parsing, bubble processing
 export function createSessionRetrospective(deps: SessionRetrospectiveDeps): SessionRetrospective {
-  const { messageStore, sessionManager, eventBus, knowledgeStore, neo4j } = deps;
+  const {
+    messageStore,
+    sessionManager,
+    eventBus,
+    projectsDir,
+    namedAgentStore,
+    knowledgeStore,
+    neo4j,
+  } = deps;
 
-  async function buildPrompt(sessionId: string, projectId: string): Promise<string> {
-    const messages = messageStore.getMessages(sessionId);
+  async function buildPrompt(messages: StoredMessage[], projectId: string): Promise<string> {
     const transcript = formatTranscript(messages);
 
-    // Get existing project knowledge for dedup context
+    // Get existing project knowledge for dedup context — only available
+    // when the knowledge engine is up (degraded mode skips this, the
+    // retrospective still runs).
     let knowledgeContext = '';
-    try {
-      const links = await getProjectKnowledgeLinks(neo4j, projectId);
-      if (links.length > 0) {
-        const entries = links
-          .map((l) => `- ${l.title} [tags: ${(l.tags ?? []).join(', ')}]`)
-          .join('\n');
-        knowledgeContext = `\n\nExisting project knowledge (do NOT duplicate):\n${entries}`;
+    if (neo4j) {
+      try {
+        const links = await getProjectKnowledgeLinks(neo4j, projectId);
+        if (links.length > 0) {
+          const entries = links
+            .map((l) => `- ${l.title} [tags: ${(l.tags ?? []).join(', ')}]`)
+            .join('\n');
+          knowledgeContext = `\n\nExisting project knowledge (do NOT duplicate):\n${entries}`;
+        }
+      } catch (err) {
+        log.warn(`Failed to load project knowledge for dedup: ${err}`);
       }
-    } catch (err) {
-      log.warn(`Failed to load project knowledge for dedup: ${err}`);
     }
 
     return `${RETROSPECTIVE_SYSTEM_PROMPT}${knowledgeContext}\n\n---\n\nSession Transcript:\n\n${transcript}`;
   }
 
+  interface BubbleContext {
+    knowledgeStore: KnowledgeStore;
+    neo4j: Neo4jClient;
+    projectId: string;
+    sessionId: string;
+  }
+
   // eslint-disable-next-line max-lines-per-function -- processes high/low confidence bubbles with knowledge store + notification
   async function processCandidateBubbles(
-    projectId: string,
+    ctx: BubbleContext,
     bubbles: CandidateBubble[],
-    sessionId: string,
   ): Promise<{ created: number; drafted: number }> {
+    const { knowledgeStore, neo4j, projectId, sessionId } = ctx;
     let created = 0;
     let drafted = 0;
 
@@ -165,6 +251,55 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
     return { created, drafted };
   }
 
+  /** Additive half of the pipeline: only runs when the knowledge engine is
+   * up (see the SessionRetrospectiveDeps comment above). Discarding
+   * proposed bubbles in degraded mode is logged, not silent. */
+  async function maybeProcessCandidateBubbles(
+    projectId: string,
+    bubbles: CandidateBubble[],
+    sessionId: string,
+  ): Promise<{ created: number; drafted: number }> {
+    if (!knowledgeStore || !neo4j) {
+      if (bubbles.length > 0) {
+        log.debug(`Knowledge engine unavailable — ${bubbles.length} candidate bubble(s) discarded`);
+      }
+      return { created: 0, drafted: 0 };
+    }
+    return processCandidateBubbles({ knowledgeStore, neo4j, projectId, sessionId }, bubbles);
+  }
+
+  /** Write each proposal as a pending memory candidate for the default
+   * agent — same agent resolution orchestrator.ts's handleUserChat uses for
+   * every chat turn today (there's no per-session agent assignment yet, so
+   * "the agent this session used" and "the default agent" are the same
+   * thing in this system as it stands). */
+  async function writeCandidates(
+    proposals: MemoryCandidateProposal[],
+    sessionId: string,
+  ): Promise<number> {
+    if (proposals.length === 0) return 0;
+
+    let agentName: string;
+    try {
+      agentName = namedAgentStore.getDefaultAgent().name;
+    } catch (err) {
+      log.warn(`Retrospective: no default agent configured, dropping memory candidates: ${err}`);
+      return 0;
+    }
+
+    let written = 0;
+    for (const proposal of proposals) {
+      const filename = await writeMemoryCandidate({ projectsDir }, agentName, {
+        title: proposal.title,
+        content: proposal.content,
+        source: 'session-retrospective',
+        sessionId,
+      });
+      if (filename) written++;
+    }
+    return written;
+  }
+
   // eslint-disable-next-line max-lines-per-function -- orchestrates full retrospective: prompt, agent, parse, store, emit
   async function runRetrospective(
     sessionId: string,
@@ -172,7 +307,16 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
   ): Promise<SessionRetrospectiveResult> {
     log.info(`Running retrospective for session ${sessionId}`);
 
-    const prompt = await buildPrompt(sessionId, projectId);
+    const messages = messageStore.getMessages(sessionId);
+    // Cron/heartbeat/internal tasks never carry a real user turn (they
+    // never set task.sessionId in the first place — see agent-session.ts —
+    // so in practice they never reach this function at all today). Gating
+    // here too is the structural belt-and-suspenders the plan calls for:
+    // only sessions with at least one real user message ever produce a
+    // memory candidate, regardless of how the session came to exist.
+    const isInteractive = messages.some((m) => m.role === 'user');
+
+    const prompt = await buildPrompt(messages, projectId);
 
     const task = {
       id: generateId(),
@@ -192,51 +336,30 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
       agentDefinitions: {},
     });
 
-    let parsed: SessionRetrospectiveResult;
-    try {
-      const raw = JSON.parse(agentResult.result) as Omit<
-        SessionRetrospectiveResult,
-        'sessionId' | 'projectId'
-      >;
-      parsed = {
-        sessionId,
-        projectId,
-        summary: raw.summary ?? '',
-        decisions: raw.decisions ?? [],
-        findings: raw.findings ?? [],
-        actionItems: raw.actionItems ?? [],
-        candidateBubbles: raw.candidateBubbles ?? [],
-        bubblesCreated: 0,
-        bubblesDrafted: 0,
-      };
-    } catch (err) {
-      log.error(`Failed to parse retrospective result: ${err}`);
-      parsed = {
-        sessionId,
-        projectId,
-        summary: agentResult.result,
-        decisions: [],
-        findings: [],
-        actionItems: [],
-        candidateBubbles: [],
-        bubblesCreated: 0,
-        bubblesDrafted: 0,
-      };
-    }
+    const { parsed, memoryCandidateProposals } = parseRetrospectiveResult(
+      agentResult.result,
+      sessionId,
+      projectId,
+    );
 
     // Store summary
     sessionManager.updateSummary(sessionId, parsed.summary);
 
-    // Process knowledge bubbles
-    const { created, drafted } = await processCandidateBubbles(
+    // Process knowledge bubbles — additive, only when the knowledge engine
+    // is up (see the SessionRetrospectiveDeps comment above).
+    const { created, drafted } = await maybeProcessCandidateBubbles(
       projectId,
       parsed.candidateBubbles,
       sessionId,
     );
-
-    // Set actual counts on the result
     parsed.bubblesCreated = created;
     parsed.bubblesDrafted = drafted;
+
+    // Write memory candidates — unconditional (no Neo4j dependency), gated
+    // only on the session being interactive.
+    parsed.memoryCandidatesWritten = isInteractive
+      ? await writeCandidates(memoryCandidateProposals, sessionId)
+      : 0;
 
     // Emit completion event
     const completeEvent: SessionRetrospectiveCompleteEvent = {
@@ -256,7 +379,7 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
     eventBus.emit(completeEvent);
 
     log.info(
-      `Retrospective complete: session=${sessionId}, bubbles created=${created}, drafted=${drafted}`,
+      `Retrospective complete: session=${sessionId}, bubbles created=${created}, drafted=${drafted}, memory candidates=${parsed.memoryCandidatesWritten}`,
     );
 
     return parsed;

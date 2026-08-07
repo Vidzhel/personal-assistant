@@ -1,4 +1,4 @@
-import { readFile, writeFile, readdir, stat, mkdir, rename } from 'node:fs/promises';
+import { readFile, writeFile, readdir, stat, mkdir, rename, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, resolve, relative, isAbsolute, dirname } from 'node:path';
 
@@ -32,6 +32,14 @@ export interface MemoryStore {
   readIndex(agentName: string): Promise<string | null>;
   write(agentName: string, relPath: string, content: string): Promise<MemoryWriteResult>;
   update(agentName: string, relPath: string, content: string): Promise<MemoryWriteResult>;
+  /** Deletes a memory file (used by consolidation to prune superseded
+   * facts). `ok: false` with no throw when the file doesn't exist. */
+  remove(agentName: string, relPath: string): Promise<MemoryWriteResult>;
+  /** Filenames present in the agent's memory dir (flat — no subdirs, e.g.
+   * `candidates/`, are ever returned since listMemoryFiles only lists
+   * files). Includes MEMORY.md; callers that want just the fact files
+   * filter it out themselves. */
+  list(agentName: string): Promise<string[]>;
   usage(agentName: string): Promise<MemoryUsage>;
 }
 
@@ -60,13 +68,17 @@ export function formatMemoryBlock(index: string): string {
   ].join('\n');
 }
 
-function validateAgentName(agentName: string): void {
+/** Exported so sibling modules (memory-candidates.ts, memory-consolidation.ts)
+ * can validate an agent name without duplicating this check. */
+export function validateAgentName(agentName: string): void {
   if (agentName.includes('/') || agentName.includes('\\') || agentName === '..') {
     throw new Error(`invalid agentName: ${agentName}`);
   }
 }
 
-function resolveMemoryDir(projectsDir: string, agentName: string): string {
+/** Exported so sibling modules can resolve an agent's memory dir (e.g. to
+ * derive `memory/candidates/`) without duplicating this join. */
+export function resolveMemoryDir(projectsDir: string, agentName: string): string {
   return join(projectsDir, 'agents', agentName, 'memory');
 }
 
@@ -211,6 +223,28 @@ export function createMemoryStore(deps: { projectsDir: string }): MemoryStore {
     async update(agentName: string, relPath: string, content: string): Promise<MemoryWriteResult> {
       validateAgentName(agentName);
       return checkAndWrite({ agentName, relPath, content, mustExist: true, projectsDir });
+    },
+
+    async remove(agentName: string, relPath: string): Promise<MemoryWriteResult> {
+      validateAgentName(agentName);
+      const absPath = safePath(projectsDir, agentName, relPath);
+      if (!existsSync(absPath)) {
+        return { ok: false, error: `memory file does not exist: ${relPath}` };
+      }
+      try {
+        await unlink(absPath);
+        log.info(`memory removed: ${agentName}/${relPath}`);
+      } catch (err) {
+        return { ok: false, error: `failed to remove memory file: ${(err as Error).message}` };
+      }
+      const budget = await readBudget(projectsDir, agentName);
+      return { ok: true, usage: await computeUsage(projectsDir, agentName, budget) };
+    },
+
+    async list(agentName: string): Promise<string[]> {
+      validateAgentName(agentName);
+      const files = await listMemoryFiles(projectsDir, agentName);
+      return files.map((f) => f.name);
     },
 
     async usage(agentName: string): Promise<MemoryUsage> {

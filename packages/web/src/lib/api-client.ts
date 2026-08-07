@@ -245,6 +245,7 @@ export const api = {
     if (params?.offset) qs.set('offset', String(params.offset));
     return request<RavenTaskRecord[]>(`/agents/${id}/tasks?${qs}`);
   },
+  getAgentMemory: (id: string) => request<AgentMemoryFile[]>(`/agents/${id}/memory`),
   // Project data sources
   getProjectDataSources: (projectId: string) =>
     request<ProjectDataSource[]>(`/projects/${projectId}/data-sources`),
@@ -563,6 +564,11 @@ export interface RavenTaskRecord {
 
 export interface RavenTaskDetail extends RavenTaskRecord {
   subtasks: RavenTaskRecord[];
+}
+
+export interface AgentMemoryFile {
+  file: string;
+  content: string;
 }
 
 export interface NamedAgentRecord {

@@ -85,6 +85,12 @@ export interface RunOptions {
   signal?: AbortSignal;
   ravenMcpDeps?: RavenMcpDeps;
   memoryStore?: MemoryStore;
+  /** Overrides `config.CLAUDE_MODEL` for this one dispatch — e.g.
+   * memory-consolidation.ts resolving a named agent's own model tier
+   * (haiku/opus) instead of the global default. Omitted by every other
+   * caller today (session-retrospective.ts, knowledge-consolidation.ts),
+   * which keep using the global default unchanged. */
+  model?: string;
   /** Used to resume the SDK session for chat turns (task.sessionId set) and
    * to record the session id the backend returns. Execution/validation
    * tasks never carry task.sessionId (see orchestrator.ts vs
@@ -392,7 +398,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       resume,
       systemPrompt,
       allowedTools,
-      model: config.CLAUDE_MODEL,
+      model: opts.model ?? config.CLAUDE_MODEL,
       maxTurns: config.RAVEN_AGENT_MAX_TURNS,
       mcpServers: sdkMcpServers,
       agents: agentDefinitions,

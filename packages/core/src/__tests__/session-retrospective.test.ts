@@ -206,6 +206,8 @@ describe('Session Auto-Compaction & Background Retrospective (10.10)', () => {
         sessionManager: sm,
         eventBus,
         config: {} as any,
+        projectsDir: tmpDir,
+        namedAgentStore: {} as any,
         knowledgeStore: mockKnowledgeStore,
         neo4j: mockNeo4j,
       });
@@ -274,6 +276,8 @@ describe('Session Auto-Compaction & Background Retrospective (10.10)', () => {
         sessionManager: sm,
         eventBus: localBus,
         config: {} as any,
+        projectsDir: tmpDir,
+        namedAgentStore: {} as any,
         knowledgeStore: mockKnowledgeStore,
         neo4j: mockNeo4j,
       });
@@ -334,6 +338,8 @@ describe('Session Auto-Compaction & Background Retrospective (10.10)', () => {
         sessionManager: sm,
         eventBus,
         config: {} as any,
+        projectsDir: tmpDir,
+        namedAgentStore: {} as any,
         knowledgeStore: mockKnowledgeStore,
         neo4j: mockNeo4j,
       });
@@ -463,6 +469,8 @@ describe('Session Auto-Compaction & Background Retrospective (10.10)', () => {
         sessionManager: sm,
         eventBus,
         config: {} as any,
+        projectsDir: tmpDir,
+        namedAgentStore: {} as any,
         knowledgeStore: mockKnowledgeStore,
         neo4j: mockNeo4j,
       });

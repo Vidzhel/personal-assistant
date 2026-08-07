@@ -5,7 +5,7 @@ import type { NamedAgentRecord } from '@/lib/api-client';
 
 // eslint-disable-next-line max-lines-per-function -- React component
 export function AgentCard({ agent }: { agent: NamedAgentRecord }) {
-  const { openEditForm, deleteAgent, showHistory } = useAgentStore();
+  const { openEditForm, deleteAgent, showHistory, showMemoryPanel } = useAgentStore();
 
   return (
     <div
@@ -46,6 +46,14 @@ export function AgentCard({ agent }: { agent: NamedAgentRecord }) {
             title="View History"
           >
             &#128337;
+          </button>
+          <button
+            onClick={() => void showMemoryPanel(agent.id)}
+            className="p-1 rounded hover:opacity-80 text-xs"
+            style={{ color: 'var(--text-muted)' }}
+            title="View Memory"
+          >
+            &#129504;
           </button>
           {!agent.isDefault && (
             <button
