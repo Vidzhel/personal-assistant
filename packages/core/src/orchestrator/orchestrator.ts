@@ -8,9 +8,11 @@ import {
   type NewEmailEvent,
   type UserChatMessageEvent,
   type Project,
+  type ProjectNode,
   type SystemAccessLevel,
   type BashAccess,
 } from '@raven/shared';
+import type Database from 'better-sqlite3';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { SessionManager } from '../session-manager/session-manager.ts';
 import type { MessageStore } from '../session-manager/message-store.ts';
@@ -19,10 +21,12 @@ import type { NamedAgentStore } from '../agent-registry/yaml-named-agent-store.t
 import type { AgentResolver } from '../agent-registry/agent-resolver.ts';
 import type { CapabilityLibrary } from '../capability-library/capability-library.ts';
 import type { ProjectRegistry } from '../project-registry/project-registry.ts';
+import type { ScaffoldingApi } from '../scaffolding/scaffolding-api.ts';
 import { createKnowledgeAgentDefinition } from '../knowledge-engine/knowledge-agent.ts';
 import { getDb } from '../db/database.ts';
 import { resolveSystemAccessInstructions } from '../project-manager/system-access-gate.ts';
 import { createAuditLog } from '../permission-engine/audit-log.ts';
+import { kebabCase, upsertCacheRow } from '../project-manager/project-sync.ts';
 
 const log = createLogger('orchestrator');
 
@@ -30,6 +34,57 @@ const LOG_MESSAGE_PREVIEW_LENGTH = 100;
 // Library skill name for Gmail (library/skills/communication/email/gmail/config.json) —
 // distinct from the retired suite name 'email'.
 const GMAIL_SKILL = 'gmail';
+
+/** ensureProject fallback for callers with no registry/scaffolding wired
+ * (minimal test harnesses) — keeps chat working via a DB-only row rather
+ * than hard-failing, same as the pre-Task-1 behavior. */
+function insertDegradedProjectRow(
+  db: Database.Database,
+  projectId: string,
+  topicName: string | undefined,
+): void {
+  const now = Date.now();
+  db.prepare(
+    'INSERT INTO projects (id, name, description, skills, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+  ).run(projectId, topicName ?? projectId, 'Auto-created (registry unavailable)', '[]', now, now);
+  log.warn(`Project "${projectId}" cache-only — project registry/scaffolding not wired`);
+}
+
+interface ResolveProjectNodeInput {
+  projectRegistry: ProjectRegistry;
+  scaffoldingApi: ScaffoldingApi;
+  projectsDir: string;
+  fsPath: string;
+  displayName: string;
+  topicName: string | undefined;
+}
+
+/** Looks up the registry node for `fsPath`, scaffolding a real directory
+ * (and reloading the registry) when none exists yet. Returns undefined only
+ * when the scaffold attempt itself fails — the caller still upserts a
+ * cache row in that case, just without an fs_path link. */
+async function resolveOrScaffoldProjectNode(
+  input: ResolveProjectNodeInput,
+): Promise<ProjectNode | undefined> {
+  const { projectRegistry, scaffoldingApi, projectsDir, fsPath, displayName, topicName } = input;
+  const existing = projectRegistry.getProject(fsPath);
+  if (existing) return existing;
+
+  try {
+    await scaffoldingApi.createProject({
+      path: fsPath,
+      displayName,
+      description: topicName
+        ? `Auto-created from Telegram topic "${topicName}"`
+        : 'Auto-created catch-all for unnamed sources',
+    });
+    await projectRegistry.load(projectsDir);
+    return projectRegistry.getProject(fsPath);
+  } catch (err) {
+    log.error(`Failed to scaffold project directory "${fsPath}": ${err}`);
+    return undefined;
+  }
+}
 
 export interface OrchestratorDeps {
   eventBus: EventBus;
@@ -40,6 +95,8 @@ export interface OrchestratorDeps {
   agentResolver?: AgentResolver;
   capabilityLibrary?: CapabilityLibrary;
   projectRegistry?: ProjectRegistry;
+  scaffoldingApi?: ScaffoldingApi;
+  projectsDir?: string;
   port: number;
 }
 
@@ -58,6 +115,8 @@ export class Orchestrator {
   private agentResolver?: AgentResolver;
   private capabilityLibrary?: CapabilityLibrary;
   private projectRegistry?: ProjectRegistry;
+  private scaffoldingApi?: ScaffoldingApi;
+  private projectsDir?: string;
   private port: number;
 
   constructor(deps: OrchestratorDeps) {
@@ -69,6 +128,8 @@ export class Orchestrator {
     this.agentResolver = deps.agentResolver;
     this.capabilityLibrary = deps.capabilityLibrary;
     this.projectRegistry = deps.projectRegistry;
+    this.scaffoldingApi = deps.scaffoldingApi;
+    this.projectsDir = deps.projectsDir;
     this.port = deps.port;
     this.eventBus.on<NewEmailEvent>('email:new', (e) => {
       this.handleNewEmail(e).catch((err: unknown) => log.error(`handleNewEmail failed: ${err}`));
@@ -136,17 +197,37 @@ export class Orchestrator {
     };
   }
 
-  /** Ensure a project row exists for auto-created project IDs (e.g. Telegram topics). */
-  private ensureProject(projectId: string): void {
+  /**
+   * Ensure a project row exists for auto-created project ids (Telegram
+   * topics, direct-mode chat). Filesystem is the source of truth: when no
+   * registry node backs `projectId` yet, scaffold one — kebab-cased topic
+   * name when available, else the "inbox" catch-all for unnameable sources
+   * (e.g. legacy direct-mode messages, which carry no topic at all) —
+   * before upserting the DB cache row.
+   */
+  private async ensureProject(projectId: string, topicName: string | undefined): Promise<void> {
     const db = getDb();
-    const exists = db.prepare('SELECT 1 FROM projects WHERE id = ?').get(projectId);
-    if (!exists) {
-      const now = Date.now();
-      db.prepare(
-        'INSERT INTO projects (id, name, description, skills, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-      ).run(projectId, projectId, 'Auto-created from Telegram', '[]', now, now);
-      log.info(`Auto-created project "${projectId}"`);
+    if (db.prepare('SELECT 1 FROM projects WHERE id = ?').get(projectId)) return;
+
+    const { projectRegistry, scaffoldingApi, projectsDir } = this;
+    if (!projectRegistry || !scaffoldingApi || !projectsDir) {
+      insertDegradedProjectRow(db, projectId, topicName);
+      return;
     }
+
+    const displayName = topicName ?? 'Inbox';
+    const fsPath = kebabCase(displayName);
+    const node = await resolveOrScaffoldProjectNode({
+      projectRegistry,
+      scaffoldingApi,
+      projectsDir,
+      fsPath,
+      displayName,
+      topicName,
+    });
+
+    upsertCacheRow(db, { id: projectId, name: displayName, fsPath: node?.id ?? null });
+    log.info(`Auto-created project "${projectId}" (fs_path: ${node?.id ?? 'none'})`);
   }
 
   // eslint-disable-next-line max-lines-per-function, complexity -- async handler with context injection, named agent resolution, and knowledge agent merging
@@ -155,7 +236,7 @@ export class Orchestrator {
     log.info(`User chat in project ${projectId}: ${message.slice(0, LOG_MESSAGE_PREVIEW_LENGTH)}`);
 
     // Ensure the project exists (Telegram messages may reference auto-generated project IDs)
-    this.ensureProject(projectId);
+    await this.ensureProject(projectId, topicName);
 
     // Use the specific session if provided, otherwise fall back to getOrCreateSession
     const session =
@@ -243,8 +324,10 @@ export class Orchestrator {
     // Look up project for system access level
     const db = getDb();
     const projectRow = db
-      .prepare('SELECT name, system_access FROM projects WHERE id = ?')
-      .get(projectId) as { name: string; system_access: string } | undefined;
+      .prepare('SELECT name, system_access, fs_path FROM projects WHERE id = ?')
+      .get(projectId) as
+      | { name: string; system_access: string; fs_path: string | null }
+      | undefined;
     const systemAccess = (projectRow?.system_access ?? 'none') as SystemAccessLevel;
     const projectForAccess: Project = {
       id: projectId,
@@ -259,7 +342,11 @@ export class Orchestrator {
     let projectContextChain: string | undefined;
     if (this.projectRegistry && projectRow) {
       try {
-        const fsProject = this.projectRegistry.findByName(projectRow.name);
+        // fs_path is the authoritative link (see project-manager/project-sync.ts);
+        // name-based lookup is a fallback for rows not yet reconciled.
+        const fsProject = projectRow.fs_path
+          ? this.projectRegistry.getProject(projectRow.fs_path)
+          : this.projectRegistry.findByName(projectRow.name);
         if (fsProject) {
           const resolved = this.projectRegistry.resolveProjectContext(fsProject.id);
           const chain = resolved.contextChain.filter(Boolean).join('\n\n---\n\n');

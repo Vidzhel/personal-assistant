@@ -1,12 +1,17 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdtempSync, rmSync, cpSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createRaven, type RavenInstance } from '../raven.ts';
 import type { AppConfig } from '../config.ts';
 import type { AgentBackend, BackendOptions } from '../agent-manager/agent-backend.ts';
 import type { StoredMessage } from '../session-manager/message-store.ts';
 import type { AgentTaskCompleteEvent } from '@raven/shared';
+
+// Real projects/ tree, copied per-test into a tmp dir (see projectsDir
+// override below) so POST /api/projects scaffolding a real directory never
+// touches the checked-out repo.
+const REAL_PROJECTS_DIR = resolve(import.meta.dirname!, '..', '..', '..', '..', 'projects');
 
 /**
  * E2E chat round-trip over the real composition root: createRaven -> start
@@ -89,10 +94,13 @@ describe('e2e: chat round-trip over the real composition root', () => {
 
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-e2e-chat-'));
     const dbPath = join(tmpDir, 'test.db');
+    const projectsDir = join(tmpDir, 'projects');
+    cpSync(REAL_PROJECTS_DIR, projectsDir, { recursive: true });
 
     raven = await createRaven(buildTestConfig(), {
       dbPath,
       dataDir: tmpDir,
+      projectsDir,
       agentBackend: fakeBackend,
       skipSuites: true,
     });

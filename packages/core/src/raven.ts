@@ -58,6 +58,7 @@ import { createNeo4jClient } from './knowledge-engine/neo4j-client.ts';
 import type { Neo4jClient } from './knowledge-engine/neo4j-client.ts';
 import { syncProjectNodes } from './knowledge-engine/project-knowledge.ts';
 import { getMetaProject } from './project-manager/meta-project.ts';
+import { runProjectSync } from './project-manager/project-sync.ts';
 import { createIdleDetector } from './session-manager/idle-detector.ts';
 import { createSessionRetrospective } from './session-manager/session-retrospective.ts';
 import { createKnowledgeConsolidation } from './knowledge-engine/knowledge-consolidation.ts';
@@ -91,6 +92,13 @@ export interface RavenOverrides {
   agentBackend?: AgentBackend;
   dbPath?: string;
   dataDir?: string;
+  /** Redirects the `projects/` tree (filesystem project store) away from
+   * the real repo. Tests that create projects through the API/orchestrator
+   * MUST set this — otherwise scaffolding writes real directories into the
+   * checked-out repo. Distinct from `dataDir`, which only redirects
+   * `data/*` runtime state; `projects/` holds source-of-truth definitions
+   * resolved against `projectRoot` by default. */
+  projectsDir?: string;
   skipSuites?: boolean;
 }
 
@@ -199,9 +207,12 @@ export async function createRaven(
     log.warn(`Capability library failed to load: ${err}`);
   }
 
-  // Load project registry (filesystem-based project hierarchy)
+  // Load project registry (filesystem-based project hierarchy). projectsDir
+  // is overridable so tests never scaffold real directories into the repo
+  // (see RavenOverrides.projectsDir).
   const projectRegistry = new ProjectRegistry();
-  const projectsDir = resolve(projectRoot, 'projects');
+  const projectsDir = overrides.projectsDir ?? resolve(projectRoot, 'projects');
+  if (!existsSync(projectsDir)) mkdirSync(projectsDir, { recursive: true });
   try {
     await projectRegistry.load(projectsDir);
     log.info('Project registry loaded');
@@ -214,6 +225,16 @@ export async function createRaven(
 
   // Create scaffolding API (project domain creation)
   const scaffoldingApi = createScaffoldingApi({ projectsDir, projectRegistry, agentYamlStore });
+
+  // One project store: reconcile the DB cache against the filesystem
+  // registry — link/create rows for every directory, scaffold or drop
+  // whatever legacy rows have neither a registry node nor references left.
+  // See project-manager/project-sync.ts.
+  try {
+    await runProjectSync({ db: getDb(), projectRegistry, scaffoldingApi, projectsDir });
+  } catch (err) {
+    log.warn(`Project sync failed, continuing with unreconciled cache rows: ${err}`);
+  }
 
   // L16: count only services whose requiresEnv is fully satisfied — NOT
   // every declared ServiceDefinition. Most deployments only configure a few
@@ -618,6 +639,8 @@ export async function createRaven(
     agentResolver,
     capabilityLibrary,
     projectRegistry,
+    scaffoldingApi,
+    projectsDir,
     port: config.RAVEN_PORT,
   });
 

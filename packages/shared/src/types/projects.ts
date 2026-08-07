@@ -11,6 +11,10 @@ export interface Project {
   systemPrompt?: string;
   systemAccess?: SystemAccessLevel;
   isMeta?: boolean;
+  /** Registry node id (relative path under `projects/`) this cache row is
+   * linked to. Undefined for legacy rows not yet reconciled by
+   * project-sync — see project-manager/project-sync.ts. */
+  fsPath?: string;
   createdAt: number;
   updatedAt: number;
 }

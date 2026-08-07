@@ -119,6 +119,8 @@ export async function createApiServer(
     eventBus: deps.eventBus,
     projectRegistry: deps.projectRegistry,
     templateRegistry: deps.templateRegistry,
+    scaffoldingApi: deps.scaffoldingApi,
+    projectsDir: deps.projectsDir,
   });
   registerSessionRoutes(app, deps);
   registerChatRoute(app, deps);
