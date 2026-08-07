@@ -87,12 +87,14 @@ export function AgentFormModal() {
     };
   }
 
-  // eslint-disable-next-line complexity -- form submission with create/edit branches
   async function handleSubmit() {
     if (!validateName(name)) return;
     const bashConfig = buildBashConfig();
-    const skillsArray = Array.from(selectedSkills);
-    const skills = skillsArray.length > 0 ? skillsArray : undefined;
+    // M14: send unconditionally — an empty array must clear an agent's
+    // skills. The server treats `undefined` as "leave unchanged" (see the
+    // agents API route), so collapsing an empty selection to `undefined`
+    // here made it impossible to actually remove every skill from an agent.
+    const skills = Array.from(selectedSkills);
 
     const parsedMaxTurns = maxTurns ? parseInt(maxTurns, 10) : undefined;
 
@@ -218,7 +220,7 @@ export function AgentFormModal() {
           <div>
             <label className="block text-sm font-medium mb-1">Skills</label>
             <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
-              Skills this agent can use. Leave empty for unrestricted access.
+              Skills this agent can use. Empty = no integration skills (raven + memory tools only).
             </p>
             <div className="space-y-1 max-h-40 overflow-y-auto">
               {availableSkills.map((skill) => (

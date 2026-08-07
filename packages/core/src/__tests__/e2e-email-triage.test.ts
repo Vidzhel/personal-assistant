@@ -51,17 +51,20 @@ import {
  * registers listeners). imap-watcher separately gates its own real IMAP
  * connection on GMAIL_IMAP_USER/PASSWORD, deliberately blanked here.
  *
- * IMPORTANT: `config.ts` runs `dotenv.config()` at import time, so on a dev
- * checkout this process's `process.env` already carries whatever real
- * integration credentials live in the repo's `.env` (Telegram bot token,
- * TickTick tokens, GWS credentials path, ...) — found the hard way: an
- * earlier draft of this test that only touched the Gmail vars caused the
- * REAL telegram-bot service to start and call the live Telegram Bot API
+ * IMPORTANT: an earlier draft of this test — before the credential-blanking
+ * below was structural — only touched the Gmail vars, which let the real
+ * `.env`'s Telegram bot token reach `process.env` and caused the REAL
+ * telegram-bot service to start and call the live Telegram Bot API
  * (bootstrapGroupModeTopics -> ensureAllAgentTopics, plus forwarding this
- * test's own agent:task:complete events to the real chat). Every other
- * requiresEnv key from services/registry.ts is explicitly blanked below so
- * ONLY the Gmail group — plus the always-on, no-env-required services —
- * starts, regardless of what happens to be sitting in the real `.env`.
+ * test's own agent:task:complete events to the real chat). Two structural
+ * fixes now make that impossible regardless of what this file does: `config
+ * .ts` skips `dotenv.config()` entirely under `VITEST`/`NODE_ENV=test`, and
+ * `__tests__/setup/env-guard.ts` (this package's `test.setupFiles`) deletes
+ * every credential-prefixed `process.env` key before this file's module
+ * graph even loads. So the only env this test needs to manage itself is the
+ * one thing that guard deliberately doesn't provide: the fake Gmail values
+ * that let the Gmail service group's `requiresEnv` gate (services/registry
+ * .ts) pass.
  */
 
 function buildTestConfig(): AppConfig {
@@ -103,49 +106,18 @@ async function waitFor(predicate: () => boolean, timeoutMs = 8000): Promise<void
   }
 }
 
-// config.ts runs `dotenv.config()` at import time, loading this repo's real
-// `.env` — which, on a dev machine, holds LIVE credentials (Telegram bot
-// token, TickTick tokens, GWS credentials file path, ...). Without blanking
-// them, createRaven() without `skipSuites` starts the REAL telegram-bot,
-// ticktick-sync/autonomous-manager, email-watcher/drive-watcher, and
-// transaction-sync services against those live credentials — telegram-bot
-// in particular calls the real Telegram Bot API on start
-// (bootstrapGroupModeTopics -> ensureAllAgentTopics, plus forwarding every
-// agent:task:complete it sees to the real chat). Every requiresEnv key from
-// services/registry.ts other than the Gmail group is blanked here so ONLY
-// the Gmail service group (plus the always-on, no-env-required services)
-// starts — deterministic, and safe to run against a real .env.
-const MUTATED_ENV_KEYS = [
-  'GMAIL_CLIENT_ID',
-  'GMAIL_CLIENT_SECRET',
-  'GMAIL_REFRESH_TOKEN',
-  'GMAIL_IMAP_USER',
-  'GMAIL_IMAP_PASSWORD',
-  'TELEGRAM_BOT_TOKEN',
-  'TELEGRAM_CHAT_ID',
-  'TELEGRAM_GROUP_ID',
-  'TICKTICK_CLIENT_ID',
-  'TICKTICK_CLIENT_SECRET',
-  'TICKTICK_ACCESS_TOKEN',
-  'YNAB_ACCESS_TOKEN',
-  'GOOGLE_API_KEY',
-  'GWS_PRIMARY_CREDENTIALS_FILE',
-  'GWS_SECONDARY_CREDENTIALS_FILE',
-  'GWS_GCP_PROJECT_ID',
-] as const;
-
 describe('e2e: email triage round-trip over the real composition root', () => {
   let tmpDir: string | undefined;
   let raven: RavenInstance | undefined;
-  let savedEnv: Partial<Record<string, string | undefined>> = {};
 
   beforeEach(() => {
-    savedEnv = {};
-    for (const key of MUTATED_ENV_KEYS) {
-      savedEnv[key] = process.env[key];
-      Reflect.deleteProperty(process.env, key);
-    }
-    // Fake values just need to be present — services/email/email-triage.ts's
+    // env-guard.ts (this package's test.setupFiles) already deleted every
+    // credential-prefixed env var — including GMAIL_* — before this file
+    // loaded, and config.ts's own dotenv.config() is skipped under the test
+    // runner, so there's nothing left to save/blank/restore here. The only
+    // thing this test needs to do is supply the fake Gmail values that let
+    // services/registry.ts's Gmail group `requiresEnv` gate pass. Fake
+    // values just need to be present — services/email/email-triage.ts's
     // start() never uses them for an outbound call (verified by reading it:
     // it only reads local rule config and registers listeners).
     process.env.GMAIL_CLIENT_ID = 'test-gmail-client-id';
@@ -158,11 +130,6 @@ describe('e2e: email triage round-trip over the real composition root', () => {
     if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
     raven = undefined;
     tmpDir = undefined;
-    for (const key of MUTATED_ENV_KEYS) {
-      const saved = savedEnv[key];
-      if (saved === undefined) Reflect.deleteProperty(process.env, key);
-      else process.env[key] = saved;
-    }
   });
 
   it('email:new drives the real triage service, whose rule actions genuinely dispatch to the fake backend', async () => {

@@ -86,8 +86,45 @@ describe('e2e: approval flow round-trip over the real composition root', () => {
 
   it('blocks a red-tier action pre-query and queues approval; approve re-dispatches to the backend, deny never does', async () => {
     const calls: BackendOptions[] = [];
+    // M11: results of exercising the fine-grained, per-tool-call gate
+    // (canUseTool) from inside a real run — as opposed to the coarse,
+    // pre-query gate the rest of this test exercises via a top-level
+    // actionName. Populated below, once, by the third dispatch.
+    const toolPolicyResults: unknown[] = [];
+    // Matches tool-policy.test.ts's own fake — the SDK's real CanUseTool
+    // type requires this third argument (sdk.d.ts), even though the fields
+    // in it are irrelevant to every policy branch this test exercises.
+    const FAKE_CAN_USE_TOOL_OPTIONS = {
+      signal: new AbortController().signal,
+      toolUseID: 'test-tool-use',
+    };
     const fakeBackend: AgentBackend = async (opts) => {
       calls.push(opts);
+
+      // M11: allowedTools must never include Bash or an integration-MCP
+      // wildcard — canUseTool is the SOLE gate for those (see tool-policy
+      // .ts's module docstring: either one in allowedTools would let the SDK
+      // auto-allow the call and skip this callback entirely). Checked on
+      // every dispatch this fake backend sees, not just one.
+      expect(opts.allowedTools).not.toContain('Bash');
+      expect(opts.allowedTools.some((t) => t.startsWith('mcp__gmail__'))).toBe(false);
+      expect(typeof opts.canUseTool).toBe('function');
+
+      if (calls.length === 2) {
+        // This is the third eventBus dispatch below — it carries no
+        // actionName, so it skips the coarse pre-query gate entirely and
+        // reaches here with a REAL canUseTool built from this task's own
+        // permissionDeps (agent-session.ts), not undefined. Exercise it
+        // exactly as the SDK would for a tool call the model makes mid-run:
+        // gmail:send-email is red-tier and this task never pre-approved it,
+        // so the policy must deny the call and queue a fresh approval —
+        // the same fallback path the coarse gate above delegates to for
+        // actions it doesn't already know about.
+        toolPolicyResults.push(
+          await opts.canUseTool!('mcp__gmail__send_email', { to: 'x' }, FAKE_CAN_USE_TOOL_OPTIONS),
+        );
+      }
+
       opts.onAssistantMessage('done');
       return { result: 'ok', success: true, errors: [] };
     };
@@ -248,6 +285,51 @@ describe('e2e: approval flow round-trip over the real composition root', () => {
     const pendingRes3 = await fetch(`${baseUrl}/api/approvals/pending`);
     const pending3 = (await pendingRes3.json()) as PendingApproval[];
     expect(pending3.length).toBe(0);
+
+    // ── M11: the fine-grained, per-tool-call gate (canUseTool), exercised
+    // via a dispatch with no top-level actionName — the shape orchestrator
+    // .ts's own "analyze this new email" dispatch has in production — so it
+    // skips enforcePermissionGate entirely and reaches the fake backend.
+    const taskId3 = generateId();
+    const analyzeRequest: AgentTaskRequestEvent = {
+      id: generateId(),
+      timestamp: Date.now(),
+      source: 'test-harness',
+      type: 'agent:task:request',
+      payload: {
+        taskId: taskId3,
+        prompt: 'Look into this email thread and summarize it.',
+        skillName: 'gmail',
+        mcpServers: {},
+        priority: 'normal',
+      },
+    };
+    raven.eventBus.emit(analyzeRequest);
+
+    await waitFor(() => calls.length >= 2);
+    await waitFor(() => completions.some((c) => c.payload.taskId === taskId3));
+
+    // No coarse-gate block for this dispatch (it never carried an
+    // actionName), but the per-call gate inside the fake backend above
+    // denied its one gmail:send-email tool call — the SAME PermissionResult
+    // shape enforcePermissionGate's callers get: `allow()` now must echo
+    // `updatedInput` (the SDK's actual runtime schema — see tool-policy.ts's
+    // module docstring), and `deny()` is `{ behavior: 'deny', message }`.
+    expect(toolPolicyResults).toEqual([
+      { behavior: 'deny', message: expect.stringContaining('Queued for approval') },
+    ]);
+
+    // That denial queued a fresh approval. Dedup is keyed on (actionName,
+    // sessionId) — this task, like task1/task2 above, carries no sessionId,
+    // and pendingRes3 just confirmed the queue is empty (both prior
+    // gmail:send-email/gmail:delete-email approvals are already resolved,
+    // so neither is "unresolved" and neither can be deduped against) — so
+    // this can only be a genuinely new row, not a resurfaced old one.
+    const pendingRes4 = await fetch(`${baseUrl}/api/approvals/pending`);
+    const pending4 = (await pendingRes4.json()) as PendingApproval[];
+    const sendEmailApprovals = pending4.filter((p) => p.actionName === 'gmail:send-email');
+    expect(sendEmailApprovals.length).toBe(1);
+    expect(sendEmailApprovals[0].id).not.toBe(approvalId1);
 
     // Clean stop — no dangling handles.
     await raven.stop();

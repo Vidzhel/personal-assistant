@@ -308,15 +308,17 @@ export const api = {
     }),
 
   // Approvals
-  getPendingApprovals: () => request<PendingApproval[]>('/approvals/pending'),
+  // L20: no `getPendingApprovals` here — ApprovalsInbox reads
+  // /approvals/pending through usePolling directly, same as every other
+  // polled resource in the dashboard (Settings' action catalog, /logs,
+  // /metrics, ...); usePolling has no injectable-fetcher seam, so keeping a
+  // second, unused path to the same endpoint here would just be a second
+  // source of truth that could drift from it.
   resolveApproval: (id: string, resolution: 'approved' | 'denied') =>
     request<{ id: string; resolution: string; status: string }>(`/approvals/${id}/resolve`, {
       method: 'POST',
       body: JSON.stringify({ resolution }),
     }),
-
-  // Permissions
-  getActionCatalog: () => request<ActionCatalogEntry[]>('/permissions/catalog'),
 };
 
 export interface Project {

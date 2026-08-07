@@ -17,9 +17,10 @@ export function registerSuiteRoutes(app: FastifyInstance, deps: ApiDeps): void {
   app.get('/api/skills', async () => listLibrarySkills(deps));
 
   // /api/suites served suite manifests before the suites/ stratum was
-  // deleted (Phase 2). Retired: 410 tells any remaining caller (the web
-  // dashboard currently still calls this at runtime — see Task 4) that the
-  // resource is gone for good, rather than a transient 404.
+  // deleted (Phase 2). L22: zero web callers remain (grepped — the dashboard
+  // now reads /api/skills exclusively). Kept as a 410 tombstone rather than
+  // deleted outright, so any external/out-of-tree caller still gets "gone
+  // for good" instead of a transient, retry-worthy 404.
   app.get('/api/suites', async (_req, reply) =>
     reply.status(HTTP_STATUS.GONE).send({ error: 'Suites have been retired — use /api/skills.' }),
   );
@@ -29,6 +30,8 @@ function listLibrarySkills(deps: ApiDeps): LibrarySkillSummary[] {
   const library = deps.capabilityLibrary;
   if (!library) return [];
 
+  const permissionEngine = deps.permissionEngine;
+
   return library.getSkillNames().map((name) => {
     const skill = library.getSkill(name);
     return {
@@ -36,7 +39,14 @@ function listLibrarySkills(deps: ApiDeps): LibrarySkillSummary[] {
       description: skill?.config.description ?? '',
       domain: skill?.domain ?? '',
       mcps: skill?.config.mcps ?? [],
-      actions: (skill?.config.actions ?? []).map((a) => ({ name: a.name, tier: a.defaultTier })),
+      // M10: report the EFFECTIVE tier (permissions.json overrides applied),
+      // same source of truth as /api/permissions/catalog — not the skill's
+      // bare declared default, which silently diverges from reality once an
+      // override exists.
+      actions: (skill?.config.actions ?? []).map((a) => ({
+        name: a.name,
+        tier: permissionEngine?.resolveTier(a.name) ?? a.defaultTier,
+      })),
       model: skill?.config.model,
     };
   });

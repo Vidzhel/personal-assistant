@@ -89,7 +89,7 @@ export function AgentCard({ agent }: { agent: NamedAgentRecord }) {
         </div>
       ) : (
         <p className="text-xs italic" style={{ color: 'var(--text-muted)' }}>
-          All skills (unrestricted)
+          No skills — this agent has no capabilities.
         </p>
       )}
 

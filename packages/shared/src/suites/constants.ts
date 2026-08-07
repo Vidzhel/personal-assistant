@@ -129,9 +129,6 @@ export const SOURCE_MAINTENANCE = 'maintenance';
 // Config management
 export const AGENT_CONFIG_MANAGER = 'config-manager';
 export const SOURCE_CONFIG_MANAGER = 'config-manager';
-export const EVENT_CONFIG_CHANGE_PROPOSED = 'config:change:proposed' as const;
-export const EVENT_CONFIG_CHANGE_APPLIED = 'config:change:applied' as const;
-export const EVENT_CONFIG_CHANGE_REJECTED = 'config:change:rejected' as const;
 
 // Engagement tracking
 export const EVENT_ENGAGEMENT_STATE_CHANGED = 'engagement:state-changed' as const;

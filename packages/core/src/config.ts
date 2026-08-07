@@ -8,8 +8,19 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const projectRoot = resolve(__dirname, '..', '..', '..');
 
-// Load .env from project root — not CWD (which differs in workspace scripts)
-dotenv.config({ path: resolve(projectRoot, '.env') });
+// Load .env from project root — not CWD (which differs in workspace scripts).
+// Skipped under the test runner: dotenv.config() would otherwise pull this
+// dev machine's real credentials (Telegram bot token, TickTick tokens, GWS
+// paths, ...) into every test process's `process.env`, unguarded by any test
+// file's own env handling — this is exactly how an earlier test run booted
+// the real telegram-bot service against the live Telegram Bot API. Tests
+// that need specific env vars set them explicitly (see e.g.
+// e2e-email-triage.test.ts); nothing under test should depend on the repo's
+// real `.env`. See also __tests__/setup/env-guard.ts for the structural,
+// defense-in-depth backstop.
+if (!process.env.VITEST && process.env.NODE_ENV !== 'test') {
+  dotenv.config({ path: resolve(projectRoot, '.env') });
+}
 
 const DEFAULT_PORT = 4001;
 const DEFAULT_MAX_CONCURRENT = 3;

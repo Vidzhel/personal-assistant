@@ -931,9 +931,6 @@ export type RavenEvent =
   | ProjectCreatedEvent
   | ProjectDeletedEvent
   | MaintenanceReportGeneratedEvent
-  | ConfigChangeProposedEvent
-  | ConfigChangeAppliedEvent
-  | ConfigChangeRejectedEvent
   | ConfigVersionRevertedEvent
   | SessionIdleEvent
   | SessionRetrospectiveCompleteEvent
@@ -1154,9 +1151,6 @@ export const MaintenanceReportGeneratedPayloadSchema = z.object({
   reportLength: z.number(),
 });
 
-export type ConfigChangeAction = 'create' | 'update' | 'delete' | 'view';
-export type ConfigResourceType = 'agent' | 'schedule';
-
 export interface ConfigVersionRevertedEvent extends BaseEvent {
   type: 'config:version:reverted';
   payload: {
@@ -1173,111 +1167,6 @@ export const ConfigVersionRevertedPayloadSchema = z.object({
   files: z.array(z.string()),
   timestamp: z.string(),
 });
-
-export interface ConfigChangeProposedEvent extends BaseEvent {
-  type: 'config:change:proposed';
-  payload: {
-    changeId: string;
-    action: ConfigChangeAction;
-    resourceType: ConfigResourceType;
-    resourceName: string;
-    description: string;
-    sessionId?: string;
-  };
-}
-
-export const ConfigChangeProposedPayloadSchema = z.object({
-  changeId: z.string(),
-  action: z.enum(['create', 'update', 'delete', 'view']),
-  resourceType: z.enum(['agent', 'schedule']),
-  resourceName: z.string(),
-  description: z.string(),
-  sessionId: z.string().optional(),
-});
-
-export interface ConfigChangeAppliedEvent extends BaseEvent {
-  type: 'config:change:applied';
-  payload: {
-    changeId: string;
-    action: ConfigChangeAction;
-    resourceType: ConfigResourceType;
-    resourceName: string;
-  };
-}
-
-export const ConfigChangeAppliedPayloadSchema = z.object({
-  changeId: z.string(),
-  action: z.enum(['create', 'update', 'delete', 'view']),
-  resourceType: z.enum(['agent', 'schedule']),
-  resourceName: z.string(),
-});
-
-export interface ConfigChangeRejectedEvent extends BaseEvent {
-  type: 'config:change:rejected';
-  payload: {
-    changeId: string;
-    action: ConfigChangeAction;
-    resourceType: ConfigResourceType;
-    resourceName: string;
-  };
-}
-
-export const ConfigChangeRejectedPayloadSchema = z.object({
-  changeId: z.string(),
-  action: z.enum(['create', 'update', 'delete', 'view']),
-  resourceType: z.enum(['agent', 'schedule']),
-  resourceName: z.string(),
-});
-
-export interface PendingConfigChange {
-  id: string;
-  resourceType: ConfigResourceType;
-  resourceName: string;
-  action: ConfigChangeAction;
-  currentContent: string | null;
-  proposedContent: string | null;
-  diffText: string | null;
-  description: string | null;
-  status: 'pending' | 'applied' | 'discarded';
-  telegramMessageId: string | null;
-  sessionId: string | null;
-  createdAt: string;
-  resolvedAt: string | null;
-}
-
-export interface PendingConfigChangeRow {
-  id: string;
-  resource_type: string;
-  resource_name: string;
-  action: string;
-  current_content: string | null;
-  proposed_content: string | null;
-  diff_text: string | null;
-  description: string | null;
-  status: string;
-  telegram_message_id: string | null;
-  session_id: string | null;
-  created_at: string;
-  resolved_at: string | null;
-}
-
-export function mapConfigChangeRow(row: PendingConfigChangeRow): PendingConfigChange {
-  return {
-    id: row.id,
-    resourceType: row.resource_type as ConfigResourceType,
-    resourceName: row.resource_name,
-    action: row.action as ConfigChangeAction,
-    currentContent: row.current_content,
-    proposedContent: row.proposed_content,
-    diffText: row.diff_text,
-    description: row.description,
-    status: row.status as 'pending' | 'applied' | 'discarded',
-    telegramMessageId: row.telegram_message_id,
-    sessionId: row.session_id,
-    createdAt: row.created_at,
-    resolvedAt: row.resolved_at,
-  };
-}
 
 export type Priority = 'low' | 'normal' | 'high' | 'urgent';
 

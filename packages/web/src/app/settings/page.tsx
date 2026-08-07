@@ -12,10 +12,11 @@ const CATALOG_REFRESH_INTERVAL_MS = 30000;
 // eslint-disable-next-line max-lines-per-function -- page component with system info display
 export default function SettingsPage() {
   const { health, fetchHealth } = useAppStore();
-  const { data: catalog } = usePolling<ActionCatalogEntry[]>(
-    '/permissions/catalog',
-    CATALOG_REFRESH_INTERVAL_MS,
-  );
+  const {
+    data: catalog,
+    loading: catalogLoading,
+    error: catalogError,
+  } = usePolling<ActionCatalogEntry[]>('/permissions/catalog', CATALOG_REFRESH_INTERVAL_MS);
 
   useEffect(() => {
     fetchHealth();
@@ -115,12 +116,24 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      <ActionCatalogTable catalog={catalog ?? []} />
+      <ActionCatalogTable
+        catalog={catalog ?? []}
+        loading={catalogLoading}
+        error={catalogError !== null}
+      />
     </div>
   );
 }
 
-function ActionCatalogTable({ catalog }: { catalog: ActionCatalogEntry[] }) {
+function ActionCatalogTable({
+  catalog,
+  loading,
+  error,
+}: {
+  catalog: ActionCatalogEntry[];
+  loading: boolean;
+  error: boolean;
+}) {
   const sorted = [...catalog].sort((a, b) => tierRank(a.tier) - tierRank(b.tier));
 
   return (
@@ -141,28 +154,44 @@ function ActionCatalogTable({ catalog }: { catalog: ActionCatalogEntry[] }) {
         .
       </p>
 
-      {sorted.length === 0 ? (
+      {loading ? (
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+          Loading…
+        </p>
+      ) : sorted.length === 0 && error ? (
+        // L21: distinct from "No actions loaded" — that's a truthful empty
+        // catalog, this is "we don't actually know" because the fetch failed.
+        <p className="text-sm" style={{ color: 'var(--error)' }}>
+          Could not load action catalog.
+        </p>
+      ) : sorted.length === 0 ? (
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
           No actions loaded.
         </p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left" style={{ color: 'var(--text-muted)' }}>
-                <th className="py-1.5 pr-4 font-medium">Action</th>
-                <th className="py-1.5 pr-4 font-medium">Tier</th>
-                <th className="py-1.5 font-medium">Source</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((entry) => (
-                <ActionCatalogRow key={entry.name} entry={entry} />
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ActionCatalogGrid entries={sorted} />
       )}
+    </div>
+  );
+}
+
+function ActionCatalogGrid({ entries }: { entries: ActionCatalogEntry[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left" style={{ color: 'var(--text-muted)' }}>
+            <th className="py-1.5 pr-4 font-medium">Action</th>
+            <th className="py-1.5 pr-4 font-medium">Tier</th>
+            <th className="py-1.5 font-medium">Source</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((entry) => (
+            <ActionCatalogRow key={entry.name} entry={entry} />
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
