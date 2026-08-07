@@ -2,12 +2,20 @@
 
 import { useEffect } from 'react';
 import { useAppStore } from '@/stores/app-store';
+import { usePolling } from '@/hooks/usePolling';
+import { tierBadgeProps, tierRank } from '@/components/ui/badge-helpers';
+import type { ActionCatalogEntry } from '@/lib/api-client';
 
 const SECONDS_PER_MINUTE = 60;
+const CATALOG_REFRESH_INTERVAL_MS = 30000;
 
 // eslint-disable-next-line max-lines-per-function -- page component with system info display
 export default function SettingsPage() {
   const { health, fetchHealth } = useAppStore();
+  const { data: catalog } = usePolling<ActionCatalogEntry[]>(
+    '/permissions/catalog',
+    CATALOG_REFRESH_INTERVAL_MS,
+  );
 
   useEffect(() => {
     fetchHealth();
@@ -106,6 +114,75 @@ export default function SettingsPage() {
           for API keys and system settings.
         </p>
       </div>
+
+      <ActionCatalogTable catalog={catalog ?? []} />
     </div>
+  );
+}
+
+function ActionCatalogTable({ catalog }: { catalog: ActionCatalogEntry[] }) {
+  const sorted = [...catalog].sort((a, b) => tierRank(a.tier) - tierRank(b.tier));
+
+  return (
+    <div
+      className="p-4 rounded-lg space-y-3"
+      style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
+    >
+      <h2 className="font-semibold">Action Catalog</h2>
+      <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+        Every action the library declares, the tier it resolves to, and where that tier came from.
+        Tiers are read-only here — override one by adding it to{' '}
+        <code
+          className="font-mono text-xs px-1 py-0.5 rounded"
+          style={{ background: 'var(--bg-hover)' }}
+        >
+          config/permissions.json
+        </code>
+        .
+      </p>
+
+      {sorted.length === 0 ? (
+        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+          No actions loaded.
+        </p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left" style={{ color: 'var(--text-muted)' }}>
+                <th className="py-1.5 pr-4 font-medium">Action</th>
+                <th className="py-1.5 pr-4 font-medium">Tier</th>
+                <th className="py-1.5 font-medium">Source</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((entry) => (
+                <ActionCatalogRow key={entry.name} entry={entry} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ActionCatalogRow({ entry }: { entry: ActionCatalogEntry }) {
+  const tier = tierBadgeProps(entry.tier);
+  return (
+    <tr className="border-t" style={{ borderColor: 'var(--border)' }}>
+      <td className="py-1.5 pr-4 font-mono text-xs">{entry.name}</td>
+      <td className="py-1.5 pr-4">
+        <span
+          className="text-xs px-2 py-0.5 rounded"
+          style={{ background: tier.bg, color: tier.fg }}
+        >
+          {entry.tier}
+        </span>
+      </td>
+      <td className="py-1.5 text-xs" style={{ color: 'var(--text-muted)' }}>
+        {entry.source}
+      </td>
+    </tr>
   );
 }

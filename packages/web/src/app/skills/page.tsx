@@ -2,19 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useAppStore } from '@/stores/app-store';
+import { tierBadgeProps } from '@/components/ui/badge-helpers';
 import type { Skill, SkillAction } from '@/lib/api-client';
-
-// Tier chip colors — green/yellow/red mirror the permission engine's tiers
-// (packages/core/src/permission-engine). Unknown tiers fall back to neutral.
-const TIER_CHIP: Record<string, { bg: string; fg: string }> = {
-  green: { bg: 'rgba(34,197,94,0.15)', fg: 'rgb(74,222,128)' },
-  yellow: { bg: 'rgba(234,179,8,0.15)', fg: 'rgb(250,204,21)' },
-  red: { bg: 'rgba(239,68,68,0.15)', fg: 'rgb(248,113,113)' },
-};
-
-function tierChipStyle(tier: string): { bg: string; fg: string } {
-  return TIER_CHIP[tier] ?? { bg: 'var(--bg-hover)', fg: 'var(--text-muted)' };
-}
 
 function domainLabel(domain: string): string {
   if (!domain) return 'Other';
@@ -111,7 +100,7 @@ export default function SkillsPage() {
 }
 
 function ActionTierChip({ action }: { action: SkillAction }) {
-  const c = tierChipStyle(action.tier);
+  const c = tierBadgeProps(action.tier);
   return (
     <span
       className="text-xs px-2 py-0.5 rounded"

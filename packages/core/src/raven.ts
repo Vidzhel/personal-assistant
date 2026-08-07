@@ -636,6 +636,7 @@ export async function createRaven(
         agentManager,
         auditLog,
         pendingApprovals,
+        permissionEngine,
         executionLogger,
         messageStore,
         knowledgeStore,

@@ -306,6 +306,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(plan),
     }),
+
+  // Approvals
+  getPendingApprovals: () => request<PendingApproval[]>('/approvals/pending'),
+  resolveApproval: (id: string, resolution: 'approved' | 'denied') =>
+    request<{ id: string; resolution: string; status: string }>(`/approvals/${id}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ resolution }),
+    }),
+
+  // Permissions
+  getActionCatalog: () => request<ActionCatalogEntry[]>('/permissions/catalog'),
 };
 
 export interface Project {
@@ -666,4 +677,22 @@ export interface ScaffoldResult {
   templatesCreated: string[];
   schedulesCreated: string[];
   errors: string[];
+}
+
+export interface PendingApproval {
+  id: string;
+  actionName: string;
+  skillName: string;
+  details?: string;
+  requestedAt: string;
+  resolvedAt?: string;
+  resolution?: 'approved' | 'denied';
+  sessionId?: string;
+  pipelineName?: string;
+}
+
+export interface ActionCatalogEntry {
+  name: string;
+  tier: 'green' | 'yellow' | 'red';
+  source: string;
 }

@@ -55,3 +55,25 @@ export function statusBadgeProps(status: string): BadgeStyle {
 export function sourceBadgeProps(source: string): BadgeStyle {
   return toStyle(SOURCE[source], source);
 }
+
+// Permission tiers (packages/core/src/permission-engine) — green auto-runs,
+// yellow runs + audits, red queues for approval. Used by the Skills page's
+// action chips and the Settings page's Action Catalog table.
+const TIER: Record<string, { tone: Tone; label: string }> = {
+  green: { tone: 'success', label: 'green' },
+  yellow: { tone: 'warning', label: 'yellow' },
+  red: { tone: 'error', label: 'red' },
+};
+
+const TIER_ORDER: Record<string, number> = { red: 0, yellow: 1, green: 2 };
+const UNKNOWN_TIER_RANK = 3;
+
+export function tierBadgeProps(tier: string): BadgeStyle {
+  return toStyle(TIER[tier], tier);
+}
+
+// Sort key for tier severity — red first (most attention-worthy), then
+// yellow, then green; unknown tiers sort last.
+export function tierRank(tier: string): number {
+  return TIER_ORDER[tier] ?? UNKNOWN_TIER_RANK;
+}

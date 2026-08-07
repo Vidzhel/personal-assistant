@@ -8,6 +8,7 @@ import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { LifeSummary } from '@/components/dashboard/LifeSummary';
 import { InsightsPanel } from '@/components/dashboard/InsightsPanel';
 import { UpcomingEvents } from '@/components/dashboard/UpcomingEvents';
+import { ApprovalsInbox } from '@/components/approvals/ApprovalsInbox';
 import type { LifeDashboardData } from '@raven/shared';
 
 const HEALTH_REFRESH_INTERVAL_MS = 10000;
@@ -92,7 +93,7 @@ export default function DashboardPage() {
         {
           label: 'Pending Approvals',
           value: dashboardData.pendingApprovalsCount,
-          href: '/settings',
+          href: '#approvals',
           color: dashboardData.pendingApprovalsCount > 0 ? 'var(--warning, #f59e0b)' : undefined,
         },
         {
@@ -121,6 +122,8 @@ export default function DashboardPage() {
       />
 
       {dashboardData && <LifeSummary cards={summaryCards} />}
+
+      <ApprovalsInbox />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <ActivityFeed />
