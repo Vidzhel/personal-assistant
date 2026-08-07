@@ -21,6 +21,24 @@ interface HealthResponse {
     skills: { names: string[] };
     agentManager: { queueLength: number; runningCount: number };
   };
+  selfTest?: { lastRun: string | null; ok: boolean; violations: string[] };
+}
+
+/** Folds the self-test result into the "System Health" summary card: red +
+ * an issue count when self-test found violations, otherwise the dashboard's
+ * own systemHealth.status as before. */
+function buildSystemHealthCard(
+  systemHealthStatus: string,
+  selfTest: HealthResponse['selfTest'],
+): { label: string; value: string; href: string; color: string; title: string | undefined } {
+  const hasViolations = selfTest !== undefined && !selfTest.ok;
+  return {
+    label: 'System Health',
+    value: hasViolations ? `${selfTest.violations.length} issue(s)` : systemHealthStatus,
+    href: '/settings',
+    color: hasViolations || systemHealthStatus !== 'ok' ? 'var(--error)' : 'var(--success)',
+    title: hasViolations ? selfTest.violations.join('\n') : undefined,
+  };
 }
 
 // eslint-disable-next-line max-lines-per-function -- life dashboard page with multiple data sources
@@ -96,12 +114,7 @@ export default function DashboardPage() {
           href: '#approvals',
           color: dashboardData.pendingApprovalsCount > 0 ? 'var(--warning, #f59e0b)' : undefined,
         },
-        {
-          label: 'System Health',
-          value: dashboardData.systemHealth.status,
-          href: '/settings',
-          color: dashboardData.systemHealth.status === 'ok' ? 'var(--success)' : 'var(--error)',
-        },
+        buildSystemHealthCard(dashboardData.systemHealth.status, healthData?.selfTest),
       ]
     : [];
 

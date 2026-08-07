@@ -1,0 +1,7 @@
+name: weekly-canary
+cron: "0 9 * * 0"
+timezone: UTC
+enabled: true
+run:
+  kind: template
+  ref: morning-digest

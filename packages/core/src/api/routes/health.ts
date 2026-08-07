@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { ApiDeps } from '../server.ts';
+import { getSelfTestStatus } from '../../services/system/self-test.ts';
 
 const ONE_HOUR_MS = 3_600_000;
 const FAILURE_RATE_THRESHOLD = 0.2;
@@ -37,10 +38,14 @@ export function registerHealthRoute(app: FastifyInstance, deps: ApiDeps): void {
       dbStatus = 'error';
     }
 
+    const selfTest = deps.db
+      ? getSelfTestStatus(deps.db)
+      : { lastRun: null, ok: true, violations: [] };
+
     const overallStatus: 'ok' | 'degraded' | 'error' =
       dbStatus === 'error'
         ? 'error'
-        : skillsStatus === 'error' || failureRate >= FAILURE_RATE_THRESHOLD
+        : skillsStatus === 'error' || failureRate >= FAILURE_RATE_THRESHOLD || !selfTest.ok
           ? 'degraded'
           : 'ok';
 
@@ -49,6 +54,7 @@ export function registerHealthRoute(app: FastifyInstance, deps: ApiDeps): void {
       uptime: process.uptime(),
       timestamp: new Date().toISOString(),
       knowledge: deps.knowledgeStore ? ('ok' as const) : ('unavailable' as const),
+      selfTest,
       services: {
         loaded: deps.serviceRunner.getRunningCount(),
         configured: deps.configuredServiceCount,

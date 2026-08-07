@@ -4,6 +4,8 @@ import type { KnowledgeConsolidation } from '../knowledge-engine/knowledge-conso
 import type { MemoryConsolidation } from '../agent-memory/memory-consolidation.ts';
 import type { SystemRetrospectiveDeps } from '../agent-memory/system-retrospective.ts';
 import { runSystemRetrospective } from '../agent-memory/system-retrospective.ts';
+import type { SelfTestJobDeps } from '../services/system/self-test.ts';
+import { runSelfTestJob } from '../services/system/self-test.ts';
 
 interface ArchiverLike {
   archiveCompletedTasks(): number;
@@ -22,6 +24,10 @@ export interface CoreJobDeps {
   // that don't care about memory jobs (most existing tests) can omit them.
   memoryConsolidation?: MemoryConsolidation;
   systemRetrospectiveDeps?: SystemRetrospectiveDeps;
+  // Self-test (Phase 3): zero-model deterministic invariants. No Neo4j or
+  // model dependency either — optional only so tests that don't care about
+  // the self-test job can omit it.
+  selfTestDeps?: SelfTestJobDeps;
 }
 
 export function registerCoreJobs(registry: JobRegistry, deps: CoreJobDeps): void {
@@ -30,8 +36,13 @@ export function registerCoreJobs(registry: JobRegistry, deps: CoreJobDeps): void
     return { summary: `Archived ${count} completed tasks` };
   });
 
-  const { retrospective, knowledgeConsolidation, memoryConsolidation, systemRetrospectiveDeps } =
-    deps;
+  const {
+    retrospective,
+    knowledgeConsolidation,
+    memoryConsolidation,
+    systemRetrospectiveDeps,
+    selfTestDeps,
+  } = deps;
 
   if (retrospective) {
     registry.register('knowledge-retrospective', async () => {
@@ -65,5 +76,9 @@ export function registerCoreJobs(registry: JobRegistry, deps: CoreJobDeps): void
           : 'System retrospective: nothing to report',
       };
     });
+  }
+
+  if (selfTestDeps) {
+    registry.register('self-test', async () => runSelfTestJob(selfTestDeps));
   }
 }

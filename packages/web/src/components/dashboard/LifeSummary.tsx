@@ -7,6 +7,9 @@ interface SummaryCard {
   value: number | string;
   href: string;
   color?: string;
+  /** Native tooltip — used by the System Health card to list self-test
+   * violations without a dedicated UI element. */
+  title?: string;
 }
 
 interface LifeSummaryProps {
@@ -20,6 +23,7 @@ export function LifeSummary({ cards }: LifeSummaryProps) {
         <Link
           key={card.label}
           href={card.href}
+          title={card.title}
           className="p-4 rounded-lg transition-colors hover:opacity-80"
           style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
         >

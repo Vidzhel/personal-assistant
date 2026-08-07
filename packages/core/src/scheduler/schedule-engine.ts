@@ -3,6 +3,7 @@ import { createLogger } from '@raven/shared';
 import type { ScheduleYaml, RavenTask } from '@raven/shared';
 import type { JobRegistry } from './job-registry.ts';
 import type { SchedulePrefs } from './schedule-prefs.ts';
+import type { ScheduleFireLog } from './schedule-fire-log.ts';
 
 const log = createLogger('schedule-engine');
 
@@ -29,6 +30,9 @@ export type FireTemplate = (
 export interface RunJobDeps {
   jobRegistry: JobRegistry;
   taskStore: TaskStoreLike;
+  /** Optional so existing unit tests that construct RunJobDeps by hand keep
+   * working unchanged — see self-test.ts for the reader side. */
+  scheduleFireLog?: ScheduleFireLog;
 }
 
 function markBlocked(deps: RunJobDeps, taskId: string, reason: string): void {
@@ -49,6 +53,7 @@ export async function runScheduledJob(def: ScheduleYaml, deps: RunJobDeps): Prom
   if (!handler) {
     log.error(`No job registered for "${def.run.ref}" (schedule ${def.name})`);
     markBlocked(deps, task.id, `No job handler registered: ${def.run.ref}`);
+    deps.scheduleFireLog?.record(def.name, 'blocked', 'No job handler registered');
     return;
   }
 
@@ -59,14 +64,17 @@ export async function runScheduledJob(def: ScheduleYaml, deps: RunJobDeps): Prom
       ...(result.summary !== undefined && { description: result.summary }),
     });
     log.info(`Schedule "${def.name}" completed: ${result.summary ?? 'ok'}`);
+    deps.scheduleFireLog?.record(def.name, 'completed', result.summary);
   } catch (err) {
     log.error(`Schedule "${def.name}" failed: ${String(err)}`);
     markBlocked(deps, task.id, String(err));
+    deps.scheduleFireLog?.record(def.name, 'blocked', String(err));
   }
 }
 
 export interface RunTemplateDeps {
   fireTemplate: FireTemplate;
+  scheduleFireLog?: ScheduleFireLog;
 }
 
 /** Fire a template-kind schedule. The resulting tree is the board-visible, scheduleId-stamped item. */
@@ -80,8 +88,10 @@ export async function runScheduledTemplate(
       params: def.params ?? {},
     });
     log.info(`Schedule "${def.name}" fired template "${def.run.ref}" → tree ${treeId}`);
+    deps.scheduleFireLog?.record(def.name, 'fired', treeId);
   } catch (err) {
     log.error(`Schedule "${def.name}" template fire failed: ${String(err)}`);
+    deps.scheduleFireLog?.record(def.name, 'failed', String(err));
   }
 }
 
@@ -92,6 +102,7 @@ export interface ScheduleEngineDeps {
   timezone: string;
   fireTemplate?: FireTemplate;
   schedulePrefs?: SchedulePrefs;
+  scheduleFireLog?: ScheduleFireLog;
 }
 
 export interface ScheduleInfo {
@@ -130,12 +141,17 @@ function checkEffectiveEnabled(def: ScheduleYaml, deps: ScheduleEngineDeps): boo
 
 async function fireDef(def: ScheduleYaml, deps: ScheduleEngineDeps): Promise<void> {
   if (def.run.kind === 'job') {
-    await runScheduledJob(def, { jobRegistry: deps.jobRegistry, taskStore: deps.taskStore }).catch(
-      (err: unknown) => log.error(`runScheduledJob(${def.name}) failed: ${String(err)}`),
-    );
+    await runScheduledJob(def, {
+      jobRegistry: deps.jobRegistry,
+      taskStore: deps.taskStore,
+      scheduleFireLog: deps.scheduleFireLog,
+    }).catch((err: unknown) => log.error(`runScheduledJob(${def.name}) failed: ${String(err)}`));
   } else if (def.run.kind === 'template' && deps.fireTemplate) {
     const fireTemplate = deps.fireTemplate;
-    await runScheduledTemplate(def, { fireTemplate }).catch((err: unknown) =>
+    await runScheduledTemplate(def, {
+      fireTemplate,
+      scheduleFireLog: deps.scheduleFireLog,
+    }).catch((err: unknown) =>
       log.error(`runScheduledTemplate(${def.name}) failed: ${String(err)}`),
     );
   }

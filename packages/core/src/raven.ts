@@ -76,6 +76,7 @@ import { createJobRegistry } from './scheduler/job-registry.ts';
 import { registerCoreJobs } from './scheduler/core-jobs.ts';
 import { createScheduleEngine } from './scheduler/schedule-engine.ts';
 import { createSchedulePrefs } from './scheduler/schedule-prefs.ts';
+import { createScheduleFireLog } from './scheduler/schedule-fire-log.ts';
 
 const log = createLogger('raven');
 
@@ -132,6 +133,7 @@ export async function createRaven(
   setConfig(config);
 
   const dataRoot = overrides.dataDir ?? projectRoot;
+  const dataDir = resolve(dataRoot, 'data');
 
   // 1b. Initialize file logging (must be before any substantive logging)
   const logDir = resolve(dataRoot, 'data/logs');
@@ -624,6 +626,21 @@ export async function createRaven(
     namedAgentStore,
   };
 
+  // 11a-4. Self-test deps (Phase 3): deterministic invariants over the same
+  // subsystems raven.ts already wired — no model call, no Neo4j dep.
+  const selfTestDeps = {
+    db: getDb(),
+    executionLogger,
+    pendingApprovals,
+    serviceRunner,
+    dataDir,
+    eventBus,
+  };
+
+  // Durable per-fire log the self-test job reads to check "every schedule's
+  // last fire reached a healthy terminal status" (see schedule-fire-log.ts).
+  const scheduleFireLog = createScheduleFireLog(getDb());
+
   // Unified schedule engine (job-kind schedules; template/agent kinds land in Plan 1b)
   registerCoreJobs(jobRegistry, {
     taskStore,
@@ -631,6 +648,7 @@ export async function createRaven(
     knowledgeConsolidation,
     memoryConsolidation,
     systemRetrospectiveDeps,
+    selfTestDeps,
   });
   const schedulePrefs = createSchedulePrefs(getDb());
   const scheduleEngine = createScheduleEngine({
@@ -640,6 +658,7 @@ export async function createRaven(
     timezone: config.RAVEN_TIMEZONE,
     fireTemplate: (ref, options) => templateScheduler.triggerTemplate(ref, options),
     schedulePrefs,
+    scheduleFireLog,
   });
   scheduleEngine.start();
 
@@ -711,7 +730,7 @@ export async function createRaven(
         configuredServiceCount,
         unsnoozableCategories: [...UNSNOOZABLE_CATEGORIES],
         sessionRetrospective,
-        dataDir: resolve(dataRoot, 'data'),
+        dataDir,
         projectRegistry,
         agentYamlStore,
         projectsDir,
