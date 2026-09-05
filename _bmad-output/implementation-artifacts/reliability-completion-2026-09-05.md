@@ -15,7 +15,7 @@ plans are reconciled against code, not blindly reimplemented.
 | R4 | Repair current build/deployment paths and runtime persistence | Complete | 174 files, 1913 passed / 6 skipped; check/builds; compiled two-process and offline Docker restart proof; 9 real Git tests. |
 | R5 | Review current learning/schedule/approval loops and run isolated journeys | Complete | 184 files, 1971 passed / 6 skipped; 11 browser journeys; check/builds/compiled restart passed; reviewed lifecycle and memory-retention fixes. |
 | R6 | Reconcile Claude/Codex/docs and old plan status with final behavior | Complete | Shared guides and historical notices; 66 skill manifests/TOML; check and 70 focused tests; real online/offline embeddings; zero npm audit advisories. |
-| R7 | Final regression/review and resolution ledger | Pending | check, tests, definition validators, builds; evidence and limits documented. |
+| R7 | Final regression/review and resolution ledger | Complete | 1971 tests / 11 browser journeys; checks, validators, builds, compiled restart, fresh images/offline smoke/native check; owner integrity and cleanup verified. |
 
 ## Deferred work and resolution plans
 
@@ -211,3 +211,36 @@ budget and WebSocket claims plus two verification-helper defects. Ordinary sched
 staleness and global daily-budget enforcement have explicit resolution plans.
 All 87 original owner definitions are unchanged. Details and evidence are in
 tech-spec-reliability-r6-guidance.md and the dependency assessment.
+
+## R7 completion
+
+The final Node22.23.2/npm10.9.8 regression passed 184 files / 1971 tests with six
+explicit live TickTick skips, all 11 headless browser journeys, the required check,
+both definition validators and production builds. Compiled smoke passed all 33
+migrations, six real services, fake chat, persisted definitions/memory/Git history
+and two natural process exits. All nine deployment initializer tests passed.
+
+Fresh core and web images built from the patched lockfile. The actual Docker
+context audit passed 368 deliberate inputs. Offline container smoke passed core
+restart/persistence and web/static retrieval; no new smoke containers or volumes
+remained. The core image's actual ESM Transformers import passed native Sharp
+0.35.4/libvips8.18.6 and synthetic image checks with network disabled. The initial
+native probe selected the CJS entry and was corrected before the passing run;
+this was a probe defect, with no application change required.
+
+Independent final acceptance review found one wording error about empty skill
+lists; it now accurately says no capability-library bindings. Role-scoped Raven
+and memory tools remain separate. The parent reviewed final logs and completed
+deployment verification when the delegated runner became unavailable. Earlier
+reviews used existing independent agents, not fresh blind contexts.
+
+All 87 original definition files are unchanged, with no additions/removals.
+The owner's original next-env change and unrelated work remain unstaged. Browser
+fixture roots/listeners/processes were removed. The current assessment and ledger
+record remaining cancellation/storage/provider/budget/schedule work with explicit
+fix plans; workspace design and graph replacement remain deferred. No live owner
+account canary, production deployment or graph restoration is claimed.
+
+Implementation checkpoints pushed to origin/master: R1 8ebf1db, R0 17ead95,
+R2 b2b49cf, R3 1fc47cc, R4 255e181, R5 9c2de3c and R6 1aca044. The final
+verification record is committed and pushed as the following R7 checkpoint.

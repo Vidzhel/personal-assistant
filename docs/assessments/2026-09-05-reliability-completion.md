@@ -1,8 +1,8 @@
 # Raven reliability completion — September 5, 2026
 
-The existing runtime and dashboard improvements have been reviewed and completed
-through R5. R6 reconciles development guidance and dependencies; R7 records the
-final regression. The [current queue and detailed evidence](../../_bmad-output/implementation-artifacts/reliability-completion-2026-09-05.md)
+The reliability pass is complete through R7: implementation, review, dependency
+fixes, shared Claude/Codex guidance and final regression. Remaining issues have
+explicit resolution plans below. The [current queue and detailed evidence](../../_bmad-output/implementation-artifacts/reliability-completion-2026-09-05.md)
 is authoritative. Old March/August checkboxes are historical, and attached
 repositories/project-memory redesign remain deferred at the owner's request.
 
@@ -24,7 +24,7 @@ links, memberships and lifecycle metadata that cannot all be recovered from
 files. Routine reindex now preserves these. Graph replacement needs a separate
 export/restore and reader-migration plan.
 
-Skills are explicit bindings: an empty list grants no capabilities, missing
+Skills are explicit bindings: an empty list grants no capability-library bindings, missing
 bindings fail before a turn starts, and unavailable knowledge tools are omitted.
 Project/session ownership is enforced at HTTP, WebSocket and orchestration entry
 points. These are useful boundaries for a single-owner assistant; they do not
@@ -39,14 +39,14 @@ when the owner returns to workspace design. Neither ../disertation nor
 
 ## Completed behavior
 
-| Area | Result |
-| --- | --- |
-| Project ownership and persistence | Foreign sessions/sources are rejected; managed settings persist; empty projects archive; known SQLite references and available graph memberships prevent deletion. |
-| Chat and dashboard | Durable send acknowledgment, recoverable drafts, session switching, reconnect reconciliation, usable nested IDs, truthful failure/cancel/approval outcomes, and real graph chat. |
-| Learning and background work | Failed/partial consolidation retains candidates; local learning writes drain; service/task shutdown suppresses late callbacks and new work. |
-| Capabilities and knowledge | Explicit grants and role-scoped tools; graph truly optional; relationship-preserving reindex and guarded disposal. |
-| Build and deployment | Packaged migrations, standalone dashboard, persistent definition/memory/Git roots, recoverable seed initialization, tested compiled and container restarts. |
-| Development agents | Shared AGENTS.md, reconciled Claude entry, preserved Claude skills/settings, Codex browser skills and optional custom agent. Raven's runtime provider is unchanged. |
+| Area                              | Result                                                                                                                                                                           |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Project ownership and persistence | Foreign sessions/sources are rejected; managed settings persist; empty projects archive; known SQLite references and available graph memberships prevent deletion.               |
+| Chat and dashboard                | Durable send acknowledgment, recoverable drafts, session switching, reconnect reconciliation, usable nested IDs, truthful failure/cancel/approval outcomes, and real graph chat. |
+| Learning and background work      | Failed/partial consolidation retains candidates; local learning writes drain; service/task shutdown suppresses late callbacks and new work.                                      |
+| Capabilities and knowledge        | Explicit grants and role-scoped tools; graph truly optional; relationship-preserving reindex and guarded disposal.                                                               |
+| Build and deployment              | Packaged migrations, standalone dashboard, persistent definition/memory/Git roots, recoverable seed initialization, tested compiled and container restarts.                      |
+| Development agents                | Shared AGENTS.md, reconciled Claude entry, preserved Claude skills/settings, Codex browser skills and optional custom agent. Raven's runtime provider is unchanged.              |
 
 When Neo4j is unavailable, an otherwise empty project can archive while reporting
 `knowledgeReferencesChecked: false`. Its graph memberships were not checked; the
@@ -54,13 +54,25 @@ archive outcome does not establish their absence.
 
 ## Verification and limits
 
-R5 passed 184 test files / 1,971 tests, with six explicitly skipped live TickTick
-cases, and all 11 isolated headless browser journeys. Formatting, lint, types,
-shared/core and production dashboard builds passed. Compiled smoke covered 33
-migrations, six real services, fake chat, persisted memory/definitions/Git history
-and two natural process exits. R4 built both Docker images and passed offline
-restart/static-asset smoke. R3 separately passed 30 disposable Neo4j tests.
-R7 will replace this paragraph's baseline with final evidence after R6 changes.
+Final verification used Node 22.23.2/npm 10.9.8 on the R6 code and lockfile:
+
+| Check                                    | Result                                                                                                                                                     |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Default suite                            | 184 files; 1,971 passed; six explicit live TickTick skips.                                                                                                 |
+| Headless browser journeys                | All 11 passed; fixture files, processes and listeners cleaned up.                                                                                          |
+| Required check and definition validators | Formatting, lint, types, strip-types, dependency guard, library and project validation passed.                                                             |
+| Production builds                        | Shared/core, packaged 33 migrations, and standalone dashboard passed.                                                                                      |
+| Compiled restart                         | Six real services, fake chat, persistent definitions/memory/Git history and two natural process exits passed.                                              |
+| Deployment initializer                   | Nine real temporary Git/bootstrap/recovery tests passed.                                                                                                   |
+| Fresh Docker images                      | Both built from the lockfile; 368 allowlisted context inputs; offline restart/page/static-asset smoke passed with no leftover smoke containers or volumes. |
+| Native embedding dependency              | Core image loaded Transformers with Sharp 0.35.4/libvips 8.18.6 and passed synthetic image adapter checks without network.                                 |
+| R6 real model and advisory checks        | Online and separate offline BGE fp32/384-value embedding checks passed in disposable storage; zero npm audit advisories.                                   |
+| Earlier disposable Neo4j proof           | R3 passed 30 knowledge-store tests, including durable relationship preservation.                                                                           |
+
+The final spec records commands and local log paths. The
+[dependency review](2026-09-05-dependency-review.md) explains the scoped override
+and its removal criteria. The Docker tags are local verification artifacts;
+production was not deployed.
 
 Default tests use temporary roots and fake model execution, and block real SDK
 and Neo4j factories. Browser checks use their own services and temporary frontend
@@ -94,7 +106,11 @@ contains concrete file boundaries and verification requirements for each item.
 4. Track provider file cleanup across cancellation/restart; local abort does not
    prove remote inference cancellation or uploaded-file deletion. Validate the
    retry path with a fake provider before an explicitly authorized live canary.
-5. Resume the workspace proposal: explicit project selection, source grants,
+5. Enforce a real global daily budget and detect ordinary schedules that never
+   fire or become stale. The old budget setting has no consumer, and current
+   schedule status checks do not establish freshness. The ledger specifies
+   existing SQLite/cron paths and concurrency, restart and fake-clock tests.
+6. Resume the workspace proposal: explicit project selection, source grants,
    retrieval, structured project memory and a separately proven graph migration.
 
 All original owner definition files and unrelated local changes are preserved

@@ -134,10 +134,11 @@ is the current task queue and dated verification evidence; the
 [deferred ledger](_bmad-output/implementation-artifacts/deferred-work.md) records
 concrete remaining fixes. March and August plans are historical snapshots.
 
-The R5 checkpoint (`9c2de3c`) passed **1971 tests with 6 explicit skips**, **11 browser
-journeys**, the required check, production builds and compiled restart verification.
-R4 also verified both Docker images, offline container persistence and real Git
-history. These checks use isolated roots and fake model boundaries; live Claude
+Final reliability verification passed **1971 tests with 6 explicit skips**, **11 browser
+journeys**, required checks, production builds and compiled restart verification.
+Both fresh Docker images passed offline persistence/static-asset checks; real
+Git history and native embedding dependencies were verified. The patched lockfile
+has zero npm audit advisories. These checks use isolated roots; live Claude
 authentication, model quality and account delivery remain separate canaries.
 
 The
