@@ -21,7 +21,7 @@ import { createMessageStore } from '../session-manager/message-store.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { RavenEvent } from '@raven/shared';
+import { META_PROJECT_ID, type AgentTask, type RavenEvent } from '@raven/shared';
 import { createRavenTestFixture } from './fixtures/raven-fixture.ts';
 import { ProjectRegistry } from '../project-registry/project-registry.ts';
 import { createScaffoldingApi } from '../scaffolding/scaffolding-api.ts';
@@ -36,11 +36,45 @@ function makeMockAgentManager() {
   };
 }
 
+function makeAgentTask(overrides: Partial<AgentTask> = {}): AgentTask {
+  const now = Date.now();
+  return {
+    id: `api-task-${Math.random().toString(36).slice(2, 8)}`,
+    skillName: 'test-skill',
+    prompt: 'test prompt',
+    status: 'completed',
+    priority: 'normal',
+    mcpServers: {},
+    agentDefinitions: {},
+    createdAt: now,
+    startedAt: now,
+    completedAt: now,
+    ...overrides,
+  };
+}
+
+async function recordAgentTask(
+  logger: ReturnType<typeof createExecutionLogger>,
+  overrides: Partial<AgentTask>,
+): Promise<void> {
+  const task = makeAgentTask({ ...overrides, status: 'running', completedAt: undefined });
+  await logger.logTaskStart(task);
+  await logger.logTaskComplete(
+    makeAgentTask({
+      ...task,
+      ...overrides,
+      status: overrides.status ?? 'completed',
+      completedAt: overrides.completedAt ?? Date.now(),
+    }),
+  );
+}
+
 describe('API routes', () => {
   let tmpDir: string;
   let app: ReturnType<typeof Fastify>;
   let eventBus: EventBus;
   let scheduleEngine: ScheduleEngine;
+  let executionLogger: ReturnType<typeof createExecutionLogger>;
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-api-'));
@@ -67,8 +101,6 @@ describe('API routes', () => {
     const pendingApprovals = createPendingApprovals(getDb());
     pendingApprovals.initialize();
 
-    const executionLogger = createExecutionLogger({ db: getDb() });
-
     const deps = {
       eventBus,
       sessionManager,
@@ -76,7 +108,6 @@ describe('API routes', () => {
       agentManager: makeMockAgentManager() as any,
       auditLog,
       pendingApprovals,
-      executionLogger,
       messageStore: createMessageStore({ basePath: join(tmpDir, 'sessions') }),
       serviceRunner: { getRunningCount: () => 0 },
       configuredServiceCount: 0,
@@ -94,6 +125,16 @@ describe('API routes', () => {
       },
     });
     await runProjectSync({ db: getDb(), projectsDir, projectRegistry, scaffoldingApi });
+
+    executionLogger = createExecutionLogger({
+      projectsDir,
+      projects: () =>
+        projectRegistry.listProjects().map((node) => ({
+          id: node.isMeta ? META_PROJECT_ID : (node.metadata?.id ?? node.id),
+          fsPath: node.id,
+        })),
+    });
+    deps.executionLogger = executionLogger;
 
     registerHealthRoute(app, deps);
     registerProjectRoutes(app, { eventBus, projectsDir, projectRegistry, scaffoldingApi });
@@ -351,14 +392,19 @@ describe('API routes', () => {
 
   describe('GET /api/agent-tasks', () => {
     it('returns paginated task list', async () => {
-      const db = getDb();
-      const now = new Date().toISOString();
-      db.prepare(
-        'INSERT INTO agent_tasks (id, skill_name, prompt, status, priority, blocked, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      ).run('task-1', 'gmail', 'Check email', 'completed', 'normal', 0, now);
-      db.prepare(
-        'INSERT INTO agent_tasks (id, skill_name, prompt, status, priority, blocked, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      ).run('task-2', 'ticktick', 'Create task', 'failed', 'high', 0, now);
+      await recordAgentTask(executionLogger, {
+        id: 'task-1',
+        skillName: 'gmail',
+        prompt: 'Check email',
+        status: 'completed',
+      });
+      await recordAgentTask(executionLogger, {
+        id: 'task-2',
+        skillName: 'ticktick',
+        prompt: 'Create task',
+        status: 'failed',
+        priority: 'high',
+      });
 
       const res = await app.inject({ method: 'GET', url: '/api/agent-tasks' });
       expect(res.statusCode).toBe(200);
@@ -367,7 +413,7 @@ describe('API routes', () => {
       expect(body.length).toBeGreaterThanOrEqual(2);
     });
 
-    it('filters by status', async () => {
+    it('filters by status and bounded project/date parameters', async () => {
       const res = await app.inject({ method: 'GET', url: '/api/agent-tasks?status=completed' });
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.payload);
@@ -375,6 +421,17 @@ describe('API routes', () => {
       for (const task of body) {
         expect(task.status).toBe('completed');
       }
+      const filtered = await app.inject({
+        method: 'GET',
+        url: '/api/agent-tasks?createdSinceMs=0&completedSinceMs=0&limit=1',
+      });
+      expect(filtered.statusCode).toBe(200);
+      expect(JSON.parse(filtered.payload)).toHaveLength(1);
+      const invalid = await app.inject({
+        method: 'GET',
+        url: '/api/agent-tasks?createdSinceMs=not-a-number',
+      });
+      expect(invalid.statusCode).toBe(400);
     });
   });
 
@@ -420,49 +477,35 @@ describe('API routes', () => {
     });
 
     it('reflects inserted test data accurately', async () => {
-      const db = getDb();
       const now = new Date();
 
-      // Insert agent tasks
-      db.prepare(
-        'INSERT INTO agent_tasks (id, skill_name, prompt, status, priority, blocked, created_at, completed_at, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      ).run(
-        'metrics-task-1',
-        'gmail',
-        'Check email',
-        'completed',
-        'normal',
-        0,
-        now.getTime(),
-        now.getTime(),
-        1500,
-      );
-      db.prepare(
-        'INSERT INTO agent_tasks (id, skill_name, prompt, status, priority, blocked, created_at, completed_at, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      ).run(
-        'metrics-task-2',
-        'gmail',
-        'Send reply',
-        'failed',
-        'normal',
-        0,
-        now.getTime(),
-        now.getTime(),
-        3000,
-      );
-      db.prepare(
-        'INSERT INTO agent_tasks (id, skill_name, prompt, status, priority, blocked, created_at, completed_at, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      ).run(
-        'metrics-task-3',
-        'ticktick',
-        'Create task',
-        'completed',
-        'normal',
-        0,
-        now.getTime(),
-        now.getTime(),
-        800,
-      );
+      await recordAgentTask(executionLogger, {
+        id: 'metrics-task-1',
+        skillName: 'gmail',
+        prompt: 'Check email',
+        status: 'completed',
+        durationMs: 1500,
+        createdAt: now.getTime(),
+        completedAt: now.getTime(),
+      });
+      await recordAgentTask(executionLogger, {
+        id: 'metrics-task-2',
+        skillName: 'gmail',
+        prompt: 'Send reply',
+        status: 'failed',
+        durationMs: 3000,
+        createdAt: now.getTime(),
+        completedAt: now.getTime(),
+      });
+      await recordAgentTask(executionLogger, {
+        id: 'metrics-task-3',
+        skillName: 'ticktick',
+        prompt: 'Create task',
+        status: 'completed',
+        durationMs: 800,
+        createdAt: now.getTime(),
+        completedAt: now.getTime(),
+      });
 
       const res = await app.inject({ method: 'GET', url: '/api/metrics?period=1h' });
       expect(res.statusCode).toBe(200);

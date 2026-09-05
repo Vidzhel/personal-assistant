@@ -17,7 +17,7 @@ external repositories.
 | --- | --- | --- |
 | F1 | Validated project-local YAML board tasks, atomic persistence and current file-owned project metadata | Complete; reviewed, 2,014 tests and 12 browser journeys passed |
 | F2 | Whole-tree YAML execution state, explicit board/run linkage, engine shutdown and restart interruption | Complete; reviewed, 2,079 tests and 14 browser journeys passed |
-| F3 | Project-local agent-run records and replacement of remaining task SQL readers | Pending |
+| F3 | Project-local agent-run records and replacement of remaining task SQL readers | Complete; reviewed, 2,092 tests and 14 browser journeys passed |
 | F4 | Drain admitted MCP mutations before terminal task state and store shutdown | Pending |
 | F5 | File/graph reconciliation and changed-content derived-index refresh | Pending |
 | F6 | Enforced global daily budget through existing execution paths | Pending |
@@ -54,9 +54,15 @@ F2 evidence and reviewed limits are in
 execution trees now live in YAML; interrupted work requires deliberate resume.
 The default suite passed 194 files / 2,079 tests (six deliberate live skips),
 required checks and both production builds passed, and fourteen browser journeys
-plus packaged process-restart verification passed. F3 is the next checkpoint.
-Readiness specs for F3–F5 are recorded alongside this queue; implementation remains
-ordered, with parent review and a tested commit/push for each checkpoint.
+plus packaged process-restart verification passed.
+
+F3 evidence and reviewed limits are in
+[tech-spec-f3-agent-run-files.md](tech-spec-f3-agent-run-files.md). The default suite
+passed 196 files / 2,092 tests (six deliberate live skips); required checks,
+production builds, fourteen browser journeys and packaged restart passed. F4 is
+the next checkpoint. Readiness specs for F4–F5 are recorded alongside this queue;
+implementation remains ordered, with parent review and a tested commit/push for
+each checkpoint.
 
 ## Workspace requirements accepted from the owner
 

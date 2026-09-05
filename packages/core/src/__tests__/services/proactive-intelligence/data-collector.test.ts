@@ -17,6 +17,7 @@ vi.mock('@raven/shared', async (importOriginal) => {
 
 import { buildSnapshot } from '../../../services/proactive-intelligence/data-collector.ts';
 import type { DatabaseInterface } from '@raven/shared';
+import type { ExecutionLogger } from '../../../agent-manager/execution-logger.ts';
 
 function createMockDb(queryResults: Record<string, any[]>): DatabaseInterface {
   return {
@@ -31,10 +32,20 @@ function createMockDb(queryResults: Record<string, any[]>): DatabaseInterface {
   } as any;
 }
 
+function createMockExecutionLogger(
+  tasks: Array<{ skillName: string; status: string }> = [],
+): ExecutionLogger {
+  return {
+    queryTasks: vi.fn((opts) =>
+      opts.status ? tasks.filter((task) => task.status === opts.status) : tasks,
+    ),
+  } as unknown as ExecutionLogger;
+}
+
 describe('data-collector buildSnapshot', () => {
   it('returns snapshot with empty-data messages when DB has no data', () => {
     const db = createMockDb({});
-    const snapshot = buildSnapshot(db);
+    const snapshot = buildSnapshot(db, createMockExecutionLogger());
 
     expect(snapshot).toContain('No events in the last 7 days');
     expect(snapshot).toContain('No agent tasks in the last 7 days');
@@ -54,7 +65,7 @@ describe('data-collector buildSnapshot', () => {
       ],
     });
 
-    const snapshot = buildSnapshot(db);
+    const snapshot = buildSnapshot(db, createMockExecutionLogger());
 
     expect(snapshot).toContain('Events (7d):');
     expect(snapshot).toContain('user:chat:message: 5');
@@ -69,7 +80,7 @@ describe('data-collector buildSnapshot', () => {
       ],
     });
 
-    const snapshot = buildSnapshot(db);
+    const snapshot = buildSnapshot(db, createMockExecutionLogger());
 
     expect(snapshot).toContain('Knowledge Activity (7d):');
     expect(snapshot).toContain('knowledge:ingestion:complete: 2');
@@ -78,17 +89,19 @@ describe('data-collector buildSnapshot', () => {
 
   it('includes conversation snapshot with task topics and volume', () => {
     const db = createMockDb({
-      'FROM agent_tasks WHERE created_at': [
-        { skill_name: 'ticktick', count: 4 },
-        { skill_name: 'gmail', count: 2 },
-      ],
       'SUM(turn_count)': [
         { project_id: 'proj-1', total_turns: 15 },
         { project_id: 'proj-2', total_turns: 3 },
       ],
     });
 
-    const snapshot = buildSnapshot(db);
+    const snapshot = buildSnapshot(
+      db,
+      createMockExecutionLogger([
+        ...Array.from({ length: 4 }, () => ({ skillName: 'ticktick', status: 'completed' })),
+        ...Array.from({ length: 2 }, () => ({ skillName: 'gmail', status: 'completed' })),
+      ]),
+    );
 
     expect(snapshot).toContain('Task Topics (7d):');
     expect(snapshot).toContain('ticktick: 4 completed tasks');
@@ -97,17 +110,33 @@ describe('data-collector buildSnapshot', () => {
   });
 
   it('includes agent task data', () => {
-    const db = createMockDb({
-      'FROM agent_tasks WHERE created_at > ? GROUP BY skill_name, status': [
-        { skill_name: 'ticktick', status: 'completed', count: 10 },
-        { skill_name: 'gmail', status: 'failed', count: 1 },
-      ],
-    });
+    const db = createMockDb({});
 
-    const snapshot = buildSnapshot(db);
+    const snapshot = buildSnapshot(
+      db,
+      createMockExecutionLogger([
+        ...Array.from({ length: 10 }, () => ({ skillName: 'ticktick', status: 'completed' })),
+        { skillName: 'gmail', status: 'failed' },
+      ]),
+    );
 
     expect(snapshot).toContain('Agent Tasks (7d):');
     expect(snapshot).toContain('ticktick [completed]: 10');
+  });
+
+  it('requests every task record when building aggregates', () => {
+    const logger = createMockExecutionLogger(
+      Array.from({ length: 60 }, () => ({ skillName: 'ticktick', status: 'completed' })),
+    );
+
+    const snapshot = buildSnapshot(createMockDb({}), logger);
+
+    expect(snapshot).toContain('ticktick [completed]: 60');
+    expect(logger.queryTasks).toHaveBeenCalledWith({
+      createdSinceMs: expect.any(Number),
+      limit: null,
+      offset: 0,
+    });
   });
 
   it('includes session data with days-ago calculation', () => {
@@ -117,7 +146,7 @@ describe('data-collector buildSnapshot', () => {
       ],
     });
 
-    const snapshot = buildSnapshot(db);
+    const snapshot = buildSnapshot(db, createMockExecutionLogger());
 
     expect(snapshot).toContain('Sessions (30d):');
     expect(snapshot).toContain('proj-1: 5 sessions');
@@ -128,7 +157,7 @@ describe('data-collector buildSnapshot', () => {
       'FROM insights WHERE created_at': [{ pattern_key: 'meeting-overload', count: 3 }],
     });
 
-    const snapshot = buildSnapshot(db);
+    const snapshot = buildSnapshot(db, createMockExecutionLogger());
 
     expect(snapshot).toContain('Recent Insights (7d, avoid duplicating):');
     expect(snapshot).toContain('meeting-overload: 3 occurrences');
@@ -145,7 +174,7 @@ describe('data-collector buildSnapshot', () => {
       'FROM events WHERE timestamp': bigData,
     });
 
-    const snapshot = buildSnapshot(db);
+    const snapshot = buildSnapshot(db, createMockExecutionLogger());
 
     expect(snapshot).toContain('[...truncated]');
   });

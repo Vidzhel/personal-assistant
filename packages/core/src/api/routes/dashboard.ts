@@ -4,6 +4,7 @@ import type { AgentManager } from '../../agent-manager/agent-manager.ts';
 import type { PendingApprovals } from '../../permission-engine/pending-approvals.ts';
 import type { DatabaseInterface } from '@raven/shared';
 import type { LifeDashboardData } from '@raven/shared';
+import type { ExecutionLogger } from '../../agent-manager/execution-logger.ts';
 
 const INSIGHTS_LIMIT = 5;
 const UPCOMING_LIMIT = 5;
@@ -12,6 +13,7 @@ interface DashboardDeps {
   scheduleEngine: ScheduleEngine;
   agentManager: AgentManager;
   pendingApprovals: PendingApprovals;
+  executionLogger: ExecutionLogger;
   db?: DatabaseInterface;
 }
 
@@ -23,11 +25,6 @@ interface InsightRow {
   created_at: string;
 }
 
-interface CountRow {
-  count: number;
-}
-
-// eslint-disable-next-line max-lines-per-function -- contains one large route handler aggregating multiple data sources
 export function registerDashboardRoutes(app: FastifyInstance, deps: DashboardDeps): void {
   app.get('/api/dashboard/life', async (): Promise<LifeDashboardData> => {
     // Autonomous actions today
@@ -35,15 +32,12 @@ export function registerDashboardRoutes(app: FastifyInstance, deps: DashboardDep
     todayMidnight.setHours(0, 0, 0, 0);
     const todayMs = todayMidnight.getTime();
 
-    let autonomousActionsCount = 0;
-
-    if (deps.db) {
-      const taskRow = deps.db.get<CountRow>(
-        "SELECT COUNT(*) as count FROM agent_tasks WHERE completed_at >= ? AND status = 'completed'",
-        todayMs,
-      );
-      autonomousActionsCount = taskRow?.count ?? 0;
-    }
+    const autonomousActionsCount = deps.executionLogger.queryTasks({
+      status: 'completed',
+      completedSinceMs: todayMs,
+      limit: null,
+      offset: 0,
+    }).length;
 
     // Active schedules
     const activeCount = deps.scheduleEngine.getActiveCount();

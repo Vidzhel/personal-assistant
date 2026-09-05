@@ -1,14 +1,11 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type Database from 'better-sqlite3';
-import { initDatabase, closeDatabase } from '../db/database.ts';
 import { EventBus } from '../event-bus/event-bus.ts';
 import type { NamedAgentStore } from '../agent-registry/yaml-named-agent-store.ts';
 import type { AgentResolver } from '../agent-registry/agent-resolver.ts';
 import type { CapabilityLibrary } from '../capability-library/capability-library.ts';
 import type { NotificationEvent } from '@raven/shared';
+import type { ExecutionLogger } from '../agent-manager/execution-logger.ts';
 
 // runAgentTask is mocked at the module level — same convention
 // memory-consolidation.test.ts and session-retrospective's own suite use
@@ -57,39 +54,28 @@ describe('isWithinActiveHours', () => {
 });
 
 describe('hadRecentAgentActivity', () => {
-  let dir: string;
-  let db: Database.Database;
-
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'raven-heartbeat-busy-'));
-    db = initDatabase(join(dir, 'test.db'));
-  });
-
-  afterEach(() => {
-    closeDatabase();
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  function insertTask(id: string, createdAt: number): void {
-    db.prepare(
-      `INSERT INTO agent_tasks (id, skill_name, prompt, status, priority, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(id, 'chat', 'hi', 'completed', 'normal', createdAt);
+  function logger(hasActivity: boolean) {
+    return {
+      queryTasks: vi.fn(() => (hasActivity ? [{}] : [])),
+    } as unknown as ExecutionLogger;
   }
 
-  it('is false with no agent_tasks at all', () => {
-    expect(hadRecentAgentActivity(db, Date.now() - MS_PER_HOUR)).toBe(false);
+  it('is false with no recorded activity', () => {
+    const executionLogger = logger(false);
+    expect(hadRecentAgentActivity(executionLogger, Date.now() - MS_PER_HOUR)).toBe(false);
+    expect(executionLogger.queryTasks).toHaveBeenCalledWith({
+      createdSinceMs: expect.any(Number),
+      limit: 1,
+      offset: 0,
+    });
   });
 
   it('is true when a task was created within the window', () => {
-    const now = Date.now();
-    insertTask('t1', now);
-    expect(hadRecentAgentActivity(db, now - MS_PER_HOUR)).toBe(true);
+    expect(hadRecentAgentActivity(logger(true), Date.now() - MS_PER_HOUR)).toBe(true);
   });
 
   it('is false when the only task predates the window', () => {
-    const now = Date.now();
-    insertTask('t1', now - 2 * MS_PER_HOUR);
-    expect(hadRecentAgentActivity(db, now - MS_PER_HOUR)).toBe(false);
+    expect(hadRecentAgentActivity(logger(false), Date.now() - MS_PER_HOUR)).toBe(false);
   });
 });
 
@@ -130,9 +116,11 @@ function makeSessionManager() {
 // skip/swallow/notify orchestration, not re-deriving the active-hours math.
 const ALWAYS_ACTIVE_HOURS = '00-24';
 
-function makeDeps(overrides: { db?: Database.Database } = {}) {
+function makeDeps(overrides: { db?: Database.Database; executionLogger?: ExecutionLogger } = {}) {
   return {
     db: overrides.db ?? makeFakeDb(false),
+    executionLogger: (overrides.executionLogger ??
+      ({ queryTasks: vi.fn(() => []) } as unknown as ExecutionLogger)) as ExecutionLogger,
     eventBus: new EventBus(),
     sessionManager: makeSessionManager(),
     config: {
@@ -165,7 +153,10 @@ describe('createHeartbeat', () => {
   });
 
   it('skips on busy-deferral (recent agent activity) without dispatching', async () => {
-    const deps = makeDeps({ db: makeFakeDb(true) });
+    const deps = makeDeps({
+      db: makeFakeDb(true),
+      executionLogger: { queryTasks: vi.fn(() => [{}]) } as unknown as ExecutionLogger,
+    });
     const heartbeat = createHeartbeat(deps);
 
     const result = await heartbeat.fireHeartbeat();

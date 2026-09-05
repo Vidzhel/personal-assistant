@@ -6,13 +6,22 @@ import type { AgentManager } from '../../agent-manager/agent-manager.ts';
 
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
+const MAX_EPOCH_MS = Number.MAX_SAFE_INTEGER;
+
+const boundedEpochQuery = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() !== '' ? Number(value) : value),
+  z.number().int().min(0).max(MAX_EPOCH_MS).optional(),
+);
 
 const TaskQuerySchema = z.object({
   skillName: z.string().optional(),
   status: z.enum(['queued', 'running', 'completed', 'failed', 'blocked', 'cancelled']).optional(),
   sessionId: z.string().optional(),
+  projectId: z.string().optional(),
+  createdSinceMs: boundedEpochQuery,
+  completedSinceMs: boundedEpochQuery,
   limit: z.coerce.number().int().min(1).max(MAX_PAGE_SIZE).default(DEFAULT_PAGE_SIZE),
-  offset: z.coerce.number().int().min(0).default(0),
+  offset: z.coerce.number().int().min(0).max(MAX_EPOCH_MS).default(0),
 });
 
 // eslint-disable-next-line max-lines-per-function -- multiple route handlers registered in one function

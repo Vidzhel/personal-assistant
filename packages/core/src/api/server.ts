@@ -247,6 +247,7 @@ export async function createApiServer(
     scheduleEngine: deps.scheduleEngine,
     agentManager: deps.agentManager,
     pendingApprovals: deps.pendingApprovals,
+    executionLogger: deps.executionLogger,
     db: deps.db,
   });
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -8,6 +8,13 @@ import { registerDashboardRoutes } from '../api/routes/dashboard.ts';
 import type { ScheduleEngine } from '../scheduler/schedule-engine.ts';
 import type { AgentManager } from '../agent-manager/agent-manager.ts';
 import type { PendingApprovals } from '../permission-engine/pending-approvals.ts';
+import type { ExecutionLogger, TaskRecord } from '../agent-manager/execution-logger.ts';
+
+function createMockExecutionLogger(): ExecutionLogger {
+  return {
+    queryTasks: vi.fn(() => []),
+  } as unknown as ExecutionLogger;
+}
 
 function createMockScheduleEngine(): ScheduleEngine {
   return {
@@ -42,10 +49,12 @@ function createMockPendingApprovals(): PendingApprovals {
 describe('GET /api/dashboard/life', () => {
   let tmpDir: string;
   let app: ReturnType<typeof Fastify>;
+  let executionLogger: ExecutionLogger;
 
   beforeEach(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'dashboard-api-'));
     initDatabase(join(tmpDir, 'test.db'));
+    executionLogger = createMockExecutionLogger();
 
     app = Fastify({ logger: false });
 
@@ -53,6 +62,7 @@ describe('GET /api/dashboard/life', () => {
       scheduleEngine: createMockScheduleEngine(),
       agentManager: createMockAgentManager(),
       pendingApprovals: createMockPendingApprovals(),
+      executionLogger,
       db: createDbInterface(),
     });
 
@@ -116,19 +126,7 @@ describe('GET /api/dashboard/life', () => {
   });
 
   it('counts completed tasks from today', async () => {
-    const db = getDb();
-    const now = Date.now();
-
-    // Insert a completed task from today
-    db.prepare(
-      "INSERT INTO agent_tasks (id, session_id, skill_name, prompt, status, created_at, completed_at) VALUES (?, ?, ?, ?, 'completed', ?, ?)",
-    ).run('task-1', 'sess-1', 'test-skill', 'test prompt', now, now);
-
-    // Insert a task from yesterday (should not count)
-    const yesterday = now - 86400000;
-    db.prepare(
-      "INSERT INTO agent_tasks (id, session_id, skill_name, prompt, status, created_at, completed_at) VALUES (?, ?, ?, ?, 'completed', ?, ?)",
-    ).run('task-2', 'sess-1', 'test-skill', 'test prompt', yesterday, yesterday);
+    vi.mocked(executionLogger.queryTasks).mockReturnValue([{} as TaskRecord]);
 
     const res = await app.inject({
       method: 'GET',
@@ -137,6 +135,12 @@ describe('GET /api/dashboard/life', () => {
 
     const data = res.json();
     expect(data.today.autonomousActionsCount).toBe(1);
+    expect(executionLogger.queryTasks).toHaveBeenCalledWith({
+      status: 'completed',
+      completedSinceMs: expect.any(Number),
+      limit: null,
+      offset: 0,
+    });
   });
 
   it('returns latest insights from DB', async () => {

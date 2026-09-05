@@ -80,6 +80,7 @@ export interface ActiveTaskInfo {
 export class AgentManager {
   private queue: AgentTask[] = [];
   private running = new Map<string, Promise<void>>();
+  private queuedFinalizers = new Map<string, Promise<void>>();
   // sessionIds with a currently-running task — checked by processQueue so a
   // second chat turn for the same Raven session never gets admitted while
   // the first is still in flight (both would `claude --resume <same id>`
@@ -156,6 +157,13 @@ export class AgentManager {
   }
 
   private queueTask(task: AgentTask): void {
+    if (
+      this.running.has(task.id) ||
+      this.queuedFinalizers.has(task.id) ||
+      this.queue.some((queued) => queued.id === task.id)
+    ) {
+      throw new Error(`Agent task is already admitted: ${task.id}`);
+    }
     // Insert by priority
     const priorityOrder = { urgent: 0, high: 1, normal: 2, low: 3 };
     const idx = this.queue.findIndex(
@@ -181,15 +189,17 @@ export class AgentManager {
     // processQueue call later in this same tick (e.g. from another admitted
     // task's turn through the loop) already sees this session as taken.
     if (task.sessionId) this.runningSessionIds.add(task.sessionId);
-    const promise = this.runTask(task).finally(() => {
-      this.abortControllers.delete(task.id);
-      this.taskMeta.delete(task.id);
-      this.running.delete(task.id);
-      if (task.sessionId) this.runningSessionIds.delete(task.sessionId);
-      this.completions.get(task.id)?.();
-      this.completions.delete(task.id);
-      this.processQueue();
-    });
+    const promise = this.runTask(task)
+      .catch((error: unknown) => this.handleFinalizationFailure(task, error))
+      .finally(() => {
+        this.abortControllers.delete(task.id);
+        this.taskMeta.delete(task.id);
+        this.running.delete(task.id);
+        if (task.sessionId) this.runningSessionIds.delete(task.sessionId);
+        this.completions.get(task.id)?.();
+        this.completions.delete(task.id);
+        this.processQueue();
+      });
     // Keep unexpected persistence/listener errors observable without an unhandled rejection.
     void promise.catch((err: unknown) =>
       log.error(`Task ${task.id} failed during finalization: ${err}`),
@@ -250,7 +260,12 @@ export class AgentManager {
     this.taskMeta.set(task.id, task);
     const abortController = new AbortController();
     this.abortControllers.set(task.id, abortController);
-    this.executionLogger?.logTaskStart(task);
+    await this.executionLogger?.logTaskStart(task);
+    if (abortController.signal.aborted) {
+      this.markTaskCancelled(task);
+      await this.persistCancellation(task, true);
+      return;
+    }
     if (task.sessionId) this.sessionManager?.updateStatus(task.sessionId, 'running');
 
     const thinkingContent = `Starting ${task.skillName} agent...`;
@@ -302,7 +317,6 @@ export class AgentManager {
     });
 
     this.abortControllers.delete(task.id);
-    this.taskMeta.delete(task.id);
 
     const isCancelled = result.errors?.includes('cancelled');
     task.status = isCancelled
@@ -316,7 +330,7 @@ export class AgentManager {
     task.durationMs = result.durationMs;
     task.errors = result.errors;
     task.completedAt = Date.now();
-    this.executionLogger?.logTaskComplete(task);
+    await this.executionLogger?.logTaskComplete(task);
 
     // Update session: increment turn count and set status back to idle
     if (task.sessionId && this.sessionManager) {
@@ -339,29 +353,7 @@ export class AgentManager {
       });
     }
 
-    this.eventBus.emit({
-      id: generateId(),
-      timestamp: Date.now(),
-      source: 'agent-manager',
-      projectId: task.projectId,
-      type: 'agent:task:complete',
-      payload: {
-        taskId: task.id,
-        // The Raven session id (F3): this is what consumers actually key
-        // on for session correlation. The SDK's own session id — needed
-        // only to resume the *next* turn — travels separately below; it
-        // must never be aliased into this field again.
-        sessionId: task.sessionId,
-        sdkSessionId: result.sdkSessionId,
-        skillName: task.skillName,
-        result: result.result,
-        durationMs: result.durationMs,
-        success: result.success,
-        errors: result.errors,
-        blocked: result.blocked,
-        cancelled: isCancelled,
-      },
-    });
+    this.emitTaskComplete(task, result.sdkSessionId);
 
     log.info(
       `Task completed: ${task.id} (${result.success ? 'success' : 'failed'}, ${result.durationMs}ms)`,
@@ -373,39 +365,18 @@ export class AgentManager {
     const queueIdx = this.queue.findIndex((t) => t.id === taskId);
     if (queueIdx !== -1) {
       const task = this.queue.splice(queueIdx, 1)[0];
-      task.status = 'cancelled';
-      task.completedAt = Date.now();
-      task.errors = ['cancelled'];
-      task.result = '';
-      task.durationMs = 0;
-      this.executionLogger?.logTaskComplete(task);
-      if (task.sessionId && !this.runningSessionIds.has(task.sessionId)) {
-        this.sessionManager?.updateStatus(task.sessionId, 'idle');
-      }
-      log.info(`Cancelled queued task: ${taskId}`);
-      // The running branch already emits agent:task:complete via the abort
-      // path (runTask always emits on completion); a queued task never
-      // reaches runTask, so it must emit here or callers waiting on this
-      // taskId (the execution bridge, validators) will hang forever.
-      this.eventBus.emit({
-        id: generateId(),
-        timestamp: Date.now(),
-        source: 'agent-manager',
-        projectId: task.projectId,
-        type: 'agent:task:complete',
-        payload: {
-          taskId: task.id,
-          sessionId: task.sessionId,
-          skillName: task.skillName,
-          result: '',
-          durationMs: 0,
-          success: false,
-          errors: ['cancelled'],
-          cancelled: true,
-        },
-      });
-      this.completions.get(task.id)?.();
-      this.completions.delete(task.id);
+      this.markTaskCancelled(task);
+      const finishing = this.persistCancellation(task)
+        .catch((error: unknown) => this.handleFinalizationFailure(task, error))
+        .finally(() => {
+          this.queuedFinalizers.delete(task.id);
+          this.completions.get(task.id)?.();
+          this.completions.delete(task.id);
+        });
+      this.queuedFinalizers.set(task.id, finishing);
+      void finishing.catch((error: unknown) =>
+        log.error(`Cancellation finalization failed: ${String(error)}`),
+      );
       return true;
     }
 
@@ -420,11 +391,78 @@ export class AgentManager {
     return false;
   }
 
+  private markTaskCancelled(task: AgentTask): void {
+    task.status = 'cancelled';
+    task.completedAt = Date.now();
+    task.errors = ['cancelled'];
+    task.result = '';
+    task.durationMs = 0;
+  }
+
+  private async persistCancellation(task: AgentTask, ownsSession = false): Promise<void> {
+    await this.executionLogger?.logTaskComplete(task);
+    if (task.sessionId && (ownsSession || !this.runningSessionIds.has(task.sessionId))) {
+      this.sessionManager?.updateStatus(task.sessionId, 'idle');
+    }
+    log.info(`Cancelled task before dispatch: ${task.id}`);
+    this.emitTaskComplete(task);
+  }
+
+  private emitTaskComplete(task: AgentTask, sdkSessionId?: string): void {
+    this.eventBus.emit({
+      id: generateId(),
+      timestamp: Date.now(),
+      source: 'agent-manager',
+      projectId: task.projectId,
+      type: 'agent:task:complete',
+      payload: {
+        taskId: task.id,
+        sessionId: task.sessionId,
+        sdkSessionId,
+        skillName: task.skillName,
+        result: task.result ?? '',
+        durationMs: task.durationMs ?? 0,
+        success: task.status === 'completed',
+        errors: task.errors,
+        blocked: task.status === 'blocked',
+        cancelled: task.status === 'cancelled',
+      },
+    });
+  }
+
+  private handleFinalizationFailure(task: AgentTask, error: unknown): void {
+    const message = `Agent run finalization failed; durable outcome is unresolved: ${error instanceof Error ? error.message : String(error)}`;
+    // A completed side effect may already exist. Block automatic retries and
+    // report the failure; never overwrite a conflicting history file to hide it.
+    if (task.status !== 'cancelled') task.status = 'blocked';
+    task.errors = [...(task.errors ?? []), message];
+    task.completedAt = Date.now();
+    log.error(`Task ${task.id}: ${message}`);
+    if (
+      task.sessionId &&
+      (this.taskMeta.has(task.id) || !this.runningSessionIds.has(task.sessionId))
+    ) {
+      try {
+        this.sessionManager?.updateStatus(task.sessionId, 'idle');
+      } catch (sessionError) {
+        log.error(`Task ${task.id} session finalization failed: ${String(sessionError)}`);
+      }
+    }
+    this.eventBus.emit({
+      id: generateId(),
+      timestamp: Date.now(),
+      source: 'agent-manager',
+      type: 'system:health:alert',
+      payload: { severity: 'error', source: 'agent-manager', message, taskId: task.id },
+    });
+    this.emitTaskComplete(task);
+  }
+
   getActiveTasks(): { running: ActiveTaskInfo[]; queued: ActiveTaskInfo[] } {
     const now = Date.now();
     const running: ActiveTaskInfo[] = [];
     for (const task of this.taskMeta.values()) {
-      if (task.status === 'running') {
+      if (this.running.has(task.id)) {
         running.push({
           taskId: task.id,
           skillName: task.skillName,
@@ -432,7 +470,7 @@ export class AgentManager {
           sessionId: task.sessionId,
           projectId: task.projectId,
           priority: task.priority,
-          status: task.status,
+          status: task.status === 'running' ? 'running' : 'finalizing',
           startedAt: task.startedAt,
           createdAt: task.createdAt,
           durationMs: task.startedAt ? now - task.startedAt : undefined,
@@ -469,8 +507,14 @@ export class AgentManager {
     this.eventBus.off('agent:task:request', this.requestHandler);
     for (const task of [...this.queue]) this.cancelTask(task.id);
     for (const controller of this.abortControllers.values()) controller.abort();
-    this.stopping = Promise.allSettled([...this.running.values()]).then(() => undefined);
+    this.stopping = this.drainFinalizers();
     return this.stopping;
+  }
+
+  private async drainFinalizers(): Promise<void> {
+    while (this.running.size > 0 || this.queuedFinalizers.size > 0) {
+      await Promise.allSettled([...this.running.values(), ...this.queuedFinalizers.values()]);
+    }
   }
 
   async executeAction(

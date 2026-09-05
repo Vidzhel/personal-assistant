@@ -1,10 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi, beforeEach } from 'vitest';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { initDatabase, getDb } from '../db/database.ts';
 import { createExecutionLogger } from '../agent-manager/execution-logger.ts';
 import { EventBus } from '../event-bus/event-bus.ts';
 import { registerSSERoutes } from '../api/sse/stream.ts';
@@ -37,7 +36,7 @@ function makeAgentMessageEvent(taskId: string, content: string): RavenEvent {
 
 function makeAgentCompleteEvent(
   taskId: string,
-  overrides?: { success?: boolean; errors?: string[] },
+  overrides?: { success?: boolean; errors?: string[]; blocked?: boolean; cancelled?: boolean },
 ): RavenEvent {
   return {
     id: crypto.randomUUID(),
@@ -50,6 +49,8 @@ function makeAgentCompleteEvent(
       durationMs: 100,
       success: overrides?.success ?? true,
       errors: overrides?.errors,
+      blocked: overrides?.blocked,
+      cancelled: overrides?.cancelled,
     },
   };
 }
@@ -61,27 +62,42 @@ describe('SSE Streaming API', () => {
   let eventBus: EventBus;
   let runningTaskId: string;
   let completedTaskId: string;
+  const controllers: AbortController[] = [];
+
+  async function connect(taskId: string) {
+    const address = app.server.address();
+    const port = typeof address === 'object' && address ? address.port : 0;
+    const controller = new AbortController();
+    controllers.push(controller);
+    return fetch(`http://127.0.0.1:${port}/api/agent-tasks/${taskId}/stream`, {
+      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(2_000)]),
+    });
+  }
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-sse-'));
-    initDatabase(join(tmpDir, 'test.db'));
-    executionLogger = createExecutionLogger({ db: getDb() });
+    const projectsDir = join(tmpDir, 'projects');
+    mkdirSync(join(projectsDir, 'system'), { recursive: true });
+    executionLogger = createExecutionLogger({
+      projectsDir,
+      projects: () => [{ id: 'meta', fsPath: 'system' }],
+    });
     eventBus = new EventBus();
 
     // Create a running task
     const runningTask = makeTask({ id: 'sse-running-1' });
     runningTaskId = runningTask.id;
-    executionLogger.logTaskStart(runningTask);
+    await executionLogger.logTaskStart(runningTask);
 
     // Create a completed task
     const completedTask = makeTask({ id: 'sse-completed-1' });
     completedTaskId = completedTask.id;
-    executionLogger.logTaskStart(completedTask);
+    await executionLogger.logTaskStart(completedTask);
     completedTask.status = 'completed';
     completedTask.result = 'all done';
     completedTask.durationMs = 500;
     completedTask.completedAt = Date.now();
-    executionLogger.logTaskComplete(completedTask);
+    await executionLogger.logTaskComplete(completedTask);
 
     app = Fastify({ logger: false });
     await app.register(cors, { origin: true });
@@ -92,16 +108,16 @@ describe('SSE Streaming API', () => {
   afterAll(async () => {
     eventBus.removeAllListeners();
     await app.close();
-    try {
-      getDb().close();
-    } catch {
-      /* */
-    }
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  afterEach(async () => {
+    for (const controller of controllers.splice(0)) controller.abort();
+    await vi.waitFor(() => expect(eventBus.listenerCount()).toBe(0));
   });
 
   it('returns 404 for nonexistent task ID', async () => {
@@ -128,65 +144,17 @@ describe('SSE Streaming API', () => {
   });
 
   it('SSE endpoint sets correct headers for running task', async () => {
-    const address = app.server.address();
-    const port = typeof address === 'object' && address ? address.port : 0;
-
-    const controller = new AbortController();
-    const res = await fetch(`http://127.0.0.1:${port}/api/agent-tasks/${runningTaskId}/stream`, {
-      signal: controller.signal,
-    });
-
+    const res = await connect(runningTaskId);
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('text/event-stream');
     expect(res.headers.get('cache-control')).toBe('no-cache');
-
-    controller.abort();
   });
 
   it('forwards agent:message events for correct taskId as SSE agent-output', async () => {
-    const address = app.server.address();
-    const port = typeof address === 'object' && address ? address.port : 0;
-
-    const controller = new AbortController();
-    const receivedLines: string[] = [];
-
-    const fetchPromise = fetch(`http://127.0.0.1:${port}/api/agent-tasks/${runningTaskId}/stream`, {
-      signal: controller.signal,
-    }).then(async (res) => {
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      // Read chunks until we have a complete SSE event (not just the :ok comment)
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        if (buffer.includes('event:')) {
-          receivedLines.push(buffer);
-          break;
-        }
-      }
-    });
-
-    // Give the SSE connection time to establish
-    await new Promise((r) => setTimeout(r, 50));
-
-    // Emit agent:message for our task
+    const res = await connect(runningTaskId);
     eventBus.emit(makeAgentMessageEvent(runningTaskId, 'hello world'));
-
-    // Wait a bit then abort
-    await new Promise((r) => setTimeout(r, 100));
-    controller.abort();
-
-    try {
-      await fetchPromise;
-    } catch {
-      /* AbortError expected */
-    }
-
-    expect(receivedLines.length).toBeGreaterThan(0);
-    const raw = receivedLines[0];
+    eventBus.emit(makeAgentCompleteEvent(runningTaskId));
+    const raw = await res.text();
     expect(raw).toContain('event: agent-output');
     expect(raw).toContain('"chunk":"hello world"');
     expect(raw).toContain(`"taskId":"${runningTaskId}"`);
@@ -194,145 +162,87 @@ describe('SSE Streaming API', () => {
   });
 
   it('does NOT forward agent:message events for a different taskId', async () => {
-    const address = app.server.address();
-    const port = typeof address === 'object' && address ? address.port : 0;
-
-    const controller = new AbortController();
-    let receivedData = '';
-
-    const fetchPromise = fetch(`http://127.0.0.1:${port}/api/agent-tasks/${runningTaskId}/stream`, {
-      signal: controller.signal,
-    }).then(async (res) => {
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      // Read all available chunks
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        receivedData += decoder.decode(value, { stream: true });
-      }
-    });
-
-    await new Promise((r) => setTimeout(r, 50));
-
-    // Emit for a DIFFERENT task
+    const res = await connect(runningTaskId);
     eventBus.emit(makeAgentMessageEvent('other-task-id', 'should not appear'));
-
-    await new Promise((r) => setTimeout(r, 100));
-    controller.abort();
-
-    try {
-      await fetchPromise;
-    } catch {
-      /* AbortError expected */
-    }
-
-    // Should only have the initial :ok comment, no agent-output events
-    expect(receivedData).not.toContain('agent-output');
+    eventBus.emit(makeAgentMessageEvent(runningTaskId, 'delivery barrier'));
+    eventBus.emit(makeAgentCompleteEvent(runningTaskId));
+    const raw = await res.text();
+    expect(raw).toContain('delivery barrier');
+    expect(raw).not.toContain('should not appear');
+    expect(raw).not.toContain('other-task-id');
   });
 
   it('agent:task:complete event sends agent-complete and closes stream', async () => {
-    // Create a fresh running task for this test
     const task = makeTask({ id: 'sse-complete-test' });
-    executionLogger.logTaskStart(task);
-
-    const address = app.server.address();
-    const port = typeof address === 'object' && address ? address.port : 0;
-
-    let receivedData = '';
-
-    const fetchPromise = fetch(`http://127.0.0.1:${port}/api/agent-tasks/${task.id}/stream`).then(
-      async (res) => {
-        const reader = res.body!.getReader();
-        const decoder = new TextDecoder();
-        // Read until the stream ends
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          receivedData += decoder.decode(value, { stream: true });
-        }
-      },
-    );
-
-    await new Promise((r) => setTimeout(r, 50));
-
-    // Emit complete event
+    await executionLogger.logTaskStart(task);
+    const res = await connect(task.id);
     eventBus.emit(makeAgentCompleteEvent(task.id));
-
-    await fetchPromise;
-
-    expect(receivedData).toContain('event: agent-complete');
-    expect(receivedData).toContain(`"taskId":"${task.id}"`);
-    expect(receivedData).toContain('"status":"completed"');
+    const raw = await res.text();
+    expect(raw).toContain('event: agent-complete');
+    expect(raw).toContain(`"taskId":"${task.id}"`);
+    expect(raw).toContain('"status":"completed"');
   });
 
   it('failed task sends status "failed" with errors via SSE', async () => {
     const task = makeTask({ id: 'sse-failed-test' });
-    executionLogger.logTaskStart(task);
+    await executionLogger.logTaskStart(task);
+    const res = await connect(task.id);
+    eventBus.emit(makeAgentCompleteEvent(task.id, { success: false, errors: ['timeout'] }));
+    const raw = await res.text();
+    expect(raw).toContain('event: agent-complete');
+    expect(raw).toContain('"status":"failed"');
+    expect(raw).toContain('"errors":["timeout"]');
+  });
 
+  it.each([
+    { label: 'blocked', blocked: true, status: 'blocked', flag: 'blocked' },
+    { label: 'cancelled', cancelled: true, status: 'cancelled', flag: 'cancelled' },
+  ])('$label task sends a truthful terminal SSE payload', async (outcome) => {
+    const task = makeTask({ id: `sse-${outcome.label}-test` });
+    await executionLogger.logTaskStart(task);
+    const res = await connect(task.id);
+    eventBus.emit(
+      makeAgentCompleteEvent(task.id, {
+        success: false,
+        blocked: outcome.blocked,
+        cancelled: outcome.cancelled,
+      }),
+    );
+    const raw = await res.text();
+    expect(raw).toContain('event: agent-complete');
+    expect(raw).toContain(`"status":"${outcome.status}"`);
+    expect(raw).toContain(`"${outcome.flag}":true`);
+    expect(raw).toContain(`"${outcome.flag === 'blocked' ? 'cancelled' : 'blocked'}":false`);
+  });
+
+  it('subscribes before a completion queued immediately after the initial record read', async () => {
+    const task = makeTask({ id: 'sse-read-subscribe-boundary' });
+    await executionLogger.logTaskStart(task);
+    const read = executionLogger.getTaskById.bind(executionLogger);
+    const spy = vi.spyOn(executionLogger, 'getTaskById').mockImplementation((id) => {
+      const record = read(id);
+      if (id === task.id) queueMicrotask(() => eventBus.emit(makeAgentCompleteEvent(id)));
+      return record;
+    });
     const address = app.server.address();
     const port = typeof address === 'object' && address ? address.port : 0;
-
-    let receivedData = '';
-
-    const fetchPromise = fetch(`http://127.0.0.1:${port}/api/agent-tasks/${task.id}/stream`).then(
-      async (res) => {
-        const reader = res.body!.getReader();
-        const decoder = new TextDecoder();
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          receivedData += decoder.decode(value, { stream: true });
-        }
-      },
-    );
-
-    await new Promise((r) => setTimeout(r, 50));
-
-    eventBus.emit(makeAgentCompleteEvent(task.id, { success: false, errors: ['timeout'] }));
-
-    await fetchPromise;
-
-    expect(receivedData).toContain('event: agent-complete');
-    expect(receivedData).toContain('"status":"failed"');
-    expect(receivedData).toContain('"errors":["timeout"]');
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/agent-tasks/${task.id}/stream`, {
+        signal: AbortSignal.timeout(2_000),
+      });
+      expect(await response.text()).toContain('"status":"completed"');
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('client disconnect cleans up eventBus listeners', async () => {
-    // Create a fresh task
     const task = makeTask({ id: 'sse-cleanup-test' });
-    executionLogger.logTaskStart(task);
-
-    const address = app.server.address();
-    const port = typeof address === 'object' && address ? address.port : 0;
-
+    await executionLogger.logTaskStart(task);
     const listenersBefore = eventBus.listenerCount();
-
-    const controller = new AbortController();
-    const fetchPromise = fetch(`http://127.0.0.1:${port}/api/agent-tasks/${task.id}/stream`, {
-      signal: controller.signal,
-    });
-
-    await new Promise((r) => setTimeout(r, 50));
-
-    // Should have added listeners
-    const listenersDuring = eventBus.listenerCount();
-    expect(listenersDuring).toBeGreaterThan(listenersBefore);
-
-    // Abort (disconnect)
-    controller.abort();
-
-    try {
-      await fetchPromise;
-    } catch {
-      /* AbortError expected */
-    }
-
-    // Give cleanup time
-    await new Promise((r) => setTimeout(r, 100));
-
-    // Listeners should be back to before
-    const listenersAfter = eventBus.listenerCount();
-    expect(listenersAfter).toBe(listenersBefore);
+    await connect(task.id);
+    expect(eventBus.listenerCount()).toBeGreaterThan(listenersBefore);
+    controllers.at(-1)!.abort();
+    await vi.waitFor(() => expect(eventBus.listenerCount()).toBe(listenersBefore));
   });
 });

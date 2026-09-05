@@ -17,6 +17,7 @@ import {
   type MemoryConsolidation,
 } from '../agent-memory/memory-consolidation.ts';
 import { createHeartbeat, type Heartbeat } from '../services/system/heartbeat.ts';
+import type { ExecutionLogger } from '../agent-manager/execution-logger.ts';
 import { buildTestConfig } from './fixtures/raven-fixture.ts';
 
 function namedAgents(): NamedAgentStore {
@@ -100,6 +101,9 @@ describe('direct background model callers stop before their stores are disposed'
     const held = holdBackend();
     heartbeat = createHeartbeat({
       db: initDatabase(join(root, 'test.db')),
+      executionLogger: {
+        queryTasks: vi.fn(() => []),
+      } as unknown as ExecutionLogger,
       eventBus,
       sessionManager: new SessionManager(),
       config,

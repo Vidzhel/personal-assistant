@@ -68,7 +68,7 @@ function buildSummary(stats: TaskStats, perSkill: PerSkillStats[], stuckTreeCoun
   return lines.join(' ');
 }
 
-/** Weekly, deterministic (zero model calls): aggregates agent_tasks
+/** Weekly, deterministic (zero model calls): aggregates recorded agent run
  * failures/error-rates and stuck task trees over the last 7 days into ONE
  * memory candidate for the default agent — "what kept failing". Purely
  * mechanical aggregation, so there's no judgment call here that needs an

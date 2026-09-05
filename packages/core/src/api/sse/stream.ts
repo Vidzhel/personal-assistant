@@ -14,12 +14,47 @@ export interface SSEDeps {
 
 interface SSEStreamOpts {
   raw: ServerResponse;
-  req: FastifyRequest;
   taskId: string;
   eventBus: EventBus;
 }
 
-function setupSSEStream({ raw, req, taskId, eventBus }: SSEStreamOpts): void {
+function terminalStatus(input: {
+  status?: string;
+  success?: boolean;
+  blocked?: boolean;
+  cancelled?: boolean;
+}): 'completed' | 'failed' | 'blocked' | 'cancelled' {
+  if (input.cancelled || input.status === 'cancelled') return 'cancelled';
+  if (input.blocked || input.status === 'blocked') return 'blocked';
+  if (input.status === 'completed' || input.success) return 'completed';
+  return 'failed';
+}
+
+function terminalPayload(
+  taskId: string,
+  input: {
+    status?: string;
+    success?: boolean;
+    result?: string;
+    errors?: string[];
+    blocked?: boolean;
+    cancelled?: boolean;
+    interrupted?: boolean;
+  },
+): Record<string, unknown> {
+  const status = terminalStatus(input);
+  return {
+    taskId,
+    status,
+    ...(input.result !== undefined && { result: input.result }),
+    ...(input.errors !== undefined && { errors: input.errors }),
+    blocked: status === 'blocked',
+    cancelled: status === 'cancelled',
+    ...(input.interrupted === true && { interrupted: true }),
+  };
+}
+
+function setupSSEStream({ raw, taskId, eventBus }: SSEStreamOpts): void {
   const writeSSE = (event: string, data: unknown): void => {
     raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
@@ -36,12 +71,7 @@ function setupSSEStream({ raw, req, taskId, eventBus }: SSEStreamOpts): void {
 
   const onComplete = (ev: RavenEvent): void => {
     if (ev.type === 'agent:task:complete' && ev.payload.taskId === taskId) {
-      writeSSE('agent-complete', {
-        taskId: ev.payload.taskId,
-        status: ev.payload.success ? 'completed' : 'failed',
-        result: ev.payload.result,
-        errors: ev.payload.errors,
-      });
+      writeSSE('agent-complete', terminalPayload(ev.payload.taskId, ev.payload));
       cleanup();
     }
   };
@@ -58,7 +88,7 @@ function setupSSEStream({ raw, req, taskId, eventBus }: SSEStreamOpts): void {
 
   eventBus.on('agent:message', onMessage);
   eventBus.on('agent:task:complete', onComplete);
-  req.raw.on('close', cleanup);
+  raw.once('close', cleanup);
 }
 
 export function registerSSERoutes(app: FastifyInstance, deps: SSEDeps): void {
@@ -74,11 +104,10 @@ export function registerSSERoutes(app: FastifyInstance, deps: SSEDeps): void {
           .send({ error: 'Task not found', code: 'NOT_FOUND' });
       }
 
-      if (task.status === 'completed' || task.status === 'failed') {
+      if (['completed', 'failed', 'blocked', 'cancelled'].includes(task.status)) {
         return reply.status(HTTP_STATUS.OK).send({
           event: 'agent-complete',
-          taskId: task.id,
-          status: task.status,
+          ...terminalPayload(task.id, task),
         });
       }
 
@@ -93,7 +122,7 @@ export function registerSSERoutes(app: FastifyInstance, deps: SSEDeps): void {
       raw.write(':ok\n\n');
       log.info(`SSE stream opened for task ${id}`);
 
-      setupSSEStream({ raw, req, taskId: id, eventBus: deps.eventBus });
+      setupSSEStream({ raw, taskId: id, eventBus: deps.eventBus });
     },
   );
 }

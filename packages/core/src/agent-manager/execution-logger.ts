@@ -1,11 +1,23 @@
-import type Database from 'better-sqlite3';
 import { createLogger } from '@raven/shared';
 import type { AgentTask } from '@raven/shared';
+import { runAfterProjectMutations } from '../project-manager/project-mutation.ts';
+import type { ProjectRecordProject } from '../project-manager/project-records.ts';
+import {
+  agentTaskToRunRecord,
+  readExecutionRunRecords,
+  runLocation,
+  writeExecutionRunRecord,
+  type ExecutionRunRecord,
+  type ExecutionRunRecordDeps,
+  type ExecutionRunRecordWithBytes,
+} from './execution-run-records.ts';
 
 const log = createLogger('execution-logger');
-
 const DEFAULT_QUERY_LIMIT = 50;
 const PERCENT = 100;
+const TERMINAL_STATUSES = new Set(['completed', 'failed', 'blocked', 'cancelled']);
+const INTERRUPTED_REASON =
+  'Agent run was not durably finalized before process restart; prior execution outcome is unknown';
 
 export interface TaskRecord {
   id: string;
@@ -23,13 +35,20 @@ export interface TaskRecord {
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
+  treeId?: string;
+  executionTaskId?: string;
+  namedAgentId?: string;
+  interrupted?: boolean;
 }
 
 export interface TaskQueryOpts {
   skillName?: string;
   status?: string;
   sessionId?: string;
-  limit?: number;
+  projectId?: string;
+  createdSinceMs?: number;
+  completedSinceMs?: number;
+  limit?: number | null;
   offset?: number;
 }
 
@@ -51,204 +70,312 @@ export interface PerSkillStats {
 }
 
 export interface ExecutionLogger {
-  logTaskStart: (task: AgentTask) => void;
-  logTaskComplete: (task: AgentTask) => void;
+  logTaskStart: (task: AgentTask) => Promise<void>;
+  logTaskComplete: (task: AgentTask) => Promise<void>;
   queryTasks: (opts: TaskQueryOpts) => TaskRecord[];
   getTaskById: (id: string) => TaskRecord | undefined;
   getTaskStats: (sinceMs: number) => TaskStats;
   getPerSkillStats: (sinceMs: number) => PerSkillStats[];
 }
 
-interface AgentTaskRow {
-  id: string;
-  session_id: string | null;
-  project_id: string | null;
-  skill_name: string;
-  action_name: string | null;
-  prompt: string;
-  status: string;
-  priority: string;
-  result: string | null;
-  duration_ms: number | null;
-  errors: string | null;
-  blocked: number;
-  created_at: number;
-  started_at: number | null;
-  completed_at: number | null;
+function toTaskRecord(record: ExecutionRunRecord): TaskRecord {
+  return { ...record };
 }
 
-function epochToIso(epoch: number | null): string | undefined {
-  if (epoch === null || epoch === undefined) return undefined;
-  return new Date(epoch).toISOString();
+function epoch(iso: string | undefined): number | undefined {
+  return iso === undefined ? undefined : Date.parse(iso);
 }
 
-function safeParseErrors(json: string): string[] {
-  try {
-    const parsed: unknown = JSON.parse(json);
-    return Array.isArray(parsed) ? (parsed as string[]) : [String(parsed)];
-  } catch {
-    return [json];
+function sortNewest(a: TaskRecord, b: TaskRecord): number {
+  return (epoch(b.createdAt) ?? 0) - (epoch(a.createdAt) ?? 0) || a.id.localeCompare(b.id);
+}
+
+function sameArray(left: string[] | undefined, right: string[] | undefined): boolean {
+  return JSON.stringify(left ?? []) === JSON.stringify(right ?? []);
+}
+
+function sameTerminalPayload(existing: ExecutionRunRecord, incoming: ExecutionRunRecord): boolean {
+  return (
+    existing.status === incoming.status &&
+    existing.result === incoming.result &&
+    existing.durationMs === incoming.durationMs &&
+    existing.blocked === incoming.blocked &&
+    sameArray(existing.errors, incoming.errors)
+  );
+}
+
+function mergeCompletion(
+  existing: ExecutionRunRecord,
+  incoming: ExecutionRunRecord,
+): ExecutionRunRecord {
+  if (TERMINAL_STATUSES.has(existing.status)) {
+    if (!sameTerminalPayload(existing, incoming)) {
+      throw new Error(`Conflicting terminal update for agent run: ${existing.id}`);
+    }
+    return existing;
   }
-}
-
-function rowToTaskRecord(row: AgentTaskRow): TaskRecord {
+  if (!TERMINAL_STATUSES.has(incoming.status)) {
+    throw new Error(`Agent run completion must be terminal: ${incoming.id}`);
+  }
   return {
-    id: row.id,
-    ...(row.session_id !== null && { sessionId: row.session_id }),
-    ...(row.project_id !== null && { projectId: row.project_id }),
-    skillName: row.skill_name,
-    ...(row.action_name !== null && { actionName: row.action_name }),
-    prompt: row.prompt,
-    status: row.status,
-    priority: row.priority,
-    ...(row.result !== null && { result: row.result }),
-    ...(row.duration_ms !== null && { durationMs: row.duration_ms }),
-    ...(row.errors !== null && { errors: safeParseErrors(row.errors) }),
-    blocked: row.blocked === 1,
-    createdAt: new Date(row.created_at).toISOString(),
-    ...(row.started_at !== null && { startedAt: epochToIso(row.started_at) }),
-    ...(row.completed_at !== null && { completedAt: epochToIso(row.completed_at) }),
+    ...existing,
+    status: incoming.status,
+    ...(incoming.result !== undefined && { result: incoming.result }),
+    ...(incoming.durationMs !== undefined && { durationMs: incoming.durationMs }),
+    ...(incoming.errors !== undefined && { errors: incoming.errors }),
+    blocked: incoming.blocked,
+    ...(incoming.completedAt !== undefined && { completedAt: incoming.completedAt }),
   };
 }
 
-interface StatsRow {
-  total: number;
-  succeeded: number;
-  failed: number;
-  avg_duration_ms: number | null;
-  last_task_at: number | null;
+function assertSameIdentity(existing: ExecutionRunRecord, incoming: ExecutionRunRecord): void {
+  const fields: Array<keyof ExecutionRunRecord> = [
+    'projectId',
+    'sessionId',
+    'skillName',
+    'actionName',
+    'prompt',
+    'priority',
+    'createdAt',
+    'startedAt',
+    'treeId',
+    'executionTaskId',
+    'namedAgentId',
+  ];
+  for (const field of fields) {
+    const same =
+      field === 'createdAt'
+        ? Date.parse(existing.createdAt) === Date.parse(incoming.createdAt)
+        : field === 'startedAt'
+          ? epoch(existing.startedAt) === epoch(incoming.startedAt)
+          : existing[field] === incoming[field];
+    if (!same) {
+      throw new Error(`Agent run identity changed: ${existing.id}`);
+    }
+  }
 }
 
-// eslint-disable-next-line max-lines-per-function -- factory function that initializes all store methods
-export function createExecutionLogger(deps: { db: Database.Database }): ExecutionLogger {
-  const { db } = deps;
+function selectRecords(records: TaskRecord[], opts: TaskQueryOpts): TaskRecord[] {
+  const filtered = records
+    .filter((record) => opts.skillName === undefined || record.skillName === opts.skillName)
+    .filter((record) => opts.status === undefined || record.status === opts.status)
+    .filter((record) => opts.sessionId === undefined || record.sessionId === opts.sessionId)
+    .filter((record) => opts.projectId === undefined || record.projectId === opts.projectId)
+    .filter(
+      (record) =>
+        opts.createdSinceMs === undefined || (epoch(record.createdAt) ?? 0) >= opts.createdSinceMs,
+    )
+    .filter(
+      (record) =>
+        opts.completedSinceMs === undefined ||
+        (epoch(record.completedAt) ?? Number.NEGATIVE_INFINITY) >= opts.completedSinceMs,
+    )
+    .sort(sortNewest);
+  const offset = opts.offset ?? 0;
+  const limit = opts.limit === undefined ? DEFAULT_QUERY_LIMIT : opts.limit;
+  return limit === null ? filtered.slice(offset) : filtered.slice(offset, offset + limit);
+}
+
+function aggregateStats(records: TaskRecord[], sinceMs: number): TaskStats {
+  const cutoff = Date.now() - sinceMs;
+  const recent = records.filter(
+    (record) =>
+      record.completedAt !== undefined &&
+      (epoch(record.completedAt) ?? Number.NEGATIVE_INFINITY) >= cutoff,
+  );
+  const durations = recent.flatMap((record) =>
+    record.durationMs === undefined ? [] : [record.durationMs],
+  );
+  const completed = recent.filter((record) => record.status === 'completed');
+  const failed = recent.filter((record) => record.status === 'failed');
+  const latest = recent.reduce<string | undefined>((latestAt, record) => {
+    if (record.completedAt === undefined) return latestAt;
+    if (latestAt === undefined || (epoch(record.completedAt) ?? 0) > (epoch(latestAt) ?? 0)) {
+      return record.completedAt;
+    }
+    return latestAt;
+  }, undefined);
+  return {
+    total1h: recent.length,
+    succeeded1h: completed.length,
+    failed1h: failed.length,
+    avgDurationMs:
+      durations.length === 0
+        ? null
+        : Math.round(durations.reduce((total, value) => total + value, 0) / durations.length),
+    lastTaskAt: latest ?? null,
+  };
+}
+
+function aggregatePerSkill(records: TaskRecord[], sinceMs: number): PerSkillStats[] {
+  const cutoff = Date.now() - sinceMs;
+  const groups = new Map<string, TaskRecord[]>();
+  for (const record of records) {
+    if (
+      record.completedAt === undefined ||
+      (epoch(record.completedAt) ?? Number.NEGATIVE_INFINITY) < cutoff
+    )
+      continue;
+    const group = groups.get(record.skillName) ?? [];
+    group.push(record);
+    groups.set(record.skillName, group);
+  }
+  return [...groups]
+    .map(([skillName, group]) => {
+      const succeeded = group.filter((record) => record.status === 'completed').length;
+      const failed = group.filter((record) => record.status === 'failed').length;
+      const durations = group.flatMap((record) =>
+        record.durationMs === undefined ? [] : [record.durationMs],
+      );
+      return {
+        skillName,
+        total: group.length,
+        succeeded,
+        failed,
+        successRate: group.length > 0 ? Math.round((succeeded / group.length) * PERCENT) : 0,
+        avgDurationMs:
+          durations.length === 0
+            ? null
+            : Math.round(durations.reduce((total, value) => total + value, 0) / durations.length),
+      };
+    })
+    .sort(
+      (left, right) => right.total - left.total || left.skillName.localeCompare(right.skillName),
+    );
+}
+
+function assertExpectedBytes(
+  expectedBytes: string | undefined,
+  current: ExecutionRunRecordWithBytes,
+): void {
+  if (expectedBytes !== undefined && current.bytes !== expectedBytes) {
+    throw new Error(`Agent run changed on disk: ${current.record.id}`);
+  }
+}
+
+function interruptRecord(record: ExecutionRunRecord): ExecutionRunRecord {
+  if (TERMINAL_STATUSES.has(record.status)) return record;
+  return {
+    ...record,
+    status: 'failed',
+    interrupted: true,
+    errors: [...(record.errors ?? []), INTERRUPTED_REASON],
+    completedAt: new Date().toISOString(),
+    blocked: false,
+  };
+}
+
+function initializeRecords(deps: ExecutionRunRecordDeps, expectedBytes: Map<string, string>): void {
+  for (const item of readExecutionRunRecords(deps)) {
+    const recovered = interruptRecord(item.record);
+    const bytes =
+      recovered === item.record
+        ? item.bytes
+        : writeExecutionRunRecord(deps, item.location, recovered);
+    expectedBytes.set(recovered.id, bytes);
+  }
+}
+
+interface LoggerState {
+  deps: ExecutionRunRecordDeps;
+  expectedBytes: Map<string, string>;
+}
+
+function readLoggerRecords(state: LoggerState): ExecutionRunRecordWithBytes[] {
+  const records = readExecutionRunRecords(state.deps);
+  for (const item of records) {
+    if (!state.expectedBytes.has(item.record.id))
+      state.expectedBytes.set(item.record.id, item.bytes);
+  }
+  return records;
+}
+
+function readFreshRecords(state: LoggerState): ExecutionRunRecordWithBytes[] {
+  return readExecutionRunRecords(state.deps);
+}
+
+async function logStart(state: LoggerState, task: AgentTask): Promise<void> {
+  const snapshot = agentTaskToRunRecord(task);
+  if (snapshot.status !== 'queued' && snapshot.status !== 'running') {
+    throw new Error(`Agent run start must be queued or running: ${snapshot.id}`);
+  }
+  await runAfterProjectMutations(state.deps.projectsDir, () => {
+    const existing = readFreshRecords(state).find((item) => item.record.id === snapshot.id);
+    if (existing) throw new Error(`Agent run already exists: ${snapshot.id}`);
+    const location = runLocation(state.deps, snapshot.projectId, snapshot.id);
+    const bytes = writeExecutionRunRecord(state.deps, location, snapshot);
+    state.expectedBytes.set(snapshot.id, bytes);
+  });
+  log.debug(`Logged agent run start: ${snapshot.id}`);
+}
+
+async function logComplete(state: LoggerState, task: AgentTask): Promise<void> {
+  const snapshot = agentTaskToRunRecord(task);
+  if (!TERMINAL_STATUSES.has(snapshot.status)) {
+    throw new Error(`Agent run completion must be terminal: ${snapshot.id}`);
+  }
+  await runAfterProjectMutations(state.deps.projectsDir, () => {
+    const existing = readFreshRecords(state).find((item) => item.record.id === snapshot.id);
+    if (!existing) {
+      if (state.expectedBytes.has(snapshot.id)) {
+        throw new Error(`Agent run changed on disk: ${snapshot.id}`);
+      }
+      if (snapshot.status !== 'cancelled' || snapshot.startedAt !== undefined) {
+        throw new Error(`Agent run completion has no start record: ${snapshot.id}`);
+      }
+      const location = runLocation(state.deps, snapshot.projectId, snapshot.id);
+      const bytes = writeExecutionRunRecord(state.deps, location, snapshot);
+      state.expectedBytes.set(snapshot.id, bytes);
+      return;
+    }
+    assertExpectedBytes(state.expectedBytes.get(snapshot.id), existing);
+    assertSameIdentity(existing.record, snapshot);
+    const merged = mergeCompletion(existing.record, snapshot);
+    if (merged === existing.record) {
+      state.expectedBytes.set(snapshot.id, existing.bytes);
+      return;
+    }
+    const bytes = writeExecutionRunRecord(state.deps, existing.location, merged);
+    state.expectedBytes.set(snapshot.id, bytes);
+  });
+  log.debug(`Logged agent run completion: ${snapshot.id} (${snapshot.status})`);
+}
+
+export function createExecutionLogger(deps: {
+  projectsDir: string;
+  projects: () => ProjectRecordProject[];
+}): ExecutionLogger {
+  const state: LoggerState = { deps, expectedBytes: new Map<string, string>() };
+  initializeRecords(state.deps, state.expectedBytes);
 
   return {
-    logTaskStart(task: AgentTask): void {
-      db.prepare(
-        `INSERT INTO agent_tasks (id, session_id, project_id, skill_name, action_name, prompt, status, priority, created_at, started_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        task.id,
-        task.sessionId ?? null,
-        task.projectId ?? null,
-        task.skillName,
-        task.actionName ?? null,
-        task.prompt,
-        task.status,
-        task.priority,
-        task.createdAt,
-        task.startedAt ?? null,
-      );
-      log.debug(`Logged task start: ${task.id}`);
-    },
-
-    logTaskComplete(task: AgentTask): void {
-      db.prepare(
-        `UPDATE agent_tasks
-         SET status = ?, result = ?, duration_ms = ?, errors = ?, completed_at = ?, blocked = ?
-         WHERE id = ?`,
-      ).run(
-        task.status,
-        task.result ?? null,
-        task.durationMs ?? null,
-        task.errors ? JSON.stringify(task.errors) : null,
-        task.completedAt ?? null,
-        task.status === 'blocked' ? 1 : 0,
-        task.id,
-      );
-      log.debug(`Logged task complete: ${task.id} (${task.status})`);
-    },
+    logTaskStart: (task) => logStart(state, task),
+    logTaskComplete: (task) => logComplete(state, task),
 
     queryTasks(opts: TaskQueryOpts): TaskRecord[] {
-      const conditions: string[] = [];
-      const params: unknown[] = [];
-
-      if (opts.skillName) {
-        conditions.push('skill_name = ?');
-        params.push(opts.skillName);
-      }
-      if (opts.status) {
-        conditions.push('status = ?');
-        params.push(opts.status);
-      }
-      if (opts.sessionId) {
-        conditions.push('session_id = ?');
-        params.push(opts.sessionId);
-      }
-
-      const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-      const limit = opts.limit ?? DEFAULT_QUERY_LIMIT;
-      const offset = opts.offset ?? 0;
-
-      const rows = db
-        .prepare(`SELECT * FROM agent_tasks ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
-        .all(...params, limit, offset) as AgentTaskRow[];
-
-      return rows.map(rowToTaskRecord);
+      return selectRecords(
+        readLoggerRecords(state).map((item) => toTaskRecord(item.record)),
+        opts,
+      );
     },
 
     getTaskById(id: string): TaskRecord | undefined {
-      const row = db.prepare('SELECT * FROM agent_tasks WHERE id = ?').get(id) as
-        AgentTaskRow | undefined;
-      return row ? rowToTaskRecord(row) : undefined;
+      const record = readLoggerRecords(state).find((item) => item.record.id === id)?.record;
+      return record === undefined ? undefined : toTaskRecord(record);
     },
 
     getTaskStats(sinceMs: number): TaskStats {
-      const cutoff = Date.now() - sinceMs;
-      const row = db
-        .prepare(
-          `SELECT
-            COUNT(*) as total,
-            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as succeeded,
-            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
-            AVG(CASE WHEN duration_ms IS NOT NULL THEN duration_ms END) as avg_duration_ms,
-            MAX(completed_at) as last_task_at
-          FROM agent_tasks
-          WHERE completed_at > ?`,
-        )
-        .get(cutoff) as StatsRow;
-
-      return {
-        total1h: row.total,
-        succeeded1h: row.succeeded,
-        failed1h: row.failed,
-        avgDurationMs: row.avg_duration_ms !== null ? Math.round(row.avg_duration_ms) : null,
-        lastTaskAt: row.last_task_at !== null ? new Date(row.last_task_at).toISOString() : null,
-      };
+      return aggregateStats(
+        readLoggerRecords(state).map((item) => toTaskRecord(item.record)),
+        sinceMs,
+      );
     },
 
     getPerSkillStats(sinceMs: number): PerSkillStats[] {
-      const cutoff = Date.now() - sinceMs;
-      const rows = db
-        .prepare(
-          `SELECT
-            skill_name,
-            COUNT(*) as total,
-            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as succeeded,
-            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
-            AVG(CASE WHEN duration_ms IS NOT NULL THEN duration_ms END) as avg_duration_ms
-          FROM agent_tasks
-          WHERE completed_at > ?
-          GROUP BY skill_name
-          ORDER BY total DESC`,
-        )
-        .all(cutoff) as Array<{
-        skill_name: string;
-        total: number;
-        succeeded: number;
-        failed: number;
-        avg_duration_ms: number | null;
-      }>;
-
-      return rows.map((row) => ({
-        skillName: row.skill_name,
-        total: row.total,
-        succeeded: row.succeeded,
-        failed: row.failed,
-        successRate: row.total > 0 ? Math.round((row.succeeded / row.total) * PERCENT) : 0,
-        avgDurationMs: row.avg_duration_ms !== null ? Math.round(row.avg_duration_ms) : null,
-      }));
+      return aggregatePerSkill(
+        readLoggerRecords(state).map((item) => toTaskRecord(item.record)),
+        sinceMs,
+      );
     },
   };
 }

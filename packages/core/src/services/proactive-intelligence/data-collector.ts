@@ -6,6 +6,7 @@ import {
   type DatabaseInterface,
 } from '@raven/shared';
 import type { ServiceContext, RavenService } from '../types.ts';
+import type { ExecutionLogger } from '../../agent-manager/execution-logger.ts';
 
 const log = createLogger('data-collector');
 
@@ -17,12 +18,6 @@ const CHARS_PER_TOKEN = 4; // rough token estimate: ~4 chars per token
 
 interface EventSummary {
   type: string;
-  count: number;
-}
-
-interface TaskSummary {
-  skill_name: string;
-  status: string;
   count: number;
 }
 
@@ -46,6 +41,7 @@ interface SessionSummary {
 
 let eventBus: EventBusInterface;
 let db: DatabaseInterface;
+let executionLogger: ExecutionLogger;
 
 function epochCutoff(days: number): number {
   return Date.now() - days * ONE_DAY_MS;
@@ -70,14 +66,21 @@ function collectEventSnapshot(): string {
 
 function collectTaskSnapshot(): string {
   const cutoff = epochCutoff(DEFAULT_WINDOW_DAYS);
-  const rows = db.all<TaskSummary>(
-    'SELECT skill_name, status, COUNT(*) as count FROM agent_tasks WHERE created_at > ? GROUP BY skill_name, status ORDER BY count DESC',
-    cutoff,
-  );
+  const rows = executionLogger.queryTasks({ createdSinceMs: cutoff, limit: null, offset: 0 });
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const key = `${row.skillName}\u0000${row.status}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
 
-  if (rows.length === 0) return 'No agent tasks in the last 7 days.';
+  if (counts.size === 0) return 'No agent tasks in the last 7 days.';
 
-  const lines = rows.map((r) => `  ${r.skill_name} [${r.status}]: ${r.count}`);
+  const lines = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([key, count]) => {
+      const separator = key.indexOf('\u0000');
+      return `  ${key.slice(0, separator)} [${key.slice(separator + 1)}]: ${count}`;
+    });
   return `Agent Tasks (7d):\n${lines.join('\n')}`;
 }
 
@@ -139,11 +142,15 @@ function collectKnowledgeSnapshot(): string {
 function collectConversationSnapshot(): string {
   const cutoff = epochCutoff(DEFAULT_WINDOW_DAYS);
 
-  // Use agent_tasks as a proxy for conversation themes — each task captures what was asked
-  const rows = db.all<{ skill_name: string; count: number }>(
-    "SELECT skill_name, COUNT(*) as count FROM agent_tasks WHERE created_at > ? AND status = 'completed' GROUP BY skill_name ORDER BY count DESC",
-    cutoff,
-  );
+  // Use recorded agent runs as a proxy for conversation themes — each task captures what was asked.
+  const tasks = executionLogger.queryTasks({
+    status: 'completed',
+    createdSinceMs: cutoff,
+    limit: null,
+    offset: 0,
+  });
+  const counts = new Map<string, number>();
+  for (const task of tasks) counts.set(task.skillName, (counts.get(task.skillName) ?? 0) + 1);
 
   // Also get session turn counts per project for engagement signals
   const sessionRows = db.all<{ project_id: string; total_turns: number }>(
@@ -153,8 +160,10 @@ function collectConversationSnapshot(): string {
 
   const parts: string[] = [];
 
-  if (rows.length > 0) {
-    const taskLines = rows.map((r) => `  ${r.skill_name}: ${r.count} completed tasks`);
+  if (counts.size > 0) {
+    const taskLines = [...counts.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([skillName, count]) => `  ${skillName}: ${count} completed tasks`);
     parts.push(`Task Topics (7d):\n${taskLines.join('\n')}`);
   }
 
@@ -181,8 +190,9 @@ function collectInsightHistory(): string {
   return `Recent Insights (7d, avoid duplicating):\n${lines.join('\n')}`;
 }
 
-export function buildSnapshot(database: DatabaseInterface): string {
+export function buildSnapshot(database: DatabaseInterface, logger: ExecutionLogger): string {
   db = database;
+  executionLogger = logger;
 
   const sections = [
     collectEventSnapshot(),
@@ -208,11 +218,13 @@ export function buildSnapshot(database: DatabaseInterface): string {
 
 const service: RavenService = {
   async start(context: ServiceContext): Promise<void> {
+    if (!context.executionLogger) throw new Error('Data collector requires execution logger');
     eventBus = context.eventBus;
     db = context.db;
+    executionLogger = context.executionLogger;
 
     context.jobRegistry.register('pattern-analysis', async () => {
-      const snapshot = buildSnapshot(db);
+      const snapshot = buildSnapshot(db, executionLogger);
       log.info(`Data snapshot collected (${snapshot.length} chars)`);
       eventBus.emit({
         id: generateId(),

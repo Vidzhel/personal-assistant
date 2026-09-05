@@ -90,8 +90,12 @@ versions; do not copy versions from historical planning documents.
   Resolve project IDs through current definitions; projectless tasks use `system`.
   Execution trees and their nodes commit together at `tasks/trees/<id>.yaml`.
   Interrupted trees require deliberate resume through the board detail panel/API.
-  SQLite still owns sessions, agent-run history, approvals and intents; moving run
-  history is the next checkpoint in the active continuation queue.
+  AgentManager run history lives at `tasks/runs/<agentTaskId>.yaml`; admission and
+  terminal writes precede model dispatch and completion events. Restart marks
+  unfinalized runs failed/interrupted with an unknown prior execution outcome;
+  history never replays model work. SQLite still owns sessions, approvals and
+  intents. Direct heartbeat/learning model calls bypass Manager history; F6 must
+  enforce budgets at their shared execution boundary.
   Knowledge bodies are Markdown; durable links and project membership still live
   in Neo4j. Routine reindexing must preserve those relationships and graph metadata.
 - Agent memory currently lives at `projects/agents/<name>/memory/`, globally by

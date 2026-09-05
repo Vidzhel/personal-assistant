@@ -5,6 +5,7 @@ import type {
   IntegrationsConfig,
 } from '@raven/shared';
 import type { JobRegistry } from '../scheduler/job-registry.ts';
+import type { ExecutionLogger } from '../agent-manager/execution-logger.ts';
 
 /**
  * Runtime dependencies handed to every background service's `start()`.
@@ -14,6 +15,8 @@ import type { JobRegistry } from '../scheduler/job-registry.ts';
 export interface ServiceContext {
   eventBus: EventBusInterface;
   db: DatabaseInterface;
+  /** Optional for services that do not consume agent-run history. */
+  executionLogger?: ExecutionLogger;
   logger: LoggerInterface;
   config: Record<string, unknown>;
   projectRoot: string;

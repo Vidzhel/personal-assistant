@@ -12,6 +12,7 @@ import type { CapabilityLibrary } from '../../capability-library/capability-libr
 import type { RavenMcpDeps } from '../../mcp-server/index.ts';
 import type { MemoryStore } from '../../agent-memory/memory-store.ts';
 import type { PermissionDeps } from '../../agent-manager/agent-session.ts';
+import type { ExecutionLogger } from '../../agent-manager/execution-logger.ts';
 import { runAgentTask } from '../../agent-manager/agent-session.ts';
 import { resolveSystemAccessInstructions } from '../../project-manager/system-access-gate.ts';
 import type { AppConfig } from '../../config.ts';
@@ -74,18 +75,18 @@ export function isWithinActiveHours(nowMs: number, activeHours: string, timezone
   return start <= end ? hour >= start && hour < end : hour >= start || hour < end;
 }
 
-/** Pure (given a db handle): busy-deferral — was there any agent_tasks
- * activity at or after `sinceMs`? Deliberately broad (any task, any
+/** Busy-deferral — was there any recorded agent activity at or after
+ * `sinceMs`? Deliberately broad (any task, any
  * project) rather than scoped to the heartbeat's own target project: a
  * busy owner anywhere in the system is a signal ambient noise would be
  * unwelcome right now. */
-export function hadRecentAgentActivity(db: Database.Database, sinceMs: number): boolean {
-  const row = db.prepare('SELECT 1 FROM agent_tasks WHERE created_at >= ? LIMIT 1').get(sinceMs);
-  return row !== undefined;
+export function hadRecentAgentActivity(logger: ExecutionLogger, sinceMs: number): boolean {
+  return logger.queryTasks({ createdSinceMs: sinceMs, limit: 1, offset: 0 }).length > 0;
 }
 
 export interface HeartbeatDeps {
   db: Database.Database;
+  executionLogger: ExecutionLogger;
   eventBus: EventBus;
   sessionManager: SessionManager;
   config: AppConfig;
@@ -248,7 +249,7 @@ async function fireHeartbeat(
     log.info('Skipping: outside active hours');
     return { summary: 'skipped: outside active hours' };
   }
-  if (hadRecentAgentActivity(deps.db, now - BUSY_DEFERRAL_WINDOW_MS)) {
+  if (hadRecentAgentActivity(deps.executionLogger, now - BUSY_DEFERRAL_WINDOW_MS)) {
     log.info('Skipping: busy-deferral (recent agent activity)');
     return { summary: 'skipped: busy-deferral (recent agent activity)' };
   }

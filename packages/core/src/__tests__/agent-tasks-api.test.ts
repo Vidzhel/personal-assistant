@@ -1,13 +1,14 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { initDatabase, getDb } from '../db/database.ts';
+import { stringify } from 'yaml';
 import { createExecutionLogger } from '../agent-manager/execution-logger.ts';
+import { agentTaskToRunRecord } from '../agent-manager/execution-run-records.ts';
 import { registerAgentTaskRoutes } from '../api/routes/agent-tasks.ts';
-import type { AgentTask } from '@raven/shared';
+import { META_PROJECT_ID, type AgentTask } from '@raven/shared';
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -20,6 +21,7 @@ function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
     agentDefinitions: {},
     createdAt: Date.now(),
     startedAt: Date.now(),
+    projectId: 'project-a',
     ...overrides,
   };
 }
@@ -31,27 +33,35 @@ describe('Agent Tasks API', () => {
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-tasks-api-'));
-    initDatabase(join(tmpDir, 'test.db'));
-    executionLogger = createExecutionLogger({ db: getDb() });
+    const projectsDir = join(tmpDir, 'projects');
+    mkdirSync(join(projectsDir, 'system'), { recursive: true });
+    mkdirSync(join(projectsDir, 'project-a'), { recursive: true });
+    executionLogger = createExecutionLogger({
+      projectsDir,
+      projects: () => [
+        { id: META_PROJECT_ID, fsPath: 'system' },
+        { id: 'project-a', fsPath: 'project-a' },
+      ],
+    });
 
     // Seed some tasks
     const t1 = makeTask({ id: 'api-task-1', skillName: 'gmail' });
-    executionLogger.logTaskStart(t1);
+    await executionLogger.logTaskStart(t1);
     t1.status = 'completed';
     t1.result = 'sent email';
     t1.durationMs = 200;
     t1.completedAt = Date.now();
-    executionLogger.logTaskComplete(t1);
+    await executionLogger.logTaskComplete(t1);
 
     const t2 = makeTask({ id: 'api-task-2', skillName: 'ticktick' });
-    executionLogger.logTaskStart(t2);
+    await executionLogger.logTaskStart(t2);
     t2.status = 'failed';
     t2.errors = ['timeout'];
     t2.completedAt = Date.now();
-    executionLogger.logTaskComplete(t2);
+    await executionLogger.logTaskComplete(t2);
 
     const t3 = makeTask({ id: 'api-task-3', skillName: 'gmail', actionName: 'gmail:read' });
-    executionLogger.logTaskStart(t3);
+    await executionLogger.logTaskStart(t3);
 
     app = Fastify({ logger: false });
     await app.register(cors, { origin: true });
@@ -68,11 +78,6 @@ describe('Agent Tasks API', () => {
 
   afterAll(async () => {
     await app.close();
-    try {
-      getDb().close();
-    } catch {
-      /* */
-    }
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -117,6 +122,28 @@ describe('Agent Tasks API', () => {
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.payload);
       expect(body.length).toBe(1);
+    });
+
+    it('returns every matching record when an explicit page exceeds fifty', async () => {
+      for (let i = 0; i < 55; i++) {
+        const task = makeTask({ id: `api-page-${i}`, createdAt: Date.now() + i });
+        writeFileSync(
+          join(tmpDir, 'projects', 'project-a', 'tasks', 'runs', `${task.id}.yaml`),
+          stringify(
+            agentTaskToRunRecord({
+              ...task,
+              status: 'completed',
+              completedAt: Date.now() + i,
+            }),
+          ),
+        );
+      }
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/agent-tasks?projectId=project-a&limit=100',
+      });
+      expect(res.statusCode).toBe(200);
+      expect(JSON.parse(res.payload).length).toBeGreaterThanOrEqual(55);
     });
 
     it('rejects invalid status', async () => {

@@ -825,25 +825,28 @@ describe('execution flow integration (real engine + real event bus)', () => {
       } as RavenEvent);
     }
 
-    emitRequest('running-task');
-    emitRequest('queued-task');
-
-    await new Promise((r) => setTimeout(r, 10));
-    expect(agentManager.getRunningCount()).toBe(1);
-    expect(agentManager.getQueueLength()).toBe(1);
-
-    const cancelled = agentManager.cancelTask('queued-task');
-    expect(cancelled).toBe(true);
-
-    const complete = completions.find(
-      (e) => (e as unknown as { payload: { taskId: string } }).payload.taskId === 'queued-task',
-    ) as unknown as
-      { payload: { success: boolean; errors?: string[]; cancelled?: boolean } } | undefined;
-    expect(complete).toBeDefined();
-    expect(complete!.payload.success).toBe(false);
-    expect(complete!.payload.errors).toEqual(['cancelled']);
-    expect(complete!.payload.cancelled).toBe(true);
-    await agentManager.stop();
+    try {
+      emitRequest('running-task');
+      emitRequest('queued-task');
+      await vi.waitFor(() => expect(mockQuery).toHaveBeenCalled());
+      expect(agentManager.getRunningCount()).toBe(1);
+      expect(agentManager.getQueueLength()).toBe(1);
+      expect(agentManager.cancelTask('queued-task')).toBe(true);
+      await vi.waitFor(() =>
+        expect(completions).toContainEqual(
+          expect.objectContaining({
+            payload: expect.objectContaining({
+              taskId: 'queued-task',
+              success: false,
+              errors: ['cancelled'],
+              cancelled: true,
+            }),
+          }),
+        ),
+      );
+    } finally {
+      await agentManager.stop();
+    }
   });
 
   it('(6) cancelling an in-flight tree task marks it cancelled with no retry/re-dispatch, and the tree reaches a terminal state (F1)', async () => {

@@ -112,8 +112,10 @@ async function checkChat(projectId) {
     await request(`/api/projects/${projectId}/chat`, 'POST', {
       message: 'Verify the packaged runtime.',
     });
-    assert.equal((await completion).payload.success, true);
+    const event = await completion;
+    assert.equal(event.payload.success, true);
     assert.equal(backendCalls, 1);
+    return event.payload.taskId;
   } finally {
     clearTimeout(timer);
   }
@@ -192,7 +194,14 @@ async function seedState(migrations) {
     systemPrompt: 'Use the compiled smoke conventions.',
     skills: [],
   });
-  await checkChat(project.id);
+  const runId = await checkChat(project.id);
+  const runBytes = readFileSync(
+    join(paths.projectsDir, project.fsPath, 'tasks/runs', `${runId}.yaml`),
+    'utf8',
+  );
+  assert(runBytes.includes(runId));
+  assert.equal((await request(`/api/agent-tasks/${runId}`)).status, 'completed');
+  assert.equal(raven.db.get('SELECT COUNT(*) AS count FROM agent_tasks').count, 0);
   const store = createMemoryStore({ projectsDir: paths.projectsDir });
   assert.equal((await store.write('raven', 'smoke.md', memoryText)).ok, true);
   const memoryPath = join(paths.projectsDir, 'agents/raven/memory/smoke.md');
@@ -220,6 +229,8 @@ async function seedState(migrations) {
       context,
       task,
       taskBytes,
+      runId,
+      runBytes,
       treeId: seedInterruptedTree(project),
       head: git('rev-parse', 'HEAD'),
       migrations,
@@ -253,6 +264,17 @@ async function verifyState(migrations) {
     readFileSync(join(paths.projectsDir, project.fsPath, 'tasks/board', `${task.id}.yaml`), 'utf8'),
     state.taskBytes,
   );
+  const run = await request(`/api/agent-tasks/${state.runId}`);
+  assert.equal(run.status, 'completed');
+  assert.equal(run.projectId, project.id);
+  assert.equal(
+    readFileSync(
+      join(paths.projectsDir, project.fsPath, 'tasks/runs', `${state.runId}.yaml`),
+      'utf8',
+    ),
+    state.runBytes,
+  );
+  assert.equal(raven.db.get('SELECT COUNT(*) AS count FROM agent_tasks').count, 0);
   await checkChat(project.id);
   await verifyInterruptedTree(state.treeId);
 }

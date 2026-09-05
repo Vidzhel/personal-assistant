@@ -258,9 +258,11 @@ export async function createRaven(
   };
   let taskStore: ReturnType<typeof createTaskStore>;
   let executionEngine: TaskExecutionEngine;
+  let executionLogger: ReturnType<typeof createExecutionLogger>;
   try {
     taskStore = createTaskStore({ ...projectRecords, eventBus });
     taskStore.getTaskCountsByStatus();
+    executionLogger = createExecutionLogger(projectRecords);
     executionEngine = new TaskExecutionEngine({
       ...projectRecords,
       eventBus,
@@ -312,6 +314,7 @@ export async function createRaven(
         eventBus.off(type as RavenEventType, handler),
     },
     db: dbInterface,
+    executionLogger,
     logger: log,
     config: {
       intentStore,
@@ -350,10 +353,6 @@ export async function createRaven(
   const pendingApprovals = createPendingApprovals(getDb());
   pendingApprovals.initialize();
   log.info('Pending approvals initialized');
-
-  // 7d. Init execution logger
-  const executionLogger = createExecutionLogger({ db: getDb() });
-  log.info('Execution logger initialized');
 
   // 7f. Init named agent registry (filesystem YAML is the source of truth)
   const namedAgentStore = createYamlNamedAgentStore({
@@ -543,7 +542,7 @@ export async function createRaven(
   });
 
   // 11a-3. Weekly system retrospective deps (Phase 3): deterministic
-  // aggregation of agent_tasks failures + stuck task trees over 7d into one
+  // aggregation of recorded agent failures + stuck task trees over 7d into one
   // memory candidate for the default agent. No model call, no Neo4j dep.
   const systemRetrospectiveDeps = {
     projectsDir,
@@ -589,6 +588,7 @@ export async function createRaven(
   // runAgentTask directly rather than through agent-manager's event queue.
   const heartbeat = createHeartbeat({
     db: getDb(),
+    executionLogger,
     eventBus,
     sessionManager,
     config,

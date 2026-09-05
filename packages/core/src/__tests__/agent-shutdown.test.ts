@@ -71,8 +71,8 @@ describe('agent shutdown', () => {
     const session = new SessionManager().getOrCreateSession('meta');
     request(app, 'running', session.id);
     request(app, 'queued', session.id);
+    await vi.waitFor(() => expect(backend).toHaveBeenCalledTimes(1));
     options!.onSessionId?.('initial-sdk-session');
-    expect(backend).toHaveBeenCalledTimes(1);
     const stopping = app.stop();
     expect(options?.signal?.aborted).toBe(true);
     await stopping;
@@ -222,10 +222,11 @@ describe('agent shutdown', () => {
       errors: ['cancelled'],
     });
     expect((await fetch(url, { method: 'POST' })).status).toBe(404);
-    expect(
-      app.db.get<{ status: string }>('SELECT status FROM agent_tasks WHERE id = ?', 'cancel-me')
-        ?.status,
-    ).toBe('cancelled');
+    const persisted = await fetch(`http://127.0.0.1:${app.port}/api/agent-tasks/cancel-me`);
+    expect(await persisted.json()).toMatchObject({ status: 'cancelled' });
+    expect(app.db.get<{ count: number }>('SELECT COUNT(*) AS count FROM agent_tasks')?.count).toBe(
+      0,
+    );
   });
   it('cancels direct retrospective work without late summaries or memory candidates', async () => {
     let started!: () => void;
