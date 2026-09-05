@@ -12,13 +12,14 @@ core. `createRaven()` in `packages/core/src/raven.ts` composes the runtime, and
 owns task completion. Core can boot without Neo4j; graph-backed knowledge features
 then remain unavailable.
 
-The [completion record](_bmad-output/implementation-artifacts/reliability-completion-2026-09-05.md)
-is the current delivery and verification record; the
+The [active continuation queue](_bmad-output/implementation-artifacts/file-first-completion-2026-09-05.md)
+tracks delivery and verification; the
 [deferred ledger](_bmad-output/implementation-artifacts/deferred-work.md) gives
 remaining limitations and their resolution plans. The
 [project workspace proposal](docs/superpowers/specs/2026-09-05-project-workspaces-design.md)
-is deferred: external repository attachments, project-owned memory and graph
-replacement are not implemented. Keep the runtime small by extending existing
+precedes the owner's accepted flexible-layout and direct-repository requirements.
+W1 is authorized after F9; external repository attachments, project-owned memory
+and graph replacement are not implemented yet. Keep the runtime small by extending existing
 paths; remove a predecessor in the same change that replaces it.
 
 ## System Diagram

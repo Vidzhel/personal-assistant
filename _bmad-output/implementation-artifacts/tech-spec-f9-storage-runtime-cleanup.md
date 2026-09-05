@@ -1,7 +1,7 @@
 ---
 title: Finish storage and runtime contracts before repository workspaces
 created: '2026-09-05'
-status: in-progress
+status: complete
 execution_mode: plan-code-review
 ---
 
@@ -277,6 +277,40 @@ Logs: `/tmp/raven-f9d-check-final.log`, `/tmp/raven-f9d-full-final.log`,
 
 F9e now reconciles the final assessment/setup documents and repeats disposable
 Neo4j and isolated deployment/container verification before W1 begins.
+
+## F9e completion evidence — September 6
+
+F9d is pushed as `b7d3b35`. The current assessment, README, architecture and
+setup instructions now describe the implemented file/operational storage
+boundaries and the owner's accepted next workspace work. Historical R0–R7
+records and the graph incident remain linked; legacy restoration is waived
+without claiming that prior graph state was restored.
+
+The F9d baseline remains the verified code: 224 default files / 2,342 passing
+tests with six explicit live skips, 16 browser journeys, production core/web
+builds and two clean packaged process exits. F9e adds a complete successful
+run of all nine disposable Neo4j files / 148 tests, nine real temporary Git
+initializer tests, Compose validation, and an allowlisted Docker context of
+361 source inputs. Both current images built from the lockfile. Offline smoke
+containers preserved project definitions, memory and Git history across
+restart and served the standalone page/static asset. The core image's native
+Transformers adapter passed synthetic local PNG/resizing checks using Sharp
+0.35.4 and libvips 8.18.6. No model download or provider account was needed.
+The current full npm audit reports zero advisories; project/library validators
+and the required repository check pass. Smoke containers and volumes were
+removed by their harness. The images remain local verification artifacts.
+
+Logs: `/tmp/raven-f9e-graph.log`, `/tmp/raven-f9e-deployment.log`,
+`/tmp/raven-f9e-compose.log`, `/tmp/raven-f9e-docker-context.log`,
+`/tmp/raven-f9e-docker-core.log`, `/tmp/raven-f9e-docker-web.log`,
+`/tmp/raven-f9e-containers.log`, `/tmp/raven-f9e-native-image.log`,
+`/tmp/raven-f9e-audit.json`, `/tmp/raven-f9e-validate-library.log`,
+`/tmp/raven-f9e-validate-projects.log`, `/tmp/raven-f9e-check.log`.
+
+F1–F9 are complete. W1 starts next with read-only inspection of the actual
+sibling repositories, followed by the already authorized flexible workspace,
+direct execution, shared-skill and mobile artifact implementation. External
+account canaries and the next Croner dependency review remain explicit limits.
 
 ## Remaining constraints
 

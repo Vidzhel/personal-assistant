@@ -1,125 +1,124 @@
-# Raven reliability completion — September 5, 2026
+# Raven reliability assessment — September 5–6, 2026
 
-This is the historical R7 assessment. Subsequent owner decisions and F1 onward
-are tracked in the [active continuation queue](../../_bmad-output/implementation-artifacts/file-first-completion-2026-09-05.md).
-The owner waived legacy runtime migration and restoration because Raven had not
-been used, chose project-local YAML task state, and authorized flexible repository
-workspaces after F1–F9. References below to required legacy exports, restoration
-and deferred workspace authorization describe the earlier checkpoint only.
+This document is the current assessment of the F1–F9 continuation work. The
+[R0–R7 completion record](../../_bmad-output/implementation-artifacts/reliability-completion-2026-09-05.md)
+remains the historical evidence for the earlier reliability checkpoint; it is
+not a status report for F9. The [active continuation queue](../../_bmad-output/implementation-artifacts/file-first-completion-2026-09-05.md)
+and its linked specifications record the detailed implementation evidence.
 
-The reliability pass is complete through R7: implementation, review, dependency
-fixes, shared Claude/Codex guidance and final regression. Remaining issues have
-explicit resolution plans below. The [current queue and detailed evidence](../../_bmad-output/implementation-artifacts/reliability-completion-2026-09-05.md)
-is authoritative. Old March/August checkboxes are historical, and attached
-repositories/project-memory redesign remain deferred at the owner's request.
+The owner confirmed that Raven has not been used and authorized discarding
+legacy runtime data. No legacy export, migration or restoration path is being
+built. New runtime state still receives interruption-safe handling because
+unused historical data does not justify losing work created now. The owner
+also authorized flexible repository workspaces after F1–F9; that work is W1 and
+has not started.
 
-## Architecture assessment
+## Current architecture
 
-Raven's direction fits its philosophy: one owner's assistant, a small runtime
-around the Claude Agent SDK, explicit capability grants, visible approvals,
-file-based definitions and learning artifacts, and runtime-owned task outcomes.
-The retired suite, pipeline, CLI-backend and custom compaction paths should stay
-removed. The next useful work is to strengthen existing storage and cancellation
-boundaries, rather than add another orchestration system.
+Raven remains a small runtime around the Claude Agent SDK for one owner. The
+composition root wires the existing agent manager, services, scheduler,
+permission checks, file-backed definitions and operational stores. Capability
+bindings are explicit: `skills: []` grants no library capability, and missing
+skill, MCP or vendor definitions fail dispatch before a model turn or tool
+mutation. HTTP, WebSocket and orchestration entry points enforce current
+project and session ownership.
 
-Managed project identity/settings now persist in context.md and survive restart;
-human context is preserved. SQLite still owns operational state such as tasks,
-approvals and sessions. Legacy plain project definitions retain some metadata
-in SQLite until a controlled migration or managed update. Therefore the database
-is not disposable. Knowledge markdown owns content, while Neo4j contains durable
-links, memberships and lifecycle metadata that cannot all be recovered from
-files. Routine reindex now preserves these. Graph replacement needs a separate
-export/restore and reader-migration plan.
+Authoritative state now has clear boundaries:
 
-Skills are explicit bindings: an empty list grants no capability-library bindings, missing
-bindings fail before a turn starts, and unavailable knowledge tools are omitted.
-Project/session ownership is enforced at HTTP, WebSocket and orchestration entry
-points. These are useful boundaries for a single-owner assistant; they do not
-establish a multi-tenant security model or repository filesystem sandbox.
+- Project settings and identity come from `context.md` metadata. Agent,
+  schedule and template definitions remain filesystem records.
+- Board tasks, execution trees and agent runs use canonical YAML under the
+  resolved project directory: `tasks/board/<id>.yaml`,
+  `tasks/trees/<id>.yaml`, and `tasks/runs/<id>.yaml`. A projectless task uses
+  the system project's physical directory.
+- Fresh SQLite contains the current 24-table operational schema for sessions,
+  approvals, events, notifications, integrations, intents, model budgets,
+  provider uploads and the project cache. Retired SQL task, run, tree and
+  pipeline readers are removed. SQLite remains an operational store, not a
+  source of project definition settings.
+- Knowledge bodies are canonical Markdown files. Neo4j stores durable links,
+  project membership and graph lifecycle metadata. Reindex and derived-index
+  refresh preserve those relationships, but Markdown cannot recreate graph
+  metadata after an unknown graph loss.
 
-Agent memory remains scoped by agent name under projects/agents. Existing data
-sources are metadata, not repository mounts or an automatic retrieval system.
-The global graph view still selects an implicit first project for chat. Project
-selection, retrieval grants and project-owned memory should be resolved together
-when the owner returns to workspace design. Neither ../disertation nor
-../teaching has been attached or changed.
+Cancellation closes admission and suppresses late callbacks across model,
+service, file and graph paths. Already admitted mutations drain at their own
+commit boundaries; cancellation does not roll back a committed write. Local
+abort also cannot prove that an external Claude, provider or remote service
+operation stopped.
 
-## Completed behavior
+## F1–F9 status
 
-| Area                              | Result                                                                                                                                                                           |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Project ownership and persistence | Foreign sessions/sources are rejected; managed settings persist; empty projects archive; known SQLite references and available graph memberships prevent deletion.               |
-| Chat and dashboard                | Durable send acknowledgment, recoverable drafts, session switching, reconnect reconciliation, usable nested IDs, truthful failure/cancel/approval outcomes, and real graph chat. |
-| Learning and background work      | Failed/partial consolidation retains candidates; local learning writes drain; service/task shutdown suppresses late callbacks and new work.                                      |
-| Capabilities and knowledge        | Explicit grants and role-scoped tools; graph truly optional; relationship-preserving reindex and guarded disposal.                                                               |
-| Build and deployment              | Packaged migrations, standalone dashboard, persistent definition/memory/Git roots, recoverable seed initialization, tested compiled and container restarts.                      |
-| Development agents                | Shared AGENTS.md, reconciled Claude entry, preserved Claude skills/settings, Codex browser skills and optional custom agent. Raven's runtime provider is unchanged.              |
+| Checkpoint                                                  | Current status and evidence                                                                                                                                                                                                                                                                                                                                                            |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F1 — project-local task files and current project authority | Complete. Validated project-local board YAML, atomic persistence, current file-owned project identity/settings and inactive-project guards passed the F1 suite, required checks, core build, browser journeys and packaged restart. See [F1 specification](../../_bmad-output/implementation-artifacts/tech-spec-f1-project-task-files.md).                                            |
+| F2 — execution trees and bounded validation                 | Complete. Whole trees and nodes persist in YAML, validation is fail-closed, and execution shutdown/restart interruption is covered. The reviewed F2 checkpoint passed its recorded default, browser, build and packaged restart checks. See [F2 specification](../../_bmad-output/implementation-artifacts/tech-spec-f2-execution-tree-files.md).                                      |
+| F3 — agent-run files and direct history consumers           | Complete. Agent-run records and service/dashboard history queries use the execution logger; retired SQL task history consumers are removed. The reviewed checkpoint passed 2,092 tests and 14 browser journeys. See [F3 specification](../../_bmad-output/implementation-artifacts/tech-spec-f3-agent-run-files.md).                                                                   |
+| F4 — admitted MCP mutation drain                            | Complete. Per-task Raven and memory MCP admission closes on abort/backend settlement, drains admitted handlers before terminal state, and refuses late callbacks. The reviewed checkpoint passed 2,105 tests and 14 browser journeys. See [F4 specification](../../_bmad-output/implementation-artifacts/tech-spec-f4-mcp-drain.md).                                                   |
+| F5 — knowledge reconciliation and derived refresh           | Complete. Read-only reconciliation, recoverable Markdown mutations, durable deletion intents, revisioned embeddings/chunks and relationship-preserving graph updates are implemented. The reviewed checkpoint passed 2,138 default tests and 132 disposable Neo4j tests. See [F5 specification](../../_bmad-output/implementation-artifacts/tech-spec-f5-knowledge-reconciliation.md). |
+| F6 — global model budget                                    | Complete. Existing execution paths share SQLite budget admission, model estimates, reservations, query caps and truthful unknown-cost handling. The reviewed checkpoint passed 2,176 tests and 14 browser journeys. See [F6 specification](../../_bmad-output/implementation-artifacts/tech-spec-f6-model-budget.md).                                                                  |
+| F7 — schedule health and shutdown                           | Complete. Current activation IDs, cron absence/staleness checks, in-flight grace and scheduled-work cancellation are wired through the existing scheduler and self-test. The reviewed checkpoint passed 2,200 tests, 14 browser journeys and packaged restart checks. See [F7 specification](../../_bmad-output/implementation-artifacts/tech-spec-f7-schedule-health.md).             |
+| F8 — provider upload cleanup                                | Complete. Upload ownership, remote IDs, bounded deletion retries, restart recovery and truthful unresolved reports use the existing maintenance path. The reviewed checkpoint passed 2,223 tests, 14 browser journeys and packaged restart checks. See [F8 specification](../../_bmad-output/implementation-artifacts/tech-spec-f8-provider-upload-cleanup.md).                        |
+| F9a — fresh operational schema                              | Verified. The fresh schema retains the current operational tables and removes obsolete pipeline/task compatibility paths; fresh initialization and restart checks passed.                                                                                                                                                                                                              |
+| F9b — dispatch, artifact and service contracts              | Verified. Current capability ownership, artifact requirements, named-agent settings and per-start autonomous service lifetimes passed 2,259 tests, 15 browser journeys, required checks, production builds and packaged restart.                                                                                                                                                       |
+| F9c — canonical knowledge outcomes and recovery             | Verified in the previous checkpoint. File-owned ingestion, consolidation, cluster/hub outcomes, merge intents and explicit recovery passed 2,296 default tests, 148 disposable graph checks across the verified runs, 15 browser journeys, required checks, core build and packaged restart.                                                                                           |
+| F9d — definition diagnostics and project recovery           | Verified and pushed as `b7d3b35`. Current definition diagnostics, cache-safe mutation journals, actual SIGKILL recovery and mobile correction passed 2,342 default tests, 16 browser journeys, required checks, production builds and packaged restart.                                                                                                                                |
+| F9e — final review and verification                         | Complete. All 148 disposable Neo4j tests, nine deployment initializer tests, Compose/context validation, current image builds and offline persistence/static-asset/native-adapter checks pass. Current audit reports zero advisories. The F9d full, browser, build and compiled checks remain the verified code baseline.                                                              |
 
-When Neo4j is unavailable, an otherwise empty project can archive while reporting
-`knowledgeReferencesChecked: false`. Its graph memberships were not checked; the
-archive outcome does not establish their absence.
+F9a–F9e evidence, limits and exact log paths are recorded in the [F9 storage
+and runtime specification](../../_bmad-output/implementation-artifacts/tech-spec-f9-storage-runtime-cleanup.md).
+F1–F9 are complete; W1 is the next implementation checkpoint.
 
-## Verification and limits
+## Reliability limits that remain explicit
 
-Final verification used Node 22.23.2/npm 10.9.8 on the R6 code and lockfile:
+Project mutation journals now detect interrupted create, update and archive
+boundaries. Startup can complete a published mutation or cancel a mutation
+that never published; a changed file remains a conflict for deliberate repair.
+This is recovery for new journaled runtime work. It is not restoration of
+discarded legacy state, and filesystem publication plus SQLite or graph changes
+are not one cross-store transaction.
 
-| Check                                    | Result                                                                                                                                                     |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Default suite                            | 184 files; 1,971 passed; six explicit live TickTick skips.                                                                                                 |
-| Headless browser journeys                | All 11 passed; fixture files, processes and listeners cleaned up.                                                                                          |
-| Required check and definition validators | Formatting, lint, types, strip-types, dependency guard, library and project validation passed.                                                             |
-| Production builds                        | Shared/core, packaged 33 migrations, and standalone dashboard passed.                                                                                      |
-| Compiled restart                         | Six real services, fake chat, persistent definitions/memory/Git history and two natural process exits passed.                                              |
-| Deployment initializer                   | Nine real temporary Git/bootstrap/recovery tests passed.                                                                                                   |
-| Fresh Docker images                      | Both built from the lockfile; 368 allowlisted context inputs; offline restart/page/static-asset smoke passed with no leftover smoke containers or volumes. |
-| Native embedding dependency              | Core image loaded Transformers with Sharp 0.35.4/libvips 8.18.6 and passed synthetic image adapter checks without network.                                 |
-| R6 real model and advisory checks        | Online and separate offline BGE fp32/384-value embedding checks passed in disposable storage; zero npm audit advisories.                                   |
-| Earlier disposable Neo4j proof           | R3 passed 30 knowledge-store tests, including durable relationship preservation.                                                                           |
+Knowledge recovery preserves source files, intents and graph evidence through
+partial or unknown outcomes. It cannot infer deleted or changed graph
+relationships from Markdown alone. A future graph replacement must move relationship ownership and switch readers
+together, with behavioral parity tests. Legacy import remains waived.
 
-The final spec records commands and local log paths. The
-[dependency review](2026-09-05-dependency-review.md) explains the scoped override
-and its removal criteria. The Docker tags are local verification artifacts;
-production was not deployed.
+The F6 budget is a local execution estimate and admission policy, not a
+subscription billing guarantee. Gemini and arbitrary external commands remain
+outside that budget. F8 records local knowledge of provider upload outcomes;
+unknown remote IDs and local cancellation do not establish remote deletion or
+inference cancellation. No live Claude, Gemini, TickTick or other account
+canary was run, and no outbound owner message or production deployment was
+performed.
 
-Default tests use temporary roots and fake model execution, and block real SDK
-and Neo4j factories. Browser checks use their own services and temporary frontend
-copy. These checks prove local behavior, not live Claude authentication or
-account delivery. Reviews used existing independent agents and parent review;
-fresh blind reviewer contexts were unavailable. No production deployment or
-outbound owner-account message was performed.
+Croner behavior is pinned by the installed dependency and tested through the
+actual dispatch path, including timezone and DST cases. A future Croner
+upgrade must rerun the gap/overlap checks together with schedule-health policy.
 
-The initial verification did contact the owner's local Neo4j before the R0 guard
-was complete. Later review established that the old startup issued a destructive
-reindex query. The exact affected data is unknown without a prior snapshot;
-no restoration is claimed. The [incident record](2026-09-05-codex-verification.md#local-graph-contact-during-verification)
-preserves the correction and the [resolution ledger](../../_bmad-output/implementation-artifacts/deferred-work.md)
-requires comparison with a prior backup before any repair.
+The initial R0–R7 verification contacted the owner's local Neo4j before the
+graph guard was complete and the old startup issued a destructive reindex
+query. The exact prior data delta is unknown because there was no pre-run
+snapshot. The [incident record](2026-09-05-codex-verification.md#local-graph-contact-during-verification)
+preserves that fact and its correction. The owner later confirmed Raven was
+unused and waived legacy restoration, so this assessment makes no claim that
+the prior graph state was restored.
 
-## Remaining work and proposed order
+## Remaining work and boundaries
 
-The [resolution ledger](../../_bmad-output/implementation-artifacts/deferred-work.md)
-contains concrete file boundaries and verification requirements for each item.
+All postponed F1–F9 improvements are complete. Remaining dependency/account
+limits have explicit resolution criteria in the deferred ledger; they do not
+stand in for missing local implementation or tests.
 
-1. Drain already admitted MCP mutations across cancellation/shutdown. Current
-   guards reject new calls and suppress late success; an admitted handler can
-   still finish its storage mutation. Add per-task tracking and commit-boundary
-   tests using held file, SQLite and graph writes.
-2. Add read-only reconciliation and explicit recovery for interrupted project
-   file/SQLite and knowledge file/graph mutations. Back up first; never silently
-   prune unmatched graph records. Export legacy project metadata before treating
-   the project cache as rebuildable.
-3. Refresh embeddings/chunks after external file edits using content hashes and
-   retryable existing processors, preserving graph relationships.
-4. Track provider file cleanup across cancellation/restart; local abort does not
-   prove remote inference cancellation or uploaded-file deletion. Validate the
-   retry path with a fake provider before an explicitly authorized live canary.
-5. Enforce a real global daily budget and detect ordinary schedules that never
-   fire or become stale. The old budget setting has no consumer, and current
-   schedule status checks do not establish freshness. The ledger specifies
-   existing SQLite/cron paths and concurrency, restart and fake-clock tests.
-6. Resume the workspace proposal: explicit project selection, source grants,
-   retrieval, structured project memory and a separately proven graph migration.
+W1 is authorized after F9. It starts by inspecting dissertation and teaching,
+then implements flexible project layouts, direct repository shell/file/Git work,
+linked context indexes, project-owned memory, shared skills and mobile artifact
+access. The agent may evolve each repository’s scripts and structure within the
+owner’s configured autonomy. Those repositories have not been inspected in this reliability pass;
+there is no claim about their current layout or tooling. No repository
+embedding pipeline or graph replacement is part of the current implementation.
 
-All original owner definition files and unrelated local changes are preserved
-and excluded from task commits. Reviewed checkpoints are committed and pushed
-to origin/master as requested; the current queue records their evidence.
+The original definitions retain their recorded hashes except for the explicit
+summary-only maintenance template change in F9b. Unrelated owner work is preserved.
+The owner decision waiving legacy migration/restoration is retained here as a
+scope decision, while new task, project, knowledge and provider records remain
+subject to the current persistence and recovery contracts.

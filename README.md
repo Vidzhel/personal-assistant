@@ -111,7 +111,7 @@ isolated tests supply a fake model boundary instead.
 | `RAVEN_TIMEZONE`                 | Timezone for schedules (e.g., `Europe/London`)                                            |
 | `RAVEN_DIGEST_TIME`              | Legacy unused setting; edit the morning-digest schedule definition to set its cron time   |
 | `RAVEN_MAX_CONCURRENT_AGENTS`    | Max parallel AI agents (default: `3`)                                                     |
-| `RAVEN_MAX_BUDGET_USD_PER_DAY`   | Daily Claude query estimate budget (default $5); zero blocks model queries                  |
+| `RAVEN_MAX_BUDGET_USD_PER_DAY`   | Daily Claude query estimate budget (default $5); zero blocks model queries                |
 | `NEO4J_ENABLED`                  | `false` disables all graph connections; `.env.example` and default Compose start disabled |
 
 The daily model budget applies to chat, tasks, heartbeat and learning. It reserves
@@ -142,22 +142,25 @@ support; Raven itself still runs through the Claude Agent SDK.
 
 The [current reliability assessment](docs/assessments/2026-09-05-reliability-completion.md)
 summarizes the implemented improvements against Raven's philosophy. The
+[active continuation queue](_bmad-output/implementation-artifacts/file-first-completion-2026-09-05.md)
+tracks the current work; the earlier
 [completion record](_bmad-output/implementation-artifacts/reliability-completion-2026-09-05.md)
-is the current task queue and dated verification evidence; the
+preserves R0–R7 evidence. The
 [deferred ledger](_bmad-output/implementation-artifacts/deferred-work.md) records
 concrete remaining fixes. March and August plans are historical snapshots.
 
-Final reliability verification passed **1971 tests with 6 explicit skips**, **11 browser
+The F9d checkpoint passed **2,342 tests with 6 explicit skips**, **16 browser
 journeys**, required checks, production builds and compiled restart verification.
-Both fresh Docker images passed offline persistence/static-asset checks; real
-Git history and native embedding dependencies were verified. The patched lockfile
-has zero npm audit advisories. These checks use isolated roots; live Claude
+Current F9 verification images pass offline persistence/static-asset checks,
+including real Git history. The current lockfile audit reports no advisories.
+These checks use isolated roots; live Claude
 authentication, model quality and account delivery remain separate canaries.
 
 The
 [project workspace proposal](./docs/superpowers/specs/2026-09-05-project-workspaces-design.md)
 describes attached repositories, structured project files, and linked memories;
-these remain deferred. A project data-source URI currently labels a source; it
+W1 implementation is authorized after the final F9 checks. The proposed layout
+is a default that each project's agent can evolve. A project data-source URI currently labels a source; it
 does not attach a repository, grant file access or index its contents.
 
 Useful verification commands:

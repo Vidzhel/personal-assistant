@@ -30,14 +30,14 @@ output and its static files. Images run as the unprivileged `node` user (UID 100
 
 Compose creates named volumes; it does not mount the checkout's working data.
 
-| Volume           | Container path       | Contents                                                                  |
-| ---------------- | -------------------- | ------------------------------------------------------------------------- |
-| `raven_data`     | `/app/data`          | SQLite, Raven sessions, logs, knowledge Markdown, definition Git metadata |
-| `raven_projects` | `/app/projects`      | Project context, named agents, templates, schedules, agent memory         |
-| `raven_library`  | `/app/library`       | Capability definitions and deliberately installed vendor plugins          |
-| `raven_config`   | `/app/config`        | Runtime configuration files                                               |
-| `raven_claude`   | `/home/node/.claude` | Claude authentication/configuration and SDK session transcripts           |
-| `neo4j_data`     | `/data` in Neo4j     | Optional knowledge relationships, membership and graph metadata           |
+| Volume           | Container path       | Contents                                                                                                       |
+| ---------------- | -------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `raven_data`     | `/app/data`          | SQLite, Raven sessions, logs, knowledge Markdown, definition Git metadata                                      |
+| `raven_projects` | `/app/projects`      | Project context, named agents, templates, schedules, agent memory, board tasks, execution trees and agent runs |
+| `raven_library`  | `/app/library`       | Capability definitions and deliberately installed vendor plugins                                               |
+| `raven_config`   | `/app/config`        | Runtime configuration files                                                                                    |
+| `raven_claude`   | `/home/node/.claude` | Claude authentication/configuration and SDK session transcripts                                                |
+| `neo4j_data`     | `/data` in Neo4j     | Optional knowledge relationships, membership and graph metadata                                                |
 
 On first startup, the entrypoint copies only the explicit
 [`deployment/seeds`](../deployment/seeds) into each **empty** projects/library/config
@@ -75,6 +75,16 @@ instance for these volumes. If using bind mounts, create dedicated runtime
 directories writable by UID 1000; do not point the initializer at a source Git
 checkout or symlinked roots. Restoring data/history without matching definition
 volumes is not a substitute for restoring a complete backup.
+
+Project mutation recovery is reported by `GET /api/project-recovery`. The
+response contains mutation IDs, paths, operation states and repair messages;
+it does not expose the recorded file bytes. After checking a `published`
+entry, request `POST /api/project-recovery/<mutation-id>/recover`. A changed
+file remains a `409` conflict and is retained for deliberate reconciliation;
+the recovery endpoint does not overwrite it. Startup attempts the same
+current-format recovery before loading the project registry and synchronizing
+the SQLite cache. A pending or conflicting entry keeps its project unavailable
+for new mutations until it is repaired.
 
 ## Authenticate Claude deliberately
 

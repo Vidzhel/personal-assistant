@@ -13,18 +13,18 @@ queue. The owner subsequently authorized workspaces after all postponed
 improvements below. Finish F1–F9 first; moving task storage alone does not mount
 external repositories.
 
-| Order | Checkpoint                                                                                                       | State                                                                                |
-| ----- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| F1    | Validated project-local YAML board tasks, atomic persistence and current file-owned project metadata             | Complete; reviewed, 2,014 tests and 12 browser journeys passed                       |
-| F2    | Whole-tree YAML execution state, explicit board/run linkage, engine shutdown and restart interruption            | Complete; reviewed, 2,079 tests and 14 browser journeys passed                       |
-| F3    | Project-local agent-run records and replacement of remaining task SQL readers                                    | Complete; reviewed, 2,092 tests and 14 browser journeys passed                       |
-| F4    | Drain admitted MCP mutations before terminal task state and store shutdown                                       | Complete; reviewed, 2,105 tests and 14 browser journeys passed                       |
-| F5    | File/graph reconciliation and changed-content derived-index refresh                                              | Complete; 2,138 default / 132 graph tests, 14 browser journeys                       |
-| F6    | Enforced global daily budget through existing execution paths                                                    | Complete; 2,176 tests, 14 browser journeys and packaged restart                      |
-| F7    | Ordinary schedule absence/staleness detection                                                                    | Complete; 2,200 tests, 14 browser journeys and packaged restart                      |
-| F8    | Durable provider upload cleanup/retry after cancellation and restart                                             | Complete; 2,223 tests, 14 browser journeys and packaged restart                      |
-| F9    | Remove obsolete storage compatibility/schema paths, reconcile docs, full/browser/compiled/container verification | In progress; F9a–F9d verified; F9e final assessment and deployment verification next |
-| W1    | Review dissertation/teaching and implement flexible repository workspaces with browser artifact access           | Authorized after F1–F9                                                               |
+| Order | Checkpoint                                                                                                       | State                                                                                                                    |
+| ----- | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| F1    | Validated project-local YAML board tasks, atomic persistence and current file-owned project metadata             | Complete; reviewed, 2,014 tests and 12 browser journeys passed                                                           |
+| F2    | Whole-tree YAML execution state, explicit board/run linkage, engine shutdown and restart interruption            | Complete; reviewed, 2,079 tests and 14 browser journeys passed                                                           |
+| F3    | Project-local agent-run records and replacement of remaining task SQL readers                                    | Complete; reviewed, 2,092 tests and 14 browser journeys passed                                                           |
+| F4    | Drain admitted MCP mutations before terminal task state and store shutdown                                       | Complete; reviewed, 2,105 tests and 14 browser journeys passed                                                           |
+| F5    | File/graph reconciliation and changed-content derived-index refresh                                              | Complete; 2,138 default / 132 graph tests, 14 browser journeys                                                           |
+| F6    | Enforced global daily budget through existing execution paths                                                    | Complete; 2,176 tests, 14 browser journeys and packaged restart                                                          |
+| F7    | Ordinary schedule absence/staleness detection                                                                    | Complete; 2,200 tests, 14 browser journeys and packaged restart                                                          |
+| F8    | Durable provider upload cleanup/retry after cancellation and restart                                             | Complete; 2,223 tests, 14 browser journeys and packaged restart                                                          |
+| F9    | Remove obsolete storage compatibility/schema paths, reconcile docs, full/browser/compiled/container verification | Complete; 2,342 default / 148 graph tests, 16 browser journeys, builds, packaged restart and offline containers verified |
+| W1    | Review dissertation/teaching and implement flexible repository workspaces with browser artifact access           | Next; authorized, prerequisites complete                                                                                 |
 
 Legacy metadata migration and prior Neo4j restoration are closed by the owner's
 explicit decision, not by a claim that data was restored. Future runtime writes
@@ -133,5 +133,8 @@ required checks, core build and packaged restart pass. See the F9 spec for evide
 and the corrected test-fixture failures. F9d completes current definition diagnostics,
 cache-safe project interruption recovery and mobile correction. Required checks,
 2,342 default tests, 16 browser journeys, production builds and packaged restart
-pass. F9e final documentation/graph/deployment verification is next; W1 remains
-after F9.
+pass. F9e completes the current assessment, all 148 disposable graph tests, nine
+deployment initializer tests, both current container images, offline persistence
+and standalone static-asset checks. The required check and definition validators
+pass; the current audit reports no advisories. F1–F9 are complete. W1 begins next
+by inspecting the actual sibling repositories before implementation.
