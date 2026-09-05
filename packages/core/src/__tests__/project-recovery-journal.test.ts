@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parse, stringify } from 'yaml';
 import { afterEach, describe, expect, it } from 'vitest';
+import { projectWorkspaceDefaults } from '@raven/shared';
 import { createRavenTestFixture } from './fixtures/raven-fixture.ts';
 import { ProjectRegistry } from '../project-registry/project-registry.ts';
 import {
@@ -140,6 +141,68 @@ describe('project recovery journal boundaries', () => {
       }
     },
   );
+
+  it('treats a published create with a missing workspace anchor as a conflict', async () => {
+    const fixture = await makeFixture();
+    const path = 'published-project';
+    const intendedBytes = '# Published project\n';
+    const workspaceBytes = stringify(projectWorkspaceDefaults());
+    const journal = createMutationJournal({
+      projectsDir: fixture.projectsDir,
+      operation: 'create',
+      projectId: path,
+      path,
+      originalBytes: '',
+      intendedBytes,
+      preparedPath: `.project-mutations/prepared-${randomUUID()}`,
+      workspaceBytes,
+    });
+    const publishedDirectory = join(fixture.projectsDir, path);
+    mkdirSync(publishedDirectory);
+    writeFileSync(join(publishedDirectory, 'context.md'), intendedBytes);
+
+    expect(readProjectRecoveryReport(fixture.projectsDir).entries).toEqual([
+      expect.objectContaining({ mutationId: journal.mutationId, state: 'conflict' }),
+    ]);
+    await expect(recoverProjectMutation(recoveryDeps(fixture), journal.mutationId)).rejects.toThrow(
+      /conflicts/,
+    );
+    expect(readFileSync(join(publishedDirectory, 'context.md'), 'utf8')).toBe(intendedBytes);
+    expect(readProjectRecoveryReport(fixture.projectsDir).entries).toHaveLength(1);
+  });
+
+  it('retains a symlinked workspace anchor in conflicted create staging', async () => {
+    const fixture = await makeFixture();
+    const path = 'symlinked-project';
+    const intendedBytes = '# Symlinked project\n';
+    const workspaceBytes = stringify(projectWorkspaceDefaults());
+    const preparedPath = `.project-mutations/prepared-${randomUUID()}`;
+    const journal = createMutationJournal({
+      projectsDir: fixture.projectsDir,
+      operation: 'create',
+      projectId: path,
+      path,
+      originalBytes: '',
+      intendedBytes,
+      preparedPath,
+      workspaceBytes,
+    });
+    const preparedDirectory = join(fixture.projectsDir, preparedPath);
+    mkdirSync(preparedDirectory);
+    writeFileSync(join(preparedDirectory, 'context.md'), intendedBytes);
+    const outsideManifest = join(fixture.outsideDir, 'project.yaml');
+    writeFileSync(outsideManifest, workspaceBytes);
+    symlinkSync(outsideManifest, join(preparedDirectory, 'project.yaml'));
+
+    expect(readProjectRecoveryReport(fixture.projectsDir).entries).toEqual([
+      expect.objectContaining({ mutationId: journal.mutationId, state: 'conflict' }),
+    ]);
+    await expect(recoverProjectMutation(recoveryDeps(fixture), journal.mutationId)).rejects.toThrow(
+      /conflicts/,
+    );
+    expect(lstatSync(join(preparedDirectory, 'project.yaml')).isSymbolicLink()).toBe(true);
+    expect(readProjectRecoveryReport(fixture.projectsDir).entries).toHaveLength(1);
+  });
 
   it('cancels an empty create staging directory and clears its journal', async () => {
     const fixture = await makeFixture();

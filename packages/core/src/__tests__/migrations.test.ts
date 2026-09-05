@@ -121,6 +121,9 @@ describe('migrations', () => {
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='pipeline_runs'")
         .get(),
     ).toBeUndefined();
+    expect(
+      db.prepare("SELECT name FROM sqlite_master WHERE name='project_data_sources'").get(),
+    ).toBeUndefined();
 
     db.close();
   });

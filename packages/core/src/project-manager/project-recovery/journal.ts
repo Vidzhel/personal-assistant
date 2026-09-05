@@ -17,6 +17,8 @@ import {
 import { dirname, join, relative, resolve } from 'node:path';
 import { parse, stringify } from 'yaml';
 import { z } from 'zod';
+import { ProjectWorkspaceSchema } from '@raven/shared';
+import { readProjectTextFile } from '../project-file-read.ts';
 import type Database from 'better-sqlite3';
 import type { ProjectRegistry } from '../../project-registry/project-registry.ts';
 import { projectReferences } from '../project-cache.ts';
@@ -26,6 +28,7 @@ import { ProjectMutationError, withProjectMutation } from '../project-mutation.t
 const JOURNAL_DIR = '.project-mutations';
 const VERSION = 1;
 const JOURNAL_FILE_MODE = 0o600;
+const MAX_MUTATION_SOURCE_BYTES = 16_777_216;
 const JOURNAL_SUFFIX_LENGTH = '.yaml'.length;
 const PREPARED_PREFIX = `${JOURNAL_DIR}/prepared-`;
 const ARCHIVE_PREFIX = '.archive/';
@@ -44,6 +47,8 @@ const JournalSchemaBase = z.object({
   archivePath: z.string().min(1).optional(),
   archiveJson: z.string().optional(),
   archiveJsonHash: Hash.optional(),
+  workspaceBytes: z.string().optional(),
+  workspaceHash: Hash.optional(),
 });
 const JournalSchema = JournalSchemaBase.strict().superRefine((entry, context) =>
   validateJournal(entry, context),
@@ -53,6 +58,37 @@ function validateJournal(entry: z.infer<typeof JournalSchemaBase>, context: z.Re
   validateJournalHashes(entry, context);
   validateArchiveMetadata(entry, context);
   validateCreateMetadata(entry, context);
+  validateWorkspaceMetadata(entry, context);
+}
+
+function validateWorkspaceMetadata(
+  entry: z.infer<typeof JournalSchemaBase>,
+  context: z.RefinementCtx,
+): void {
+  const hasBytes = entry.workspaceBytes !== undefined;
+  const hasHash = entry.workspaceHash !== undefined;
+  if (hasBytes !== hasHash) {
+    context.addIssue({ code: 'custom', message: 'Workspace bytes and hash must be paired' });
+    return;
+  }
+  if (hasBytes && entry.operation !== 'create' && entry.operation !== 'archive') {
+    context.addIssue({
+      code: 'custom',
+      message: 'Only create and archive mutations may have workspace metadata',
+    });
+  }
+  if (entry.workspaceBytes === undefined || entry.workspaceHash === undefined) return;
+  if (sha256(entry.workspaceBytes) !== entry.workspaceHash) {
+    context.addIssue({ code: 'custom', message: 'Workspace bytes do not match workspace hash' });
+  }
+  try {
+    ProjectWorkspaceSchema.parse(parse(entry.workspaceBytes));
+  } catch (error) {
+    context.addIssue({
+      code: 'custom',
+      message: `Workspace bytes are invalid: ${error instanceof Error ? error.message : String(error)}`,
+    });
+  }
 }
 
 function validateArchiveMetadata(
@@ -244,6 +280,7 @@ export function createMutationJournal(input: {
   preparedPath?: string;
   archivePath?: string;
   archiveJson?: string;
+  workspaceBytes?: string;
 }): ProjectMutationJournal {
   const mutationId = randomUUID();
   const journal: ProjectMutationJournal = {
@@ -264,6 +301,9 @@ export function createMutationJournal(input: {
       : {}),
     ...(input.archiveJson
       ? { archiveJson: input.archiveJson, archiveJsonHash: sha256(input.archiveJson) }
+      : {}),
+    ...(input.workspaceBytes !== undefined
+      ? { workspaceBytes: input.workspaceBytes, workspaceHash: sha256(input.workspaceBytes) }
       : {}),
   };
   JournalSchema.parse(journal);
@@ -391,52 +431,126 @@ function currentHash(path: string): string | undefined {
   try {
     const stat = lstatSync(path);
     if (stat.isSymbolicLink() || !stat.isFile()) return undefined;
-    return sha256(readFileSync(path, 'utf8'));
+    const bytes = readProjectTextFile(path, MAX_MUTATION_SOURCE_BYTES);
+    return bytes === undefined ? undefined : sha256(bytes);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw error;
   }
 }
 
-function directoryState(path: string, expected: string): 'missing' | 'matching' | 'conflict' {
+function workspaceState(
+  path: string,
+  expectedHash: string | undefined,
+): 'matching' | 'missing' | 'conflict' {
+  const workspacePath = join(path, 'project.yaml');
+  const present = existsSync(workspacePath);
+  const actualHash = currentHash(workspacePath);
+  if (expectedHash === undefined) return present ? 'conflict' : 'matching';
+  if (actualHash === expectedHash) return 'matching';
+  return present ? 'conflict' : 'missing';
+}
+
+function directoryState(
+  path: string,
+  expectedContextHash: string,
+  expectedWorkspaceHash?: string,
+): 'missing' | 'matching' | 'conflict' {
   try {
     const stat = lstatSync(path);
     if (stat.isSymbolicLink() || !stat.isDirectory()) return 'conflict';
-    const entries = readdirSync(path);
-    if (entries.some((entry) => entry !== 'context.md')) return 'conflict';
-    const hash = currentHash(join(path, 'context.md'));
-    return hash === expected ? 'matching' : hash === undefined ? 'missing' : 'conflict';
+    return classifyDirectoryContents(path, expectedContextHash, expectedWorkspaceHash);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 'missing';
     throw error;
   }
 }
 
+function classifyDirectoryContents(
+  path: string,
+  expectedContextHash: string,
+  expectedWorkspaceHash?: string,
+): 'missing' | 'matching' | 'conflict' {
+  const entries = readdirSync(path);
+  const allowed =
+    expectedWorkspaceHash === undefined ? ['context.md'] : ['context.md', 'project.yaml'];
+  if (entries.some((entry) => !allowed.includes(entry))) return 'conflict';
+  const contextHash = currentHash(join(path, 'context.md'));
+  const workspaceHash =
+    expectedWorkspaceHash === undefined ? undefined : currentHash(join(path, 'project.yaml'));
+  if (entries.includes('context.md') && contextHash === undefined) return 'conflict';
+  if (
+    expectedWorkspaceHash !== undefined &&
+    entries.includes('project.yaml') &&
+    workspaceHash === undefined
+  ) {
+    return 'conflict';
+  }
+  return classifyDirectoryHashes({
+    contextHash,
+    expectedContextHash,
+    workspaceHash,
+    expectedWorkspaceHash,
+  });
+}
+
+function classifyDirectoryHashes(input: {
+  contextHash: string | undefined;
+  expectedContextHash: string;
+  workspaceHash: string | undefined;
+  expectedWorkspaceHash: string | undefined;
+}): 'missing' | 'matching' | 'conflict' {
+  if (
+    input.contextHash === input.expectedContextHash &&
+    input.workspaceHash === input.expectedWorkspaceHash
+  ) {
+    return 'matching';
+  }
+  if (
+    (input.contextHash !== undefined && input.contextHash !== input.expectedContextHash) ||
+    (input.workspaceHash !== undefined && input.workspaceHash !== input.expectedWorkspaceHash)
+  ) {
+    return 'conflict';
+  }
+  return 'missing';
+}
+
 function classifyJournal(root: string, entry: ProjectMutationJournal): ProjectRecoveryEntry {
   safeRelative(root, entry.path);
-  const source = resolve(root, entry.path);
-  if (entry.operation === 'create') {
-    const published = directoryState(source, entry.intendedHash);
-    if (published === 'missing' && entry.preparedPath) {
-      safeRelative(root, entry.preparedPath);
-      const prepared = directoryState(resolve(root, entry.preparedPath), entry.intendedHash);
-      if (prepared === 'conflict')
-        return recoveryEntry(entry, 'conflict', 'create staging conflicts');
-    }
-    if (published === 'missing') return recoveryEntry(entry, 'preparing', 'create not published');
-    return recoveryEntry(entry, published === 'matching' ? 'published' : published, 'create state');
-  }
-  if (entry.operation === 'update') {
-    const hash = currentHash(contextPath(root, entry.path));
-    const state =
-      hash === entry.intendedHash
-        ? 'published'
-        : hash === entry.originalHash
-          ? 'preparing'
-          : 'conflict';
-    return recoveryEntry(entry, state, 'update state');
-  }
+  if (entry.operation === 'create') return classifyCreate(root, entry);
+  if (entry.operation === 'update') return classifyUpdate(root, entry);
   return classifyArchive(root, entry);
+}
+
+function classifyCreate(root: string, entry: ProjectMutationJournal): ProjectRecoveryEntry {
+  const source = resolve(root, entry.path);
+  const published = directoryState(source, entry.intendedHash, entry.workspaceHash);
+  if (published === 'missing' && existsSync(source)) {
+    return recoveryEntry(entry, 'conflict', 'published create files are incomplete');
+  }
+  if (published === 'missing' && entry.preparedPath) {
+    safeRelative(root, entry.preparedPath);
+    const prepared = directoryState(
+      resolve(root, entry.preparedPath),
+      entry.intendedHash,
+      entry.workspaceHash,
+    );
+    if (prepared === 'conflict')
+      return recoveryEntry(entry, 'conflict', 'create staging conflicts');
+  }
+  if (published === 'missing') return recoveryEntry(entry, 'preparing', 'create not published');
+  return recoveryEntry(entry, published === 'matching' ? 'published' : published, 'create state');
+}
+
+function classifyUpdate(root: string, entry: ProjectMutationJournal): ProjectRecoveryEntry {
+  const hash = currentHash(contextPath(root, entry.path));
+  const state =
+    hash === entry.intendedHash
+      ? 'published'
+      : hash === entry.originalHash
+        ? 'preparing'
+        : 'conflict';
+  return recoveryEntry(entry, state, 'update state');
 }
 
 function classifyArchive(root: string, entry: ProjectMutationJournal): ProjectRecoveryEntry {
@@ -444,14 +558,25 @@ function classifyArchive(root: string, entry: ProjectMutationJournal): ProjectRe
     return recoveryEntry(entry, 'invalid', 'archive journal metadata is incomplete');
   }
   const sourceHash = currentHash(contextPath(root, entry.path));
+  const source = resolve(root, entry.path);
   safeRelative(root, entry.archivePath);
   const archiveDir = resolve(root, entry.archivePath);
   const archiveContext = currentHash(join(archiveDir, 'context.md'));
   const archiveJson = currentHash(join(archiveDir, 'archive.json'));
+  const sourceWorkspace = workspaceState(source, entry.workspaceHash);
+  if (sourceHash === entry.originalHash && sourceWorkspace !== 'matching') {
+    return recoveryEntry(entry, 'conflict', 'source workspace does not match journal');
+  }
   if (sourceHash === entry.originalHash && !existsSync(archiveDir)) {
     return recoveryEntry(entry, 'preparing', 'archive has not moved');
   }
-  const archiveState = archiveContentsState(archiveDir, archiveJson, entry.archiveJsonHash);
+  const archiveWorkspace = currentHash(join(archiveDir, 'project.yaml'));
+  const archiveState = archiveContentsState(archiveDir, {
+    archiveJsonHash: archiveJson,
+    expectedArchiveJsonHash: entry.archiveJsonHash,
+    workspaceHash: archiveWorkspace,
+    expectedWorkspaceHash: entry.workspaceHash,
+  });
   if (
     sourceHash === undefined &&
     archiveContext === entry.originalHash &&
@@ -464,18 +589,45 @@ function classifyArchive(root: string, entry: ProjectMutationJournal): ProjectRe
 
 function archiveContentsState(
   path: string,
-  archiveJsonHash: string | undefined,
-  expectedHash: string | undefined,
+  input: {
+    archiveJsonHash: string | undefined;
+    expectedArchiveJsonHash: string | undefined;
+    workspaceHash: string | undefined;
+    expectedWorkspaceHash: string | undefined;
+  },
 ): 'matching' | 'missing' | 'conflict' {
   try {
-    const entries = readdirSync(path);
-    if (entries.some((entry) => !['context.md', 'archive.json'].includes(entry))) return 'conflict';
-    if (!entries.includes('context.md')) return 'conflict';
-    if (!entries.includes('archive.json')) return 'missing';
-    return archiveJsonHash === expectedHash ? 'matching' : 'conflict';
+    return classifyArchiveContents(readdirSync(path), input);
   } catch {
     return 'conflict';
   }
+}
+
+function classifyArchiveContents(
+  entries: string[],
+  input: {
+    archiveJsonHash: string | undefined;
+    expectedArchiveJsonHash: string | undefined;
+    workspaceHash: string | undefined;
+    expectedWorkspaceHash: string | undefined;
+  },
+): 'matching' | 'missing' | 'conflict' {
+  const allowed =
+    input.expectedWorkspaceHash === undefined
+      ? ['context.md', 'archive.json']
+      : ['context.md', 'archive.json', 'project.yaml'];
+  if (entries.some((entry) => !allowed.includes(entry))) return 'conflict';
+  if (!entries.includes('context.md')) return 'conflict';
+  if (input.expectedWorkspaceHash === undefined && input.workspaceHash !== undefined)
+    return 'conflict';
+  if (
+    input.expectedWorkspaceHash !== undefined &&
+    input.workspaceHash !== input.expectedWorkspaceHash
+  ) {
+    return 'conflict';
+  }
+  if (!entries.includes('archive.json')) return 'missing';
+  return input.archiveJsonHash === input.expectedArchiveJsonHash ? 'matching' : 'conflict';
 }
 
 function recoveryEntry(
@@ -568,10 +720,10 @@ async function loadAfterRecovery(deps: RecoveryDeps): Promise<void> {
 async function cancelCreate(root: string, entry: ProjectMutationJournal): Promise<void> {
   if (!entry.preparedPath) return;
   const path = resolve(root, safeRelative(root, entry.preparedPath));
-  const state = directoryState(path, entry.intendedHash);
+  const state = directoryState(path, entry.intendedHash, entry.workspaceHash);
   if (state === 'missing') {
     if (existsSync(path)) {
-      rmdirSync(path);
+      removeKnownCreateFiles(path, entry.workspaceHash !== undefined);
       flushDirectory(dirname(path));
     }
     return;
@@ -579,13 +731,20 @@ async function cancelCreate(root: string, entry: ProjectMutationJournal): Promis
   if (state === 'conflict') {
     throw new ProjectMutationError(`Create staging changed during recovery`);
   }
-  if (directoryState(path, entry.intendedHash) !== 'matching') {
+  if (directoryState(path, entry.intendedHash, entry.workspaceHash) !== 'matching') {
     throw new ProjectMutationError(`Create staging changed during recovery`);
   }
-  unlinkSync(join(path, 'context.md'));
-  rmdirSync(path);
+  removeKnownCreateFiles(path, entry.workspaceHash !== undefined);
   flushDirectory(dirname(path));
   if (existsSync(path)) throw new ProjectMutationError(`Create staging could not be removed`);
+}
+
+function removeKnownCreateFiles(path: string, hasWorkspace: boolean): void {
+  const contextPath = join(path, 'context.md');
+  if (existsSync(contextPath)) unlinkSync(contextPath);
+  const workspacePath = join(path, 'project.yaml');
+  if (hasWorkspace && existsSync(workspacePath)) unlinkSync(workspacePath);
+  rmdirSync(path);
 }
 
 async function recoverCreate(
@@ -633,21 +792,42 @@ function assertArchiveSnapshot(entry: ProjectMutationJournal, archiveDir: string
   }
   const snapshotPath = join(archiveDir, 'archive.json');
   if (currentHash(snapshotPath) === undefined) {
-    if (archiveContentsState(archiveDir, undefined, entry.archiveJsonHash) !== 'missing') {
+    const state = archiveContentsState(archiveDir, {
+      archiveJsonHash: undefined,
+      expectedArchiveJsonHash: entry.archiveJsonHash,
+      workspaceHash:
+        entry.workspaceHash === undefined
+          ? undefined
+          : currentHash(join(archiveDir, 'project.yaml')),
+      expectedWorkspaceHash: entry.workspaceHash,
+    });
+    if (state !== 'missing') {
       throw new ProjectMutationError(`Archived project snapshot path is unsafe`);
     }
     atomicWriteSync(snapshotPath, entry.archiveJson);
   }
+  assertArchiveJsonSnapshot(entry, snapshotPath);
+  assertArchiveWorkspaceSnapshot(entry, archiveDir);
+  assertArchiveIdentity(entry.archiveJson, entry.projectId, entry.path);
+}
+
+function assertArchiveJsonSnapshot(entry: ProjectMutationJournal, snapshotPath: string): void {
   if (currentHash(snapshotPath) !== entry.archiveJsonHash) {
     throw new ProjectMutationError(`Archived project snapshot is missing or changed`);
   }
   if (readFileSync(snapshotPath, 'utf8') !== entry.archiveJson) {
     throw new ProjectMutationError(`Archived project snapshot bytes changed`);
   }
-  const snapshot = JSON.parse(entry.archiveJson) as { id?: string; fsPath?: string };
-  if (snapshot.id !== entry.projectId || snapshot.fsPath !== entry.path) {
-    throw new ProjectMutationError(`Archived project snapshot identity conflicts`);
+}
+
+function assertArchiveWorkspaceSnapshot(entry: ProjectMutationJournal, archiveDir: string): void {
+  if (entry.workspaceBytes === undefined || entry.workspaceHash === undefined) return;
+  const workspacePath = join(archiveDir, 'project.yaml');
+  if (currentHash(workspacePath) !== entry.workspaceHash) {
+    throw new ProjectMutationError(`Archived project workspace manifest is missing or changed`);
   }
+  if (readProjectTextFile(workspacePath, MAX_MUTATION_SOURCE_BYTES) !== entry.workspaceBytes)
+    throw new ProjectMutationError(`Archived project workspace manifest is missing or changed`);
 }
 
 async function recoverArchive(

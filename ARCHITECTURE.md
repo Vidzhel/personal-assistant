@@ -16,11 +16,12 @@ The [active continuation queue](_bmad-output/implementation-artifacts/file-first
 tracks delivery and verification; the
 [deferred ledger](_bmad-output/implementation-artifacts/deferred-work.md) gives
 remaining limitations and their resolution plans. The
-[project workspace proposal](docs/superpowers/specs/2026-09-05-project-workspaces-design.md)
-precedes the owner's accepted flexible-layout and direct-repository requirements.
-W1 is authorized after F9; external repository attachments, project-owned memory
-and graph replacement are not implemented yet. Keep the runtime small by extending existing
-paths; remove a predecessor in the same change that replaces it.
+[W1 specification](_bmad-output/implementation-artifacts/tech-spec-w1-project-workspaces.md)
+implements the owner's flexible-layout and direct-repository requirements after
+completed F1–F9. Workspace configuration is now file-owned; direct execution,
+project memory and artifact viewing continue in the ordered W1 checkpoints.
+Keep the runtime small by extending existing paths; remove a predecessor in the
+same change that replaces it.
 
 ## System Diagram
 
@@ -351,10 +352,15 @@ and duplicate identities make affected subtrees unavailable while valid siblings
 continue. Root scan failure prevents cache synchronization; an absent root with
 known project paths is not silently recreated at startup.
 
-Data-source rows hold labeled URIs. Their ownership-checked CRUD is available even
-when graph knowledge is disabled, but a row does not attach a repository, grant
-filesystem access or index its files. Graph views are currently global, and chat
-still selects the global default agent rather than a project-local default.
+`project.yaml` owns workspace execution settings and labeled data sources;
+`context.md` keeps project identity and human context. Existing source projects
+without a manifest use defaults. New project staging and recovery include both
+anchors. Workspace CRUD uses the current registry identity and atomic YAML writes;
+the previous SQL source table is removed. Folder inputs store canonical server
+paths with optional links to repository instructions/indexes. HTTP configuration
+is available without Neo4j, but direct SDK execution and artifact access are still
+being wired in W1. Graph views currently remain global and chat still uses the
+global default agent; subsequent W1 checkpoints address these boundaries.
 
 Agent memory lives in `projects/agents/<name>/memory/`; interactive retrospectives
 write candidate files with provenance, and consolidation applies validated note
@@ -384,7 +390,8 @@ record precedes graph deletion, prevents reindex resurrection and supports an
 explicit retry of that delete. Source changes or duplicate files require review.
 There is no atomic transaction across Markdown and Neo4j or automatic restoration
 of deleted relationships. The owner waived legacy migration/restoration because
-Raven has not been used. Graph replacement remains part of the workspace design.
+Raven has not been used. W1 retains these working graph relationships; repository attachments do not require
+a graph replacement.
 
 Manual merges and consolidation use the same queued, file-owned operation. A
 merge creates a new Markdown identity, preserves external typed links and their

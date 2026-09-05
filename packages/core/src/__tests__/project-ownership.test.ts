@@ -2,7 +2,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
 import websocket from '@fastify/websocket';
 import type { WebSocket, RawData } from 'ws';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { loadConfig } from '../config.ts';
 import { join } from 'node:path';
@@ -12,7 +12,11 @@ import { EventBus } from '../event-bus/event-bus.ts';
 import { SessionManager } from '../session-manager/session-manager.ts';
 import { createMessageStore, type MessageStore } from '../session-manager/message-store.ts';
 import { createReference, getAllReferences } from '../session-manager/session-references.ts';
-import { createDataSource, getDataSource } from '../project-manager/project-data-sources.ts';
+import { ProjectRegistry } from '../project-registry/project-registry.ts';
+import {
+  createProjectWorkspaceStore,
+  type ProjectWorkspaceStore,
+} from '../project-manager/project-workspace.ts';
 import { registerProjectKnowledgeRoutes } from '../api/routes/project-knowledge.ts';
 import { registerChatRoute } from '../api/routes/chat.ts';
 import { registerSessionRoutes } from '../api/routes/sessions.ts';
@@ -31,10 +35,30 @@ describe('Project ownership across APIs and chat dispatch', () => {
   let requests: AgentTaskRequestEvent[];
   let rejections: UserChatRejectedEvent[];
   let sockets: WebSocket[];
+  let workspaceStore: ProjectWorkspaceStore;
 
   beforeEach(async () => {
     loadConfig();
     dir = mkdtempSync(join(tmpdir(), 'raven-project-ownership-'));
+    const projectsDir = join(dir, 'projects');
+    mkdirSync(projectsDir, { recursive: true });
+    writeFileSync(join(projectsDir, 'context.md'), '# Global\n');
+    for (const id of ['project-a', 'project-b', 'project-c']) {
+      const projectDir = join(projectsDir, id);
+      mkdirSync(projectDir, { recursive: true });
+      writeFileSync(join(projectDir, 'context.md'), `# ${id}\n`);
+      writeFileSync(
+        join(projectDir, 'project.yaml'),
+        'version: 1\nexecution:\n  mode: default\nsources: []\n',
+      );
+    }
+    const projectRegistry = new ProjectRegistry();
+    await projectRegistry.load(projectsDir);
+    workspaceStore = createProjectWorkspaceStore({
+      projectsDir,
+      projectRegistry,
+      projectRoot: dir,
+    });
     initDatabase(join(dir, 'test.db'));
     for (const id of ['project-a', 'project-b', 'project-c']) {
       getDb()
@@ -72,7 +96,7 @@ describe('Project ownership across APIs and chat dispatch', () => {
     app = Fastify();
     await app.register(websocket);
     const deps = { eventBus, sessionManager: sessions, messageStore: messages };
-    registerProjectKnowledgeRoutes(app, {});
+    registerProjectKnowledgeRoutes(app, { workspaceStore, projectRegistry, projectsDir });
     registerChatRoute(app, deps);
     registerSessionRoutes(app, deps as ApiDeps);
     registerWebSocketHandler(app, deps);
@@ -106,8 +130,8 @@ describe('Project ownership across APIs and chat dispatch', () => {
     });
   }
 
-  function makeSource() {
-    return createDataSource('project-a', {
+  async function makeSource() {
+    return workspaceStore.createDataSource('project-a', {
       label: 'Notes',
       uri: join(dir, 'notes.md'),
       sourceType: 'file',
@@ -117,7 +141,7 @@ describe('Project ownership across APIs and chat dispatch', () => {
   it.each(['PUT', 'DELETE'] as const)(
     '%s cannot mutate a source through another project',
     async (method) => {
-      const source = makeSource();
+      const source = await makeSource();
       const res = await app.inject({
         method,
         url: `/api/projects/project-b/data-sources/${source.id}`,
@@ -125,14 +149,14 @@ describe('Project ownership across APIs and chat dispatch', () => {
       });
       expect(res.statusCode).toBe(404);
       expect(res.json()).toEqual({ error: 'Data source not found' });
-      expect(getDataSource(source.id)).toEqual(source);
+      expect(workspaceStore.getDataSource('project-a', source.id)).toEqual(source);
     },
   );
 
   it.each(['GET', 'POST', 'PUT', 'DELETE'] as const)(
     '%s sources rejects a missing parent',
     async (method) => {
-      const source = makeSource();
+      const source = await makeSource();
       const suffix = method === 'PUT' || method === 'DELETE' ? `/${source.id}` : '';
       const res = await app.inject({
         method,
@@ -143,10 +167,10 @@ describe('Project ownership across APIs and chat dispatch', () => {
       });
       expect(res.statusCode).toBe(404);
       expect(res.json()).toEqual({ error: 'Project not found' });
-      expect(getDataSource(source.id)).toEqual(source);
-      expect(getDb().prepare('SELECT COUNT(*) AS count FROM project_data_sources').get()).toEqual({
-        count: 1,
-      });
+      expect(workspaceStore.getDataSource('project-a', source.id)).toEqual(source);
+      expect(readFileSync(join(dir, 'projects', 'project-a', 'project.yaml'), 'utf8')).toContain(
+        source.id,
+      );
     },
   );
 
@@ -196,7 +220,7 @@ describe('Project ownership across APIs and chat dispatch', () => {
     });
     expect(deleted.statusCode).toBe(204);
     expect(deleted.body).toBe('');
-    expect(getDataSource(source.id)).toBeUndefined();
+    expect(workspaceStore.getDataSource('project-a', source.id)).toBeUndefined();
   });
 
   it.each(['foreign', 'missing', 'unknown-parent'] as const)(

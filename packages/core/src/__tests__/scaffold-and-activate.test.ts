@@ -153,8 +153,9 @@ describe('scaffoldAndActivate', () => {
       expect(result.live).toBe(true);
       expect(existsSync(result.path)).toBe(true);
       expect(deps.projectRegistry.getProject('demo')).toBeDefined();
+      expect(existsSync(join(projectsDir, 'demo', 'project.yaml'))).toBe(true);
       expect(gitAutoCommitMock).toHaveBeenCalledWith(
-        [result.path],
+        [result.path, join(projectsDir, 'demo', 'project.yaml')],
         expect.stringContaining('demo'),
       );
     });

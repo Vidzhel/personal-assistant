@@ -226,18 +226,6 @@ CREATE TABLE session_references (
 CREATE INDEX idx_session_references_source ON session_references(source_session_id);
 CREATE INDEX idx_session_references_target ON session_references(target_session_id);
 
-CREATE TABLE project_data_sources (
-  id TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL REFERENCES projects(id),
-  uri TEXT NOT NULL,
-  label TEXT NOT NULL,
-  description TEXT,
-  source_type TEXT NOT NULL CHECK(source_type IN ('gdrive', 'file', 'url', 'other')),
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-CREATE INDEX idx_project_data_sources_project ON project_data_sources(project_id);
-
 CREATE TABLE knowledge_rejections (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL,

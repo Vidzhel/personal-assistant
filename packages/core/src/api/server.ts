@@ -1,3 +1,4 @@
+import type { ProjectWorkspaceStore } from '../project-manager/project-workspace.ts';
 import Fastify from 'fastify';
 import type { DefinitionDiagnostic } from '../diagnostics/definition-diagnostics.ts';
 import type { ReloadRegistriesResult } from '../scaffolding/scaffold-and-activate.ts';
@@ -104,6 +105,7 @@ export interface ApiDeps {
   memoryStore?: MemoryStore;
   sessionRetrospective?: SessionRetrospective;
   dataDir?: string;
+  workspaceStore?: ProjectWorkspaceStore;
   projectRegistry?: ProjectRegistry;
   getProjectRecoveryDiagnostics?: () => readonly DefinitionDiagnostic[];
   reloadRegistries?: () => Promise<ReloadRegistriesResult>;
@@ -237,6 +239,7 @@ export async function createApiServer(
 
   // Project knowledge (data sources + knowledge links)
   registerProjectKnowledgeRoutes(app, {
+    workspaceStore: deps.workspaceStore,
     neo4j: deps.neo4jClient,
     projectsDir: deps.projectsDir,
     knowledgeStore: deps.knowledgeStore,

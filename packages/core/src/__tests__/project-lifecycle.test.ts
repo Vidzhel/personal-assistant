@@ -395,7 +395,10 @@ describe('managed project lifecycle failures and legacy data', () => {
         );
       else
         expect(deps.projectRegistry.getProject('example')?.metadata?.displayName).toBe('Example');
-      expect(readdirSync(join(deps.projectsDir, 'example'))).toEqual(['context.md']);
+      expect(readdirSync(join(deps.projectsDir, 'example'))).toEqual([
+        'context.md',
+        'project.yaml',
+      ]);
       const pending = readProjectRecoveryReport(deps.projectsDir).entries;
       expect(pending).toEqual([
         expect.objectContaining({

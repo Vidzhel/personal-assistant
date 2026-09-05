@@ -632,7 +632,8 @@ export interface ProjectDataSource {
   uri: string;
   label: string;
   description?: string;
-  sourceType: 'gdrive' | 'file' | 'url' | 'other';
+  sourceType: 'gdrive' | 'file' | 'url' | 'other' | 'folder';
+  contextFiles?: string[];
   createdAt: string;
   updatedAt: string;
 }

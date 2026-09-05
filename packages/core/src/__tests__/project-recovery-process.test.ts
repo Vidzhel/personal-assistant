@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { fork, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
@@ -16,6 +24,7 @@ import { syncProjectCache } from '../project-manager/project-sync.ts';
 import { saveProjectRow } from '../project-manager/project-cache.ts';
 import {
   readProjectRecoveryReport,
+  readProjectMutationRecordsSync,
   recoverProjectMutation,
 } from '../project-manager/project-recovery/journal.ts';
 import { readProjectDefinition } from '../project-registry/project-definition.ts';
@@ -285,6 +294,12 @@ describe('project mutation recovery across process interruption', () => {
       phase: 'create:staged',
       projectId: 'create-staged-id',
     });
+    const stagedJournal = readProjectMutationRecordsSync(fixture.projectsDir)[0];
+    if (!stagedJournal?.preparedPath || stagedJournal.workspaceBytes === undefined)
+      throw new Error('staged create journal did not retain workspace bytes');
+    expect(
+      readFileSync(join(fixture.projectsDir, stagedJournal.preparedPath, 'project.yaml'), 'utf8'),
+    ).toBe(stagedJournal.workspaceBytes);
     await recoverAndSync(fixture);
     expect(existsSync(join(fixture.projectsDir, 'interrupted-create'))).toBe(false);
     expect(readProjectRecoveryReport(fixture.projectsDir).entries).toEqual([]);
@@ -299,6 +314,7 @@ describe('project mutation recovery across process interruption', () => {
     expect(
       readFileSync(join(fixture.projectsDir, 'interrupted-create', 'context.md'), 'utf8'),
     ).toContain('create-published-id');
+    expect(existsSync(join(fixture.projectsDir, 'interrupted-create', 'project.yaml'))).toBe(true);
     expect(readProjectRecoveryReport(fixture.projectsDir).entries).toEqual([]);
   });
 
@@ -315,6 +331,68 @@ describe('project mutation recovery across process interruption', () => {
     expect(existsSync(join(fixture.projectsDir, archivePath, 'context.md'))).toBe(true);
     expect(existsSync(join(fixture.projectsDir, archivePath, 'archive.json'))).toBe(true);
     expect(readProjectRecoveryReport(fixture.projectsDir).entries).toEqual([]);
+  });
+
+  it.each(['changed', 'missing'])(
+    'retains an archive when its workspace manifest is %s after the move',
+    async (change) => {
+      await killAtCheckpoint({ fixture, operation: 'archive', phase: 'archive:after-rename' });
+      const report = readProjectRecoveryReport(fixture.projectsDir);
+      const archivePath = report.entries[0]?.archivePath;
+      if (!archivePath) throw new Error('archive recovery record has no archive path');
+      const manifestPath = join(fixture.projectsDir, archivePath, 'project.yaml');
+      const changedManifest = `${readFileSync(manifestPath, 'utf8')}# owner edit\n`;
+      if (change === 'changed') writeFileSync(manifestPath, changedManifest);
+      else unlinkSync(manifestPath);
+
+      const db = initDatabase(fixture.dbPath);
+      const projectRegistry = new ProjectRegistry();
+      await projectRegistry.load(fixture.projectsDir);
+      const changed = readProjectRecoveryReport(fixture.projectsDir);
+      expect(changed.entries[0]?.state).toBe('conflict');
+      await expect(
+        recoverProjectMutation(
+          { projectsDir: fixture.projectsDir, projectRegistry, db },
+          changed.entries[0]?.mutationId ?? '',
+        ),
+      ).rejects.toThrow('conflicts');
+      closeDatabase();
+
+      expect(existsSync(fixture.projectPath)).toBe(false);
+      if (change === 'changed') expect(readFileSync(manifestPath, 'utf8')).toBe(changedManifest);
+      else expect(existsSync(manifestPath)).toBe(false);
+      expect(readProjectRecoveryReport(fixture.projectsDir).entries).toHaveLength(1);
+    },
+  );
+
+  it('retains unknown staged files instead of deleting a conflicted create', async () => {
+    await killAtCheckpoint({
+      fixture,
+      operation: 'create',
+      phase: 'create:staged',
+      projectId: 'create-extra-file-id',
+    });
+    const journal = readProjectMutationRecordsSync(fixture.projectsDir)[0];
+    if (!journal?.preparedPath) throw new Error('create journal has no staging path');
+    const prepared = join(fixture.projectsDir, journal.preparedPath);
+    const extraPath = join(prepared, 'owner-notes.txt');
+    writeFileSync(extraPath, 'keep this file\n');
+
+    const db = initDatabase(fixture.dbPath);
+    const projectRegistry = new ProjectRegistry();
+    await projectRegistry.load(fixture.projectsDir);
+    const report = readProjectRecoveryReport(fixture.projectsDir);
+    expect(report.entries[0]?.state).toBe('conflict');
+    await expect(
+      recoverProjectMutation(
+        { projectsDir: fixture.projectsDir, projectRegistry, db },
+        journal.mutationId,
+      ),
+    ).rejects.toThrow('conflicts');
+    closeDatabase();
+
+    expect(readFileSync(extraPath, 'utf8')).toBe('keep this file\n');
+    expect(readProjectRecoveryReport(fixture.projectsDir).entries).toHaveLength(1);
   });
 
   it('completes archive cleanup when killed after archive snapshot publication', async () => {

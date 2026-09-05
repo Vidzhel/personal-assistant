@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { ProjectMetadataSchema, type ProjectMetadata } from '@raven/shared';
+import { stringify } from 'yaml';
+import {
+  ProjectMetadataSchema,
+  projectWorkspaceDefaults,
+  type ProjectMetadata,
+} from '@raven/shared';
 import type { ProjectRegistry } from '../project-registry/project-registry.ts';
 import type { ScaffoldProjectInput } from '../scaffolding/scaffolding-api.ts';
 import {
@@ -82,7 +87,8 @@ async function createDefinitionMutation(input: {
     throw new ProjectMutationError(`Project path ${projectInput.path} already exists`);
   const body = `# ${metadata.displayName}\n\n${projectInput.description ?? ''}\n`;
   const intended = writeProjectDefinition(body, metadata);
-  await publishCreatedDefinition({ deps, projectInput, metadata, intended, path });
+  const workspaceBytes = stringify(projectWorkspaceDefaults());
+  await publishCreatedDefinition({ deps, projectInput, metadata, intended, workspaceBytes, path });
   return projectInput.path;
 }
 
@@ -109,9 +115,10 @@ async function publishCreatedDefinition(input: {
   projectInput: ScaffoldProjectInput;
   metadata: ProjectMetadata;
   intended: string;
+  workspaceBytes: string;
   path: string;
 }): Promise<void> {
-  const { deps, projectInput, metadata, intended, path } = input;
+  const { deps, projectInput, metadata, intended, workspaceBytes, path } = input;
   const preparedRelative = `.project-mutations/prepared-${randomUUID()}`;
   const preparedPath = join(deps.projectsDir, preparedRelative);
   const journal = createMutationJournal({
@@ -122,11 +129,14 @@ async function publishCreatedDefinition(input: {
     originalBytes: '',
     intendedBytes: intended,
     preparedPath: preparedRelative,
+    workspaceBytes,
   });
   await deps.checkpoint?.('create:journal');
   await mkdir(preparedPath);
   await writeFile(join(preparedPath, 'context.md'), intended, { flag: 'wx' });
+  await writeFile(join(preparedPath, 'project.yaml'), workspaceBytes, { flag: 'wx' });
   flushProjectMutationPath(join(preparedPath, 'context.md'));
+  flushProjectMutationPath(join(preparedPath, 'project.yaml'));
   flushProjectMutationPath(preparedPath);
   await deps.checkpoint?.('create:staged');
   await renamePreparedProject(preparedPath, path);

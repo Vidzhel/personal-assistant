@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { parse } from 'yaml';
 import {
   gitAutoCommit,
   META_PROJECT_ID,
+  ProjectWorkspaceSchema,
   type Project,
   type ProjectCreateInput,
   type ProjectUpdateInput,
@@ -31,6 +33,7 @@ import {
   readManagedContext,
   replaceContextChecked,
 } from './project-files.ts';
+import { readProjectTextFile } from './project-file-read.ts';
 import { withProjectMutation, ProjectMutationError } from './project-mutation.ts';
 import { kebabCase } from './project-sync.ts';
 import {
@@ -38,6 +41,8 @@ import {
   flushProjectMutationPath,
   removeProjectMutationJournal,
 } from './project-recovery/journal.ts';
+
+const MAX_WORKSPACE_BYTES = 1_048_576;
 
 export interface ProjectLifecycleDeps {
   db: Database.Database;
@@ -102,7 +107,10 @@ export async function createManagedProject(
       throw error;
     }
     await gitAutoCommit(
-      [join(deps.projectsDir, fsPath, 'context.md')],
+      [
+        join(deps.projectsDir, fsPath, 'context.md'),
+        join(deps.projectsDir, fsPath, 'project.yaml'),
+      ],
       `feat(project): create ${fsPath}`,
     );
     return parseProjectRow(getProjectRow(deps.db, project.id));
@@ -177,15 +185,42 @@ function assertUnreferenced(deps: ProjectLifecycleDeps, project: Project): void 
     throw new ProjectMutationError(`Project is referenced by ${references.join(', ')}`);
 }
 
+async function readWorkspaceBytes(
+  deps: ProjectLifecycleDeps,
+  projectPath: string,
+): Promise<string | undefined> {
+  const directory = await managedPath(deps.projectsDir, projectPath);
+  const manifestPath = join(directory, 'project.yaml');
+  const bytes = readProjectTextFile(manifestPath, MAX_WORKSPACE_BYTES);
+  if (bytes === undefined) return undefined;
+  try {
+    ProjectWorkspaceSchema.parse(parse(bytes));
+  } catch (error) {
+    throw new ProjectMutationError(`Invalid project workspace manifest: ${String(error)}`);
+  }
+  return bytes;
+}
+
 async function assertEmpty(
   deps: ProjectLifecycleDeps,
   project: Project & { fsPath: string },
+  workspaceBytes?: string,
 ): Promise<boolean> {
   assertUnreferenced(deps, project);
   const path = await managedPath(deps.projectsDir, project.fsPath);
   await managedPath(deps.projectsDir, `${project.fsPath}/context.md`);
-  if ((await readdir(path)).some((entry) => entry !== 'context.md')) {
+  const entries = await readdir(path);
+  if (entries.some((entry) => !['context.md', 'project.yaml'].includes(entry))) {
     throw new ProjectMutationError('Project contains children, local definitions, or other files');
+  }
+  const currentWorkspaceBytes = await readWorkspaceBytes(deps, project.fsPath);
+  if (currentWorkspaceBytes !== workspaceBytes) {
+    throw new ProjectMutationError('Project workspace changed before archive');
+  }
+  if (workspaceBytes !== undefined) {
+    const workspace = ProjectWorkspaceSchema.parse(parse(workspaceBytes));
+    if (workspace.sources.length > 0)
+      throw new ProjectMutationError('Project has attached workspace sources');
   }
   if (!deps.neo4jClient) return false;
   const links = await deps.neo4jClient.query<{ id: string }>(
@@ -218,8 +253,9 @@ async function deleteProjectMutation(input: {
     ...projectFromNode({ ...node, metadata: definition.metadata }, linked),
     fsPath: linked.fsPath,
   };
-  const knowledgeReferencesChecked = await assertEmpty(deps, project);
-  await archiveProjectMutation({ deps, id, project, original });
+  const workspaceBytes = await readWorkspaceBytes(deps, project.fsPath);
+  const knowledgeReferencesChecked = await assertEmpty(deps, project, workspaceBytes);
+  await archiveProjectMutation({ deps, id, project, original, workspaceBytes });
   return { knowledgeReferencesChecked };
 }
 
@@ -228,8 +264,9 @@ async function archiveProjectMutation(input: {
   id: string;
   project: Project & { fsPath: string };
   original: string;
+  workspaceBytes?: string;
 }): Promise<void> {
-  const { deps, id, project, original } = input;
+  const { deps, id, project, original, workspaceBytes } = input;
   const archiveRoot = await managedPath(deps.projectsDir, '.archive');
   const source = await managedPath(deps.projectsDir, project.fsPath);
   const archive = await managedPath(deps.projectsDir, `.archive/${randomUUID()}`);
@@ -244,19 +281,17 @@ async function archiveProjectMutation(input: {
     intendedBytes: original,
     archivePath: `.archive/${archiveName}`,
     archiveJson,
+    workspaceBytes,
   });
   await deps.checkpoint?.('archive:journal');
-  await mkdir(archiveRoot, { recursive: true });
-  await assertArchiveSource({
+  await moveProjectToArchive({
     deps,
     project,
-    expectedHash: journal.originalHash,
+    source,
+    archive,
+    archiveRoot,
+    journal,
   });
-  flushProjectMutationPath(dirname(source));
-  await rename(source, archive);
-  flushProjectMutationPath(dirname(source));
-  flushProjectMutationPath(archiveRoot);
-  await deps.checkpoint?.('archive:after-rename');
   const snapshot = await writeArchiveSnapshot(archive, archiveJson);
   await deps.checkpoint?.('archive:after-json');
   await deps.projectRegistry.load(deps.projectsDir);
@@ -266,10 +301,51 @@ async function archiveProjectMutation(input: {
   })();
   await deps.checkpoint?.('archive:cache');
   removeProjectMutationJournal(deps.projectsDir, journal.mutationId);
+  await commitArchive({ source, archive, snapshot, project, workspaceBytes });
+}
+
+async function commitArchive(input: {
+  source: string;
+  archive: string;
+  snapshot: string;
+  project: Project & { fsPath: string };
+  workspaceBytes?: string;
+}): Promise<void> {
+  const { source, archive, snapshot, project, workspaceBytes } = input;
   await gitAutoCommit(
-    [join(source, 'context.md'), join(archive, 'context.md'), snapshot],
+    [
+      join(source, 'context.md'),
+      ...(workspaceBytes !== undefined ? [join(source, 'project.yaml')] : []),
+      join(archive, 'context.md'),
+      ...(workspaceBytes !== undefined ? [join(archive, 'project.yaml')] : []),
+      snapshot,
+    ],
     `chore(project): archive ${project.fsPath}`,
   );
+}
+
+async function moveProjectToArchive(input: {
+  deps: ProjectLifecycleDeps;
+  project: Project & { fsPath: string };
+  source: string;
+  archive: string;
+  archiveRoot: string;
+  journal: ReturnType<typeof createMutationJournal>;
+}): Promise<void> {
+  const { deps, project, source, archive, archiveRoot, journal } = input;
+  await mkdir(archiveRoot, { recursive: true });
+  await assertArchiveSource({
+    deps,
+    project,
+    expectedHash: journal.originalHash,
+    expectedWorkspaceHash: journal.workspaceHash,
+    expectedWorkspaceBytes: journal.workspaceBytes,
+  });
+  flushProjectMutationPath(dirname(source));
+  await rename(source, archive);
+  flushProjectMutationPath(dirname(source));
+  flushProjectMutationPath(archiveRoot);
+  await deps.checkpoint?.('archive:after-rename');
 }
 
 async function writeArchiveSnapshot(archive: string, bytes: string): Promise<string> {
@@ -284,20 +360,51 @@ async function assertArchiveSource(input: {
   deps: ProjectLifecycleDeps;
   project: Project & { fsPath: string };
   expectedHash: string;
+  expectedWorkspaceHash?: string;
+  expectedWorkspaceBytes?: string;
 }): Promise<void> {
   const raw = await readManagedContext(input.deps.projectsDir, input.project.fsPath);
   const hash = createHash('sha256').update(raw).digest('hex');
   if (hash !== input.expectedHash)
     throw new ProjectMutationError('Project context changed before archive');
-  const definition = readProjectDefinition(raw);
-  if (definition.metadata?.id && definition.metadata.id !== input.project.id) {
-    throw new ProjectMutationError('Project identity changed before archive');
-  }
-  if (!definition.metadata?.id && input.project.id !== input.project.fsPath) {
-    throw new ProjectMutationError('Plain project identity changed before archive');
-  }
+  assertArchiveProjectIdentity(raw, input.project);
+  await assertArchiveWorkspace(input);
   const path = await managedPath(input.deps.projectsDir, input.project.fsPath);
-  if ((await readdir(path)).some((entry) => entry !== 'context.md')) {
+  if ((await readdir(path)).some((entry) => !isArchiveEntry(entry))) {
     throw new ProjectMutationError('Project gained files before archive');
   }
+}
+
+function assertArchiveProjectIdentity(raw: string, project: Project & { fsPath: string }): void {
+  const definition = readProjectDefinition(raw);
+  if (definition.metadata?.id && definition.metadata.id !== project.id) {
+    throw new ProjectMutationError('Project identity changed before archive');
+  }
+  if (!definition.metadata?.id && project.id !== project.fsPath) {
+    throw new ProjectMutationError('Plain project identity changed before archive');
+  }
+}
+
+async function assertArchiveWorkspace(input: {
+  deps: ProjectLifecycleDeps;
+  project: Project & { fsPath: string };
+  expectedWorkspaceHash?: string;
+  expectedWorkspaceBytes?: string;
+}): Promise<void> {
+  const workspaceBytes = await readWorkspaceBytes(input.deps, input.project.fsPath);
+  if (workspaceBytes !== input.expectedWorkspaceBytes)
+    throw new ProjectMutationError('Project workspace changed before archive');
+  if (
+    input.expectedWorkspaceBytes !== undefined &&
+    input.expectedWorkspaceHash !== undefined &&
+    createHash('sha256')
+      .update(workspaceBytes ?? '')
+      .digest('hex') !== input.expectedWorkspaceHash
+  ) {
+    throw new ProjectMutationError('Project workspace changed before archive');
+  }
+}
+
+function isArchiveEntry(entry: string): boolean {
+  return entry === 'context.md' || entry === 'project.yaml';
 }

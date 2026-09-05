@@ -25,8 +25,8 @@ Keep the custom runtime small; use the existing agent SDK for model execution.
 - Repository workspaces are authorized after F1–F9 in the active queue. Read the
   owner's flexible-layout, direct-repository execution and mobile artifact
   requirements there before designing them. The
-  [workspace proposal](docs/superpowers/specs/2026-09-05-project-workspaces-design.md)
-  remains a proposal; it is not an available feature or a fixed directory contract.
+  [W1 specification](_bmad-output/implementation-artifacts/tech-spec-w1-project-workspaces.md)
+  is the current implementation plan; the earlier workspace proposal is superseded.
 - Updated owner decision: Raven has not been used; legacy runtime data may be
   discarded. Do not build legacy exports, migrations or restoration flows.
   Task state is moving to validated YAML inside each project. Use cheaper
@@ -140,6 +140,13 @@ versions; do not copy versions from historical planning documents.
   Digests are actual project-linked Markdown. Ingestion, clustering and hub HTTP
   routes await completed operations; do not invent untracked task IDs or report
   an agent completion as proof that subsequent storage work completed.
+- Workspace execution settings and labeled data sources live in each project's
+  optional `project.yaml`; missing manifests on existing source projects take
+  defaults, malformed manifests make the project unavailable. Source CRUD resolves
+  current file identity, serializes mutations with the lifecycle and uses bounded,
+  flushed atomic replacement. Folder input resolves against the configured Raven
+  root and stores a canonical absolute path. There is no SQL source table/import.
+  Configuration alone does not provide direct execution; W1 tracks that wiring.
 - Agent memory currently lives at `projects/agents/<name>/memory/`, globally by
   name. Project memory and attached repositories are **proposed**, not available
   simply by putting paths in a data-source row or `context.md`.

@@ -156,12 +156,11 @@ including real Git history. The current lockfile audit reports no advisories.
 These checks use isolated roots; live Claude
 authentication, model quality and account delivery remain separate canaries.
 
-The
-[project workspace proposal](./docs/superpowers/specs/2026-09-05-project-workspaces-design.md)
-describes attached repositories, structured project files, and linked memories;
-W1 implementation is authorized after the final F9 checks. The proposed layout
-is a default that each project's agent can evolve. A project data-source URI currently labels a source; it
-does not attach a repository, grant file access or index its contents.
+The [W1 implementation](./_bmad-output/implementation-artifacts/tech-spec-w1-project-workspaces.md)
+is in progress after completed F1–F9. Workspace settings and sources now live in
+project YAML. Direct repository execution, project memory and mobile artifact
+viewing follow in that plan. Project layouts may evolve around the small Raven
+anchors; repository indexes link to existing instructions without embeddings.
 
 Useful verification commands:
 

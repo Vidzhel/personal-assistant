@@ -1,16 +1,14 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { initDatabase, getDb } from '../db/database.ts';
+import { ProjectRegistry } from '../project-registry/project-registry.ts';
 import {
-  createDataSource,
-  getDataSources,
-  getDataSource,
-  updateDataSource,
-  deleteDataSource,
-  buildProjectDataSourcesContext,
-} from '../project-manager/project-data-sources.ts';
+  createProjectWorkspaceStore,
+  type ProjectWorkspaceStore,
+} from '../project-manager/project-workspace.ts';
+import { type CreateDataSourceInput } from '@raven/shared';
 import {
   recordKnowledgeRejection,
   isContentRejected,
@@ -41,9 +39,30 @@ function createMockNeo4j(): Neo4jClient {
 
 describe('Project Knowledge (10.9)', () => {
   let tmpDir: string;
+  let projectsDir: string;
+  let workspaceStore: ProjectWorkspaceStore;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'project-knowledge-'));
+    projectsDir = join(tmpDir, 'projects');
+    mkdirSync(projectsDir, { recursive: true });
+    writeFileSync(join(projectsDir, 'context.md'), '# Global\n');
+    for (const id of [PROJECT_ID, 'proj-test-2', 'proj-ctx', 'proj-empty']) {
+      const projectDir = join(projectsDir, id);
+      mkdirSync(projectDir, { recursive: true });
+      writeFileSync(join(projectDir, 'context.md'), `# ${id}\n`);
+      writeFileSync(
+        join(projectDir, 'project.yaml'),
+        'version: 1\nexecution:\n  mode: default\nsources: []\n',
+      );
+    }
+    const projectRegistry = new ProjectRegistry();
+    await projectRegistry.load(projectsDir);
+    workspaceStore = createProjectWorkspaceStore({
+      projectsDir,
+      projectRegistry,
+      projectRoot: tmpDir,
+    });
     initDatabase(join(tmpDir, 'test.db'));
 
     const db = getDb();
@@ -65,14 +84,16 @@ describe('Project Knowledge (10.9)', () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  describe('Data Source CRUD (SQLite)', () => {
-    it('creates and retrieves a data source', () => {
-      const ds = createDataSource(PROJECT_ID, {
-        uri: 'https://docs.google.com/spreadsheets/d/abc',
-        label: 'Budget Sheet',
-        description: 'Monthly budget tracking',
-        sourceType: 'gdrive',
-      });
+  describe('Data Source CRUD (project.yaml)', () => {
+    const sourceInput: CreateDataSourceInput = {
+      uri: 'https://docs.google.com/spreadsheets/d/abc',
+      label: 'Budget Sheet',
+      description: 'Monthly budget tracking',
+      sourceType: 'gdrive',
+    };
+
+    it('creates and retrieves a data source', async () => {
+      const ds = await workspaceStore.createDataSource(PROJECT_ID, sourceInput);
 
       expect(ds.id).toBeDefined();
       expect(ds.projectId).toBe(PROJECT_ID);
@@ -80,49 +101,68 @@ describe('Project Knowledge (10.9)', () => {
       expect(ds.label).toBe('Budget Sheet');
       expect(ds.sourceType).toBe('gdrive');
 
-      const fetched = getDataSource(ds.id);
+      const fetched = workspaceStore.getDataSource(PROJECT_ID, ds.id);
       expect(fetched).toBeDefined();
       expect(fetched!.label).toBe('Budget Sheet');
+      expect(readFileSync(join(projectsDir, PROJECT_ID, 'project.yaml'), 'utf8')).toContain(ds.id);
     });
 
-    it('lists data sources scoped to project', () => {
-      createDataSource('proj-test-2', {
+    it('lists data sources scoped to project', async () => {
+      await workspaceStore.createDataSource('proj-test-2', {
         uri: '/tmp/notes.txt',
         label: 'Notes',
         sourceType: 'file',
       });
 
-      const sources = getDataSources(PROJECT_ID);
+      const sources = workspaceStore.getDataSources(PROJECT_ID);
       expect(sources.every((s) => s.projectId === PROJECT_ID)).toBe(true);
     });
 
-    it('updates a data source', () => {
-      const ds = createDataSource(PROJECT_ID, {
+    it('updates a data source', async () => {
+      const ds = await workspaceStore.createDataSource(PROJECT_ID, {
         uri: 'https://example.com',
         label: 'Example',
         sourceType: 'url',
       });
 
-      updateDataSource(ds.id, { label: 'Updated Example', description: 'New desc' });
-      const updated = getDataSource(ds.id)!;
+      const updated = await workspaceStore.updateDataSource(PROJECT_ID, ds.id, {
+        label: 'Updated Example',
+        description: 'New desc',
+      });
       expect(updated.label).toBe('Updated Example');
       expect(updated.description).toBe('New desc');
     });
 
-    it('deletes a data source', () => {
-      const ds = createDataSource(PROJECT_ID, {
+    it('deletes a data source', async () => {
+      const ds = await workspaceStore.createDataSource(PROJECT_ID, {
         uri: 'https://delete.me',
         label: 'To Delete',
         sourceType: 'url',
       });
 
-      deleteDataSource(ds.id);
-      expect(getDataSource(ds.id)).toBeUndefined();
+      await workspaceStore.deleteDataSource(PROJECT_ID, ds.id);
+      expect(workspaceStore.getDataSource(PROJECT_ID, ds.id)).toBeUndefined();
+    });
+
+    it('retains sources after a store restart', async () => {
+      const ds = await workspaceStore.createDataSource(PROJECT_ID, {
+        uri: '/data/logs.csv',
+        label: 'Log Data',
+        sourceType: 'file',
+      });
+      const restartedRegistry = new ProjectRegistry();
+      await restartedRegistry.load(projectsDir);
+      const restarted = createProjectWorkspaceStore({
+        projectsDir,
+        projectRegistry: restartedRegistry,
+        projectRoot: tmpDir,
+      });
+      expect(restarted.getDataSource(PROJECT_ID, ds.id)).toEqual(ds);
     });
   });
 
   describe('buildProjectDataSourcesContext', () => {
-    it('returns formatted markdown with all data sources', () => {
+    it('returns formatted markdown with all data sources', async () => {
       // Create a fresh project for this test
       const db = getDb();
       const now = Date.now();
@@ -130,19 +170,19 @@ describe('Project Knowledge (10.9)', () => {
         'INSERT INTO projects (id, name, description, skills, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
       ).run('proj-ctx', 'Context Test', '', '[]', now, now);
 
-      createDataSource('proj-ctx', {
+      await workspaceStore.createDataSource('proj-ctx', {
         uri: 'https://drive.google.com/file/abc',
         label: 'Design Doc',
         description: 'Architecture design',
         sourceType: 'gdrive',
       });
-      createDataSource('proj-ctx', {
+      await workspaceStore.createDataSource('proj-ctx', {
         uri: '/data/logs.csv',
         label: 'Log Data',
         sourceType: 'file',
       });
 
-      const ctx = buildProjectDataSourcesContext('proj-ctx');
+      const ctx = workspaceStore.buildDataSourcesContext('proj-ctx');
       expect(ctx).toContain('**Design Doc**');
       expect(ctx).toContain('(gdrive)');
       expect(ctx).toContain('Architecture design');
@@ -151,7 +191,7 @@ describe('Project Knowledge (10.9)', () => {
     });
 
     it('returns undefined when no data sources', () => {
-      expect(buildProjectDataSourcesContext('nonexistent-project')).toBeUndefined();
+      expect(workspaceStore.buildDataSourcesContext('proj-empty')).toBeUndefined();
     });
   });
 

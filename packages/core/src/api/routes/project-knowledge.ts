@@ -2,19 +2,13 @@ import type { FastifyInstance } from 'fastify';
 import { resolve } from 'node:path';
 import {
   HTTP_STATUS,
-  CreateDataSourceSchema,
   CreateProjectKnowledgeLinkSchema,
   KnowledgeProposalResponseSchema,
 } from '@raven/shared';
 import type { Neo4jClient } from '../../knowledge-engine/neo4j-client.ts';
 import type { KnowledgeStore } from '../../knowledge-engine/knowledge-store.ts';
-import {
-  createDataSource,
-  getDataSources,
-  getDataSource,
-  updateDataSource,
-  deleteDataSource,
-} from '../../project-manager/project-data-sources.ts';
+import type { ProjectWorkspaceStore } from '../../project-manager/project-workspace.ts';
+import { registerProjectWorkspaceRoutes } from './project-workspaces.ts';
 import {
   linkBubbleToProject,
   unlinkBubbleFromProject,
@@ -35,6 +29,7 @@ export interface ProjectKnowledgeRouteDeps {
   knowledgeStore?: KnowledgeStore;
   projectsDir?: string;
   projectRegistry?: ProjectRegistry;
+  workspaceStore?: ProjectWorkspaceStore;
 }
 
 function assertProjectExists(projectId: string): void {
@@ -62,62 +57,7 @@ export function registerProjectKnowledgeRoutes(
   app: FastifyInstance,
   deps: ProjectKnowledgeRouteDeps,
 ): void {
-  // --- Data Sources CRUD ---
-
-  app.get<{ Params: { id: string } }>('/api/projects/:id/data-sources', async (req, reply) => {
-    if (!getDb().prepare('SELECT 1 FROM projects WHERE id = ?').get(req.params.id)) {
-      return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
-    }
-    const sources = getDataSources(req.params.id);
-    return reply.send(sources);
-  });
-
-  app.post<{ Params: { id: string } }>('/api/projects/:id/data-sources', async (req, reply) => {
-    if (!isCurrentProject(getDb(), req.params.id, deps.projectRegistry)) {
-      return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
-    }
-    const parsed = CreateDataSourceSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: parsed.error.message });
-    }
-    const ds = createDataSource(req.params.id, parsed.data);
-    return reply.status(HTTP_STATUS.CREATED).send(ds);
-  });
-
-  app.put<{ Params: { id: string; dsId: string } }>(
-    '/api/projects/:id/data-sources/:dsId',
-    async (req, reply) => {
-      if (!isCurrentProject(getDb(), req.params.id, deps.projectRegistry)) {
-        return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
-      }
-      const existing = getDataSource(req.params.dsId);
-      if (!existing || existing.projectId !== req.params.id) {
-        return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Data source not found' });
-      }
-      const parsed = CreateDataSourceSchema.partial().safeParse(req.body);
-      if (!parsed.success) {
-        return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: parsed.error.message });
-      }
-      updateDataSource(req.params.dsId, parsed.data);
-      const updated = getDataSource(req.params.dsId);
-      return reply.send(updated);
-    },
-  );
-
-  app.delete<{ Params: { id: string; dsId: string } }>(
-    '/api/projects/:id/data-sources/:dsId',
-    async (req, reply) => {
-      if (!isCurrentProject(getDb(), req.params.id, deps.projectRegistry)) {
-        return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
-      }
-      const existing = getDataSource(req.params.dsId);
-      if (!existing || existing.projectId !== req.params.id) {
-        return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Data source not found' });
-      }
-      deleteDataSource(req.params.dsId);
-      return reply.status(HTTP_STATUS.NO_CONTENT).send();
-    },
-  );
+  registerProjectWorkspaceRoutes(app, deps.workspaceStore);
 
   // --- Knowledge Links (Neo4j) ---
 

@@ -2,9 +2,16 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 
 import yaml from 'js-yaml';
+import { parse as parseWorkspaceYaml } from 'yaml';
 const { load: yamlLoad } = yaml;
 
-import { createLogger, AgentYamlSchema, ScheduleYamlSchema, META_PROJECT_ID } from '@raven/shared';
+import {
+  createLogger,
+  AgentYamlSchema,
+  ProjectWorkspaceSchema,
+  ScheduleYamlSchema,
+  META_PROJECT_ID,
+} from '@raven/shared';
 import type {
   AgentYaml,
   ScheduleYaml,
@@ -12,13 +19,24 @@ import type {
   ProjectIndex,
   ProjectMetadata,
 } from '@raven/shared';
+import { readProjectTextFile } from '../project-manager/project-file-read.ts';
 import { readProjectDefinition } from './project-definition.ts';
 import { errorMessage, validateScheduleTiming } from '../diagnostics/definition-diagnostics.ts';
 import type { DefinitionDiagnostic } from '../diagnostics/definition-diagnostics.ts';
 
 const log = createLogger('project-scanner');
 
-const SKIP_DIRS = new Set(['agents', 'templates', 'schedules', 'tasks', 'node_modules', '.git']);
+const SKIP_DIRS = new Set([
+  'agents',
+  'templates',
+  'schedules',
+  'tasks',
+  'memory',
+  'files',
+  'node_modules',
+  '.git',
+]);
+const MAX_WORKSPACE_BYTES = 1_048_576;
 
 export interface ProjectScanOptions {
   knownSkills?: ReadonlySet<string>;
@@ -51,6 +69,40 @@ function addDiagnostic(
   diagnostic: Omit<DefinitionDiagnostic, 'message'> & { message: string },
 ): void {
   diagnostics.push(diagnostic);
+}
+
+function workspaceDiagnostic(
+  rel: string,
+  message: string,
+): Omit<DefinitionDiagnostic, 'message'> & { message: string } {
+  return {
+    source: 'project',
+    path: `${rel || '.'}/project.yaml`,
+    code: 'invalid-project-workspace',
+    message,
+    severity: 'error',
+  };
+}
+
+function validateWorkspaceManifest(
+  dirPath: string,
+  rel: string,
+  diagnostics: DefinitionDiagnostic[],
+): boolean {
+  const filePath = join(dirPath, 'project.yaml');
+  try {
+    const raw = readProjectTextFile(filePath, MAX_WORKSPACE_BYTES);
+    if (raw === undefined) return true;
+    ProjectWorkspaceSchema.parse(parseWorkspaceYaml(raw));
+    return true;
+  } catch (error) {
+    addDiagnostic(
+      diagnostics,
+      workspaceDiagnostic(rel, `Invalid workspace manifest: ${errorMessage(error)}`),
+    );
+    log.warn(`Skipping invalid workspace manifest: ${filePath}`);
+    return false;
+  }
 }
 
 interface KnownSkillValidation {
@@ -275,26 +327,12 @@ async function readDefinition(
   { contextMd: string; definition: ReturnType<typeof readProjectDefinition> } | undefined
 > {
   const id = rel || '_global';
-  let contextMd: string | null;
-  try {
-    contextMd = await readTextFile(join(dirPath, 'context.md'));
-  } catch (error) {
-    if (id === '_global') throw error;
+  if (id !== '_global' && !validateWorkspaceManifest(dirPath, rel, ctx.diagnostics)) {
     ctx.invalidProjectPaths.add(rel);
-    addDiagnostic(ctx.diagnostics, {
-      source: 'project',
-      path: `${rel}/context.md`,
-      code: 'project-context-unreadable',
-      message: `Cannot read project context: ${errorMessage(error)}`,
-      severity: 'error',
-    });
     return undefined;
   }
-
-  // For non-global: must have context.md to be a project
-  if (id !== '_global' && contextMd === null) {
-    return undefined;
-  }
+  const contextMd = await readProjectContext(dirPath, rel, ctx);
+  if (id !== '_global' && contextMd === null) return undefined;
 
   try {
     const definition = readProjectDefinition(contextMd ?? '');
@@ -316,6 +354,30 @@ async function readDefinition(
       severity: 'error',
     });
     return undefined;
+  }
+}
+
+async function readProjectContext(
+  dirPath: string,
+  rel: string,
+  ctx: ScanContext,
+): Promise<string | null> {
+  const id = rel || '_global';
+  try {
+    const contextMd = await readTextFile(join(dirPath, 'context.md'));
+    if (id !== '_global' && contextMd === null) return null;
+    return contextMd;
+  } catch (error) {
+    if (id === '_global') throw error;
+    ctx.invalidProjectPaths.add(rel);
+    addDiagnostic(ctx.diagnostics, {
+      source: 'project',
+      path: `${rel}/context.md`,
+      code: 'project-context-unreadable',
+      message: `Cannot read project context: ${errorMessage(error)}`,
+      severity: 'error',
+    });
+    return null;
   }
 }
 

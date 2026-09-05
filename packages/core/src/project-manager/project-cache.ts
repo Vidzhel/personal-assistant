@@ -169,7 +169,7 @@ export function projectFromNode(node: ProjectNode, existing?: Project): Project 
 }
 
 export function projectReferences(db: Database.Database, id: string): string[] {
-  const tables = ['sessions', 'project_data_sources', 'events', 'knowledge_rejections'];
+  const tables = ['sessions', 'events', 'knowledge_rejections'];
   const references = tables.filter((table) =>
     db.prepare(`SELECT 1 FROM ${table} WHERE project_id = ? LIMIT 1`).get(id),
   );

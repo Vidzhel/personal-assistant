@@ -92,8 +92,11 @@ async function activateProject(
   deps: ScaffoldAndActivateDeps,
 ): Promise<ScaffoldActivateResult> {
   const relPath = await deps.scaffoldingApi.createProject(input);
-  const filePath = join(resolveProjectDir(deps.projectsDir, relPath), 'context.md');
-  return commit(filePath, `feat(project): scaffold "${relPath}"`);
+  const directory = resolveProjectDir(deps.projectsDir, relPath);
+  return commit(
+    [join(directory, 'context.md'), join(directory, 'project.yaml')],
+    `feat(project): scaffold "${relPath}"`,
+  );
 }
 
 async function activateAgent(

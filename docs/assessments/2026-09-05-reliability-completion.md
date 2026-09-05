@@ -11,7 +11,7 @@ legacy runtime data. No legacy export, migration or restoration path is being
 built. New runtime state still receives interruption-safe handling because
 unused historical data does not justify losing work created now. The owner
 also authorized flexible repository workspaces after F1–F9; that work is W1 and
-has not started.
+is now in progress in the [W1 specification](../../_bmad-output/implementation-artifacts/tech-spec-w1-project-workspaces.md).
 
 ## Current architecture
 
@@ -31,7 +31,7 @@ Authoritative state now has clear boundaries:
   resolved project directory: `tasks/board/<id>.yaml`,
   `tasks/trees/<id>.yaml`, and `tasks/runs/<id>.yaml`. A projectless task uses
   the system project's physical directory.
-- Fresh SQLite contains the current 24-table operational schema for sessions,
+- The F9 checkpoint verified a fresh 24-table operational schema for sessions,
   approvals, events, notifications, integrations, intents, model budgets,
   provider uploads and the project cache. Retired SQL task, run, tree and
   pipeline readers are removed. SQLite remains an operational store, not a
@@ -67,7 +67,7 @@ operation stopped.
 
 F9a–F9e evidence, limits and exact log paths are recorded in the [F9 storage
 and runtime specification](../../_bmad-output/implementation-artifacts/tech-spec-f9-storage-runtime-cleanup.md).
-F1–F9 are complete; W1 is the next implementation checkpoint.
+F1–F9 are complete; W1 implementation is in progress.
 
 ## Reliability limits that remain explicit
 
@@ -109,13 +109,14 @@ All postponed F1–F9 improvements are complete. Remaining dependency/account
 limits have explicit resolution criteria in the deferred ledger; they do not
 stand in for missing local implementation or tests.
 
-W1 is authorized after F9. It starts by inspecting dissertation and teaching,
-then implements flexible project layouts, direct repository shell/file/Git work,
-linked context indexes, project-owned memory, shared skills and mobile artifact
-access. The agent may evolve each repository’s scripts and structure within the
-owner’s configured autonomy. Those repositories have not been inspected in this reliability pass;
-there is no claim about their current layout or tooling. No repository
-embedding pipeline or graph replacement is part of the current implementation.
+W1 is now in progress. Read-only inspection of the actual dissertation and teaching
+repositories confirmed different, explicit agent workflows and repository-owned
+scripts. The current plan implements flexible layouts, direct shell/file/Git work,
+linked context indexes, project-owned memory, reusable runtime skills and mobile
+artifact access. The agent may evolve each repository's scripts and structure
+under the owner's configured autonomy. No private repository content is copied
+into Raven's public source. No repository embedding pipeline or graph replacement
+is required for this implementation.
 
 The original definitions retain their recorded hashes except for the explicit
 summary-only maintenance template change in F9b. Unrelated owner work is preserved.

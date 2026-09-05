@@ -1,3 +1,4 @@
+import { createProjectWorkspaceStore } from './project-manager/project-workspace.ts';
 import {
   initializeKnowledge,
   type KnowledgeRuntime,
@@ -456,6 +457,7 @@ export async function createRaven(
   const sessionManager = new SessionManager();
   const messageStore = createMessageStore({ basePath: sessionPath });
   const memoryStore = createMemoryStore({ projectsDir });
+  const workspaceStore = createProjectWorkspaceStore({ projectsDir, projectRegistry, projectRoot });
 
   // 10. Init agent manager. INVARIANT: AgentManager subscribes before any
   // agent:task:request emitter starts — it is the sole subscriber for that
@@ -713,6 +715,7 @@ export async function createRaven(
   let server: Awaited<ReturnType<typeof createApiServer>> | undefined;
 
   const apiDeps: ApiDeps = {
+    workspaceStore,
     eventBus,
     capabilityLibrary,
     sessionManager,

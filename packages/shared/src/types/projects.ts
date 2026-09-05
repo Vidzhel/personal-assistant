@@ -3,7 +3,7 @@ import { z } from 'zod';
 export const SystemAccessLevel = z.enum(['none', 'read', 'read-write']);
 export type SystemAccessLevel = z.infer<typeof SystemAccessLevel>;
 
-/** File-owned metadata inside context.md; absent fields on legacy files inherit the cache. */
+/** File-owned metadata inside context.md. */
 export const ProjectMetadataSchema = z
   .object({
     version: z.literal(1),
@@ -29,9 +29,7 @@ export interface Project {
   systemPrompt?: string;
   systemAccess?: SystemAccessLevel;
   isMeta?: boolean;
-  /** Registry node id (relative path under `projects/`) this cache row is
-   * linked to. Undefined for legacy rows not yet reconciled by
-   * project-sync — see project-manager/project-sync.ts. */
+  /** Registry node id (relative path under `projects/`) linked to this project. */
   fsPath?: string;
   createdAt: number;
   updatedAt: number;
@@ -52,9 +50,124 @@ export interface ProjectDataSource {
   uri: string;
   label: string;
   description?: string;
-  sourceType: 'gdrive' | 'file' | 'url' | 'other';
+  sourceType: 'gdrive' | 'file' | 'url' | 'other' | 'folder';
   createdAt: string;
   updatedAt: string;
+  contextFiles?: string[];
+}
+
+const SOURCE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function isSafeContextFile(path: string): boolean {
+  return (
+    path.length > 0 &&
+    !path.includes('\0') &&
+    !path.includes('\\') &&
+    !path.startsWith('/') &&
+    !path.split('/').some((part) => part === '' || part === '.' || part === '..')
+  );
+}
+
+export const ProjectWorkspaceSourceSchema = z
+  .object({
+    id: z
+      .string()
+      .regex(SOURCE_ID)
+      .refine((id) => id !== 'home', 'The home source is reserved'),
+    uri: z.string().min(1),
+    label: z.string().min(1),
+    description: z.string().optional(),
+    sourceType: z.enum(['gdrive', 'file', 'url', 'other', 'folder']),
+    createdAt: z.iso.datetime({ offset: true }),
+    updatedAt: z.iso.datetime({ offset: true }),
+    contextFiles: z
+      .array(z.string().refine(isSafeContextFile, 'Context file must be relative'))
+      .optional(),
+  })
+  .strict()
+  .superRefine((source, context) => {
+    if (source.sourceType !== 'folder' && source.contextFiles !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Only folder sources may define context files',
+        path: ['contextFiles'],
+      });
+    }
+  });
+export type ProjectWorkspaceSource = z.infer<typeof ProjectWorkspaceSourceSchema>;
+
+const WorkspaceModeSchema = z.enum(['default', 'auto', 'full']);
+const WorkspaceExecutionSchema = z
+  .object({
+    mode: WorkspaceModeSchema,
+    sourceId: z
+      .string()
+      .regex(SOURCE_ID)
+      .refine((id) => id !== 'home')
+      .optional(),
+  })
+  .strict();
+
+export const ProjectWorkspaceSchema = z
+  .object({
+    version: z.literal(1),
+    execution: WorkspaceExecutionSchema.default({ mode: 'default' }),
+    sources: z.array(ProjectWorkspaceSourceSchema).default([]),
+  })
+  .strict()
+  .superRefine((workspace, context) => {
+    const ids = new Set<string>();
+    for (const [index, source] of workspace.sources.entries()) {
+      if (ids.has(source.id)) {
+        context.addIssue({
+          code: 'custom',
+          message: `Duplicate source id: ${source.id}`,
+          path: ['sources', index, 'id'],
+        });
+      }
+      ids.add(source.id);
+    }
+    if (workspace.execution.sourceId) {
+      const selected = workspace.sources.find(
+        (source) => source.id === workspace.execution.sourceId,
+      );
+      if (!selected) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Execution source does not exist',
+          path: ['execution', 'sourceId'],
+        });
+      } else if (selected.sourceType !== 'folder') {
+        context.addIssue({
+          code: 'custom',
+          message: 'Execution source must be a folder',
+          path: ['execution', 'sourceId'],
+        });
+      }
+    }
+  });
+export type ProjectWorkspace = z.infer<typeof ProjectWorkspaceSchema>;
+
+export const WorkspaceUpdateSchema = z
+  .object({
+    execution: z
+      .object({
+        mode: WorkspaceModeSchema.optional(),
+        sourceId: z
+          .string()
+          .regex(SOURCE_ID)
+          .refine((id) => id !== 'home')
+          .nullable()
+          .optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+export type WorkspaceUpdate = z.infer<typeof WorkspaceUpdateSchema>;
+
+export function projectWorkspaceDefaults(): ProjectWorkspace {
+  return { version: 1, execution: { mode: 'default' }, sources: [] };
 }
 
 export interface ProjectKnowledgeLink {
@@ -72,13 +185,40 @@ export interface KnowledgeDiscoveryProposal {
   sourceDescription: string;
 }
 
-export const CreateDataSourceSchema = z.object({
-  uri: z.string().min(1),
-  label: z.string().min(1),
-  description: z.string().optional(),
-  sourceType: z.enum(['gdrive', 'file', 'url', 'other']),
-});
+export const CreateDataSourceSchema = z
+  .object({
+    uri: z.string().min(1),
+    label: z.string().min(1),
+    description: z.string().optional(),
+    sourceType: z.enum(['gdrive', 'file', 'url', 'other', 'folder']),
+    contextFiles: z
+      .array(z.string().refine(isSafeContextFile, 'Context file must be relative'))
+      .optional(),
+  })
+  .strict()
+  .superRefine((source, context) => {
+    if (source.sourceType !== 'folder' && source.contextFiles !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Only folder sources may define context files',
+        path: ['contextFiles'],
+      });
+    }
+  });
 export type CreateDataSourceInput = z.infer<typeof CreateDataSourceSchema>;
+
+export const UpdateDataSourceSchema = z
+  .object({
+    uri: z.string().min(1).optional(),
+    label: z.string().min(1).optional(),
+    description: z.string().optional(),
+    sourceType: z.enum(['gdrive', 'file', 'url', 'other', 'folder']).optional(),
+    contextFiles: z
+      .array(z.string().refine(isSafeContextFile, 'Context file must be relative'))
+      .optional(),
+  })
+  .strict();
+export type UpdateDataSourceInput = z.infer<typeof UpdateDataSourceSchema>;
 
 export const CreateProjectKnowledgeLinkSchema = z.object({
   bubbleId: z.string().min(1),

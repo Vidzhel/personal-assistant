@@ -1,15 +1,14 @@
 # Raven projects with attached repositories and linked memory
 
-> **Deferred proposal — scope clarified September 5, 2026 after R5.** This is
-> design material, not an approved implementation queue. See the
-> [canonical reliability completion record](../../../_bmad-output/implementation-artifacts/reliability-completion-2026-09-05.md)
-> for completed work and the owner's explicit deferral of workspace design.
-> Before resuming, reassess the proposed manifest and migration against R2's
-> existing `context.md` project metadata and identity behavior. No attached-folder
-> retrieval, project-memory redesign or graph replacement is implemented by this proposal.
+> **Superseded September 6, 2026.** The owner's later instructions authorize
+> direct repository execution, flexible layouts and full shell capability after
+> F1–F9. Those prerequisites are complete. The current
+> [W1 implementation specification](../../../_bmad-output/implementation-artifacts/tech-spec-w1-project-workspaces.md)
+> replaces this proposal. The read-only-first sequence, embedding catalog,
+> migration/export requirements and identity relocation below are historical
+> alternatives, not implementation instructions or available features.
 
-Status: proposed design, not implemented. September 5, 2026.
-Context: [current assessment](../../assessments/2026-09-05-project-workspaces-assessment.md).
+Status: historical proposal, superseded. September 5, 2026.
 
 ## Outcome
 
