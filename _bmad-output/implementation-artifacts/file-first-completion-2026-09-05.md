@@ -145,3 +145,14 @@ with reviewed create/archive recovery. The required check, 2,384 default tests,
 16 browser journeys, core build and compiled restart pass. Direct repository
 execution continues in W1b; this checkpoint does not claim that stored settings
 already change SDK cwd or permissions. See the W1 specification for evidence.
+
+
+W1b's first runtime checkpoint completes project-local agent identity/defaults and
+project-owned memory together. Parent review covered cross-project lookup, current
+file identity, atomic note/agent writes, candidate/index conflicts, partial learning
+failures, validator scope, mobile selection and commit shutdown drain. Required
+checks, 2,397 default tests, 17 browser journeys across full/focused runs, production
+builds and compiled restart pass. See
+[project context checkpoint](tech-spec-w1b-project-context.md). Direct SDK cwd,
+permission modes and session revisions are the next W1b checkpoint; W1c then adds
+repository overviews/skills, followed by W1d mobile workspace/artifact access.

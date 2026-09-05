@@ -390,7 +390,7 @@ export async function createRaven(
     eventBus: baseContext.eventBus,
   });
   const agentResolver = createAgentResolver({ capabilityLibrary });
-  const configCommitter = createConfigCommitter({ eventBus });
+  const configCommitter = createConfigCommitter({ eventBus, cwd: projectsDir });
   configCommitter.start();
   log.info(`Named agent registry initialized (${namedAgentStore.listAgents().length} agents)`);
 
@@ -456,8 +456,8 @@ export async function createRaven(
   // 9. Init session manager + message store
   const sessionManager = new SessionManager();
   const messageStore = createMessageStore({ basePath: sessionPath });
-  const memoryStore = createMemoryStore({ projectsDir });
   const workspaceStore = createProjectWorkspaceStore({ projectsDir, projectRegistry, projectRoot });
+  const memoryStore = createMemoryStore({ projectsDir, workspaceStore });
 
   // 10. Init agent manager. INVARIANT: AgentManager subscribes before any
   // agent:task:request emitter starts — it is the sole subscriber for that
@@ -550,16 +550,15 @@ export async function createRaven(
     sessionManager,
     eventBus,
     config,
-    projectsDir,
-    namedAgentStore,
+    memoryStore,
     ...(knowledgeStore && neo4jClient ? { knowledgeStore, neo4j: neo4jClient } : {}),
   });
 
   // 11a-2. Memory consolidation (Phase 3): promotes pending memory
-  // candidates written by retrospectives into an agent's actual memory
+  // candidates written by retrospectives into the project's actual memory
   // files, then regenerates MEMORY.md and git-commits. No Neo4j dependency.
   const memoryConsolidation = createMemoryConsolidation({
-    projectsDir,
+    workspaceStore,
     memoryStore,
     namedAgentStore,
     eventBus,
@@ -568,11 +567,10 @@ export async function createRaven(
 
   // 11a-3. Weekly system retrospective deps (Phase 3): deterministic
   // aggregation of recorded agent failures + stuck task trees over 7d into one
-  // memory candidate for the default agent. No model call, no Neo4j dep.
+  // memory candidate for the system project. No model call, no Neo4j dep.
   const systemRetrospectiveDeps = {
-    projectsDir,
+    memoryStore,
     executionLogger,
-    namedAgentStore,
     executionEngine,
   };
 

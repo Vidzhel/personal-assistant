@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { TaskTree } from '@raven/shared';
+import { META_PROJECT_ID, type TaskTree } from '@raven/shared';
+import { createProjectMemoryFixture } from './fixtures/project-memory.ts';
 import { listPendingCandidates } from '../agent-memory/memory-candidates.ts';
 import { runSystemRetrospective } from '../agent-memory/system-retrospective.ts';
 
@@ -20,9 +21,11 @@ function makeTree(id: string, status: TaskTree['status'], updatedAt: string): Ta
 
 describe('system retrospective execution tree query', () => {
   let projectsDir: string;
+  let memoryStore: Awaited<ReturnType<typeof createProjectMemoryFixture>>['memoryStore'];
 
-  beforeEach(() => {
+  beforeEach(async () => {
     projectsDir = mkdtempSync(join(tmpdir(), 'raven-system-retrospective-'));
+    ({ memoryStore } = await createProjectMemoryFixture(projectsDir, ['system']));
   });
 
   afterEach(() => {
@@ -31,7 +34,7 @@ describe('system retrospective execution tree query', () => {
 
   function makeDeps(trees: TaskTree[]) {
     return {
-      projectsDir,
+      memoryStore,
       executionEngine: { queryTrees: () => trees },
       executionLogger: {
         getTaskStats: vi.fn().mockReturnValue({
@@ -43,9 +46,6 @@ describe('system retrospective execution tree query', () => {
         }),
         getPerSkillStats: vi.fn().mockReturnValue([]),
       } as any,
-      namedAgentStore: {
-        getDefaultAgent: vi.fn().mockReturnValue({ name: 'default' }),
-      },
     };
   }
 
@@ -62,7 +62,7 @@ describe('system retrospective execution tree query', () => {
     const result = await runSystemRetrospective(makeDeps(trees));
 
     expect(result).toMatchObject({ candidateWritten: true, stuckTreeCount: 1 });
-    const candidates = await listPendingCandidates(projectsDir, 'default');
+    const candidates = await listPendingCandidates(memoryStore, META_PROJECT_ID);
     expect(candidates).toHaveLength(1);
     expect(candidates[0].body).toContain('1 task tree(s)');
   });
@@ -73,6 +73,13 @@ describe('system retrospective execution tree query', () => {
     const result = await runSystemRetrospective(makeDeps(trees));
 
     expect(result).toEqual({ candidateWritten: false, failureCount: 0, stuckTreeCount: 0 });
-    expect(await listPendingCandidates(projectsDir, 'default')).toEqual([]);
+    expect(await listPendingCandidates(memoryStore, META_PROJECT_ID)).toEqual([]);
+  });
+  it('reports a failed candidate write as a failed job rather than nothing to report', async () => {
+    vi.spyOn(memoryStore, 'withDirectory').mockRejectedValueOnce(new Error('Unavailable project'));
+    const trees = [
+      makeTree('stuck', 'running', new Date(Date.now() - 8 * MS_PER_DAY).toISOString()),
+    ];
+    await expect(runSystemRetrospective(makeDeps(trees))).rejects.toThrow('could not be saved');
   });
 });

@@ -111,9 +111,9 @@ stand in for missing local implementation or tests.
 
 W1 is now in progress. Read-only inspection of the actual dissertation and teaching
 repositories confirmed different, explicit agent workflows and repository-owned
-scripts. The current plan implements flexible layouts, direct shell/file/Git work,
-linked context indexes, project-owned memory, reusable runtime skills and mobile
-artifact access. The agent may evolve each repository's scripts and structure
+scripts. Workspace configuration, local agent selection and project-owned memory
+are implemented. The remaining plan implements flexible direct shell/file/Git
+work, linked context indexes, reusable runtime skills and mobile artifact access. The agent may evolve each repository's scripts and structure
 under the owner's configured autonomy. No private repository content is copied
 into Raven's public source. No repository embedding pipeline or graph replacement
 is required for this implementation.

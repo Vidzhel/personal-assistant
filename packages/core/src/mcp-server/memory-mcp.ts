@@ -22,27 +22,27 @@ const errorResult = (message: string): ErrResult => ({
 
 export interface MemoryToolDeps {
   memoryStore: MemoryStore;
-  agentName: string;
+  projectId: string;
   signal?: AbortSignal;
   lifetime?: ToolCallLifetime;
 }
 
-/** Build the three memory tools bound to one agent's directory. */
+/** Build the three memory tools bound to one project's directory. */
 // eslint-disable-next-line max-lines-per-function, @typescript-eslint/no-explicit-any -- builds three memory management tools; any mirrors buildSystemTools pattern
 export function buildMemoryTools(deps: MemoryToolDeps): Array<SdkMcpToolDefinition<any>> {
-  const { memoryStore, agentName } = deps;
+  const { memoryStore, projectId } = deps;
 
   const memoryRead = tool(
     'memory_read',
-    'Read one of your own memory files. Omit "path" to read your MEMORY.md index.',
+    'Read a memory file shared by this project’s agents. Omit "path" to read your MEMORY.md index.',
     {
       path: z.string().optional().describe('Memory file path relative to your memory dir'),
     },
     async (args) => {
       try {
         const content = args.path
-          ? await memoryStore.read(agentName, args.path)
-          : ((await memoryStore.readIndex(agentName)) ?? '');
+          ? await memoryStore.read(projectId, args.path)
+          : ((await memoryStore.readIndex(projectId)) ?? '');
         return okResult({ path: args.path ?? 'MEMORY.md', content });
       } catch (err) {
         return errorResult((err as Error).message);
@@ -55,12 +55,14 @@ export function buildMemoryTools(deps: MemoryToolDeps): Array<SdkMcpToolDefiniti
     'memory_write',
     'Save a new memory file (or overwrite an existing one). Rejected if it would exceed your memory budget.',
     {
-      path: z.string().describe('Memory file path relative to your memory dir, e.g. "fact-x.md"'),
+      path: z
+        .string()
+        .describe('Memory file path relative to your memory dir, e.g. "research/fact-x.md"'),
       content: z.string().describe('Full file contents'),
     },
     async (args) => {
       try {
-        const res = await memoryStore.write(agentName, args.path, args.content);
+        const res = await memoryStore.write(projectId, args.path, args.content);
         return res.ok
           ? okResult(res)
           : errorResult(`${res.error} (usage: ${JSON.stringify(res.usage)})`);
@@ -79,7 +81,7 @@ export function buildMemoryTools(deps: MemoryToolDeps): Array<SdkMcpToolDefiniti
     },
     async (args) => {
       try {
-        const res = await memoryStore.update(agentName, args.path, args.content);
+        const res = await memoryStore.update(projectId, args.path, args.content);
         return res.ok
           ? okResult(res)
           : errorResult(`${res.error} (usage: ${JSON.stringify(res.usage)})`);
@@ -92,7 +94,7 @@ export function buildMemoryTools(deps: MemoryToolDeps): Array<SdkMcpToolDefiniti
   return [memoryRead, memoryWrite, memoryUpdate];
 }
 
-/** Build an in-process MCP server exposing the memory tools for one agent. */
+/** Build an in-process MCP server exposing the memory tools for one project. */
 export function createMemoryMcp(deps: MemoryToolDeps): McpSdkServerConfigWithInstance {
   return createSdkMcpServer({
     name: 'memory',

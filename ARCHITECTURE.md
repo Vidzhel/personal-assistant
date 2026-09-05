@@ -18,8 +18,8 @@ tracks delivery and verification; the
 remaining limitations and their resolution plans. The
 [W1 specification](_bmad-output/implementation-artifacts/tech-spec-w1-project-workspaces.md)
 implements the owner's flexible-layout and direct-repository requirements after
-completed F1–F9. Workspace configuration is now file-owned; direct execution,
-project memory and artifact viewing continue in the ordered W1 checkpoints.
+completed F1–F9. Workspace configuration and project memory are file-owned. Direct repository
+execution and artifact viewing continue in the ordered W1 checkpoints.
 Keep the runtime small by extending existing paths; remove a predecessor in the
 same change that replaces it.
 
@@ -122,7 +122,7 @@ Named agent (projects/agents/<name>/agent.yaml, skills: [...])
   ├── Agent Manager spawns a Claude Agent SDK query() session with:
   │   - those resolved mcpServers
   │   - the in-process Raven MCP, scoped by role (task/chat/system/validation/knowledge)
-  │   - a per-agent memory MCP
+  │   - a project-scoped memory MCP
   │
   └── if agentDefinitions are non-empty, the session may use the `Agent` tool to
       delegate to a sub-agent — sub-agents can declare their own mcpServers subset
@@ -359,15 +359,24 @@ anchors. Workspace CRUD uses the current registry identity and atomic YAML write
 the previous SQL source table is removed. Folder inputs store canonical server
 paths with optional links to repository instructions/indexes. HTTP configuration
 is available without Neo4j, but direct SDK execution and artifact access are still
-being wired in W1. Graph views currently remain global and chat still uses the
-global default agent; subsequent W1 checkpoints address these boundaries.
+being wired in W1. Graph views currently remain global; W1d adds explicit project
+selection and server-side filtering. Chat and task dispatch use the nearest local
+agent/default. Local IDs include the stable project identity so namesakes remain
+separate; current YAML bytes and their source path provide a definition revision.
 
-Agent memory lives in `projects/agents/<name>/memory/`; interactive retrospectives
-write candidate files with provenance, and consolidation applies validated note
-operations and regenerates `MEMORY.md`. Only successful application and indexing
-allow archival; rejected, failed or partial operations retain pending candidates.
-This loop works without Neo4j. Memory currently has global agent ownership and
-flat note paths, not separate project memory.
+Memory lives under each managed project's `memory/` directory. All its named
+agents share this store; internal validators have no memory tools. Project YAML
+owns the budget, defaulting to 30 files and 64 KiB. Nested Markdown notes and
+`MEMORY.md` support project-specific organization. The current workspace identity,
+bounded safe reads, serialized budget checks and atomic replacement govern Raven
+memory operations; these controls do not isolate a future unrestricted shell.
+Interactive retrospectives write unique candidates with provenance. Consolidation
+uses the project's default model, checks source snapshots before applying changes,
+regenerates a linked index and archives only successfully applied candidates.
+Failures preserve pending evidence and surface through schedule outcomes while
+valid sibling projects can still finish. This loop works without Neo4j. The HTTP
+memory route is `/api/projects/:id/memory`; the browser requires explicit project
+selection for global agents. There is no agent-name memory store or migration.
 
 Knowledge bodies are Markdown under the configured `data/knowledge` root.
 Neo4j owns durable relationships, project membership and additional graph metadata.

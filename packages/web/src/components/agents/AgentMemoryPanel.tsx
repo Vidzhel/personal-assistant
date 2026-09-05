@@ -38,21 +38,62 @@ function MemoryPanelBody({ error, files }: { error: string | null; files: AgentM
   );
 }
 
+function ProjectMemorySelection() {
+  const {
+    selectedAgentMemory,
+    selectedAgentMemoryError,
+    availableProjects,
+    memoryProjectId,
+    memoryLoading,
+    selectMemoryProject,
+  } = useAgentStore();
+
+  return (
+    <div className="p-4 space-y-3">
+      <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+        Notes shared by agents working in the selected project.
+      </p>
+      <label className="block text-sm" htmlFor="memory-project">
+        Project
+      </label>
+      <select
+        id="memory-project"
+        value={memoryProjectId ?? ''}
+        onChange={(event) => void selectMemoryProject(event.target.value)}
+        className="w-full rounded border p-2 text-sm"
+        style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}
+      >
+        <option value="">Select a project</option>
+        {availableProjects.map((project) => (
+          <option key={project.id} value={project.id}>
+            {project.name}
+          </option>
+        ))}
+      </select>
+      {memoryLoading ? (
+        <p className="text-sm">Loading memory…</p>
+      ) : (
+        memoryProjectId && (
+          <MemoryPanelBody error={selectedAgentMemoryError} files={selectedAgentMemory} />
+        )
+      )}
+    </div>
+  );
+}
+
 export function AgentMemoryPanel() {
-  const { showMemory, selectedAgentMemory, selectedAgentMemoryError, agents, closeMemoryPanel } =
-    useAgentStore();
-  const agent = agents.find((a) => a.id === showMemory);
+  const { closeMemoryPanel } = useAgentStore();
 
   return (
     <div
-      className="fixed inset-y-0 right-0 z-50 w-96 border-l shadow-lg overflow-y-auto"
+      className="fixed inset-y-0 right-0 z-50 w-full max-w-96 border-l shadow-lg overflow-y-auto"
       style={{ background: 'var(--bg)', borderColor: 'var(--border)' }}
     >
       <div
         className="p-4 border-b flex items-center justify-between"
         style={{ borderColor: 'var(--border)' }}
       >
-        <h3 className="font-semibold text-sm">Memory: {agent?.name ?? 'Unknown'}</h3>
+        <h3 className="font-semibold text-sm">Project memory</h3>
         <button
           onClick={closeMemoryPanel}
           className="text-sm px-2 py-1 rounded"
@@ -62,12 +103,7 @@ export function AgentMemoryPanel() {
         </button>
       </div>
 
-      <div className="p-4 space-y-3">
-        <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-          What this agent actually remembers — read-only, git-committed, human-editable on disk.
-        </p>
-        <MemoryPanelBody error={selectedAgentMemoryError} files={selectedAgentMemory} />
-      </div>
+      <ProjectMemorySelection />
     </div>
   );
 }

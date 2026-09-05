@@ -62,7 +62,7 @@ export function registerCoreJobs(registry: JobRegistry, deps: CoreJobDeps): void
     registry.register('memory-consolidation', async () => {
       const result = await memoryConsolidation.runConsolidation();
       return {
-        summary: `Memory consolidation: ${result.agentsProcessed} agent(s), ${result.opsApplied} op(s), ${result.candidatesArchived} candidate(s) archived`,
+        summary: `Memory consolidation: ${result.projectsProcessed} project(s), ${result.opsApplied} op(s), ${result.candidatesArchived} candidate(s) archived`,
       };
     });
   }

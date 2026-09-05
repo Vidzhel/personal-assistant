@@ -13,6 +13,10 @@ export type NamedAgentModelTier = (typeof NAMED_AGENT_MODEL_TIERS)[number];
 export interface NamedAgent {
   id: string;
   name: string;
+  /** Stable project identity for local agents; global agents omit this. */
+  projectId?: string;
+  /** Hash of the current definition bytes and its canonical identity path. */
+  definitionRevision?: string;
   description: string | null;
   instructions: string | null;
   skills: string[]; // references library skill names

@@ -52,6 +52,9 @@ function eventBus(): EventBus {
 
 function memoryStore(overrides: Partial<MemoryStore> = {}): MemoryStore {
   return {
+    getDirectory: vi.fn(() => '/tmp/unused-memory-fixture'),
+    withDirectory: vi.fn(async (_projectId, operation) => operation('/tmp/unused-memory-fixture')),
+    apply: vi.fn(async (): Promise<MemoryWriteResult> => ({ ok: true })),
     read: vi.fn(async () => ''),
     readIndex: vi.fn(async () => null),
     write: vi.fn(async (): Promise<MemoryWriteResult> => ({ ok: true })),

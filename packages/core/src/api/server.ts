@@ -48,6 +48,7 @@ import { registerLogRoutes } from './routes/logs.ts';
 import { registerFinancialRoutes } from './routes/financial.ts';
 import { registerTaskRoutes } from './routes/tasks.ts';
 import { registerAgentRoutes } from './routes/agents.ts';
+import { registerProjectMemoryRoutes } from './routes/project-memory.ts';
 import type { TaskStore } from '../task-manager/task-store.ts';
 import type { NamedAgentStore } from '../agent-registry/yaml-named-agent-store.ts';
 import type { ProjectRegistry } from '../project-registry/project-registry.ts';
@@ -233,9 +234,10 @@ export async function createApiServer(
       namedAgentStore: deps.namedAgentStore,
       agentManager: deps.agentManager,
       taskStore: deps.taskStore,
-      memoryStore: deps.memoryStore,
     });
   }
+
+  registerProjectMemoryRoutes(app, deps.memoryStore);
 
   // Project knowledge (data sources + knowledge links)
   registerProjectKnowledgeRoutes(app, {

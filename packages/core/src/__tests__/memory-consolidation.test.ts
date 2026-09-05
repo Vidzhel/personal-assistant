@@ -1,395 +1,273 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { EventBus } from '../event-bus/event-bus.ts';
 import { createMemoryStore } from '../agent-memory/memory-store.ts';
-import { writeMemoryCandidate } from '../agent-memory/memory-candidates.ts';
+import { writeMemoryCandidate, listPendingCandidates } from '../agent-memory/memory-candidates.ts';
 import type { NamedAgent } from '@raven/shared';
 
-// Mock runAgentTask — the scripted "fake agent backend" the plan calls for.
-// The consolidation module imports it directly (not via an injected
-// backend), so it's mocked at the module level like session-retrospective's
-// own test suite does for the same function.
-vi.mock('../agent-manager/agent-session.ts', () => ({
-  runAgentTask: vi.fn(),
-}));
-
+vi.mock('../agent-manager/agent-session.ts', () => ({ runAgentTask: vi.fn() }));
 const { runAgentTask } = await import('../agent-manager/agent-session.ts');
 const { createMemoryConsolidation } = await import('../agent-memory/memory-consolidation.ts');
 
 function fakeAgent(overrides: Partial<NamedAgent> = {}): NamedAgent {
   return {
-    id: 'test-agent',
-    name: 'test-agent',
+    id: 'default',
+    name: 'default',
     description: null,
     instructions: null,
     skills: [],
     model: null,
     maxTurns: null,
-    isDefault: false,
+    isDefault: true,
     createdAt: '',
     updatedAt: '',
     ...overrides,
   };
 }
 
-describe('createMemoryConsolidation', () => {
-  let tmpDir: string;
+describe('project-owned memory consolidation', () => {
+  let root: string;
   let projectsDir: string;
+  let homes: Record<string, string>;
+  let workspaceStore: any;
   let eventBus: EventBus;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'memory-consolidation-'));
-    projectsDir = join(tmpDir, 'projects');
+    root = mkdtempSync(join(tmpdir(), 'memory-consolidation-'));
+    projectsDir = join(root, 'projects');
+    homes = {
+      'project-a': join(projectsDir, 'project-a'),
+      'project-b': join(projectsDir, 'project-b'),
+    };
+    workspaceStore = {
+      listProjectIds: () => Object.keys(homes),
+      getProjectHome: (id: string) => homes[id],
+      getWorkspace: () => ({}),
+    };
     eventBus = new EventBus();
     vi.clearAllMocks();
   });
 
-  afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
-  });
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-  it('skips agents with no pending candidates (no model call, no ops)', async () => {
-    const memoryStore = createMemoryStore({ projectsDir });
-    const namedAgentStore = { listAgents: () => [fakeAgent()] } as any;
+  function store() {
+    return createMemoryStore({ projectsDir, workspaceStore });
+  }
 
-    const consolidation = createMemoryConsolidation({
-      projectsDir,
+  function makeConsolidation(memoryStore = store()) {
+    return createMemoryConsolidation({
       memoryStore,
-      namedAgentStore,
+      workspaceStore,
+      namedAgentStore: {
+        getDefaultAgent: (projectId?: string) => fakeAgent({ id: projectId ?? 'default' }),
+      },
       eventBus,
       config: { CLAUDE_MODEL: 'claude-sonnet-4-6' } as any,
     });
+  }
 
-    const result = await consolidation.runConsolidation();
-
-    expect(result).toEqual({ agentsProcessed: 0, opsApplied: 0, candidatesArchived: 0 });
-    expect(runAgentTask).not.toHaveBeenCalled();
-  });
-
-  it('applies scripted ops, regenerates MEMORY.md, and archives the candidate', async () => {
-    const memoryStore = createMemoryStore({ projectsDir });
-    const namedAgentStore = { listAgents: () => [fakeAgent()] } as any;
-
-    const candidateFile = await writeMemoryCandidate({ projectsDir }, 'test-agent', {
-      title: 'Favorite color',
-      content: "The owner's favorite color is teal.",
+  it('processes each project independently and archives only successful candidates', async () => {
+    const memoryStore = store();
+    const first = await writeMemoryCandidate({ memoryStore }, 'project-a', {
+      title: 'Same title',
+      content: 'A private preference.',
       source: 'session-retrospective',
-      sessionId: 'sess-1',
+      sessionId: 'a',
     });
-
-    vi.mocked(runAgentTask).mockResolvedValue({
-      taskId: 'mock-task',
-      result: JSON.stringify({
-        ops: [
-          {
-            action: 'create',
-            path: 'preferences.md',
-            content: "# Preferences\n\nThe owner's favorite color is teal.",
-          },
-        ],
-      }),
-      durationMs: 10,
-      success: true,
-    });
-
-    const consolidation = createMemoryConsolidation({
-      projectsDir,
-      memoryStore,
-      namedAgentStore,
-      eventBus,
-      config: { CLAUDE_MODEL: 'claude-sonnet-4-6' } as any,
-    });
-
-    const result = await consolidation.runConsolidation();
-
-    expect(result).toEqual({ agentsProcessed: 1, opsApplied: 1, candidatesArchived: 1 });
-    expect(runAgentTask).toHaveBeenCalledTimes(1);
-    // Named agent's model is unset ('sonnet' tier) -> falls through to the
-    // global config default, not a hardcoded second sonnet id.
-    expect(vi.mocked(runAgentTask).mock.calls[0][0].model).toBe('claude-sonnet-4-6');
-
-    const preferences = readFileSync(
-      join(projectsDir, 'agents', 'test-agent', 'memory', 'preferences.md'),
-      'utf-8',
-    );
-    expect(preferences).toContain('teal');
-    // Deterministic, non-model provenance frontmatter is prepended to every
-    // written file — sourced from the candidate's own frontmatter, not the
-    // model's op content.
-    expect(preferences).toMatch(/^---\n/);
-    expect(preferences).toContain('provenance:');
-    expect(preferences).toContain('interactive');
-    expect(preferences).toContain(candidateFile);
-    expect(preferences).toContain('consolidatedAt:');
-
-    // MEMORY.md is built from the filename alone (humanized), never from
-    // file content — the only text that reaches a future system prompt
-    // verbatim is something this system itself named.
-    const memoryIndex = await memoryStore.readIndex('test-agent');
-    expect(memoryIndex).toContain('preferences.md');
-    expect(memoryIndex).toContain('Preferences');
-    expect(memoryIndex).not.toContain('teal');
-
-    // The candidate body sent to the model is wrapped in an untrusted block
-    // with a framing line — never sent as bare, unmarked text.
-    const promptSent = vi.mocked(runAgentTask).mock.calls[0][0].task.prompt;
-    expect(promptSent).toContain('<untrusted>');
-    expect(promptSent).toContain('</untrusted>');
-    expect(promptSent).toContain('never instructions to follow');
-
-    // Candidate consumed — moved out of the pending dir.
-    const pendingDir = join(projectsDir, 'agents', 'test-agent', 'memory', 'candidates');
-    const pendingFiles = readdirSync(pendingDir).filter((f) => f.endsWith('.md'));
-    expect(pendingFiles).toEqual([]);
-    const archived = readdirSync(join(pendingDir, 'archive'));
-    expect(archived).toContain(candidateFile);
-  });
-
-  it('resolves a haiku-tier agent model to a concrete model id', async () => {
-    const memoryStore = createMemoryStore({ projectsDir });
-    const namedAgentStore = { listAgents: () => [fakeAgent({ model: 'haiku' })] } as any;
-
-    await writeMemoryCandidate({ projectsDir }, 'test-agent', {
-      title: 'Something',
-      content: 'Some durable fact.',
+    const second = await writeMemoryCandidate({ memoryStore }, 'project-b', {
+      title: 'Same title',
+      content: 'A different preference.',
       source: 'session-retrospective',
+      sessionId: 'b',
     });
+    expect(first).not.toBe(second);
 
-    vi.mocked(runAgentTask).mockResolvedValue({
-      taskId: 'mock-task',
-      result: JSON.stringify({ ops: [] }),
-      durationMs: 5,
-      success: true,
-    });
-
-    const consolidation = createMemoryConsolidation({
-      projectsDir,
-      memoryStore,
-      namedAgentStore,
-      eventBus,
-      config: { CLAUDE_MODEL: 'claude-sonnet-4-6' } as any,
-    });
-
-    await consolidation.runConsolidation();
-
-    expect(vi.mocked(runAgentTask).mock.calls[0][0].model).toBe('claude-haiku-4-5');
-  });
-
-  it('caps applied ops at the deterministic guard even if the model proposes more', async () => {
-    const memoryStore = createMemoryStore({ projectsDir });
-    const namedAgentStore = { listAgents: () => [fakeAgent()] } as any;
-
-    await writeMemoryCandidate({ projectsDir }, 'test-agent', {
-      title: 'Bulk',
-      content: 'Bulk candidate.',
-      source: 'session-retrospective',
-    });
-
-    const EXCESSIVE_OP_COUNT = 15;
-    const ops = Array.from({ length: EXCESSIVE_OP_COUNT }, (_, i) => ({
-      action: 'create' as const,
-      path: `file-${i}.md`,
-      content: `content ${i}`,
-    }));
-
-    vi.mocked(runAgentTask).mockResolvedValue({
-      taskId: 'mock-task',
-      result: JSON.stringify({ ops }),
-      durationMs: 5,
-      success: true,
-    });
-
-    const consolidation = createMemoryConsolidation({
-      projectsDir,
-      memoryStore,
-      namedAgentStore,
-      eventBus,
-      config: { CLAUDE_MODEL: 'claude-sonnet-4-6' } as any,
-    });
-
-    const result = await consolidation.runConsolidation();
-
-    // MAX_CONSOLIDATION_OPS in memory-consolidation.ts is 10 — asserted by
-    // value here rather than importing the internal constant.
-    expect(result.opsApplied).toBe(10);
-    expect(result.candidatesArchived).toBe(0);
-    expect(
-      readdirSync(join(projectsDir, 'agents/test-agent/memory/candidates')).filter((file) =>
-        file.endsWith('.md'),
-      ),
-    ).toHaveLength(1);
-  });
-
-  it('skips an op that targets MEMORY.md directly (regenerated separately)', async () => {
-    const memoryStore = createMemoryStore({ projectsDir });
-    const namedAgentStore = { listAgents: () => [fakeAgent()] } as any;
-
-    await writeMemoryCandidate({ projectsDir }, 'test-agent', {
-      title: 'Sneaky',
-      content: 'Tries to overwrite the index.',
-      source: 'session-retrospective',
-    });
-
-    vi.mocked(runAgentTask).mockResolvedValue({
-      taskId: 'mock-task',
-      result: JSON.stringify({
-        ops: [{ action: 'update', path: 'MEMORY.md', content: 'hijacked' }],
-      }),
-      durationMs: 5,
-      success: true,
-    });
-
-    const consolidation = createMemoryConsolidation({
-      projectsDir,
-      memoryStore,
-      namedAgentStore,
-      eventBus,
-      config: { CLAUDE_MODEL: 'claude-sonnet-4-6' } as any,
-    });
-
-    const result = await consolidation.runConsolidation();
-
-    expect(result.opsApplied).toBe(0);
-    const memoryIndex = await memoryStore.readIndex('test-agent');
-    expect(memoryIndex).not.toContain('hijacked');
-    expect(result.candidatesArchived).toBe(0);
-  });
-
-  it.each([
-    { name: 'unsuccessful model call', success: false, result: '{"ops":[]}' },
-    { name: 'malformed JSON', success: true, result: 'not json' },
-    { name: 'missing ops', success: true, result: '{}' },
-    {
-      name: 'missing write content',
-      success: true,
-      result: '{"ops":[{"action":"create","path":"empty.md"}]}',
-    },
-  ])('retains pending sources after $name', async (response) => {
-    const memoryStore = createMemoryStore({ projectsDir });
-    const candidate = await writeMemoryCandidate({ projectsDir }, 'test-agent', {
-      title: 'Keep this',
-      content: 'A durable source fact.',
-      source: 'session-retrospective',
-    });
-    const pendingDir = join(projectsDir, 'agents/test-agent/memory/candidates');
-    const original = readFileSync(join(pendingDir, candidate!), 'utf8');
-    vi.mocked(runAgentTask).mockResolvedValue({
-      taskId: 'failed-task',
-      durationMs: 1,
-      success: response.success,
-      result: response.result,
-    });
-    const consolidation = createMemoryConsolidation({
-      projectsDir,
-      memoryStore,
-      namedAgentStore: { listAgents: () => [fakeAgent()] } as any,
-      eventBus,
-      config: { CLAUDE_MODEL: 'claude-sonnet-4-6' } as any,
-    });
-    await expect(consolidation.runConsolidation()).rejects.toThrow(/consolidation/i);
-    expect(readdirSync(pendingDir)).toEqual([candidate]);
-    expect(readFileSync(join(pendingDir, candidate!), 'utf8')).toBe(original);
-    expect(await memoryStore.list('test-agent')).toEqual([]);
-  });
-
-  it.each(['rejected', 'thrown'])(
-    'retains every candidate after a %s partial write and can retry',
-    async (failure) => {
-      const memoryStore = createMemoryStore({ projectsDir });
-      const candidates = await Promise.all(
-        ['First source', 'Second source'].map((title) =>
-          writeMemoryCandidate({ projectsDir }, 'test-agent', {
-            title,
-            content: title,
-            source: 'session-retrospective',
-          }),
-        ),
-      );
-      const pendingDir = join(projectsDir, 'agents/test-agent/memory/candidates');
-      const originals = candidates.map((file) => readFileSync(join(pendingDir, file!), 'utf8'));
-      const ops = [
-        { action: 'create', path: 'first.md', content: 'First fact' },
-        { action: 'create', path: 'second.md', content: 'Second fact' },
-      ];
-      vi.mocked(runAgentTask).mockResolvedValue({
-        taskId: 'task',
-        durationMs: 1,
+    vi.mocked(runAgentTask)
+      .mockResolvedValueOnce({
+        taskId: 'a',
+        result: JSON.stringify({ ops: [{ action: 'create', path: 'facts/a.md', content: 'A' }] }),
         success: true,
-        result: JSON.stringify({ ops }),
+        durationMs: 1,
+      })
+      .mockResolvedValueOnce({
+        taskId: 'b',
+        result: JSON.stringify({ ops: [{ action: 'create', path: 'facts/b.md', content: 'B' }] }),
+        success: true,
+        durationMs: 1,
       });
-      const actualWrite = memoryStore.write.bind(memoryStore);
-      const write = vi
-        .spyOn(memoryStore, 'write')
-        .mockImplementation(async (agent, path, content) => {
-          if (path === 'second.md') {
-            if (failure === 'thrown') throw new Error('Temporary disk error');
-            return { ok: false, error: 'Temporary write rejection' };
-          }
-          return actualWrite(agent, path, content);
-        });
-      const consolidation = createMemoryConsolidation({
-        projectsDir,
-        memoryStore,
-        namedAgentStore: { listAgents: () => [fakeAgent()] } as any,
-        eventBus,
-        config: { CLAUDE_MODEL: 'claude-sonnet-4-6' } as any,
-      });
-      expect(await consolidation.runConsolidation()).toMatchObject({
-        opsApplied: 1,
-        candidatesArchived: 0,
-      });
-      expect(readdirSync(pendingDir).sort()).toEqual([...candidates].sort());
-      expect(candidates.map((file) => readFileSync(join(pendingDir, file!), 'utf8'))).toEqual(
-        originals,
-      );
-      expect(await memoryStore.readIndex('test-agent')).toContain('first.md');
-      write.mockRestore();
-      expect(await consolidation.runConsolidation()).toMatchObject({
-        opsApplied: 2,
-        candidatesArchived: 2,
-      });
-      expect(readdirSync(pendingDir)).toEqual(['archive']);
-      expect(readdirSync(join(pendingDir, 'archive')).sort()).toEqual([...candidates].sort());
-      expect(await memoryStore.read('test-agent', 'second.md')).toContain('Second fact');
-    },
-  );
 
-  it('retains candidates when actual memory budget or index regeneration rejects writes', async () => {
-    const agentDir = join(projectsDir, 'agents/test-agent');
-    mkdirSync(agentDir, { recursive: true });
-    writeFileSync(join(agentDir, 'agent.yaml'), 'memory:\n  maxFiles: 1\n');
-    const memoryStore = createMemoryStore({ projectsDir });
-    const candidate = await writeMemoryCandidate({ projectsDir }, 'test-agent', {
-      title: 'Keep this',
-      content: 'Do not discard an oversized proposal.',
+    const result = await makeConsolidation(memoryStore).runConsolidation();
+    expect(result).toEqual({ projectsProcessed: 2, opsApplied: 2, candidatesArchived: 2 });
+    expect(runAgentTask).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ task: expect.objectContaining({ projectId: 'project-a' }) }),
+    );
+    expect(runAgentTask).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ task: expect.objectContaining({ projectId: 'project-b' }) }),
+    );
+    expect(await listPendingCandidates(memoryStore, 'project-a')).toEqual([]);
+    expect(await listPendingCandidates(memoryStore, 'project-b')).toEqual([]);
+    expect(readFileSync(join(homes['project-a'], 'memory/facts/a.md'), 'utf8')).toContain('A');
+    expect(readFileSync(join(homes['project-b'], 'memory/facts/b.md'), 'utf8')).toContain('B');
+    expect(readdirSync(join(homes['project-a'], 'memory/candidates/archive'))).toContain(first);
+  });
+
+  it('keeps candidates pending when the model response is invalid', async () => {
+    const memoryStore = store();
+    const filename = await writeMemoryCandidate({ memoryStore }, 'project-a', {
+      title: 'Retry me',
+      content: 'Durable fact.',
       source: 'session-retrospective',
     });
     vi.mocked(runAgentTask).mockResolvedValue({
-      taskId: 'budget-task',
-      durationMs: 1,
+      taskId: 'bad',
+      result: 'not json',
       success: true,
+      durationMs: 1,
+    });
+    await expect(makeConsolidation(memoryStore).runConsolidation()).rejects.toThrow(
+      'Invalid memory consolidation',
+    );
+    expect((await listPendingCandidates(memoryStore, 'project-a')).map((c) => c.filename)).toEqual([
+      filename,
+    ]);
+  });
+
+  it('keeps candidates pending after a partial operation failure', async () => {
+    const memoryStore = store();
+    await writeMemoryCandidate({ memoryStore }, 'project-a', {
+      title: 'Partial',
+      content: 'Keep source.',
+      source: 'session-retrospective',
+    });
+    vi.mocked(runAgentTask).mockResolvedValue({
+      taskId: 'partial',
       result: JSON.stringify({
         ops: [
-          { action: 'create', path: 'first.md', content: 'First fact' },
-          { action: 'create', path: 'second.md', content: 'Second fact' },
+          { action: 'create', path: 'first.md', content: 'first' },
+          { action: 'create', path: '../unsafe.md', content: 'must reject' },
         ],
       }),
+      success: true,
+      durationMs: 1,
+    });
+    await expect(makeConsolidation(memoryStore).runConsolidation()).rejects.toThrow(
+      'Memory consolidation incomplete',
+    );
+    expect(await listPendingCandidates(memoryStore, 'project-a')).toHaveLength(1);
+  });
+
+  it('does not apply model operations when a candidate changes during the model call', async () => {
+    const memoryStore = store();
+    const filename = await writeMemoryCandidate({ memoryStore }, 'project-a', {
+      title: 'Changed while waiting',
+      content: 'Original source.',
+      source: 'session-retrospective',
+    });
+    vi.mocked(runAgentTask).mockImplementationOnce(async () => {
+      const candidatePath = join(homes['project-a'], 'memory/candidates', filename!);
+      const current = readFileSync(candidatePath, 'utf8');
+      writeFileSync(candidatePath, `${current}\nExternal edit\n`);
+      return {
+        taskId: 'changed',
+        result: JSON.stringify({ ops: [{ action: 'create', path: 'stale.md', content: 'stale' }] }),
+        success: true,
+        durationMs: 1,
+      };
+    });
+    await expect(makeConsolidation(memoryStore).runConsolidation()).rejects.toThrow(
+      'Memory consolidation incomplete',
+    );
+    expect(
+      readFileSync(join(homes['project-a'], 'memory/candidates', filename!), 'utf8'),
+    ).toContain('External edit');
+    expect(
+      readFileSync(join(homes['project-a'], 'memory/candidates', filename!), 'utf8'),
+    ).not.toContain('stale.md');
+  });
+
+  it('rejects a stale update when a memory note changes during the model call', async () => {
+    const memoryStore = store();
+    await memoryStore.write('project-a', 'facts/current.md', 'Original');
+    await writeMemoryCandidate({ memoryStore }, 'project-a', {
+      title: 'Update note',
+      content: 'New fact.',
+      source: 'session-retrospective',
+    });
+    vi.mocked(runAgentTask).mockImplementationOnce(async () => {
+      writeFileSync(join(homes['project-a'], 'memory/facts/current.md'), 'External edit');
+      return {
+        taskId: 'stale-note',
+        result: JSON.stringify({
+          ops: [{ action: 'update', path: 'facts/current.md', content: 'Model edit' }],
+        }),
+        success: true,
+        durationMs: 1,
+      };
+    });
+    await expect(makeConsolidation(memoryStore).runConsolidation()).rejects.toThrow(
+      'Memory consolidation',
+    );
+    expect(readFileSync(join(homes['project-a'], 'memory/facts/current.md'), 'utf8')).toBe(
+      'External edit',
+    );
+    expect(await listPendingCandidates(memoryStore, 'project-a')).toHaveLength(1);
+  });
+
+  it('passes the project agent model tier and max turns to dispatch', async () => {
+    const memoryStore = store();
+    await writeMemoryCandidate({ memoryStore }, 'project-a', {
+      title: 'Scoped model',
+      content: 'Local setting.',
+      source: 'session-retrospective',
+    });
+    vi.mocked(runAgentTask).mockResolvedValue({
+      taskId: 'scoped',
+      result: JSON.stringify({ ops: [] }),
+      success: true,
+      durationMs: 1,
     });
     const consolidation = createMemoryConsolidation({
-      projectsDir,
       memoryStore,
-      namedAgentStore: { listAgents: () => [fakeAgent()] } as any,
+      workspaceStore,
+      namedAgentStore: {
+        getDefaultAgent: () => fakeAgent({ model: 'sonnet', maxTurns: 7 }),
+      },
       eventBus,
-      config: { CLAUDE_MODEL: 'claude-sonnet-4-6' } as any,
+      config: { CLAUDE_MODEL: 'global-model', RAVEN_AGENT_MAX_TURNS: 25 } as any,
     });
-    expect(await consolidation.runConsolidation()).toMatchObject({
-      opsApplied: 1,
-      candidatesArchived: 0,
+    await consolidation.runConsolidation();
+    expect(runAgentTask).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'claude-sonnet-5', maxTurns: 7 }),
+    );
+  });
+
+  it('preserves an index edited while the model was running', async () => {
+    const memoryStore = store();
+    await memoryStore.write('project-a', 'MEMORY.md', '# Original index\n');
+    await writeMemoryCandidate({ memoryStore }, 'project-a', {
+      title: 'Index race',
+      content: 'Keep candidate.',
+      source: 'session-retrospective',
     });
-    expect(readdirSync(join(agentDir, 'memory/candidates'))).toEqual([candidate]);
-    expect(await memoryStore.readIndex('test-agent')).toBeNull();
-    expect(await memoryStore.list('test-agent')).toEqual(['first.md']);
+    vi.mocked(runAgentTask).mockImplementationOnce(async () => {
+      writeFileSync(join(homes['project-a'], 'memory/MEMORY.md'), '# External index edit\n');
+      return {
+        taskId: 'index-race',
+        result: JSON.stringify({ ops: [] }),
+        success: true,
+        durationMs: 1,
+      };
+    });
+    await expect(makeConsolidation(memoryStore).runConsolidation()).rejects.toThrow(
+      'Memory file changed during update',
+    );
+    expect(readFileSync(join(homes['project-a'], 'memory/MEMORY.md'), 'utf8')).toBe(
+      '# External index edit\n',
+    );
+    expect(await listPendingCandidates(memoryStore, 'project-a')).toHaveLength(1);
   });
 });

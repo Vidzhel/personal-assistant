@@ -1,4 +1,4 @@
-import { createLogger, generateId } from '@raven/shared';
+import { createLogger, generateId, META_PROJECT_ID } from '@raven/shared';
 import type { AgentTask, McpServerConfig, PermissionTier, SubAgentDefinition } from '@raven/shared';
 import type { MessageStore } from '../session-manager/message-store.ts';
 import type { SessionManager } from '../session-manager/session-manager.ts';
@@ -321,8 +321,11 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       };
     }
 
-    // Per-agent identity used for memory MCP and system prompt injection.
-    const memoryAgentName = task.namedAgentId;
+    // Named project agents share project memory; auxiliary validators have no memory tools.
+    const memoryProjectId =
+      task.namedAgentId && task.internal !== 'validator'
+        ? (task.projectId ?? META_PROJECT_ID)
+        : undefined;
 
     const scope: ScopeContext = {
       role: resolveAgentRole(task),
@@ -339,14 +342,13 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       sdkMcpServers['raven'] = ravenMcp;
     }
 
-    // Per-agent memory MCP: in-process, scoped to this agent's own directory.
-    // Identity is the named agent id, which equals the agent's YAML name (id === name).
-    if (opts.memoryStore && memoryAgentName) {
+    // All named agents in this project share the same bounded memory tools.
+    if (opts.memoryStore && memoryProjectId) {
       sdkMcpServers['memory'] = createMemoryMcp({
         signal,
         lifetime: toolCalls,
         memoryStore: opts.memoryStore,
-        agentName: memoryAgentName,
+        projectId: memoryProjectId,
       });
     }
 
@@ -355,8 +357,8 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       hasSubAgents: Object.keys(agentDefinitions).length > 0,
       knowledgeTools: opts.ravenMcpDeps ? getAvailableKnowledgeTools(opts.ravenMcpDeps, scope) : [],
     });
-    if (opts.memoryStore && memoryAgentName) {
-      const memoryIndex = await opts.memoryStore.readIndex(memoryAgentName);
+    if (opts.memoryStore && memoryProjectId) {
+      const memoryIndex = await opts.memoryStore.readIndex(memoryProjectId);
       if (memoryIndex) {
         systemPrompt = `${systemPrompt}\n\n${formatMemoryBlock(memoryIndex)}`;
       }
@@ -377,7 +379,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
     if (opts.ravenMcpDeps) {
       allowedTools.push('mcp__raven__*');
     }
-    if (opts.memoryStore && memoryAgentName) {
+    if (opts.memoryStore && memoryProjectId) {
       allowedTools.push('mcp__memory__*');
     }
     const hasSubAgents = Object.keys(agentDefinitions).length > 0;

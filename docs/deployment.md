@@ -33,7 +33,7 @@ Compose creates named volumes; it does not mount the checkout's working data.
 | Volume           | Container path       | Contents                                                                                                       |
 | ---------------- | -------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `raven_data`     | `/app/data`          | SQLite, Raven sessions, logs, knowledge Markdown, definition Git metadata                                      |
-| `raven_projects` | `/app/projects`      | Project context, named agents, templates, schedules, agent memory, board tasks, execution trees and agent runs |
+| `raven_projects` | `/app/projects`      | Project context, named agents, templates, schedules, project memory, board tasks, execution trees and agent runs |
 | `raven_library`  | `/app/library`       | Capability definitions and deliberately installed vendor plugins                                               |
 | `raven_config`   | `/app/config`        | Runtime configuration files                                                                                    |
 | `raven_claude`   | `/home/node/.claude` | Claude authentication/configuration and SDK session transcripts                                                |

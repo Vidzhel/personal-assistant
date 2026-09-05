@@ -5,14 +5,15 @@ import type { NamedAgentRecord } from '@/lib/api-client';
 
 // eslint-disable-next-line max-lines-per-function -- React component
 export function AgentCard({ agent }: { agent: NamedAgentRecord }) {
-  const { openEditForm, deleteAgent, showHistory, showMemoryPanel } = useAgentStore();
+  const { openEditForm, deleteAgent, showHistory, showMemoryPanel, availableProjects } =
+    useAgentStore();
 
   return (
     <div
       className="rounded-lg border p-4 space-y-3"
       style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}
     >
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           {agent.isActive && (
             <span
@@ -49,11 +50,11 @@ export function AgentCard({ agent }: { agent: NamedAgentRecord }) {
           </button>
           <button
             onClick={() => void showMemoryPanel(agent.id)}
-            className="p-1 rounded hover:opacity-80 text-xs"
+            className="px-2 py-2 rounded hover:opacity-80 text-xs"
             style={{ color: 'var(--text-muted)' }}
             title="View Memory"
           >
-            &#129504;
+            Memory
           </button>
           {!agent.isDefault && (
             <button
@@ -71,6 +72,13 @@ export function AgentCard({ agent }: { agent: NamedAgentRecord }) {
           )}
         </div>
       </div>
+
+      <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+        {agent.projectId
+          ? (availableProjects.find((project) => project.id === agent.projectId)?.name ??
+            agent.projectId)
+          : 'Global agent'}
+      </p>
 
       {agent.description && (
         <p className="text-xs" style={{ color: 'var(--text-muted)' }}>

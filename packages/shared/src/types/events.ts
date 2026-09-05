@@ -1051,6 +1051,7 @@ export interface AgentConfigCreatedEvent extends BaseEvent {
   payload: {
     agentId: string;
     name: string;
+    filePaths?: string[];
   };
 }
 
@@ -1059,6 +1060,7 @@ export interface AgentConfigUpdatedEvent extends BaseEvent {
   payload: {
     agentId: string;
     name: string;
+    filePaths?: string[];
     changes: string[];
   };
 }
@@ -1068,6 +1070,7 @@ export interface AgentConfigDeletedEvent extends BaseEvent {
   payload: {
     agentId: string;
     name: string;
+    filePaths?: string[];
   };
 }
 

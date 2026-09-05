@@ -60,11 +60,18 @@ describe('parseMemoryCandidateProposals', () => {
 
 describe('candidate file lifecycle (write / list / archive)', () => {
   let tmpDir: string;
-  let projectsDir: string;
+  let memoryDir: string;
+  let memoryStore: {
+    withDirectory: (
+      projectId: string,
+      operation: (dir: string) => Promise<unknown>,
+    ) => Promise<unknown>;
+  };
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), 'memory-candidates-'));
-    projectsDir = join(tmpDir, 'projects');
+    memoryDir = join(tmpDir, 'memory');
+    memoryStore = { withDirectory: (_projectId, operation) => operation(memoryDir) };
   });
 
   afterEach(() => {
@@ -72,7 +79,7 @@ describe('candidate file lifecycle (write / list / archive)', () => {
   });
 
   it('writes a candidate that lists back with correct frontmatter and body', async () => {
-    const filename = await writeMemoryCandidate({ projectsDir }, 'test-agent', {
+    const filename = await writeMemoryCandidate({ memoryStore: memoryStore as any }, 'project-1', {
       title: 'Favorite color',
       content: "The owner's favorite color is teal.",
       source: 'session-retrospective',
@@ -80,9 +87,9 @@ describe('candidate file lifecycle (write / list / archive)', () => {
     });
 
     expect(filename).toBeDefined();
-    expect(filename).toMatch(/^\d{4}-\d{2}-\d{2}-favorite-color\.md$/);
+    expect(filename).toMatch(/^\d{4}-\d{2}-\d{2}-favorite-color-[0-9a-f-]+\.md$/);
 
-    const pending = await listPendingCandidates(projectsDir, 'test-agent');
+    const pending = await listPendingCandidates(memoryStore as any, 'project-1');
     expect(pending).toHaveLength(1);
     expect(pending[0].filename).toBe(filename);
     expect(pending[0].frontmatter).toMatchObject({
@@ -96,58 +103,70 @@ describe('candidate file lifecycle (write / list / archive)', () => {
   });
 
   it('derives provenance from source for system-retrospective candidates', async () => {
-    await writeMemoryCandidate({ projectsDir }, 'test-agent', {
+    await writeMemoryCandidate({ memoryStore: memoryStore as any }, 'project-1', {
       title: 'System health',
       content: 'Everything is fine.',
       source: 'system-retrospective',
     });
 
-    const pending = await listPendingCandidates(projectsDir, 'test-agent');
+    const pending = await listPendingCandidates(memoryStore as any, 'project-1');
     expect(pending[0].frontmatter.provenance).toBe('system');
     expect(pending[0].frontmatter.sessionId).toBeUndefined();
   });
 
   it('returns [] for an agent with no candidates dir yet', async () => {
-    const pending = await listPendingCandidates(projectsDir, 'brand-new-agent');
+    const pending = await listPendingCandidates(memoryStore as any, 'brand-new-project');
     expect(pending).toEqual([]);
   });
 
   it('archiveCandidate moves the file so it no longer lists as pending', async () => {
-    const filename = (await writeMemoryCandidate({ projectsDir }, 'test-agent', {
+    const filename = (await writeMemoryCandidate({ memoryStore: memoryStore as any }, 'project-1', {
       title: 'To archive',
       content: 'Will be consumed.',
       source: 'session-retrospective',
     })) as string;
 
-    await archiveCandidate(projectsDir, 'test-agent', filename);
+    const [candidate] = await listPendingCandidates(memoryStore as any, 'project-1');
+    await archiveCandidate(memoryStore as any, 'project-1', candidate);
 
-    const pending = await listPendingCandidates(projectsDir, 'test-agent');
+    const pending = await listPendingCandidates(memoryStore as any, 'project-1');
     expect(pending).toEqual([]);
 
-    const archived = readdirSync(
-      join(projectsDir, 'agents', 'test-agent', 'memory', 'candidates', 'archive'),
-    );
+    const archived = readdirSync(join(memoryDir, 'candidates', 'archive'));
     expect(archived).toContain(filename);
   });
 
+  it('does not archive a candidate whose bytes changed after consolidation read', async () => {
+    await writeMemoryCandidate({ memoryStore: memoryStore as any }, 'project-1', {
+      title: 'CAS candidate',
+      content: 'Original body.',
+      source: 'session-retrospective',
+    });
+    const [candidate] = await listPendingCandidates(memoryStore as any, 'project-1');
+    writeFileSync(join(memoryDir, 'candidates', candidate.filename), 'externally changed');
+
+    expect(await archiveCandidate(memoryStore as any, 'project-1', candidate)).toBe(false);
+    expect(readdirSync(join(memoryDir, 'candidates'))).toContain(candidate.filename);
+  });
+
   it('drops a candidate file with no YAML frontmatter (logged, not thrown)', async () => {
-    const dir = join(projectsDir, 'agents', 'test-agent', 'memory', 'candidates');
+    const dir = join(memoryDir, 'candidates');
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, '2026-01-01-no-frontmatter.md'), '# Just a plain markdown file\n');
 
-    const pending = await listPendingCandidates(projectsDir, 'test-agent');
+    const pending = await listPendingCandidates(memoryStore as any, 'project-1');
     expect(pending).toEqual([]);
   });
 
   it('drops a candidate file with malformed frontmatter fields', async () => {
-    const dir = join(projectsDir, 'agents', 'test-agent', 'memory', 'candidates');
+    const dir = join(memoryDir, 'candidates');
     mkdirSync(dir, { recursive: true });
     writeFileSync(
       join(dir, '2026-01-01-bad.md'),
       '---\nsource: not-a-real-source\nprovenance: interactive\ncreatedAt: "2026-01-01"\nstatus: pending\n---\n\nbody\n',
     );
 
-    const pending = await listPendingCandidates(projectsDir, 'test-agent');
+    const pending = await listPendingCandidates(memoryStore as any, 'project-1');
     expect(pending).toEqual([]);
   });
 });

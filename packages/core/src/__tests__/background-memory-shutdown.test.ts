@@ -47,6 +47,7 @@ function namedAgents(): NamedAgentStore {
 describe('direct background model callers stop before their stores are disposed', () => {
   let root: string;
   let projectsDir: string;
+  let projectHome: string;
   let eventBus: EventBus;
   let events: RavenEvent[];
   let heartbeat: Heartbeat | undefined;
@@ -56,6 +57,7 @@ describe('direct background model callers stop before their stores are disposed'
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'raven-background-stop-'));
     projectsDir = join(root, 'projects');
+    projectHome = join(projectsDir, 'raven-project');
     setConfig(config);
     eventBus = new EventBus();
     events = [];
@@ -86,10 +88,21 @@ describe('direct background model callers stop before their stores are disposed'
     return { backend, options: () => options!, resolve: (value: BackendResult) => resolve(value) };
   }
 
-  function makeConsolidation(memoryStore = createMemoryStore({ projectsDir })) {
-    consolidation = createMemoryConsolidation({
+  function makeStore() {
+    return createMemoryStore({
       projectsDir,
+      workspaceStore: {
+        getProjectHome: () => projectHome,
+        getWorkspace: () => ({}),
+        listProjectIds: () => ['raven-project'],
+      },
+    } as any);
+  }
+
+  function makeConsolidation(memoryStore = makeStore()) {
+    consolidation = createMemoryConsolidation({
       memoryStore,
+      workspaceStore: { listProjectIds: () => ['raven-project'] },
       namedAgentStore: namedAgents(),
       eventBus,
       config,
@@ -127,12 +140,13 @@ describe('direct background model callers stop before their stores are disposed'
 
   it('keeps candidates pending when a held consolidation is stopped before model completion', async () => {
     const held = holdBackend();
-    const candidate = await writeMemoryCandidate({ projectsDir }, 'raven', {
+    const memoryStore = makeStore();
+    const candidate = await writeMemoryCandidate({ memoryStore }, 'raven-project', {
       title: 'Preference',
       content: 'Keep concise responses.',
       source: 'session-retrospective',
     });
-    const pendingDir = join(projectsDir, 'agents/raven/memory/candidates');
+    const pendingDir = join(projectHome, 'memory/candidates');
     const candidateBefore = readFileSync(join(pendingDir, candidate!), 'utf8');
     const operation = makeConsolidation()
       .runConsolidation()
@@ -150,7 +164,7 @@ describe('direct background model callers stop before their stores are disposed'
       errors: [],
     });
     await new Promise((resolve) => setImmediate(resolve));
-    expect(readdirSync(join(projectsDir, 'agents/raven/memory'))).toEqual(['candidates']);
+    expect(readdirSync(join(projectHome, 'memory'))).toEqual(['candidates']);
     expect(readFileSync(join(pendingDir, candidate!), 'utf8')).toBe(candidateBefore);
     expect(events).toEqual([]);
     await expect(consolidation!.runConsolidation()).rejects.toMatchObject({ name: 'AbortError' });
@@ -167,25 +181,25 @@ describe('direct background model callers stop before their stores are disposed'
       success: true,
       errors: [],
     }));
-    await writeMemoryCandidate({ projectsDir }, 'raven', {
+    const memoryStore = makeStore();
+    await writeMemoryCandidate({ memoryStore }, 'raven-project', {
       title: 'Preference',
       content: 'Keep concise responses.',
       source: 'session-retrospective',
     });
-    const memoryStore = createMemoryStore({ projectsDir });
-    const actualWrite = memoryStore.write.bind(memoryStore);
+    const actualApply = memoryStore.apply.bind(memoryStore);
     let release!: () => void;
     const hold = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const write = vi.spyOn(memoryStore, 'write').mockImplementationOnce(async (...args) => {
+    const apply = vi.spyOn(memoryStore, 'apply').mockImplementationOnce(async (...args) => {
       await hold;
-      return actualWrite(...args);
+      return actualApply(...args);
     });
     const operation = makeConsolidation(memoryStore)
       .runConsolidation()
       .catch((error: unknown) => error);
-    await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(apply).toHaveBeenCalledTimes(1));
     let stopped = false;
     const stopping = consolidation!.stop().then(() => {
       stopped = true;
@@ -195,8 +209,8 @@ describe('direct background model callers stop before their stores are disposed'
     release();
     await stopping;
     expect(await operation).toBeInstanceOf(DOMException);
-    expect(write).toHaveBeenCalledTimes(1);
-    const memoryDir = join(projectsDir, 'agents/raven/memory');
+    expect(apply).toHaveBeenCalledTimes(1);
+    const memoryDir = join(projectHome, 'memory');
     expect(readFileSync(join(memoryDir, 'first.md'), 'utf8')).toContain('Already admitted write');
     expect(existsSync(join(memoryDir, 'second.md'))).toBe(false);
     expect(existsSync(join(memoryDir, 'MEMORY.md'))).toBe(false);

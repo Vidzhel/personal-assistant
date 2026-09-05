@@ -51,6 +51,8 @@ await initializeRuntime({ root, seedDir: join(repoRoot, 'deployment/seeds') });
 const { createRaven } = await compiled('raven.js');
 const { loadConfig } = await compiled('config.js');
 const { createMemoryStore } = await compiled('agent-memory/memory-store.js');
+const { ProjectRegistry } = await compiled('project-registry/project-registry.js');
+const { createProjectWorkspaceStore } = await compiled('project-manager/project-workspace.js');
 const { gitAutoCommit } = await import(
   pathToFileURL(join(repoRoot, 'packages/shared/dist/index.js')).href
 );
@@ -206,9 +208,16 @@ async function seedState(migrations) {
     raven.db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='agent_tasks'"),
     undefined,
   );
-  const store = createMemoryStore({ projectsDir: paths.projectsDir });
-  assert.equal((await store.write('raven', 'smoke.md', memoryText)).ok, true);
-  const memoryPath = join(paths.projectsDir, 'agents/raven/memory/smoke.md');
+  const projectRegistry = new ProjectRegistry();
+  await projectRegistry.load(paths.projectsDir);
+  const workspaceStore = createProjectWorkspaceStore({
+    projectsDir: paths.projectsDir,
+    projectRoot: root,
+    projectRegistry,
+  });
+  const store = createMemoryStore({ projectsDir: paths.projectsDir, workspaceStore });
+  assert.equal((await store.write(project.id, 'smoke.md', memoryText)).ok, true);
+  const memoryPath = join(store.getDirectory(project.id), 'smoke.md');
   await gitAutoCommit([memoryPath], 'test: persist compiled smoke memory', root);
   const context = readFileSync(join(paths.projectsDir, project.fsPath, 'context.md'), 'utf8');
   assert(context.includes(project.id));
@@ -257,9 +266,9 @@ async function verifyState(migrations) {
   const agents = await request('/api/agents');
   const agent = agents.find((item) => item.name === 'raven');
   assert(agent, 'Seeded default agent must survive restart');
-  const memories = await request(`/api/agents/${agent.id}/memory`);
+  const memories = await request(`/api/projects/${project.id}/memory`);
   assert(memories.some((item) => item.file === 'smoke.md' && item.content === memoryText));
-  assert.equal(git('show', 'HEAD:projects/agents/raven/memory/smoke.md'), memoryText.trim());
+  assert.equal(git('show', `HEAD:projects/${project.fsPath}/memory/smoke.md`), memoryText.trim());
   assert((await request(`/api/projects/${project.id}/sessions`)).length > 0);
   const task = await request(`/api/tasks/${state.task.id}`);
   assert.equal(task.title, state.task.title);

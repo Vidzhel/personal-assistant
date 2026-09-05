@@ -18,6 +18,8 @@ interface AgentState {
    * store isn't wired, or the request errored) — distinct from a
    * successful fetch that simply returned no files. */
   selectedAgentMemoryError: string | null;
+  memoryProjectId: string | null;
+  memoryLoading: boolean;
   showForm: boolean;
   editingAgentId: string | null;
   showTaskHistory: string | null;
@@ -35,6 +37,7 @@ interface AgentState {
   closeHistory: () => void;
   showMemoryPanel: (agentId: string) => Promise<void>;
   closeMemoryPanel: () => void;
+  selectMemoryProject: (projectId: string) => Promise<void>;
   createAgent: (data: {
     name: string;
     description?: string;
@@ -60,6 +63,8 @@ interface AgentState {
   deleteAgent: (id: string) => Promise<void>;
 }
 
+let memoryRequest = 0;
+
 // eslint-disable-next-line max-lines-per-function -- Zustand store factory
 export const useAgentStore = create<AgentState>((set, get) => ({
   agents: [],
@@ -68,6 +73,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   selectedAgentTasks: [],
   selectedAgentMemory: [],
   selectedAgentMemoryError: null,
+  memoryProjectId: null,
+  memoryLoading: false,
   showForm: false,
   editingAgentId: null,
   showTaskHistory: null,
@@ -119,19 +126,47 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   closeHistory: () => set({ showTaskHistory: null, selectedAgentTasks: [] }),
 
   showMemoryPanel: async (agentId) => {
-    set({ showMemory: agentId, selectedAgentMemory: [], selectedAgentMemoryError: null });
+    ++memoryRequest;
+    set({
+      showMemory: agentId,
+      memoryProjectId: null,
+      memoryLoading: false,
+      selectedAgentMemory: [],
+      selectedAgentMemoryError: null,
+    });
+    const projectId = get().agents.find((agent) => agent.id === agentId)?.projectId;
+    if (projectId) await get().selectMemoryProject(projectId);
+  },
+
+  selectMemoryProject: async (projectId) => {
+    const requestId = ++memoryRequest;
+    set({
+      memoryProjectId: projectId || null,
+      selectedAgentMemory: [],
+      selectedAgentMemoryError: null,
+      memoryLoading: !!projectId,
+    });
+    if (!projectId) return;
     try {
-      const memory = await api.getAgentMemory(agentId);
-      set({ selectedAgentMemory: memory });
+      const memory = await api.getProjectMemory(projectId);
+      if (requestId === memoryRequest) set({ selectedAgentMemory: memory });
     } catch (err) {
-      // A failed fetch must not render the same as "this agent has no
-      // memory yet" — surface it so the panel can show it distinctly.
-      set({ selectedAgentMemoryError: (err as Error).message });
+      if (requestId === memoryRequest) set({ selectedAgentMemoryError: (err as Error).message });
+    } finally {
+      if (requestId === memoryRequest) set({ memoryLoading: false });
     }
   },
 
-  closeMemoryPanel: () =>
-    set({ showMemory: null, selectedAgentMemory: [], selectedAgentMemoryError: null }),
+  closeMemoryPanel: () => {
+    ++memoryRequest;
+    set({
+      showMemory: null,
+      memoryProjectId: null,
+      memoryLoading: false,
+      selectedAgentMemory: [],
+      selectedAgentMemoryError: null,
+    });
+  },
 
   createAgent: async (data) => {
     set({ loading: true, error: null });

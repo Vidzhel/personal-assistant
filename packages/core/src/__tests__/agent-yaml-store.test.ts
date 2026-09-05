@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,7 +18,6 @@ function makeAgent(overrides: Partial<AgentYaml> = {}): AgentYaml {
     isDefault: false,
     model: 'sonnet',
     maxTurns: 15,
-    memory: { maxFiles: 30, maxTotalKb: 64 },
     ...overrides,
   };
 }
@@ -114,5 +113,37 @@ describe('AgentYamlStore', () => {
     await expect(
       store.updateAgent(tmpDir, 'validate-update', { model: 'invalid-model' as any }),
     ).rejects.toThrow();
+  });
+
+  it('does not adopt an existing flat or directory agent path', async () => {
+    mkdirSync(join(tmpDir, 'agents'), { recursive: true });
+    writeFileSync(join(tmpDir, 'agents', 'flat-agent.yaml'), 'reserved\n');
+    await expect(store.createAgent(tmpDir, makeAgent({ name: 'flat-agent' }))).rejects.toThrow(
+      /already exists/,
+    );
+
+    mkdirSync(join(tmpDir, 'agents', 'dir-agent'), { recursive: true });
+    writeFileSync(join(tmpDir, 'agents', 'dir-agent', 'keep.txt'), 'keep');
+    await expect(store.createAgent(tmpDir, makeAgent({ name: 'dir-agent' }))).rejects.toThrow(
+      /already exists/,
+    );
+    expect(existsSync(join(tmpDir, 'agents', 'dir-agent', 'keep.txt'))).toBe(true);
+  });
+
+  it('rejects serialized definitions larger than the bounded file size', async () => {
+    await expect(
+      store.createAgent(
+        tmpDir,
+        makeAgent({ name: 'too-large', description: 'x'.repeat(1_048_577) }),
+      ),
+    ).rejects.toThrow(/maximum size/);
+  });
+
+  it('deletes only the known YAML and preserves unrelated files', async () => {
+    await store.createAgent(tmpDir, makeAgent({ name: 'has-extra' }));
+    writeFileSync(join(tmpDir, 'agents', 'has-extra', 'keep.txt'), 'keep');
+    await store.deleteAgent(tmpDir, 'has-extra');
+    expect(existsSync(join(tmpDir, 'agents', 'has-extra', 'agent.yaml'))).toBe(false);
+    expect(existsSync(join(tmpDir, 'agents', 'has-extra', 'keep.txt'))).toBe(true);
   });
 });

@@ -10,7 +10,7 @@ dashboard. Claude and Codex can both develop the project using the same guide.
 - **Project chats** — persistent sessions, streaming replies, recoverable drafts,
   task controls and approval decisions.
 - **Learning** — interactive retrospectives produce candidate files; consolidation
-  promotes durable agent memory and retains candidates when an operation fails.
+  promotes durable project memory and retains candidates when an operation fails.
 - **Extension from chat** — create and activate skills, agents, templates and
   schedules through the existing runtime tools.
 - **Bounded reminders** — deterministic intents have budgets, cooldowns and expiry;
@@ -18,12 +18,13 @@ dashboard. Claude and Codex can both develop the project using the same guide.
 - **Optional integrations** — TickTick tasks, Gmail monitoring, Google Workspace
   through the gws CLI, Telegram delivery and Gemini transcription.
 - **Optional graph knowledge** — linked knowledge and retrieval backed by Neo4j;
-  chat and file-based agent memory work with the graph disabled.
+  chat and file-based project memory work with the graph disabled.
 
 Integrations require their definitions, executables and credentials to be configured
 and explicitly bound where used. A fresh Docker install starts with no external
-capability bindings or schedules. Repository attachments and separate project-owned
-memory remain planned work.
+capability bindings or schedules. Projects support local agents, shared project
+memory and attachment configuration. Direct repository execution and mobile
+artifact previews remain in progress.
 
 ## Quick Start
 
@@ -158,7 +159,8 @@ authentication, model quality and account delivery remain separate canaries.
 
 The [W1 implementation](./_bmad-output/implementation-artifacts/tech-spec-w1-project-workspaces.md)
 is in progress after completed F1–F9. Workspace settings and sources now live in
-project YAML. Direct repository execution, project memory and mobile artifact
+project YAML. Agents share their project’s nested memory notes; local definitions
+override inherited agents. Direct repository execution and mobile artifact
 viewing follow in that plan. Project layouts may evolve around the small Raven
 anchors; repository indexes link to existing instructions without embeddings.
 

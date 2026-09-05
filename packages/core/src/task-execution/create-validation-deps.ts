@@ -33,7 +33,7 @@ function parseValidatorJson(text: string): unknown {
 // projects/agents/_evaluator|_quality-reviewer/agent.yaml's `instructions`
 // (or its model/maxTurns) — those YAML fields are not wired to this dispatch
 // and must not be treated as configuring it. namedAgentId is passed through
-// only for identification/memory-scoping; `internal: 'validator'` below is
+// only for identification; validators have no project memory tools. `internal: 'validator'` is
 // the actual privilege grant.
 interface RunAgentOptions {
   eventBus: EventBusInterface;

@@ -147,9 +147,18 @@ versions; do not copy versions from historical planning documents.
   flushed atomic replacement. Folder input resolves against the configured Raven
   root and stores a canonical absolute path. There is no SQL source table/import.
   Configuration alone does not provide direct execution; W1 tracks that wiring.
-- Agent memory currently lives at `projects/agents/<name>/memory/`, globally by
-  name. Project memory and attached repositories are **proposed**, not available
-  simply by putting paths in a data-source row or `context.md`.
+- Named agents resolve through the current project's ancestor chain. Global IDs
+  remain names; local IDs are `<projectId>::<name>`. Local definitions override
+  ancestor names; unrelated projects never provide implicit fallbacks. Re-read
+  bounded current YAML and project identity before lookup. New definitions require
+  registry reload. Agent CRUD preserves extra files and commits both rename paths.
+- Memory belongs to projects at `<managed-home>/memory/`, shared by their agents.
+  `project.yaml` owns its budget (defaults: 30 files, 64 KiB). Notes may use nested
+  Markdown paths; ordinary tools cannot touch candidates/internal paths or follow
+  symlinks. Serial writes enforce budgets and compare prior bytes. Learning uses
+  explicit snapshots across model calls and retains rejected/changed candidates.
+  The browser's memory access selects a project explicitly. Internal validators
+  have no memory tools. Direct repository execution remains a later W1 checkpoint.
 - Preserve knowledge links and project membership before changing graph storage.
   Permission checks must be enforced in tools/runtime, not only prompt text.
 - Stop admission and own listeners, timers and in-flight local work across

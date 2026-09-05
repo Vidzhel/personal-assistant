@@ -229,7 +229,7 @@ export const api = {
 
   // Named agents management
   getAgents: () => request<NamedAgentRecord[]>('/agents'),
-  getAgent: (id: string) => request<NamedAgentRecord>(`/agents/${id}`),
+  getAgent: (id: string) => request<NamedAgentRecord>(`/agents/${encodeURIComponent(id)}`),
   createAgent: (data: {
     name: string;
     description?: string;
@@ -251,15 +251,19 @@ export const api = {
       maxTurns?: number | null;
       bash?: object;
     },
-  ) => request<NamedAgentRecord>(`/agents/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  deleteAgent: (id: string) => request(`/agents/${id}`, { method: 'DELETE' }),
+  ) =>
+    request<NamedAgentRecord>(`/agents/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  deleteAgent: (id: string) => request(`/agents/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   getNamedAgentTasks: (id: string, params?: { limit?: number; offset?: number }) => {
     const qs = new URLSearchParams();
     if (params?.limit) qs.set('limit', String(params.limit));
     if (params?.offset) qs.set('offset', String(params.offset));
-    return request<RavenTaskRecord[]>(`/agents/${id}/tasks?${qs}`);
+    return request<RavenTaskRecord[]>(`/agents/${encodeURIComponent(id)}/tasks?${qs}`);
   },
-  getAgentMemory: (id: string) => request<AgentMemoryFile[]>(`/agents/${id}/memory`),
+  getProjectMemory: (id: string) => request<AgentMemoryFile[]>(`${projectPath(id)}/memory`),
   // Project data sources
   getProjectDataSources: (projectId: string) =>
     request<ProjectDataSource[]>(`${projectPath(projectId)}/data-sources`),
@@ -613,6 +617,7 @@ export interface AgentMemoryFile {
 
 export interface NamedAgentRecord {
   id: string;
+  projectId?: string;
   name: string;
   description: string | null;
   instructions: string | null;

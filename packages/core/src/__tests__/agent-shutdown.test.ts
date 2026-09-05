@@ -259,7 +259,7 @@ describe('agent shutdown', () => {
       }),
     });
     await new Promise((resolve) => setImmediate(resolve));
-    expect(existsSync(join(root!, 'projects/agents/raven/memory/candidates'))).toBe(false);
+    expect(existsSync(join(root!, 'projects/system/memory/candidates'))).toBe(false);
   });
   it('retains the prior session summary when retrospective model execution fails', async () => {
     const app = await boot(async () => ({

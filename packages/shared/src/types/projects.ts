@@ -97,6 +97,13 @@ export const ProjectWorkspaceSourceSchema = z
 export type ProjectWorkspaceSource = z.infer<typeof ProjectWorkspaceSourceSchema>;
 
 const WorkspaceModeSchema = z.enum(['default', 'auto', 'full']);
+export const ProjectMemoryBudgetSchema = z
+  .object({
+    maxFiles: z.number().int().positive(),
+    maxTotalKb: z.number().int().positive(),
+  })
+  .strict();
+export type ProjectMemoryBudget = z.infer<typeof ProjectMemoryBudgetSchema>;
 const WorkspaceExecutionSchema = z
   .object({
     mode: WorkspaceModeSchema,
@@ -113,6 +120,7 @@ export const ProjectWorkspaceSchema = z
     version: z.literal(1),
     execution: WorkspaceExecutionSchema.default({ mode: 'default' }),
     sources: z.array(ProjectWorkspaceSourceSchema).default([]),
+    memory: ProjectMemoryBudgetSchema.optional(),
   })
   .strict()
   .superRefine((workspace, context) => {
@@ -162,6 +170,7 @@ export const WorkspaceUpdateSchema = z
       })
       .strict()
       .optional(),
+    memory: ProjectMemoryBudgetSchema.partial().optional(),
   })
   .strict();
 export type WorkspaceUpdate = z.infer<typeof WorkspaceUpdateSchema>;

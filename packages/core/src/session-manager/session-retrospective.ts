@@ -16,8 +16,8 @@ import { linkBubbleToProject } from '../knowledge-engine/project-knowledge.ts';
 import { getProjectKnowledgeLinks } from '../knowledge-engine/project-knowledge.ts';
 import { isContentRejected } from '../knowledge-engine/knowledge-rejections.ts';
 import { runAgentTask } from '../agent-manager/agent-session.ts';
-import type { NamedAgentStore } from '../agent-registry/yaml-named-agent-store.ts';
 import type { MemoryCandidateProposal } from '../agent-memory/memory-candidates.ts';
+import type { MemoryStore } from '../agent-memory/memory-store.ts';
 import {
   parseMemoryCandidateProposals,
   writeMemoryCandidate,
@@ -39,8 +39,7 @@ interface SessionRetrospectiveDeps {
   sessionManager: SessionManager;
   eventBus: EventBus;
   config: AppConfig;
-  projectsDir: string;
-  namedAgentStore: NamedAgentStore;
+  memoryStore: MemoryStore;
   // Knowledge-bubble writes stay conditional on the Neo4j-backed knowledge
   // engine being up (see raven.ts) — degraded mode (Neo4j unreachable)
   // still runs the retrospective and still writes memory candidates below,
@@ -149,15 +148,7 @@ function parseRetrospectiveResult(
 
 // eslint-disable-next-line max-lines-per-function -- orchestrates retrospective flow: transcript loading, agent spawning, result parsing, bubble processing
 export function createSessionRetrospective(deps: SessionRetrospectiveDeps): SessionRetrospective {
-  const {
-    messageStore,
-    sessionManager,
-    eventBus,
-    projectsDir,
-    namedAgentStore,
-    knowledgeStore,
-    neo4j,
-  } = deps;
+  const { messageStore, sessionManager, eventBus, memoryStore, knowledgeStore, neo4j } = deps;
 
   const lifetime = new AbortController();
   const pending = new Set<Promise<SessionRetrospectiveResult>>();
@@ -308,36 +299,28 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
     return processCandidateBubbles({ knowledgeStore, neo4j, projectId, ...options }, bubbles);
   }
 
-  /** Write each proposal as a pending memory candidate for the default
-   * agent — same agent resolution orchestrator.ts's handleUserChat uses for
-   * every chat turn today (there's no per-session agent assignment yet, so
-   * "the agent this session used" and "the default agent" are the same
-   * thing in this system as it stands). */
-  async function writeCandidates(
-    proposals: MemoryCandidateProposal[],
-    sessionId: string,
-    signal: AbortSignal,
-  ): Promise<number> {
+  async function writeCandidates(input: {
+    proposals: MemoryCandidateProposal[];
+    projectId: string;
+    sessionId: string;
+    signal: AbortSignal;
+  }): Promise<number> {
+    const { proposals, projectId, sessionId, signal } = input;
     if (proposals.length === 0) return 0;
-
-    let agentName: string;
-    try {
-      agentName = namedAgentStore.getDefaultAgent().name;
-    } catch (err) {
-      log.warn(`Retrospective: no default agent configured, dropping memory candidates: ${err}`);
-      return 0;
-    }
 
     let written = 0;
     for (const proposal of proposals) {
       signal.throwIfAborted();
-      const filename = await writeMemoryCandidate({ projectsDir, signal }, agentName, {
+      const filename = await writeMemoryCandidate({ memoryStore, signal }, projectId, {
         title: proposal.title,
         content: proposal.content,
         source: 'session-retrospective',
         sessionId,
       });
-      if (filename) written++;
+      if (!filename) {
+        throw new Error(`Failed to persist memory candidate for ${projectId}`);
+      }
+      written++;
     }
     return written;
   }
@@ -350,6 +333,13 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
   ): Promise<SessionRetrospectiveResult> {
     signal.throwIfAborted();
     log.info(`Running retrospective for session ${sessionId}`);
+
+    const storedSession = sessionManager.getSession(sessionId);
+    if (!storedSession) throw new Error(`Session ${sessionId} does not exist`);
+    if (storedSession.projectId !== projectId) {
+      throw new Error(`Session ${sessionId} belongs to project ${storedSession.projectId}`);
+    }
+    memoryStore.getDirectory(projectId);
 
     const messages = messageStore.getMessages(sessionId);
     // Cron/heartbeat/internal tasks never carry a real user turn (they
@@ -365,6 +355,7 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
 
     const task = {
       id: generateId(),
+      projectId,
       skillName: 'session-retrospective',
       prompt,
       status: 'queued' as const,
@@ -411,7 +402,12 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
     // Write memory candidates — unconditional (no Neo4j dependency), gated
     // only on the session being interactive.
     parsed.memoryCandidatesWritten = isInteractive
-      ? await writeCandidates(memoryCandidateProposals, sessionId, signal)
+      ? await writeCandidates({
+          proposals: memoryCandidateProposals,
+          projectId,
+          sessionId,
+          signal,
+        })
       : 0;
 
     signal.throwIfAborted();

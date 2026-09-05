@@ -1,24 +1,28 @@
-import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, open, readdir, unlink } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { dirname } from 'node:path';
+import { lstatSync, renameSync } from 'node:fs';
 
 import yaml from 'js-yaml';
 const { load: yamlLoad, dump: yamlDump } = yaml;
-
 import { z } from 'zod';
 import { createLogger } from '@raven/shared';
 
-import { resolveMemoryDir, validateAgentName } from './memory-store.ts';
+import { readProjectTextFile } from '../project-manager/project-file-read.ts';
+import { ProjectMutationError } from '../project-manager/project-mutation.ts';
+import type { MemoryStore } from './memory-store.ts';
+import { resolveMemoryPath } from './memory-store.ts';
 
 const log = createLogger('memory-candidates');
 
-/** Retrospectives may propose at most this many candidates per run — the
- * owner reviews via consolidation, so a flood of low-value proposals just
- * adds noise (and eats memory budget) rather than being caught upstream. */
 export const MAX_CANDIDATES_PER_RETROSPECTIVE = 3;
-
 const SLUG_MAX_LENGTH = 40;
-/** Length of the "YYYY-MM-DD" prefix of an ISO-8601 timestamp string. */
-const ISO_DATE_LENGTH = 10;
+const BYTES_PER_KILOBYTE = 1024;
+const MAX_CANDIDATE_KILOBYTES = 64;
+const MAX_CANDIDATE_BYTES = MAX_CANDIDATE_KILOBYTES * BYTES_PER_KILOBYTE;
+const PRIVATE_FILE_MODE = 0o600;
+const DATE_PREFIX_LENGTH = 10;
+const MAX_PENDING_CANDIDATES = 100;
 
 export type CandidateSource = 'session-retrospective' | 'system-retrospective';
 export type CandidateProvenance = 'interactive' | 'system';
@@ -32,15 +36,12 @@ export interface CandidateFrontmatter {
 }
 
 export interface PendingCandidate {
-  /** Filename only (relative to the candidates dir), e.g. "2026-08-07-database-config.md". */
   filename: string;
+  revision: string;
   frontmatter: CandidateFrontmatter;
-  /** Markdown body — everything after the frontmatter fence. */
   body: string;
 }
 
-/** What the retrospective agent is asked to propose: a durable memory —
- * owner preference, correction, or standing fact — not a session summary. */
 export const MemoryCandidateProposalSchema = z.object({
   title: z.string().min(1),
   content: z.string().min(1),
@@ -48,31 +49,15 @@ export const MemoryCandidateProposalSchema = z.object({
 
 export type MemoryCandidateProposal = z.infer<typeof MemoryCandidateProposalSchema>;
 
-/** Defensively extract 0-MAX_CANDIDATES_PER_RETROSPECTIVE valid proposals
- * from whatever the retrospective agent returned. Never throws: a
- * non-array, or any individual malformed entry, is dropped and logged
- * rather than failing the whole retrospective. */
 export function parseMemoryCandidateProposals(raw: unknown): MemoryCandidateProposal[] {
   if (!Array.isArray(raw)) return [];
-
   const proposals: MemoryCandidateProposal[] = [];
   for (const item of raw.slice(0, MAX_CANDIDATES_PER_RETROSPECTIVE)) {
     const parsed = MemoryCandidateProposalSchema.safeParse(item);
-    if (parsed.success) {
-      proposals.push(parsed.data);
-    } else {
-      log.warn(`Dropping malformed memory candidate proposal: ${parsed.error.message}`);
-    }
+    if (parsed.success) proposals.push(parsed.data);
+    else log.warn(`Dropping malformed memory candidate proposal: ${parsed.error.message}`);
   }
   return proposals;
-}
-
-function candidatesDir(projectsDir: string, agentName: string): string {
-  return join(resolveMemoryDir(projectsDir, agentName), 'candidates');
-}
-
-function archiveDir(projectsDir: string, agentName: string): string {
-  return join(candidatesDir(projectsDir, agentName), 'archive');
 }
 
 function slugify(title: string): string {
@@ -90,40 +75,84 @@ export interface WriteCandidateInput {
   sessionId?: string;
 }
 
-/** Write one reviewable candidate memory file. Never throws — logs and
- * returns undefined on failure so a bad candidate never takes down the
- * retrospective/system job that produced it. */
+function candidateBody(input: WriteCandidateInput, now: string): string {
+  const frontmatter: CandidateFrontmatter = {
+    source: input.source,
+    ...(input.sessionId !== undefined && { sessionId: input.sessionId }),
+    provenance: input.source === 'session-retrospective' ? 'interactive' : 'system',
+    createdAt: now,
+    status: 'pending',
+  };
+  return `---\n${yamlDump(frontmatter)}---\n\n# ${input.title}\n\n${input.content}\n`;
+}
+
+async function atomicWrite(path: string, content: string): Promise<void> {
+  const temp = `${path}.${randomUUID()}.tmp`;
+  try {
+    const handle = await open(temp, 'wx', PRIVATE_FILE_MODE);
+    try {
+      await handle.writeFile(content, 'utf8');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    renameSync(temp, path);
+    const directory = await open(dirname(path), 'r');
+    try {
+      await directory.sync();
+    } finally {
+      await directory.close();
+    }
+  } catch (error) {
+    await unlink(temp).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function flushDirectory(path: string): Promise<void> {
+  const handle = await open(path, 'r');
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+function candidatePaths(directory: string, filename: string): { source: string; archive: string } {
+  const source = resolveMemoryPath(directory, `candidates/${filename}`, true);
+  const archive = resolveMemoryPath(directory, `candidates/archive/${filename}`, true);
+  return { source, archive };
+}
+
+function internalDirectory(directory: string, relPath: string): string {
+  return dirname(resolveMemoryPath(directory, `${relPath}/placeholder.md`, true));
+}
+
 export async function writeMemoryCandidate(
-  deps: { projectsDir: string; signal?: AbortSignal },
-  agentName: string,
+  deps: { memoryStore: MemoryStore; signal?: AbortSignal },
+  projectId: string,
   input: WriteCandidateInput,
 ): Promise<string | undefined> {
   try {
     deps.signal?.throwIfAborted();
-    validateAgentName(agentName);
-    const dir = candidatesDir(deps.projectsDir, agentName);
-    const now = new Date();
-    const filename = `${now.toISOString().slice(0, ISO_DATE_LENGTH)}-${slugify(input.title)}.md`;
-
-    const frontmatter: CandidateFrontmatter = {
-      source: input.source,
-      ...(input.sessionId !== undefined && { sessionId: input.sessionId }),
-      provenance: input.source === 'session-retrospective' ? 'interactive' : 'system',
-      createdAt: now.toISOString(),
-      status: 'pending',
-    };
-
-    const content = `---\n${yamlDump(frontmatter)}---\n\n# ${input.title}\n\n${input.content}\n`;
-
-    await mkdir(dir, { recursive: true });
+    const now = new Date().toISOString();
+    const filename = `${now.slice(0, DATE_PREFIX_LENGTH)}-${slugify(input.title)}-${randomUUID()}.md`;
+    const body = candidateBody(input, now);
+    if (Buffer.byteLength(body, 'utf8') > MAX_CANDIDATE_BYTES) {
+      throw new Error('memory candidate exceeds size limit');
+    }
+    await deps.memoryStore.withDirectory(projectId, async (directory) => {
+      const path = resolveMemoryPath(directory, `candidates/${filename}`, true);
+      await mkdir(internalDirectory(directory, 'candidates'), { recursive: true });
+      deps.signal?.throwIfAborted();
+      await atomicWrite(path, body);
+    });
     deps.signal?.throwIfAborted();
-    await writeFile(join(dir, filename), content, 'utf-8');
-    deps.signal?.throwIfAborted();
-    log.info(`Wrote memory candidate: ${agentName}/candidates/${filename}`);
+    log.info(`Wrote memory candidate: ${projectId}/candidates/${filename}`);
     return filename;
   } catch (err) {
     deps.signal?.throwIfAborted();
-    log.error(`Failed to write memory candidate for ${agentName}: ${err}`);
+    log.error(`Failed to write memory candidate for ${projectId}: ${err}`);
     return undefined;
   }
 }
@@ -138,16 +167,12 @@ interface RawFrontmatter {
 
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
 
-function parseCandidateFile(
-  raw: string,
-  filename: string,
-): { frontmatter: CandidateFrontmatter; body: string } | undefined {
+function parseCandidateFile(raw: string, filename: string): PendingCandidate | undefined {
   const match = FRONTMATTER_RE.exec(raw);
   if (!match) {
     log.warn(`Candidate ${filename} has no YAML frontmatter — skipping`);
     return undefined;
   }
-
   try {
     const parsed = yamlLoad(match[1]) as RawFrontmatter;
     if (
@@ -159,68 +184,97 @@ function parseCandidateFile(
       log.warn(`Candidate ${filename} has malformed frontmatter — skipping`);
       return undefined;
     }
-    const frontmatter: CandidateFrontmatter = {
-      source: parsed.source,
-      ...(typeof parsed.sessionId === 'string' && { sessionId: parsed.sessionId }),
-      provenance: parsed.provenance,
-      createdAt: parsed.createdAt,
-      status: 'pending',
+    return {
+      filename,
+      revision: createHash('sha256').update(Buffer.from(raw, 'utf8')).digest('hex'),
+      frontmatter: {
+        source: parsed.source,
+        ...(typeof parsed.sessionId === 'string' && { sessionId: parsed.sessionId }),
+        provenance: parsed.provenance,
+        createdAt: parsed.createdAt,
+        status: 'pending',
+      },
+      body: match[2].trim(),
     };
-    return { frontmatter, body: match[2].trim() };
   } catch (err) {
     log.warn(`Failed to parse frontmatter for candidate ${filename}: ${err}`);
     return undefined;
   }
 }
 
-/** List pending candidates for an agent. Never throws: a missing directory
- * returns [], and an individual malformed file is dropped (logged), not
- * fatal to the rest of the listing. */
-export async function listPendingCandidates(
-  projectsDir: string,
-  agentName: string,
-): Promise<PendingCandidate[]> {
-  validateAgentName(agentName);
-  const dir = candidatesDir(projectsDir, agentName);
-
+async function readCandidates(directory: string): Promise<PendingCandidate[]> {
+  const dir = internalDirectory(directory, 'candidates');
   let entries;
   try {
     entries = await readdir(dir, { withFileTypes: true });
-  } catch {
-    return [];
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
   }
-
   const candidates: PendingCandidate[] = [];
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+  const candidateEntries = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .slice(0, MAX_PENDING_CANDIDATES);
+  for (const entry of candidateEntries) {
     try {
-      const raw = await readFile(join(dir, entry.name), 'utf-8');
-      const parsed = parseCandidateFile(raw, entry.name);
-      if (parsed) candidates.push({ filename: entry.name, ...parsed });
+      const raw = readProjectTextFile(
+        resolveMemoryPath(dir, entry.name, true),
+        MAX_CANDIDATE_BYTES,
+      );
+      const parsed = raw === undefined ? undefined : parseCandidateFile(raw, entry.name);
+      if (parsed) candidates.push(parsed);
     } catch (err) {
-      log.warn(`Failed to read candidate ${entry.name} for ${agentName}: ${err}`);
+      if (err instanceof ProjectMutationError) throw err;
+      log.warn(`Failed to read candidate ${entry.name}: ${err}`);
     }
   }
   return candidates;
 }
 
-/** Move a consumed candidate into candidates/archive/ so it's never picked
- * up again but stays around for owner review. Never throws. */
+export async function listPendingCandidates(
+  memoryStore: MemoryStore,
+  projectId: string,
+): Promise<PendingCandidate[]> {
+  return memoryStore.withDirectory(projectId, readCandidates);
+}
+
 export async function archiveCandidate(
-  projectsDir: string,
-  agentName: string,
-  filename: string,
+  memoryStore: MemoryStore,
+  projectId: string,
+  candidate: Pick<PendingCandidate, 'filename' | 'revision'>,
 ): Promise<boolean> {
-  validateAgentName(agentName);
-  const dir = candidatesDir(projectsDir, agentName);
-  const dest = archiveDir(projectsDir, agentName);
+  const filename = candidate.filename;
+  const expectedRevision = candidate.revision;
+  if (filename.includes('/') || filename.includes('\\') || filename.startsWith('.')) return false;
   try {
-    await mkdir(dest, { recursive: true });
-    await rename(join(dir, filename), join(dest, filename));
-    log.info(`Archived memory candidate: ${agentName}/candidates/${filename}`);
-    return true;
+    return await memoryStore.withDirectory(projectId, async (directory) => {
+      const { source, archive } = candidatePaths(directory, filename);
+      const sourceText = readProjectTextFile(source, MAX_CANDIDATE_BYTES);
+      if (sourceText === undefined) return false;
+      const revision = createHash('sha256').update(Buffer.from(sourceText, 'utf8')).digest('hex');
+      if (revision !== expectedRevision) return false;
+      await mkdir(internalDirectory(directory, 'candidates/archive'), { recursive: true });
+      try {
+        lstatSync(archive);
+        return false;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+      const currentText = readProjectTextFile(source, MAX_CANDIDATE_BYTES);
+      if (currentText === undefined) return false;
+      const currentRevision = createHash('sha256')
+        .update(Buffer.from(currentText, 'utf8'))
+        .digest('hex');
+      if (currentRevision !== expectedRevision) return false;
+      renameSync(source, archive);
+      await flushDirectory(dirname(source));
+      await flushDirectory(dirname(archive));
+      log.info(`Archived memory candidate: ${projectId}/candidates/${filename}`);
+      return true;
+    });
   } catch (err) {
-    log.warn(`Failed to archive candidate ${filename} for ${agentName}: ${err}`);
+    log.warn(`Failed to archive candidate ${filename} for ${projectId}: ${err}`);
     return false;
   }
 }

@@ -1,11 +1,11 @@
-import { createLogger } from '@raven/shared';
+import { createLogger, META_PROJECT_ID } from '@raven/shared';
 import type { TaskTree } from '@raven/shared';
 import type {
   ExecutionLogger,
   TaskStats,
   PerSkillStats,
 } from '../agent-manager/execution-logger.ts';
-import type { NamedAgentStore } from '../agent-registry/yaml-named-agent-store.ts';
+import type { MemoryStore } from './memory-store.ts';
 import { writeMemoryCandidate } from './memory-candidates.ts';
 
 const log = createLogger('system-retrospective');
@@ -16,10 +16,9 @@ const TOP_SKILLS_LIMIT = 5;
 const PERCENT = 100;
 
 export interface SystemRetrospectiveDeps {
-  projectsDir: string;
+  memoryStore: MemoryStore;
   executionEngine: ExecutionTreeQuery;
   executionLogger: ExecutionLogger;
-  namedAgentStore: Pick<NamedAgentStore, 'getDefaultAgent'>;
 }
 
 export interface SystemRetrospectiveResult {
@@ -70,14 +69,14 @@ function buildSummary(stats: TaskStats, perSkill: PerSkillStats[], stuckTreeCoun
 
 /** Weekly, deterministic (zero model calls): aggregates recorded agent run
  * failures/error-rates and stuck task trees over the last 7 days into ONE
- * memory candidate for the default agent — "what kept failing". Purely
+ * memory candidate for the system project — "what kept failing". Purely
  * mechanical aggregation, so there's no judgment call here that needs an
  * LLM (unlike session retrospectives, which summarize open-ended
  * conversation). Writes nothing when there's nothing to report. */
 export async function runSystemRetrospective(
   deps: SystemRetrospectiveDeps,
 ): Promise<SystemRetrospectiveResult> {
-  const { projectsDir, executionEngine, executionLogger, namedAgentStore } = deps;
+  const { memoryStore, executionEngine, executionLogger } = deps;
   const lookbackMs = LOOKBACK_DAYS * MS_PER_DAY;
   const cutoffMs = Date.now() - lookbackMs;
 
@@ -90,22 +89,15 @@ export async function runSystemRetrospective(
     return { candidateWritten: false, failureCount: 0, stuckTreeCount: 0 };
   }
 
-  let defaultAgentName: string;
-  try {
-    defaultAgentName = namedAgentStore.getDefaultAgent().name;
-  } catch (err) {
-    log.warn(`System retrospective: no default agent configured, skipping: ${err}`);
-    return { candidateWritten: false, failureCount: stats.failed1h, stuckTreeCount };
-  }
-
   const summary = buildSummary(stats, perSkill, stuckTreeCount);
-  const filename = await writeMemoryCandidate({ projectsDir }, defaultAgentName, {
+  const filename = await writeMemoryCandidate({ memoryStore }, META_PROJECT_ID, {
     title: `System health check-in (${LOOKBACK_DAYS}d)`,
     content: summary,
     source: 'system-retrospective',
   });
 
-  log.info(`System retrospective candidate: ${filename ?? '(write failed)'}`);
+  if (filename === undefined) throw new Error('System retrospective candidate could not be saved');
+  log.info(`System retrospective candidate: ${filename}`);
   return {
     candidateWritten: filename !== undefined,
     failureCount: stats.failed1h,

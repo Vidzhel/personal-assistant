@@ -10,7 +10,7 @@ import type { AgentTask, NamedAgent } from '@raven/shared';
 import { runAgentTask, setActiveBackend } from '../agent-manager/agent-session.ts';
 import { createSdkBackend } from '../agent-manager/sdk-backend.ts';
 import { createAgentResolver } from '../agent-registry/agent-resolver.ts';
-import { createMemoryStore } from '../agent-memory/memory-store.ts';
+import { createProjectMemoryFixture } from './fixtures/project-memory.ts';
 import { setConfig } from '../config.ts';
 import { buildTestConfig } from './fixtures/raven-fixture.ts';
 import { EventBus } from '../event-bus/event-bus.ts';
@@ -103,7 +103,8 @@ describe('SDK knowledge availability and scope', () => {
       eventBus,
       ...capabilities,
       ravenMcpDeps: deps,
-      memoryStore: createMemoryStore({ projectsDir: join(root, 'projects') }),
+      memoryStore: (await createProjectMemoryFixture(join(root, 'projects'), ['fixture-project']))
+        .memoryStore,
     });
     await vi.waitFor(() => expect(query).toHaveBeenCalledOnce());
     return vi.mocked(query).mock.calls[0][0].options!;
@@ -232,6 +233,15 @@ describe('SDK knowledge availability and scope', () => {
       ),
     ).toContain('## Fixture note');
     expect(search).toHaveBeenCalledWith('fixture', { limit: 5 });
+  });
+
+  it('does not grant project memory mutation tools to internal validators', async () => {
+    const options = await dispatch(
+      { eventBus },
+      { internal: 'validator', namedAgentId: '_evaluator' },
+    );
+    expect(options.mcpServers).not.toHaveProperty('memory');
+    expect(options.allowedTools).not.toContain('mcp__memory__*');
   });
 
   it('does not advertise Raven tools when no Raven MCP dependencies are provided', async () => {

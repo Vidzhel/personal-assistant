@@ -8,7 +8,6 @@ import {
   type UserChatMessageEvent,
   type Project,
   type SystemAccessLevel,
-  type BashAccess,
 } from '@raven/shared';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { SessionManager } from '../session-manager/session-manager.ts';
@@ -213,6 +212,9 @@ export class Orchestrator {
       capabilities = resolveDefaultAgentCapabilities({
         namedAgentStore: this.namedAgentStore,
         agentResolver: this.agentResolver,
+        projectId: getDb().prepare('SELECT id FROM projects WHERE id = ?').get(projectId)
+          ? projectId
+          : undefined,
       });
       executionSettings = resolveAgentExecutionSettings({
         model: capabilities.namedAgentModel,
@@ -226,14 +228,8 @@ export class Orchestrator {
       this.rejectChat(event, `Agent capability resolution failed: ${String(error)}`);
       return;
     }
-    const {
-      agentDefinitions,
-      mcpServers,
-      plugins,
-      namedAgentInstructions,
-      namedAgentId,
-      agentName,
-    } = capabilities;
+    const { agentDefinitions, mcpServers, plugins, namedAgentInstructions, namedAgentId } =
+      capabilities;
 
     // Only new conversations may create a project, before the session FK is written.
     // Explicit session IDs must never select a replacement conversation.
@@ -327,19 +323,7 @@ export class Orchestrator {
       this.sessionManager.autoGenerateName(session.id, message);
     }
 
-    // Resolve bash access config from project registry agent YAML
-    let bashAccess: BashAccess | undefined;
-    if (this.projectRegistry && agentName) {
-      try {
-        const globalNode = this.projectRegistry.getGlobal();
-        const yamlAgent = globalNode.agents.find((a) => a.name === agentName);
-        if (yamlAgent?.bash) {
-          bashAccess = yamlAgent.bash;
-        }
-      } catch (err) {
-        log.debug(`Bash access resolution skipped: ${err}`);
-      }
-    }
+    const bashAccess = capabilities.bashAccess;
 
     // Look up project for system access level
     const db = getDb();

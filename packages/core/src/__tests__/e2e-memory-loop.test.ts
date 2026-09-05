@@ -11,8 +11,6 @@ import {
   type SessionRetrospectiveCompleteEvent,
 } from '@raven/shared';
 
-const DEFAULT_AGENT_NAME = 'raven';
-
 async function waitFor(predicate: () => boolean, timeoutMs = 4000): Promise<void> {
   const start = Date.now();
   while (!predicate()) {
@@ -113,7 +111,7 @@ describe('e2e: memory loop closed (retrospective -> candidate -> consolidation)'
       body: JSON.stringify({ name: 'Memory Loop Project' }),
     });
     expect(projectRes.status).toBe(200);
-    const project = (await projectRes.json()) as { id: string };
+    const project = (await projectRes.json()) as { id: string; fsPath: string };
 
     const sessionRes = await fetch(`${baseUrl}/api/projects/${project.id}/sessions`, {
       method: 'POST',
@@ -154,11 +152,11 @@ describe('e2e: memory loop closed (retrospective -> candidate -> consolidation)'
     await waitFor(() => retroCompletions.length >= 1);
     expect(retroCompletions[0].payload.summary).toContain('favorite color');
 
-    // ── Candidate file landed on disk for the default agent ────────
-    const candidatesDir = join(projectsDir, 'agents', DEFAULT_AGENT_NAME, 'memory', 'candidates');
+    // ── Candidate file landed on disk for the project ────────
+    const candidatesDir = join(projectsDir, project.fsPath, 'memory', 'candidates');
     const candidateFiles = readdirSync(candidatesDir).filter((f) => f.endsWith('.md'));
     expect(candidateFiles).toHaveLength(1);
-    expect(candidateFiles[0]).toMatch(/favorite-color\.md$/);
+    expect(candidateFiles[0]).toMatch(/favorite-color-[a-f0-9-]+\.md$/);
     const candidateContent = readFileSync(join(candidatesDir, candidateFiles[0]), 'utf-8');
     expect(candidateContent).toContain('teal');
     expect(candidateContent).toContain('status: pending');
@@ -171,7 +169,7 @@ describe('e2e: memory loop closed (retrospective -> candidate -> consolidation)'
     expect(await triggerRes.json()).toEqual({ triggered: true });
 
     // ── MEMORY.md regenerated + candidate archived ──────────────────
-    const memoryDir = join(projectsDir, 'agents', DEFAULT_AGENT_NAME, 'memory');
+    const memoryDir = join(projectsDir, project.fsPath, 'memory');
     const memoryMd = readFileSync(join(memoryDir, 'MEMORY.md'), 'utf-8');
     expect(memoryMd).toContain('preferences.md');
 

@@ -1,18 +1,31 @@
-import { readFile, writeFile, readdir, stat, mkdir, rename, unlink } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
-import { join, resolve, relative, isAbsolute, dirname } from 'node:path';
-
-import yaml from 'js-yaml';
-const { load: yamlLoad } = yaml;
-
-import { createLogger } from '@raven/shared';
+import { randomUUID } from 'node:crypto';
+import {
+  closeSync,
+  fsyncSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { readdir } from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { createLogger, type ProjectMemoryBudget } from '@raven/shared';
+import { ProjectMutationError, withProjectMutation } from '../project-manager/project-mutation.ts';
+import type { ProjectWorkspaceStore } from '../project-manager/project-workspace.ts';
+import { readProjectTextFile } from '../project-manager/project-file-read.ts';
 
 const log = createLogger('memory-store');
-
 const DEFAULT_MAX_FILES = 30;
 const DEFAULT_MAX_TOTAL_KB = 64;
 const BYTES_PER_KB = 1024;
+const MAX_MEMORY_FILE_BYTES = 1_048_576;
+const MAX_MEMORY_ENTRIES = 2_000;
+const MAX_MEMORY_DEPTH = 32;
 const INDEX_FILE = 'MEMORY.md';
+const BAD_REQUEST = 400;
 
 export interface MemoryUsage {
   files: number;
@@ -28,39 +41,50 @@ export interface MemoryWriteResult {
 }
 
 export interface MemoryStore {
-  read(agentName: string, relPath: string): Promise<string>;
-  readIndex(agentName: string): Promise<string | null>;
-  write(agentName: string, relPath: string, content: string): Promise<MemoryWriteResult>;
-  update(agentName: string, relPath: string, content: string): Promise<MemoryWriteResult>;
-  /** Deletes a memory file (used by consolidation to prune superseded
-   * facts). `ok: false` with no throw when the file doesn't exist. */
-  remove(agentName: string, relPath: string): Promise<MemoryWriteResult>;
-  /** Filenames present in the agent's memory dir (flat — no subdirs, e.g.
-   * `candidates/`, are ever returned since listMemoryFiles only lists
-   * files). Includes MEMORY.md; callers that want just the fact files
-   * filter it out themselves. */
-  list(agentName: string): Promise<string[]>;
-  usage(agentName: string): Promise<MemoryUsage>;
+  read(projectId: string, relPath: string): Promise<string>;
+  readIndex(projectId: string): Promise<string | null>;
+  write(projectId: string, relPath: string, content: string): Promise<MemoryWriteResult>;
+  update(projectId: string, relPath: string, content: string): Promise<MemoryWriteResult>;
+  remove(projectId: string, relPath: string): Promise<MemoryWriteResult>;
+  list(projectId: string): Promise<string[]>;
+  usage(projectId: string): Promise<MemoryUsage>;
+  getDirectory(projectId: string): string;
+  withDirectory<T>(projectId: string, operation: (directory: string) => Promise<T>): Promise<T>;
+  apply(projectId: string, input: MemoryApplyInput): Promise<MemoryWriteResult>;
 }
 
-interface Budget {
+export interface MemoryApplyInput {
+  action: 'create' | 'update' | 'delete';
+  path: string;
+  content?: string;
+  expected: string | null;
+}
+
+interface MemoryBudget {
   maxFiles: number;
   maxTotalBytes: number;
 }
 
-interface WriteOpts {
-  agentName: string;
+interface MemoryFile {
+  path: string;
+  name: string;
+  size: number;
+}
+
+interface WriteInput {
+  directory: string;
   relPath: string;
   content: string;
   mustExist: boolean;
-  projectsDir: string;
+  requireAbsent?: boolean;
+  budget: MemoryBudget;
+  expected: string | undefined;
 }
 
-/** Wrap a MEMORY.md index for injection into an agent's system prompt. */
 export function formatMemoryBlock(index: string): string {
   return [
     '## Your Memory',
-    'This is the index of what you remember from past work. Use the `memory_read` tool to',
+    'This is the index of what this project remembers. Use the `memory_read` tool to',
     'read a specific file, `memory_write` to save a new note, and `memory_update` to revise',
     'an existing one. Keep entries concise — your memory has a hard budget.',
     '',
@@ -68,236 +92,419 @@ export function formatMemoryBlock(index: string): string {
   ].join('\n');
 }
 
-/** Exported so sibling modules (memory-candidates.ts, memory-consolidation.ts)
- * can validate an agent name without duplicating this check. */
-export function validateAgentName(agentName: string): void {
-  if (agentName.includes('/') || agentName.includes('\\') || agentName === '..') {
-    throw new Error(`invalid agentName: ${agentName}`);
-  }
+function mutationError(message: string, statusCode = 409): ProjectMutationError {
+  return new ProjectMutationError(message, statusCode);
 }
 
-/** Exported so sibling modules can resolve an agent's memory dir (e.g. to
- * derive `memory/candidates/`) without duplicating this join. */
-export function resolveMemoryDir(projectsDir: string, agentName: string): string {
-  return join(projectsDir, 'agents', agentName, 'memory');
-}
-
-function resolveAgentYamlPath(projectsDir: string, agentName: string): string {
-  const dirLayout = join(projectsDir, 'agents', agentName, 'agent.yaml');
-  if (existsSync(dirLayout)) return dirLayout;
-  return join(projectsDir, 'agents', `${agentName}.yaml`);
-}
-
-async function readBudget(projectsDir: string, agentName: string): Promise<Budget> {
+function statOrUndefined(path: string): ReturnType<typeof lstatSync> | undefined {
   try {
-    const raw = yamlLoad(await readFile(resolveAgentYamlPath(projectsDir, agentName), 'utf-8')) as {
-      memory?: { maxFiles?: number; maxTotalKb?: number };
-    };
-    return {
-      maxFiles: raw?.memory?.maxFiles ?? DEFAULT_MAX_FILES,
-      maxTotalBytes: (raw?.memory?.maxTotalKb ?? DEFAULT_MAX_TOTAL_KB) * BYTES_PER_KB,
-    };
-  } catch {
-    return { maxFiles: DEFAULT_MAX_FILES, maxTotalBytes: DEFAULT_MAX_TOTAL_KB * BYTES_PER_KB };
+    return lstatSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
   }
 }
 
-/** Resolve a relative path strictly inside the agent's memory dir, or throw. */
-function safePath(projectsDir: string, agentName: string, relPath: string): string {
-  const dir = resolveMemoryDir(projectsDir, agentName);
-  const resolved = resolve(dir, relPath);
-  const rel = relative(dir, resolved);
-  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
-    throw new Error(`invalid path: ${relPath}`);
+function assertNoSymlinkComponents(path: string): void {
+  const absolute = resolve(path);
+  let current = absolute.startsWith('/') ? '/' : '';
+  for (const part of absolute.split('/').filter(Boolean)) {
+    current = join(current, part);
+    const stats = statOrUndefined(current);
+    if (stats?.isSymbolicLink()) throw mutationError(`Memory path contains a symlink: ${path}`);
+    if (!stats) return;
   }
-  if (rel.includes('/') || rel.includes('\\')) {
-    throw new Error(`invalid path: nested paths are not allowed: ${relPath}`);
-  }
-  return resolved;
 }
 
-async function listMemoryFiles(
-  projectsDir: string,
-  agentName: string,
-): Promise<Array<{ name: string; size: number }>> {
-  const dir = resolveMemoryDir(projectsDir, agentName);
+function validateRelativePath(relPath: string, allowInternal: boolean): string[] {
+  if (!isRelativeString(relPath)) {
+    throw mutationError(`Invalid memory path: ${String(relPath)}`, BAD_REQUEST);
+  }
+  if (relPath.includes('\\')) throw mutationError(`Invalid memory path: ${relPath}`, BAD_REQUEST);
+  const parts = relPath.split('/');
+  if (parts.some((part) => !part || part === '.' || part === '..')) {
+    throw mutationError(`Invalid memory path: ${relPath}`, BAD_REQUEST);
+  }
+  if (!parts.at(-1)?.endsWith('.md')) {
+    throw mutationError(`Memory paths must be Markdown files: ${relPath}`, BAD_REQUEST);
+  }
+  if (!allowInternal && parts.some((part) => part === 'candidates' || part.startsWith('.'))) {
+    throw mutationError(`Internal memory path is not available: ${relPath}`, BAD_REQUEST);
+  }
+  return parts;
+}
+
+function isRelativeString(path: unknown): path is string {
+  return typeof path === 'string' && path.length > 0 && !isAbsolute(path) && !path.includes('\0');
+}
+
+/** Resolve a safe Markdown path under a project memory directory. */
+export function resolveMemoryPath(
+  directory: string,
+  relPath: string,
+  allowInternal = false,
+): string {
+  const parts = validateRelativePath(relPath, allowInternal);
+  const root = resolve(directory);
+  const target = resolve(root, ...parts);
+  const child = relative(root, target);
+  if (!child || child.startsWith('..') || isAbsolute(child)) {
+    throw mutationError(`Memory path escapes its project: ${relPath}`, BAD_REQUEST);
+  }
+  assertNoSymlinkComponents(root);
+  assertNoSymlinkComponents(dirname(target));
+  assertNoSymlinkComponents(target);
+  return target;
+}
+
+function memoryBudget(value: ProjectMemoryBudget | undefined): MemoryBudget {
+  return {
+    maxFiles: value?.maxFiles ?? DEFAULT_MAX_FILES,
+    maxTotalBytes: (value?.maxTotalKb ?? DEFAULT_MAX_TOTAL_KB) * BYTES_PER_KB,
+  };
+}
+
+function readText(path: string): string | undefined {
+  return readProjectTextFile(path, MAX_MEMORY_FILE_BYTES);
+}
+
+interface ScanState {
+  root: string;
+  directory: string;
+  current: string;
+  depth: number;
+  files: MemoryFile[];
+  counter: { value: number };
+}
+
+function currentPath(current: string, name: string): string {
+  return current ? current + '/' + name : name;
+}
+
+async function scanMemoryEntry(state: ScanState, entry: Dirent): Promise<void> {
+  if (entry.name === 'candidates' || entry.name.startsWith('.')) return;
+  const childName = currentPath(state.current, entry.name);
+  if (entry.isSymbolicLink()) throw mutationError('Memory path contains a symlink: ' + childName);
+  if (entry.isDirectory()) {
+    const childPath = join(state.root, childName);
+    assertNoSymlinkComponents(childPath);
+    await scanMemoryDirectory({
+      ...state,
+      directory: childPath,
+      current: childName,
+      depth: state.depth + 1,
+    });
+    return;
+  }
+  if (!entry.isFile() || !entry.name.endsWith('.md')) return;
+  const childPath = resolveMemoryPath(state.root, childName);
+  const text = readText(childPath);
+  if (text === undefined) throw mutationError('Memory file disappeared: ' + childName);
+  state.files.push({ path: childPath, name: childName, size: Buffer.byteLength(text) });
+}
+
+async function scanMemoryDirectory(state: ScanState): Promise<void> {
+  if (state.depth > MAX_MEMORY_DEPTH) throw mutationError('Memory directory is too deep');
   let entries;
   try {
-    entries = await readdir(dir, { withFileTypes: true });
-  } catch {
-    return [];
+    entries = await readdir(state.directory, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' && state.current === '') return;
+    throw error;
   }
-  const files: Array<{ name: string; size: number }> = [];
   for (const entry of entries) {
-    if (entry.isFile()) {
-      const s = await stat(join(dir, entry.name));
-      files.push({ name: entry.name, size: s.size });
+    state.counter.value += 1;
+    if (state.counter.value > MAX_MEMORY_ENTRIES) {
+      throw mutationError('Too many memory entries');
     }
+    await scanMemoryEntry(state, entry);
   }
-  return files;
 }
 
-async function computeUsage(
-  projectsDir: string,
-  agentName: string,
-  budget: Budget,
-): Promise<MemoryUsage> {
-  const files = await listMemoryFiles(projectsDir, agentName);
+async function memoryFiles(directory: string): Promise<MemoryFile[]> {
+  assertNoSymlinkComponents(directory);
+  const files: MemoryFile[] = [];
+  await scanMemoryDirectory({
+    root: directory,
+    directory,
+    current: '',
+    depth: 0,
+    files,
+    counter: { value: 0 },
+  });
+  return files.sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function usageFrom(files: MemoryFile[], budget: MemoryBudget): MemoryUsage {
   return {
     files: files.length,
-    totalBytes: files.reduce((sum, f) => sum + f.size, 0),
+    totalBytes: files.reduce((total, file) => total + file.size, 0),
     maxFiles: budget.maxFiles,
     maxTotalBytes: budget.maxTotalBytes,
   };
 }
 
-async function atomicWrite(absPath: string, content: string): Promise<void> {
-  await mkdir(dirname(absPath), { recursive: true });
-  const tmp = `${absPath}.tmp`;
-  await writeFile(tmp, content, 'utf-8');
-  await rename(tmp, absPath);
+function flushDirectory(directory: string): void {
+  const fd = openSync(directory, 'r');
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
 }
 
-interface BudgetCheckInput {
-  projectsDir: string;
-  agentName: string;
-  absPath: string;
-  content: string;
-  fileExists: boolean;
+function ensureParent(path: string): void {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  assertNoSymlinkComponents(dirname(path));
 }
 
-/** Isolated from checkAndWrite so that function's own complexity stays
- * under the guardrail threshold — this holds the two budget-limit branches,
- * checkAndWrite holds the existence/directory branches. Returns null when
- * the write is within budget. */
-async function checkBudgetLimits(input: BudgetCheckInput): Promise<MemoryWriteResult | null> {
-  const { projectsDir, agentName, absPath, content, fileExists } = input;
-  const budget = await readBudget(projectsDir, agentName);
-  const files = await listMemoryFiles(projectsDir, agentName);
-  const dir = resolveMemoryDir(projectsDir, agentName);
-  const existingSize = files.find((f) => join(dir, f.name) === absPath)?.size ?? 0;
-  const newBytes = Buffer.byteLength(content, 'utf-8');
+function expectedBytes(path: string): string | undefined {
+  return readText(path);
+}
 
-  const projectedFiles = fileExists ? files.length : files.length + 1;
-  const projectedBytes = files.reduce((s, f) => s + f.size, 0) - existingSize + newBytes;
-  const usage = await computeUsage(projectsDir, agentName, budget);
+function atomicWrite(path: string, content: string, expected?: string): void {
+  ensureParent(path);
+  if (expectedBytes(path) !== expected) throw mutationError('Memory file changed during update');
+  const temporary = join(dirname(path), `.${randomUUID()}.tmp`);
+  try {
+    writeFileSync(temporary, content, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+    const fd = openSync(temporary, 'r');
+    try {
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    if (expectedBytes(path) !== expected) throw mutationError('Memory file changed during update');
+    renameSync(temporary, path);
+    flushDirectory(dirname(path));
+  } finally {
+    if (statOrUndefined(temporary)) unlinkSync(temporary);
+  }
+}
 
-  if (projectedFiles > budget.maxFiles) {
+function budgetFailure(
+  usage: MemoryUsage,
+  files: number,
+  bytes: number,
+): MemoryWriteResult | undefined {
+  if (files > usage.maxFiles) {
     return {
       ok: false,
-      error: `memory budget exceeded: ${projectedFiles} files > ${budget.maxFiles} max. Consolidate or prune first.`,
+      error: `memory budget exceeded: ${files} files > ${usage.maxFiles} max.`,
       usage,
     };
   }
-  if (projectedBytes > budget.maxTotalBytes) {
+  if (bytes > usage.maxTotalBytes) {
     return {
       ok: false,
-      error: `memory budget exceeded: ${projectedBytes} bytes > ${budget.maxTotalBytes} max. Consolidate or prune first.`,
+      error: `memory budget exceeded: ${bytes} bytes > ${usage.maxTotalBytes} max.`,
       usage,
     };
   }
-  return null;
+  return undefined;
 }
 
-async function checkAndWrite(opts: WriteOpts): Promise<MemoryWriteResult> {
-  const { agentName, relPath, content, mustExist, projectsDir } = opts;
-  const absPath = safePath(projectsDir, agentName, relPath);
-  const fileExists = existsSync(absPath);
-  // A single path segment like "candidates" passes safePath (no slashes)
-  // but can resolve to a real subdirectory (memory-candidates.ts creates
-  // memory/<agent>/candidates/) — writing/renaming a file over that throws
-  // a noisy EISDIR further down in atomicWrite. Reject it here with a clear
-  // error instead.
-  if (fileExists && (await stat(absPath)).isDirectory()) {
-    return { ok: false, error: `memory path is a directory, not a file: ${relPath}` };
-  }
-  if (mustExist && !fileExists) {
+function writeTargetError(
+  input: WriteInput,
+  existing: ReturnType<typeof lstatSync> | undefined,
+): MemoryWriteResult | undefined {
+  if (existing?.isDirectory())
+    return { ok: false, error: 'memory path is a directory, not a file' };
+  if (input.requireAbsent && existing) return { ok: false, error: 'memory file already exists' };
+  if (!input.mustExist || existing) return undefined;
+  if (input.expected !== undefined) throw mutationError('Memory file changed during update');
+  return { ok: false, error: 'memory file does not exist' };
+}
+
+function writeBudgetFailure(input: WriteInput, files: MemoryFile[]): MemoryWriteResult | undefined {
+  const path = resolveMemoryPath(input.directory, input.relPath);
+  const existing = statOrUndefined(path);
+  const previous = files.find((file) => file.path === path)?.size ?? 0;
+  const usage = usageFrom(files, input.budget);
+  return budgetFailure(
+    usage,
+    existing ? files.length : files.length + 1,
+    usage.totalBytes - previous + Buffer.byteLength(input.content),
+  );
+}
+
+async function writeMemoryFile(input: WriteInput): Promise<MemoryWriteResult> {
+  const path = resolveMemoryPath(input.directory, input.relPath);
+  const existing = statOrUndefined(path);
+  const targetError = writeTargetError(input, existing);
+  if (targetError) return targetError;
+  const files = await memoryFiles(input.directory);
+  const failure = writeBudgetFailure(input, files);
+  if (failure) return failure;
+  atomicWrite(path, input.content, input.expected);
+  const after = usageFrom(await memoryFiles(input.directory), input.budget);
+  log.info(`memory ${input.mustExist ? 'updated' : 'written'}: ${input.relPath}`);
+  return { ok: true, usage: after };
+}
+
+interface RemoveInput {
+  directory: string;
+  relPath: string;
+  budget: MemoryBudget;
+  expected?: string | null;
+}
+
+async function removeMemoryFile(input: RemoveInput): Promise<MemoryWriteResult> {
+  const { directory, relPath, budget, expected } = input;
+  const path = resolveMemoryPath(directory, relPath);
+  const stats = statOrUndefined(path);
+  if (!stats) {
+    if (expected !== undefined) throw mutationError('Memory file changed during removal');
     return { ok: false, error: `memory file does not exist: ${relPath}` };
   }
-
-  const budgetError = await checkBudgetLimits({
-    projectsDir,
-    agentName,
-    absPath,
-    content,
-    fileExists,
-  });
-  if (budgetError) return budgetError;
-
-  await atomicWrite(absPath, content);
-  log.info(`memory ${mustExist ? 'updated' : 'written'}: ${agentName}/${relPath}`);
-  const budget = await readBudget(projectsDir, agentName);
-  return { ok: true, usage: await computeUsage(projectsDir, agentName, budget) };
+  if (stats.isDirectory()) return { ok: false, error: `memory path is a directory: ${relPath}` };
+  if (expected === null) throw mutationError('Memory file changed during removal');
+  const snapshot = expected === undefined ? expectedBytes(path) : expected;
+  if (snapshot === undefined) return { ok: false, error: `memory file does not exist: ${relPath}` };
+  if (expected !== undefined && expectedBytes(path) !== expected) {
+    throw mutationError('Memory file changed during removal');
+  }
+  unlinkSync(path);
+  flushDirectory(dirname(path));
+  return { ok: true, usage: usageFrom(await memoryFiles(directory), budget) };
 }
 
-/** Standalone (not a createMemoryStore closure member) so remove()'s body
- * doesn't push createMemoryStore over the max-lines-per-function guardrail
- * — mirrors checkAndWrite's relationship to write()/update(). */
-async function removeMemoryFile(
-  projectsDir: string,
-  agentName: string,
+export interface MemoryStoreDeps {
+  projectsDir: string;
+  workspaceStore: ProjectWorkspaceStore;
+}
+
+interface StoreContext {
+  getDirectory(projectId: string): string;
+  getBudget(projectId: string): MemoryBudget;
+  withDirectory<T>(projectId: string, operation: (directory: string) => Promise<T>): Promise<T>;
+}
+
+function projectMemoryDirectory(store: ProjectWorkspaceStore, projectId: string): string {
+  store.getWorkspace(projectId);
+  return join(store.getProjectHome(projectId), 'memory');
+}
+
+function createStoreContext(deps: MemoryStoreDeps): StoreContext {
+  const getDirectory = (projectId: string): string =>
+    projectMemoryDirectory(deps.workspaceStore, projectId);
+  const getBudget = (projectId: string): MemoryBudget =>
+    memoryBudget(deps.workspaceStore.getWorkspace(projectId).memory);
+  const withDirectory = <T>(
+    projectId: string,
+    operation: (directory: string) => Promise<T>,
+  ): Promise<T> =>
+    withProjectMutation(deps.projectsDir, async () => {
+      const directory = getDirectory(projectId);
+      assertNoSymlinkComponents(directory);
+      return operation(directory);
+    });
+  return { getDirectory, getBudget, withDirectory };
+}
+
+async function readStoreFile(
+  context: StoreContext,
+  projectId: string,
+  relPath: string,
+): Promise<string> {
+  const text = readText(resolveMemoryPath(context.getDirectory(projectId), relPath));
+  if (text === undefined) throw new Error('Memory file does not exist: ' + relPath);
+  return text;
+}
+
+async function readStoreIndex(context: StoreContext, projectId: string): Promise<string | null> {
+  return readText(resolveMemoryPath(context.getDirectory(projectId), INDEX_FILE)) ?? null;
+}
+
+interface StoreWriteInput {
+  projectId: string;
+  relPath: string;
+  content: string;
+  mustExist: boolean;
+}
+
+async function writeStoreFile(
+  context: StoreContext,
+  input: StoreWriteInput,
+): Promise<MemoryWriteResult> {
+  return context.withDirectory(input.projectId, async (directory) => {
+    const path = resolveMemoryPath(directory, input.relPath);
+    const expected = statOrUndefined(path)?.isDirectory() ? undefined : expectedBytes(path);
+    return writeMemoryFile({
+      directory,
+      relPath: input.relPath,
+      content: input.content,
+      mustExist: input.mustExist,
+      budget: context.getBudget(input.projectId),
+      expected,
+    });
+  });
+}
+
+async function removeStoreFile(
+  context: StoreContext,
+  projectId: string,
   relPath: string,
 ): Promise<MemoryWriteResult> {
-  const absPath = safePath(projectsDir, agentName, relPath);
-  if (!existsSync(absPath)) {
-    return { ok: false, error: `memory file does not exist: ${relPath}` };
-  }
-  if ((await stat(absPath)).isDirectory()) {
-    return { ok: false, error: `memory path is a directory, not a file: ${relPath}` };
-  }
-  try {
-    await unlink(absPath);
-    log.info(`memory removed: ${agentName}/${relPath}`);
-  } catch (err) {
-    return { ok: false, error: `failed to remove memory file: ${(err as Error).message}` };
-  }
-  const budget = await readBudget(projectsDir, agentName);
-  return { ok: true, usage: await computeUsage(projectsDir, agentName, budget) };
+  return context.withDirectory(projectId, (directory) =>
+    removeMemoryFile({ directory, relPath, budget: context.getBudget(projectId) }),
+  );
 }
 
-export function createMemoryStore(deps: { projectsDir: string }): MemoryStore {
-  const { projectsDir } = deps;
+async function applyStoreFile(
+  context: StoreContext,
+  input: { projectId: string; input: MemoryApplyInput },
+): Promise<MemoryWriteResult> {
+  const { projectId, input: change } = input;
+  if (change.action === 'create' && change.expected !== null) {
+    throw mutationError('Create requires an absent expected value', BAD_REQUEST);
+  }
+  if (change.action !== 'create' && change.expected === null) {
+    throw mutationError('Update and delete require expected file bytes', BAD_REQUEST);
+  }
+  return context.withDirectory(projectId, async (directory) => {
+    if (change.action === 'delete') {
+      return removeMemoryFile({
+        directory,
+        relPath: change.path,
+        budget: context.getBudget(projectId),
+        expected: change.expected,
+      });
+    }
+    if (change.content === undefined) {
+      throw mutationError('Memory content is required', BAD_REQUEST);
+    }
+    return writeMemoryFile({
+      directory,
+      relPath: change.path,
+      content: change.content,
+      mustExist: change.action === 'update',
+      requireAbsent: change.action === 'create',
+      budget: context.getBudget(projectId),
+      expected: change.expected ?? undefined,
+    });
+  });
+}
 
+export function createMemoryStore(deps: MemoryStoreDeps): MemoryStore {
+  const context = createStoreContext(deps);
   return {
-    async read(agentName: string, relPath: string): Promise<string> {
-      validateAgentName(agentName);
-      const absPath = safePath(projectsDir, agentName, relPath);
-      return readFile(absPath, 'utf-8');
+    getDirectory: context.getDirectory,
+    withDirectory: context.withDirectory,
+    read: (projectId, relPath) => readStoreFile(context, projectId, relPath),
+    readIndex: (projectId) => readStoreIndex(context, projectId),
+    write: (projectId, relPath, content) =>
+      writeStoreFile(context, { projectId, relPath, content, mustExist: false }),
+    update: (projectId, relPath, content) =>
+      writeStoreFile(context, { projectId, relPath, content, mustExist: true }),
+    remove: (projectId, relPath) => removeStoreFile(context, projectId, relPath),
+    apply: (projectId, input) => applyStoreFile(context, { projectId, input }),
+    async list(projectId) {
+      return (await memoryFiles(context.getDirectory(projectId))).map((file) => file.name);
     },
-
-    async readIndex(agentName: string): Promise<string | null> {
-      validateAgentName(agentName);
-      try {
-        return await readFile(join(resolveMemoryDir(projectsDir, agentName), INDEX_FILE), 'utf-8');
-      } catch {
-        return null;
-      }
-    },
-
-    async write(agentName: string, relPath: string, content: string): Promise<MemoryWriteResult> {
-      validateAgentName(agentName);
-      return checkAndWrite({ agentName, relPath, content, mustExist: false, projectsDir });
-    },
-
-    async update(agentName: string, relPath: string, content: string): Promise<MemoryWriteResult> {
-      validateAgentName(agentName);
-      return checkAndWrite({ agentName, relPath, content, mustExist: true, projectsDir });
-    },
-
-    async remove(agentName: string, relPath: string): Promise<MemoryWriteResult> {
-      validateAgentName(agentName);
-      return removeMemoryFile(projectsDir, agentName, relPath);
-    },
-
-    async list(agentName: string): Promise<string[]> {
-      validateAgentName(agentName);
-      const files = await listMemoryFiles(projectsDir, agentName);
-      return files.map((f) => f.name);
-    },
-
-    async usage(agentName: string): Promise<MemoryUsage> {
-      validateAgentName(agentName);
-      return computeUsage(projectsDir, agentName, await readBudget(projectsDir, agentName));
+    async usage(projectId) {
+      const budget = context.getBudget(projectId);
+      return usageFrom(await memoryFiles(context.getDirectory(projectId)), budget);
     },
   };
 }

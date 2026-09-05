@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import {
+  mkdtempSync,
+  rmSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  renameSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ProjectRegistry } from '../project-registry/project-registry.ts';
@@ -31,6 +39,7 @@ function makeMockEventBus() {
 describe('YamlNamedAgentStore', () => {
   let projectsDir: string;
   let store: NamedAgentStore;
+  let projectRegistry: ProjectRegistry;
   let eventBus: ReturnType<typeof makeMockEventBus>;
 
   beforeEach(async () => {
@@ -39,7 +48,7 @@ describe('YamlNamedAgentStore', () => {
     mkdirSync(join(projectsDir, 'agents', 'raven'), { recursive: true });
     writeFileSync(join(projectsDir, 'agents', 'raven', 'agent.yaml'), RAVEN_YAML);
 
-    const projectRegistry = new ProjectRegistry();
+    projectRegistry = new ProjectRegistry();
     await projectRegistry.load(projectsDir);
     eventBus = makeMockEventBus();
     store = createYamlNamedAgentStore({
@@ -81,7 +90,9 @@ describe('YamlNamedAgentStore', () => {
     const created = eventBus.events.find((e) => e.type === 'agent:config:created');
     expect(created).toBeDefined();
     expect(created!.payload.name).toBe('researcher');
-    expect(created!.payload.filePath).toContain('researcher');
+    expect(created!.payload.filePaths).toEqual([
+      join(projectsDir, 'agents', 'researcher', 'agent.yaml'),
+    ]);
   });
 
   it('rejects duplicate names', async () => {
@@ -119,6 +130,13 @@ describe('YamlNamedAgentStore', () => {
     expect(store.getAgent('new-name')).toBeDefined();
     expect(existsSync(join(projectsDir, 'agents', 'new-name', 'agent.yaml'))).toBe(true);
     expect(existsSync(join(projectsDir, 'agents', 'old-name'))).toBe(false);
+    const updated = eventBus.events.find(
+      (event) => event.type === 'agent:config:updated' && event.payload.name === 'new-name',
+    );
+    expect(updated?.payload.filePaths).toEqual([
+      join(projectsDir, 'agents', 'old-name', 'agent.yaml'),
+      join(projectsDir, 'agents', 'new-name', 'agent.yaml'),
+    ]);
   });
 
   it('refuses to rename or delete the default agent', async () => {
@@ -153,6 +171,162 @@ describe('YamlNamedAgentStore', () => {
       projectsDir,
       eventBus: eventBus as any,
     });
-    expect(s2.getAgentByName('sub-agent')).toBeDefined();
+    expect(s2.getAgentByName('sub-agent', 'proj-x')).toBeDefined();
   });
+
+  it('keeps local namesakes qualified and resolves the nearest visible override', async () => {
+    const localYaml = (name: string, isDefault = false) =>
+      `name: ${name}\ndisplayName: ${name}\ndescription: Local\nisDefault: ${String(isDefault)}\nskills: []\n`;
+    for (const [project, id] of [
+      ['alpha', 'alpha-stable'],
+      ['beta', 'beta-stable'],
+    ]) {
+      mkdirSync(join(projectsDir, project, 'agents', 'raven'), { recursive: true });
+      writeFileSync(
+        join(projectsDir, project, 'context.md'),
+        `---\nravenProject:\n  version: 1\n  id: ${id}\n  displayName: ${project}\n---\n# ${project}\n`,
+      );
+      writeFileSync(
+        join(projectsDir, project, 'agents', 'raven', 'agent.yaml'),
+        localYaml('raven', project === 'alpha'),
+      );
+    }
+    writeFileSync(join(projectsDir, 'alpha', 'agents', 'local-only.yaml'), localYaml('local-only'));
+    await projectRegistryLoad();
+
+    const agents = store.listAgents();
+    expect(agents.map((agent) => agent.id).sort()).toEqual([
+      'alpha-stable::local-only',
+      'alpha-stable::raven',
+      'beta-stable::raven',
+      'raven',
+    ]);
+    expect(store.getAgentByName('raven')?.projectId).toBeUndefined();
+    expect(store.getAgentByName('local-only')).toBeUndefined();
+    expect(store.getAgentByName('raven', 'alpha-stable')?.id).toBe('alpha-stable::raven');
+    expect(store.getDefaultAgent('alpha-stable').id).toBe('alpha-stable::raven');
+    expect(() => store.getAgentByName('beta-stable::raven', 'alpha-stable')).toThrow(
+      /unrelated project/,
+    );
+  });
+
+  it('allows a local shadow and rereads current bytes for revision and mutations', async () => {
+    mkdirSync(join(projectsDir, 'alpha', 'agents'), { recursive: true });
+    writeFileSync(
+      join(projectsDir, 'alpha', 'context.md'),
+      '---\nravenProject:\n  version: 1\n  id: alpha-stable\n---\n# Alpha\n',
+    );
+    await projectRegistryLoad();
+    const local = await store.createAgent(
+      { name: 'raven', description: 'Local', skills: [] },
+      { projectScope: 'alpha-stable' },
+    );
+    expect(local.id).toBe('alpha-stable::raven');
+    expect(store.getDefaultAgent('alpha-stable').id).toBe('alpha-stable::raven');
+    const globalBefore = store.getAgent('raven');
+    const localPath = join(projectsDir, 'alpha', 'agents', 'raven', 'agent.yaml');
+    const firstRevision = store.getAgent(local.id)?.definitionRevision;
+    writeFileSync(localPath, `${readFileSync(localPath, 'utf8')}# edited\n`);
+    expect(store.getAgent(local.id)?.definitionRevision).not.toBe(firstRevision);
+    expect(store.getAgent('raven')?.description).toBe(globalBefore?.description);
+
+    const renamedPath = join(projectsDir, 'alpha', 'agents', 'renamed');
+    renameSync(join(projectsDir, 'alpha', 'agents', 'raven'), renamedPath);
+    expect(() => store.getAgent(local.id)).toThrow(/unavailable/);
+  });
+
+  it('selects the nearest default name before resolving its local shadow', async () => {
+    mkdirSync(join(projectsDir, 'alpha', 'agents', 'writer'), { recursive: true });
+    writeFileSync(
+      join(projectsDir, 'alpha', 'context.md'),
+      '---\nravenProject:\n  version: 1\n  id: alpha-stable\n---\n# Alpha\n',
+    );
+    writeFileSync(
+      join(projectsDir, 'alpha', 'agents', 'writer', 'agent.yaml'),
+      'name: writer\ndisplayName: Writer\nisDefault: true\nskills: []\n',
+    );
+    mkdirSync(join(projectsDir, 'alpha', 'child', 'agents', 'writer'), { recursive: true });
+    writeFileSync(
+      join(projectsDir, 'alpha', 'child', 'context.md'),
+      '---\nravenProject:\n  version: 1\n  id: child-stable\n---\n# Child\n',
+    );
+    writeFileSync(
+      join(projectsDir, 'alpha', 'child', 'agents', 'writer', 'agent.yaml'),
+      'name: writer\ndisplayName: Writer\nisDefault: false\nskills: []\n',
+    );
+    await projectRegistryLoad();
+
+    expect(store.getDefaultAgent('alpha-stable').id).toBe('alpha-stable::writer');
+    expect(store.getDefaultAgent('child-stable').id).toBe('child-stable::writer');
+  });
+
+  it('does not discover a newly appeared definition until registry reload', async () => {
+    const filePath = join(projectsDir, 'agents', 'new-agent.yaml');
+    writeFileSync(filePath, 'name: new-agent\ndisplayName: New\nskills: []\n');
+    expect(store.getAgent('new-agent')).toBeUndefined();
+
+    await projectRegistryLoad();
+    expect(store.getAgent('new-agent')?.name).toBe('new-agent');
+  });
+
+  it('rejects scoped lookup when the owning project identity changed after reload', async () => {
+    mkdirSync(join(projectsDir, 'alpha', 'agents'), { recursive: true });
+    writeFileSync(
+      join(projectsDir, 'alpha', 'context.md'),
+      '---\nravenProject:\n  version: 1\n  id: alpha-stable\n---\n# Alpha\n',
+    );
+    writeFileSync(
+      join(projectsDir, 'alpha', 'agents', 'local.yaml'),
+      'name: local\ndisplayName: Local\nskills: []\n',
+    );
+    await projectRegistryLoad();
+    writeFileSync(
+      join(projectsDir, 'alpha', 'context.md'),
+      '---\nravenProject:\n  version: 1\n  id: changed-stable\n---\n# Alpha\n',
+    );
+
+    expect(() => store.getAgentByName('local', 'alpha-stable')).toThrow(/identity changed/);
+    expect(() => store.getDefaultAgent('alpha-stable')).toThrow(/identity changed/);
+  });
+
+  it('blocks global lookups after a failed root reload until a successful reload', async () => {
+    const moved = `${projectsDir}-held`;
+    renameSync(projectsDir, moved);
+    try {
+      await expect(projectRegistry.load(projectsDir)).rejects.toThrow();
+    } finally {
+      renameSync(moved, projectsDir);
+    }
+    expect(() => store.getDefaultAgent()).toThrow();
+    expect(() => store.getAgentByName('raven')).toThrow();
+    expect(() => store.listAgents()).toThrow();
+    await projectRegistry.load(projectsDir);
+    expect(store.getDefaultAgent().id).toBe('raven');
+  });
+
+  it('does not create an agent in a project whose metadata identity changed', async () => {
+    mkdirSync(join(projectsDir, 'alpha'));
+    writeFileSync(join(projectsDir, 'alpha/context.md'), '# Alpha\n');
+    await projectRegistryLoad();
+    writeFileSync(
+      join(projectsDir, 'alpha/context.md'),
+      '---\nravenProject:\n  version: 1\n  id: changed\n---\n# Alpha\n',
+    );
+    await expect(
+      store.createAgent({ name: 'new', skills: [] }, { projectScope: 'alpha' }),
+    ).rejects.toThrow(/identity changed/);
+    expect(existsSync(join(projectsDir, 'alpha/agents/new'))).toBe(false);
+  });
+
+  async function projectRegistryLoad(): Promise<void> {
+    const registry = new ProjectRegistry();
+    await registry.load(projectsDir);
+    projectRegistry = registry;
+    store = createYamlNamedAgentStore({
+      projectRegistry: registry,
+      agentYamlStore: createAgentYamlStore(),
+      projectsDir,
+      eventBus: eventBus as any,
+    });
+  }
 });

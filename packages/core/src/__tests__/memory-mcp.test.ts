@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createMemoryStore } from '../agent-memory/memory-store.ts';
+import { createProjectMemoryFixture } from './fixtures/project-memory.ts';
 import { buildMemoryTools } from '../mcp-server/memory-mcp.ts';
 
-const AGENT = 'mem-agent';
+const PROJECT = 'memory-project';
 
 interface ToolResult {
   content: Array<{ type: string; text: string }>;
@@ -22,15 +22,13 @@ describe('memory MCP tools', () => {
   let projectsDir: string;
   let tools: ReturnType<typeof buildMemoryTools>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     projectsDir = mkdtempSync(join(tmpdir(), 'raven-memmcp-'));
-    mkdirSync(join(projectsDir, 'agents', AGENT), { recursive: true });
-    writeFileSync(
-      join(projectsDir, 'agents', AGENT, 'agent.yaml'),
-      `name: ${AGENT}\ndisplayName: Mem\ndescription: x\nmemory:\n  maxFiles: 2\n  maxTotalKb: 1\n`,
-    );
-    const store = createMemoryStore({ projectsDir });
-    tools = buildMemoryTools({ memoryStore: store, agentName: AGENT });
+    const { memoryStore, workspaceStore } = await createProjectMemoryFixture(projectsDir, [
+      PROJECT,
+    ]);
+    await workspaceStore.updateWorkspace(PROJECT, { memory: { maxFiles: 2, maxTotalKb: 1 } });
+    tools = buildMemoryTools({ memoryStore, projectId: PROJECT });
   });
 
   afterEach(() => {

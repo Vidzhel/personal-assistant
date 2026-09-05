@@ -235,7 +235,7 @@ describe('createExecutionBridge', () => {
     deps.eventBus.on('agent:task:request', (e) => requests.push(e));
     deps.eventBus.emit(runAgentEvent() as never);
     await Promise.resolve();
-    expect(deps.namedAgentStore.getAgentByName).toHaveBeenCalledWith('gmail');
+    expect(deps.namedAgentStore.getAgentByName).toHaveBeenCalledWith('gmail', undefined);
     const req = requests[0] as { payload: Record<string, unknown> };
     expect(req.payload.namedAgentId).toBe('agent-gmail');
     expect(req.payload.mcpServers).toHaveProperty('gmail');

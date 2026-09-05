@@ -45,12 +45,13 @@ interface PendingEntry {
   agentTaskId: string;
 }
 
-function resolveAgent(deps: ExecutionBridgeDeps, agentName?: string): NamedAgent {
-  const named = agentName ? deps.namedAgentStore.getAgentByName(agentName) : undefined;
+function resolveAgent(deps: ExecutionBridgeDeps, payload: RunAgentPayload): NamedAgent {
+  const { agent: agentName, projectId } = payload;
+  const named = agentName ? deps.namedAgentStore.getAgentByName(agentName, projectId) : undefined;
   if (agentName && !named) {
     throw new Error(`Template names unknown agent '${agentName}'`);
   }
-  return named ?? deps.namedAgentStore.getDefaultAgent();
+  return named ?? deps.namedAgentStore.getDefaultAgent(projectId);
 }
 
 function buildAgentTaskRequest(
@@ -58,7 +59,7 @@ function buildAgentTaskRequest(
   payload: RunAgentPayload,
   agentTaskId: string,
 ): AgentTaskRequestEvent {
-  const agent = resolveAgent(deps, payload.agent);
+  const agent = resolveAgent(deps, payload);
   const capabilities = deps.agentResolver.resolveAgentCapabilities(agent);
   const executionSettings = resolveAgentExecutionSettings({
     model: agent.model,

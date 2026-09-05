@@ -1,133 +1,220 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createMemoryStore, formatMemoryBlock } from '../agent-memory/memory-store.ts';
+import { afterEach, describe, expect, it } from 'vitest';
+import { listPendingCandidates } from '../agent-memory/memory-candidates.ts';
+import { ProjectRegistry } from '../project-registry/project-registry.ts';
+import { createProjectWorkspaceStore } from '../project-manager/project-workspace.ts';
+import {
+  createMemoryStore,
+  formatMemoryBlock,
+  resolveMemoryPath,
+} from '../agent-memory/memory-store.ts';
 
-const AGENT = 'mem-agent';
-
-function writeAgentYaml(projectsDir: string, body: string): void {
-  mkdirSync(join(projectsDir, 'agents', AGENT), { recursive: true });
-  writeFileSync(join(projectsDir, 'agents', AGENT, 'agent.yaml'), body);
+interface Fixture {
+  root: string;
+  projectsDir: string;
+  store: ReturnType<typeof createMemoryStore>;
 }
 
-describe('MemoryStore', () => {
-  let projectsDir: string;
-  let store: ReturnType<typeof createMemoryStore>;
+const roots: string[] = [];
 
-  beforeEach(() => {
-    projectsDir = mkdtempSync(join(tmpdir(), 'raven-mem-'));
-    writeAgentYaml(
-      projectsDir,
-      `name: ${AGENT}\ndisplayName: Mem\ndescription: x\nmemory:\n  maxFiles: 3\n  maxTotalKb: 1\n`,
-    );
-    store = createMemoryStore({ projectsDir });
+async function fixture(...ids: string[]): Promise<Fixture> {
+  const root = mkdtempSync(join(tmpdir(), 'raven-memory-project-'));
+  roots.push(root);
+  const projectsDir = join(root, 'projects');
+  mkdirSync(projectsDir, { recursive: true });
+  writeFileSync(join(projectsDir, 'context.md'), '# Global\n');
+  for (const id of ids) {
+    mkdirSync(join(projectsDir, id), { recursive: true });
+    writeFileSync(join(projectsDir, id, 'context.md'), '# ' + id + '\n');
+  }
+  const registry = new ProjectRegistry();
+  await registry.load(projectsDir);
+  const workspaceStore = createProjectWorkspaceStore({
+    projectsDir,
+    projectRegistry: registry,
+    projectRoot: root,
   });
+  return {
+    root,
+    projectsDir,
+    store: createMemoryStore({ projectsDir, workspaceStore }),
+  };
+}
 
-  afterEach(() => {
-    rmSync(projectsDir, { recursive: true, force: true });
-  });
-
-  it('writes and reads a memory file', async () => {
-    await store.write(AGENT, 'fact-1.md', 'remember this');
-    expect(await store.read(AGENT, 'fact-1.md')).toBe('remember this');
-    expect(existsSync(join(projectsDir, 'agents', AGENT, 'memory', 'fact-1.md'))).toBe(true);
-  });
-
-  it('readIndex returns MEMORY.md contents, null when absent', async () => {
-    expect(await store.readIndex(AGENT)).toBeNull();
-    await store.write(AGENT, 'MEMORY.md', '# Index\n- fact-1\n');
-    expect(await store.readIndex(AGENT)).toContain('# Index');
-  });
-
-  it('update requires an existing file', async () => {
-    const res = await store.update(AGENT, 'ghost.md', 'x');
-    expect(res.ok).toBe(false);
-    expect(res.error).toMatch(/does not exist/);
-    await store.write(AGENT, 'real.md', 'v1');
-    const updated = await store.update(AGENT, 'real.md', 'v2');
-    expect(updated.ok).toBe(true);
-    expect(await store.read(AGENT, 'real.md')).toBe('v2');
-  });
-
-  it('rejects an agentName with path traversal', async () => {
-    await expect(store.read('../evil', 'fact.md')).rejects.toThrow(/invalid/i);
-    await expect(store.write('../evil', 'fact.md', 'x')).rejects.toThrow(/invalid/i);
-  });
-
-  it('rejects path escaping the memory dir', async () => {
-    await expect(store.write(AGENT, '../../escape.md', 'nope')).rejects.toThrow(/invalid path/i);
-    await expect(store.read(AGENT, '/etc/passwd')).rejects.toThrow(/invalid path/i);
-  });
-
-  it('rejects subdirectory paths', async () => {
-    await expect(store.write(AGENT, 'sub/note.md', 'x')).rejects.toThrow(/invalid path/i);
-    await expect(store.read(AGENT, 'sub/note.md')).rejects.toThrow(/invalid path/i);
-  });
-
-  it('rejects write/update/remove ops that target an existing directory', async () => {
-    // A bare path segment like "candidates" passes safePath (no slashes)
-    // but can collide with the real candidates/ subdirectory memory
-    // candidates live in — writing over it used to throw a raw EISDIR.
-    mkdirSync(join(projectsDir, 'agents', AGENT, 'memory', 'candidates'), { recursive: true });
-
-    const writeRes = await store.write(AGENT, 'candidates', 'x');
-    expect(writeRes.ok).toBe(false);
-    expect(writeRes.error).toMatch(/directory/i);
-
-    const removeRes = await store.remove(AGENT, 'candidates');
-    expect(removeRes.ok).toBe(false);
-    expect(removeRes.error).toMatch(/directory/i);
-  });
-
-  it('enforces the maxFiles budget', async () => {
-    await store.write(AGENT, 'a.md', 'a');
-    await store.write(AGENT, 'b.md', 'b');
-    await store.write(AGENT, 'c.md', 'c');
-    const res = await store.write(AGENT, 'd.md', 'd');
-    expect(res.ok).toBe(false);
-    expect(res.error).toMatch(/budget/i);
-    expect(res.usage?.files).toBe(3);
-    // overwriting an existing file is allowed even at the file cap
-    const overwrite = await store.write(AGENT, 'a.md', 'a2');
-    expect(overwrite.ok).toBe(true);
-  });
-
-  it('enforces the maxTotalKb budget', async () => {
-    const big = 'x'.repeat(900);
-    await store.write(AGENT, 'big.md', big);
-    const res = await store.write(AGENT, 'big2.md', 'y'.repeat(900));
-    expect(res.ok).toBe(false);
-    expect(res.error).toMatch(/budget/i);
-    expect(res.usage?.totalBytes).toBeGreaterThan(0);
-  });
-
-  it('reports usage', async () => {
-    await store.write(AGENT, 'a.md', 'hello');
-    const usage = await store.usage(AGENT);
-    expect(usage.files).toBe(1);
-    expect(usage.totalBytes).toBe(5);
-    expect(usage.maxFiles).toBe(3);
-    expect(usage.maxTotalBytes).toBe(1024);
-  });
-
-  it('falls back to default budget when agent.yaml lacks one', async () => {
-    writeFileSync(
-      join(projectsDir, 'agents', AGENT, 'agent.yaml'),
-      `name: ${AGENT}\ndisplayName: Mem\ndescription: x\n`,
-    );
-    const usage = await store.usage(AGENT);
-    expect(usage.maxFiles).toBe(30);
-    expect(usage.maxTotalBytes).toBe(64 * 1024);
-  });
-
-  it('formatMemoryBlock wraps the index with guidance', () => {
-    const block = formatMemoryBlock('# Index\n- fact-1\n');
-    expect(block).toContain('## Your Memory');
-    expect(block).toContain('# Index');
-    expect(block).toContain('memory_read');
-  });
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-// suppress unused import warning — readFileSync is imported in the original spec
-void readFileSync;
+describe('project-owned MemoryStore', () => {
+  it('keeps project memory isolated and supports nested notes', async () => {
+    const test = await fixture('alpha', 'beta');
+    await test.store.write('alpha', 'facts/work.md', 'alpha note');
+    expect(await test.store.read('alpha', 'facts/work.md')).toBe('alpha note');
+    expect(await test.store.list('alpha')).toEqual(['facts/work.md']);
+    expect(await test.store.list('beta')).toEqual([]);
+    expect(test.store.getDirectory('alpha')).toContain('/alpha/memory');
+  });
+
+  it('does not create a memory directory while checking an unused project', async () => {
+    const test = await fixture('alpha');
+    expect(await test.store.list('alpha')).toEqual([]);
+    expect(await test.store.readIndex('alpha')).toBeNull();
+    expect(await listPendingCandidates(test.store, 'alpha')).toEqual([]);
+    expect(existsSync(test.store.getDirectory('alpha'))).toBe(false);
+  });
+
+  it('reads an optional index and reports default budget', async () => {
+    const test = await fixture('alpha');
+    expect(await test.store.readIndex('alpha')).toBeNull();
+    await test.store.write('alpha', 'MEMORY.md', '# Index\n');
+    expect(await test.store.readIndex('alpha')).toBe('# Index\n');
+    expect((await test.store.usage('alpha')).maxFiles).toBe(30);
+    expect((await test.store.usage('alpha')).maxTotalBytes).toBe(64 * 1024);
+  });
+
+  it('updates and removes existing files while preserving missing-file semantics', async () => {
+    const test = await fixture('alpha');
+    expect((await test.store.update('alpha', 'missing.md', 'x')).ok).toBe(false);
+    await test.store.write('alpha', 'note.md', 'one');
+    expect((await test.store.update('alpha', 'note.md', 'two')).ok).toBe(true);
+    expect(await test.store.read('alpha', 'note.md')).toBe('two');
+    expect((await test.store.remove('alpha', 'note.md')).ok).toBe(true);
+    expect((await test.store.remove('alpha', 'note.md')).ok).toBe(false);
+  });
+
+  it('rejects traversal, internal paths, non-Markdown files, and symlinks', async () => {
+    const test = await fixture('alpha');
+    for (const path of ['../escape.md', '/tmp/escape.md', 'candidates/x.md', '.tmp.md', 'x.txt']) {
+      await expect(test.store.write('alpha', path, 'x')).rejects.toThrow(/memory|invalid/i);
+    }
+    const directory = test.store.getDirectory('alpha');
+    mkdirSync(join(directory, 'nested'), { recursive: true });
+    writeFileSync(join(directory, 'nested', 'real.md'), 'safe');
+    symlinkSync(join(directory, 'nested', 'real.md'), join(directory, 'linked.md'));
+    await expect(test.store.read('alpha', 'linked.md')).rejects.toThrow(/symlink|safely/i);
+    await expect(test.store.list('alpha')).rejects.toThrow(/symlink|safely/i);
+    expect(resolveMemoryPath(directory, 'candidates/internal.md', true)).toContain('candidates');
+  });
+
+  it('excludes candidates and dotfiles from ordinary listing and usage', async () => {
+    const test = await fixture('alpha');
+    const directory = test.store.getDirectory('alpha');
+    mkdirSync(join(directory, 'candidates'), { recursive: true });
+    mkdirSync(join(directory, '.tmp'), { recursive: true });
+    writeFileSync(join(directory, 'candidates', 'candidate.md'), 'candidate');
+    writeFileSync(join(directory, '.tmp', 'draft.md'), 'draft');
+    await test.store.write('alpha', 'kept.md', 'kept');
+    expect(await test.store.list('alpha')).toEqual(['kept.md']);
+    expect((await test.store.usage('alpha')).files).toBe(1);
+  });
+
+  it('bounds all entries across recursive branches', async () => {
+    const test = await fixture('alpha');
+    const directory = test.store.getDirectory('alpha');
+    for (const branch of ['left', 'right']) {
+      for (let index = 0; index < 1_000; index += 1) {
+        mkdirSync(join(directory, branch, String(index)), { recursive: true });
+      }
+    }
+    await expect(test.store.list('alpha')).rejects.toThrow(/too many/i);
+  });
+
+  it('enforces workspace memory budget across concurrent writes', async () => {
+    const test = await fixture('alpha');
+    const registry = new ProjectRegistry();
+    await registry.load(test.projectsDir);
+    const configured = createProjectWorkspaceStore({
+      projectsDir: test.projectsDir,
+      projectRegistry: registry,
+      projectRoot: test.root,
+    });
+    await configured.updateWorkspace('alpha', { memory: { maxFiles: 1, maxTotalKb: 1 } });
+    const limited = createMemoryStore({
+      projectsDir: test.projectsDir,
+      workspaceStore: configured,
+    });
+    const results = await Promise.all([
+      limited.write('alpha', 'one.md', 'one'),
+      limited.write('alpha', 'two.md', 'two'),
+    ]);
+    expect(results.filter((result) => result.ok)).toHaveLength(1);
+    expect((await limited.usage('alpha')).files).toBe(1);
+  });
+
+  it('rejects inactive projects without creating directories', async () => {
+    const test = await fixture('alpha');
+    await expect(test.store.write('missing', 'note.md', 'x')).rejects.toMatchObject({
+      statusCode: 404,
+    });
+    expect(existsSync(join(test.projectsDir, 'missing'))).toBe(false);
+  });
+
+  it('rejects writes over directories and uses current external bytes as authority', async () => {
+    const test = await fixture('alpha');
+    const directory = test.store.getDirectory('alpha');
+    mkdirSync(join(directory, 'folder.md'), { recursive: true });
+    expect((await test.store.write('alpha', 'folder.md', 'x')).ok).toBe(false);
+    await test.store.write('alpha', 'note.md', 'before');
+    writeFileSync(join(directory, 'note.md'), 'external');
+    expect((await test.store.update('alpha', 'note.md', 'after')).ok).toBe(true);
+    expect(readFileSync(join(directory, 'note.md'), 'utf8')).toBe('after');
+  });
+
+  it('supports locked learning mutations with an explicit byte snapshot', async () => {
+    const test = await fixture('alpha');
+    expect(
+      (
+        await test.store.apply('alpha', {
+          action: 'create',
+          path: 'candidate.md',
+          content: 'draft',
+          expected: null,
+        })
+      ).ok,
+    ).toBe(true);
+    await expect(
+      test.store.apply('alpha', {
+        action: 'update',
+        path: 'candidate.md',
+        content: 'new',
+        expected: 'wrong',
+      }),
+    ).rejects.toThrow(/changed/i);
+    expect(
+      (
+        await test.store.apply('alpha', {
+          action: 'update',
+          path: 'candidate.md',
+          content: 'new',
+          expected: 'draft',
+        })
+      ).ok,
+    ).toBe(true);
+    expect(
+      (
+        await test.store.apply('alpha', {
+          action: 'delete',
+          path: 'candidate.md',
+          expected: 'new',
+        })
+      ).ok,
+    ).toBe(true);
+  });
+
+  it('formats an index for agent injection', () => {
+    const block = formatMemoryBlock('# Index\n- fact\n');
+    expect(block).toContain('## Your Memory');
+    expect(block).toContain('memory_read');
+    expect(block).toContain('# Index');
+  });
+});

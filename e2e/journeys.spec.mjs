@@ -604,3 +604,39 @@ test('mobile dashboard identifies rejected definitions and reload clears the cor
     await request.post(`${API}/definitions/reload`);
   }
 });
+
+test('mobile agent memory requires a project and keeps nested project notes separate', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/agents');
+  await expect(page.getByRole('heading', { name: 'raven', exact: true })).toBeVisible();
+  await page.getByTitle('View Memory').first().click();
+  await expect(page.getByRole('heading', { name: 'Project memory', exact: true })).toBeVisible();
+  const selector = page.getByLabel('Project', { exact: true });
+  await expect(selector).toHaveValue('');
+  await expect(page.getByText('Course private memory sentinel.', { exact: true })).toHaveCount(0);
+  await selector.selectOption('course');
+  await expect(page.getByText('Course private memory sentinel.', { exact: true })).toBeVisible();
+  await expect(page.getByText('research/notes.md', { exact: true })).toBeVisible();
+  await selector.selectOption('course/one');
+  await expect(page.getByText('Nested project memory sentinel.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Course private memory sentinel.', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Close', exact: true }).click();
+  const response = await request.post(`${API}/agents`, {
+    data: { name: 'browser-local-helper', skills: [], projectScope: 'course/one' },
+  });
+  expect(response.status()).toBe(201);
+  const local = await response.json();
+  expect(local.id).toBe('course/one::browser-local-helper');
+  expect((await request.get(`${API}/agents/${encodeURIComponent(local.id)}`)).status()).toBe(200);
+  await page.reload();
+  const card = page.locator('div.rounded-lg.border').filter({
+    has: page.getByRole('heading', { name: 'browser-local-helper', exact: true }),
+  });
+  await expect(card.getByText('one', { exact: true })).toBeVisible();
+  await card.getByTitle('View Memory').click();
+  await expect(selector).toHaveValue('course/one');
+  await expect(page.getByText('Nested project memory sentinel.', { exact: true })).toBeVisible();
+});

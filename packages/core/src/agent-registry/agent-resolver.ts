@@ -108,16 +108,18 @@ export function validateNamedAgentSettings(agent: NamedAgent): void {
 export function resolveDefaultAgentCapabilities(deps: {
   namedAgentStore?: NamedAgentStore;
   agentResolver?: AgentResolver;
+  projectId?: string;
 }): ResolvedDefaultAgent {
   const { namedAgentStore, agentResolver } = deps;
   if (!namedAgentStore && !agentResolver) return emptyCapabilities();
   if (!namedAgentStore || !agentResolver) {
     throw new Error('Default agent requires both namedAgentStore and agentResolver');
   }
-  const agent = namedAgentStore.getDefaultAgent();
+  const agent = namedAgentStore.getDefaultAgent(deps.projectId);
   validateNamedAgentSettings(agent);
   return {
     ...agentResolver.resolveAgentCapabilities(agent),
+    bashAccess: agent.bash,
     namedAgentId: agent.id,
     agentName: agent.name,
     namedAgentInstructions: agent.instructions ?? undefined,

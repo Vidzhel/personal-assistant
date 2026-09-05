@@ -21,7 +21,6 @@ function makeAgent(overrides: Partial<AgentYaml> = {}): AgentYaml {
     isDefault: false,
     model: 'sonnet',
     maxTurns: 15,
-    memory: { maxFiles: 30, maxTotalKb: 64 },
     ...overrides,
   };
 }

@@ -94,8 +94,8 @@ try {
     import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
     import { execFileSync } from 'node:child_process';
     const context = ${JSON.stringify(`projects/${project.fsPath}/context.md`)};
-    const memory = 'projects/agents/raven/memory/container-smoke.md';
-    mkdirSync('/app/projects/agents/raven/memory', {recursive:true});
+    const memory = 'projects/system/memory/container-smoke.md';
+    mkdirSync('/app/projects/system/memory', {recursive:true});
     writeFileSync('/app/' + memory, '# Container memory sentinel');
     const git = (...args) => execFileSync('git', args, {cwd:'/app', encoding:'utf8'}).trim();
     git('add', '--', context, memory);
@@ -124,7 +124,7 @@ try {
     const context = ${JSON.stringify(`projects/${project.fsPath}/context.md`)};
     assert.equal(readFileSync('/app/' + context,'utf8'), ${JSON.stringify(durable.context)});
     assert.equal(git('show','HEAD:' + context), ${JSON.stringify(durable.context.trim())});
-    const memory = 'projects/agents/raven/memory/container-smoke.md';
+    const memory = 'projects/system/memory/container-smoke.md';
     assert.equal(readFileSync('/app/' + memory,'utf8'), '# Container memory sentinel');
     assert.equal(git('show','HEAD:' + memory), '# Container memory sentinel');
   `,

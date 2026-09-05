@@ -4,13 +4,11 @@ import { NamedAgentCreateInputSchema, NamedAgentUpdateInputSchema } from '@raven
 import type { NamedAgentStore } from '../../agent-registry/yaml-named-agent-store.ts';
 import type { AgentManager } from '../../agent-manager/agent-manager.ts';
 import type { TaskStore } from '../../task-manager/task-store.ts';
-import type { MemoryStore } from '../../agent-memory/memory-store.ts';
 
 const HTTP_STATUS = {
   OK_CREATED: 201,
   BAD_REQUEST: 400,
   NOT_FOUND: 404,
-  SERVICE_UNAVAILABLE: 503,
 } as const;
 
 const DEFAULT_PAGE_SIZE = 50;
@@ -25,12 +23,11 @@ export interface AgentRouteDeps {
   namedAgentStore: NamedAgentStore;
   agentManager: AgentManager;
   taskStore?: TaskStore;
-  memoryStore?: MemoryStore;
 }
 
 // eslint-disable-next-line max-lines-per-function -- route registration
 export function registerAgentRoutes(app: FastifyInstance, deps: AgentRouteDeps): void {
-  const { namedAgentStore, agentManager, taskStore, memoryStore } = deps;
+  const { namedAgentStore, agentManager, taskStore } = deps;
 
   function getActiveAgentIds(): Set<string> {
     const activeTasks = agentManager.getActiveTasks();
@@ -159,37 +156,5 @@ export function registerAgentRoutes(app: FastifyInstance, deps: AgentRouteDeps):
       offset: result.data.offset,
       includeArchived: true,
     });
-  });
-
-  // GET /api/agents/:id/memory — owner-reviewable memory files (list + content)
-  app.get('/api/agents/:id/memory', async (req, reply) => {
-    const { id } = req.params as { id: string };
-    const agent = namedAgentStore.getAgent(id);
-    if (!agent) {
-      return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Agent not found' });
-    }
-
-    // No memory store wired is "we don't know", not "this agent has no
-    // memory" — a bare [] here reads as a truthful empty result on the
-    // dashboard when it's actually a degraded backend.
-    if (!memoryStore) {
-      return reply
-        .status(HTTP_STATUS.SERVICE_UNAVAILABLE)
-        .send({ error: 'Memory store not available' });
-    }
-
-    const files = await memoryStore.list(agent.name);
-    const entries = await Promise.all(
-      files.map(async (file) => {
-        try {
-          return { file, content: await memoryStore.read(agent.name, file) };
-        } catch {
-          // Same distinction as above, at file granularity: a read failure
-          // is not an empty file — don't let it render as one.
-          return { file, content: '(unreadable)' };
-        }
-      }),
-    );
-    return entries;
   });
 }

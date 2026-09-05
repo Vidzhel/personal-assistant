@@ -72,20 +72,23 @@ link to these entrypoints and use the existing SDK and orchestration paths.
   Preserve source CRUD URLs with project-scoped IDs. Extend new-project staging
   and create/archive recovery to verify both anchors together. Test restart, concurrent
   changes, malformed files, invalid references and ownership isolation.
-- [ ] **W1b — project execution.** Extend project-aware agent lookup, dispatch events,
+- [ ] **W1b — project execution.** The first runtime checkpoint groups project-aware
+  agent selection and project-owned memory to prevent namesake leaks; see
+  [its specification](tech-spec-w1b-project-context.md). Then extend dispatch events,
   Manager/session/backend options and permission hooks. Resolve a workspace snapshot
   before admission and revalidate before execution/tool calls. Persist SDK resume
   revision with sessions. Test native SDK
   option forwarding, local defaults, stale queued/running tasks and interruption.
-- [ ] **W1c — memory and context.** Update the existing memory store/MCP, candidate
-  and consolidation paths to project ownership, preserving learning behavior.
-  Provide bounded overview/index links and source locations in project prompts.
+- [ ] **W1c — repository context and skills.** Project memory moved to the first W1b
+  checkpoint alongside agent selection. Provide bounded overview/index links and
+  source locations in project prompts.
   Update existing document runtime skills and add reusable repository/rendering
   instructions with project-owned output paths. Test same-name agent isolation,
   cross-agent sharing within a project, and unsuccessful consolidation retention.
 - [ ] **W1d — browser workspace and artifacts.** Extend project API/client/components
   with attachment/settings controls, file navigation, download and safe previews
-  for text/Markdown, images, PDF and HTML. Discover generated files directly; reuse
+  for text/Markdown, images, PDF and HTML. Add explicit project selection and
+  server-side project filtering for knowledge graph views. Discover generated files directly; reuse
   repository render pipelines for other document previews. Test mobile attachment
   management and command→file→commit/push→browser using a real temporary repository.
 - [ ] **W1e — complete review and deployment verification.** Update architecture,
@@ -126,8 +129,8 @@ verify execution contracts, not real model quality or subscription delivery.
 Planning: actual sibling repositories inspected read-only; no private datasets,
 student content, credentials or project files copied or modified. Parent review
 identified global agent precedence, fixed SDK cwd, unversioned session resume and
-SQL data sources as existing paths to replace. W1a is implemented and verified;
-W1b direct execution is next.
+SQL data sources as existing paths to replace. W1a and the first W1b project
+context checkpoint are implemented and verified; direct SDK execution is next.
 
 Parent review: anchor staging and create/archive recovery move into W1a so an
 empty newly created project remains safely archivable with its workspace manifest.
@@ -156,3 +159,15 @@ Folder source reads intentionally remain available when an attachment disappears
 so the owner can repair or remove its configuration. W1b adds current availability,
 execution rejection and revision checks; storing execution settings in W1a does
 not yet change SDK cwd or permissions. Existing graph links remain unchanged.
+
+
+### W1b project context checkpoint — September 6, 2026
+
+Project-local agent defaults/identity and project-owned memory are complete;
+[the checkpoint specification](tech-spec-w1b-project-context.md) records parent
+review and verification. Required checks, 2,397 default tests (six explicit skips),
+17 browser journeys across regression/focused runs, production builds and compiled
+restart pass. This moves the memory portion of W1c alongside local agent selection.
+The next W1b checkpoint wires workspace cwd, SDK autonomy modes, invocation
+revalidation and revision-bound session resume. Workspace execution settings still
+do not change backend cwd or permission mode until that checkpoint lands.

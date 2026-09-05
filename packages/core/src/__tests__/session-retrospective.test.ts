@@ -8,6 +8,8 @@ import { SessionManager } from '../session-manager/session-manager.ts';
 import { createMessageStore } from '../session-manager/message-store.ts';
 import { createIdleDetector } from '../session-manager/idle-detector.ts';
 import { EventBus } from '../event-bus/event-bus.ts';
+import { createMemoryStore } from '../agent-memory/memory-store.ts';
+import { listPendingCandidates } from '../agent-memory/memory-candidates.ts';
 import type { RavenEvent } from '@raven/shared';
 
 // Mock runAgentTask
@@ -38,6 +40,7 @@ describe('Session Auto-Compaction & Background Retrospective (10.10)', () => {
   let sessionPath: string;
   let sm: SessionManager;
   let eventBus: EventBus;
+  let memoryStore: ReturnType<typeof createMemoryStore>;
 
   beforeAll(() => {
     tmpDir = mkdtempSync(join(tmpdir(), 'session-retro-'));
@@ -53,6 +56,13 @@ describe('Session Auto-Compaction & Background Retrospective (10.10)', () => {
     db.prepare(
       'INSERT INTO projects (id, name, description, skills, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
     ).run('proj-1', 'Test Project', '', '[]', now, now);
+    memoryStore = createMemoryStore({
+      projectsDir: tmpDir,
+      workspaceStore: {
+        getProjectHome: () => join(tmpDir, 'project-1'),
+        getWorkspace: () => ({}),
+      },
+    } as any);
   });
 
   afterAll(() => {
@@ -207,8 +217,7 @@ describe('Session Auto-Compaction & Background Retrospective (10.10)', () => {
         sessionManager: sm,
         eventBus,
         config: {} as any,
-        projectsDir: tmpDir,
-        namedAgentStore: {} as any,
+        memoryStore,
         knowledgeStore: mockKnowledgeStore,
         neo4j: mockNeo4j,
       });
@@ -216,6 +225,9 @@ describe('Session Auto-Compaction & Background Retrospective (10.10)', () => {
       const result = await retro.runRetrospective(session.id, 'proj-1');
 
       expect(result.summary).toBe(mockResult.summary);
+      expect(runAgentTask).toHaveBeenCalledWith(
+        expect.objectContaining({ task: expect.objectContaining({ projectId: 'proj-1' }) }),
+      );
       expect(result.decisions).toEqual(['Use .env for DATABASE_PATH']);
       expect(result.candidateBubbles).toHaveLength(1);
 
@@ -277,8 +289,7 @@ describe('Session Auto-Compaction & Background Retrospective (10.10)', () => {
         sessionManager: sm,
         eventBus: localBus,
         config: {} as any,
-        projectsDir: tmpDir,
-        namedAgentStore: {} as any,
+        memoryStore,
         knowledgeStore: mockKnowledgeStore,
         neo4j: mockNeo4j,
       });
@@ -339,8 +350,7 @@ describe('Session Auto-Compaction & Background Retrospective (10.10)', () => {
         sessionManager: sm,
         eventBus,
         config: {} as any,
-        projectsDir: tmpDir,
-        namedAgentStore: {} as any,
+        memoryStore,
         knowledgeStore: mockKnowledgeStore,
         neo4j: mockNeo4j,
       });
@@ -437,6 +447,43 @@ describe('Session Auto-Compaction & Background Retrospective (10.10)', () => {
   });
 
   describe('Manual Retrospective API', () => {
+    it('writes durable candidates to the session project and rejects a project mismatch', async () => {
+      const { createSessionRetrospective } =
+        await import('../session-manager/session-retrospective.ts');
+      vi.mocked(isContentRejected).mockReturnValue(false);
+      const messageStore = createMessageStore({ basePath: sessionPath });
+      const session = sm.createSession('proj-1');
+      messageStore.appendMessage(session.id, { role: 'user', content: 'Remember this preference' });
+      vi.mocked(runAgentTask).mockResolvedValue({
+        taskId: 'candidate-task',
+        result: JSON.stringify({
+          summary: 'A preference',
+          decisions: [],
+          findings: [],
+          actionItems: [],
+          candidateBubbles: [],
+          memoryCandidates: [{ title: 'Response style', content: 'Keep answers concise.' }],
+        }),
+        durationMs: 1,
+        success: true,
+      });
+      const retro = createSessionRetrospective({
+        messageStore,
+        sessionManager: sm,
+        eventBus,
+        config: {} as any,
+        memoryStore,
+      });
+
+      const result = await retro.runRetrospective(session.id, 'proj-1');
+      expect(result.memoryCandidatesWritten).toBe(1);
+      expect(await listPendingCandidates(memoryStore, 'proj-1')).toHaveLength(1);
+      await expect(retro.runRetrospective(session.id, 'other-project')).rejects.toThrow(
+        'belongs to project proj-1',
+      );
+      await retro.stop();
+    });
+
     it('returns expected shape from runRetrospective', async () => {
       const { createSessionRetrospective } =
         await import('../session-manager/session-retrospective.ts');
@@ -471,8 +518,7 @@ describe('Session Auto-Compaction & Background Retrospective (10.10)', () => {
         sessionManager: sm,
         eventBus,
         config: {} as any,
-        projectsDir: tmpDir,
-        namedAgentStore: {} as any,
+        memoryStore,
         knowledgeStore: mockKnowledgeStore,
         neo4j: mockNeo4j,
       });

@@ -53,12 +53,12 @@ vi.mock('../agent-memory/memory-store.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof MemoryStoreModule>();
   return {
     ...actual,
-    createMemoryStore: (deps: { projectsDir: string }) => {
+    createMemoryStore: (deps: Parameters<typeof actual.createMemoryStore>[0]) => {
       const store = actual.createMemoryStore(deps);
       return {
         ...store,
         async write(agentName: string, relPath: string, content: string) {
-          const absolutePath = join(deps.projectsDir, 'agents', agentName, 'memory', relPath);
+          const absolutePath = join(store.getDirectory(agentName), relPath);
           if (fsGate.matches(absolutePath)) {
             fsGate.entered();
             await fsGate.waitUntilReleased();
@@ -145,7 +145,7 @@ describe('e2e: admitted local MCP calls drain before task shutdown', () => {
     raven.eventBus.on<AgentTaskRequestEvent>('agent:task:request', (event) => {
       requests.push(event);
     });
-    const memoryPath = join(paths.projectsDir, 'agents', 'raven', 'memory', 'held.md');
+    const memoryPath = join(paths.projectsDir, 'system', 'memory', 'held.md');
     raven.eventBus.emit({
       id: crypto.randomUUID(),
       timestamp: Date.now(),
@@ -240,7 +240,7 @@ describe('e2e: admitted local MCP calls drain before task shutdown', () => {
       }),
     ]);
 
-    const lateWritePath = join(root!, 'projects', 'agents', 'raven', 'memory', 'late.md');
+    const lateWritePath = join(root!, 'projects', 'system', 'memory', 'late.md');
     const lateWrite = await memoryMcp.client.callTool({
       name: 'memory_write',
       arguments: { path: 'late.md', content: 'must not be written' },

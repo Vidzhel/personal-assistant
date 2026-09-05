@@ -37,6 +37,8 @@ import { readProjectDefinition } from '../project-registry/project-definition.ts
 const MANIFEST = 'project.yaml';
 const SOURCE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const MAX_MANIFEST_BYTES = 1_048_576;
+const DEFAULT_MEMORY_MAX_FILES = 30;
+const DEFAULT_MEMORY_MAX_TOTAL_KB = 64;
 
 export interface ProjectWorkspaceStoreDeps {
   projectsDir: string;
@@ -50,6 +52,7 @@ export interface ProjectWorkspaceStore {
   getDataSource(projectId: string, id: string): ProjectDataSource | undefined;
   buildDataSourcesContext(projectId: string): string | undefined;
   getProjectHome(projectId: string): string;
+  listProjectIds(): string[];
   updateWorkspace(projectId: string, patch: WorkspaceUpdate): Promise<ProjectWorkspace>;
   createDataSource(projectId: string, input: CreateDataSourceInput): Promise<ProjectDataSource>;
   updateDataSource(
@@ -225,6 +228,7 @@ function detachedWorkspace(workspace: ProjectWorkspace): ProjectWorkspace {
       ...source,
       contextFiles: source.contextFiles ? [...source.contextFiles] : undefined,
     })),
+    ...(workspace.memory ? { memory: { ...workspace.memory } } : {}),
   };
 }
 
@@ -344,7 +348,20 @@ function workspaceWithExecution(
 ): ProjectWorkspace {
   const execution = { ...workspace.execution, ...(patch.execution ?? {}) };
   if (execution.sourceId === null) delete execution.sourceId;
-  return parseCompleteWorkspace({ ...workspace, execution });
+  const memory = workspaceMemory(workspace, patch);
+  return parseCompleteWorkspace({ ...workspace, execution, ...(memory ? { memory } : {}) });
+}
+
+function workspaceMemory(
+  workspace: ProjectWorkspace,
+  patch: WorkspaceUpdate,
+): ProjectWorkspace['memory'] {
+  if (!patch.memory) return workspace.memory;
+  return {
+    maxFiles: patch.memory.maxFiles ?? workspace.memory?.maxFiles ?? DEFAULT_MEMORY_MAX_FILES,
+    maxTotalKb:
+      patch.memory.maxTotalKb ?? workspace.memory?.maxTotalKb ?? DEFAULT_MEMORY_MAX_TOTAL_KB,
+  };
 }
 
 function parseCompleteWorkspace(input: unknown): ProjectWorkspace {
@@ -471,6 +488,10 @@ export function createProjectWorkspaceStore(
     },
     getProjectHome(projectId) {
       return locateProject(deps, projectId).directory;
+    },
+    listProjectIds() {
+      deps.projectRegistry.assertHealthy();
+      return deps.projectRegistry.listProjects().map((node) => sourceProjectId(node));
     },
     updateWorkspace: (projectId, patch) => updateStoreWorkspace(deps, projectId, patch),
     createDataSource: (projectId, input) => createStoreSource(deps, projectId, input),
