@@ -16,7 +16,7 @@ external repositories.
 | Order | Checkpoint | State |
 | --- | --- | --- |
 | F1 | Validated project-local YAML board tasks, atomic persistence and current file-owned project metadata | Complete; reviewed, 2,014 tests and 12 browser journeys passed |
-| F2 | Whole-tree YAML execution state, explicit board/run linkage, engine shutdown and restart interruption | Pending |
+| F2 | Whole-tree YAML execution state, explicit board/run linkage, engine shutdown and restart interruption | Complete; reviewed, 2,079 tests and 14 browser journeys passed |
 | F3 | Project-local agent-run records and replacement of remaining task SQL readers | Pending |
 | F4 | Drain admitted MCP mutations before terminal task state and store shutdown | Pending |
 | F5 | File/graph reconciliation and changed-content derived-index refresh | Pending |
@@ -48,6 +48,15 @@ F1 evidence and reviewed limitations are in
 [tech-spec-f1-project-task-files.md](tech-spec-f1-project-task-files.md). The default
 suite passed 189 files / 2,014 tests (six deliberate live skips); required check,
 core build, twelve browser journeys and packaged process-restart tests passed.
+
+F2 evidence and reviewed limits are in
+[tech-spec-f2-execution-tree-files.md](tech-spec-f2-execution-tree-files.md). Whole
+execution trees now live in YAML; interrupted work requires deliberate resume.
+The default suite passed 194 files / 2,079 tests (six deliberate live skips),
+required checks and both production builds passed, and fourteen browser journeys
+plus packaged process-restart verification passed. F3 is the next checkpoint.
+Readiness specs for F3–F5 are recorded alongside this queue; implementation remains
+ordered, with parent review and a tested commit/push for each checkpoint.
 
 ## Workspace requirements accepted from the owner
 

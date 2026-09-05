@@ -25,7 +25,7 @@ export function BoardColumn({
     <div
       role="region"
       aria-label={TITLES[column]}
-      className="flex-1 min-w-0 flex flex-col rounded-lg"
+      className="w-full flex-1 min-w-0 flex flex-col rounded-lg sm:w-auto"
       style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}
       onDragOver={(e) => {
         if (onDropCard) e.preventDefault();

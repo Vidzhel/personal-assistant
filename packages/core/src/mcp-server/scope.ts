@@ -6,6 +6,7 @@ export const ScopeContextSchema = z.object({
   sessionId: z.string().optional(),
   treeId: z.string().optional(),
   taskId: z.string().optional(),
+  agentTaskId: z.string().min(1).optional(),
 });
 
 export type ScopeContext = z.infer<typeof ScopeContextSchema>;
@@ -16,7 +17,6 @@ const SCOPE_TOOLS: Record<ScopeContext['role'], Set<string>> = {
     'complete_task',
     'fail_task',
     'update_task_progress',
-    'save_artifact',
     'search_knowledge',
     'send_message',
   ]),

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -66,12 +66,27 @@ describe('composed project task files', () => {
       projectId: project.id,
       title: 'Read the methods',
       description: 'Review assumptions.\nRecord open questions.',
+      status: 'in_progress',
+      assignedAgentId: 'raven',
     });
     expect(response.status).toBe(201);
     const task = (await response.json()) as RavenTask;
     const path = join(paths.projectsDir, project.fsPath, 'tasks', 'board', `${task.id}.yaml`);
     expect(parse(readFileSync(path, 'utf8'))).toMatchObject(task);
     expect(raven.db.get<{ count: number }>('SELECT COUNT(*) AS count FROM tasks')?.count).toBe(0);
+
+    let chatCompleted = false;
+    raven.eventBus.on('agent:task:complete', () => {
+      chatCompleted = true;
+    });
+    expect(
+      (await request(`/api/projects/${project.id}/chat`, 'POST', { message: 'Unrelated chat' }))
+        .status,
+    ).toBe(200);
+    await vi.waitFor(() => expect(chatCompleted).toBe(true));
+    expect(await (await request(`/api/tasks/${task.id}`)).json()).toMatchObject({
+      status: 'in_progress',
+    });
 
     await raven.stop();
     raven = undefined;

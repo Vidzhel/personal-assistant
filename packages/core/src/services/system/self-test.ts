@@ -2,7 +2,7 @@ import { writeFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import { createLogger, generateId } from '@raven/shared';
-import type { DatabaseInterface } from '@raven/shared';
+import type { DatabaseInterface, TaskTree } from '@raven/shared';
 import type { EventBus } from '../../event-bus/event-bus.ts';
 import type { ExecutionLogger, TaskStats } from '../../agent-manager/execution-logger.ts';
 import type {
@@ -29,41 +29,32 @@ const WRITE_PROBE_FILE = '.self-test-write-probe';
  * model calls. Each function is pure given its inputs so it can be unit
  * tested against a seeded temp DB without booting the whole system. */
 
-interface StuckTreeRow {
-  id: string;
-  updated_at: string;
+export interface ExecutionTreeQuery {
+  queryTrees(): TaskTree[];
 }
 
-export function checkStuckTrees(db: Database.Database, nowMs: number): string[] {
-  const cutoffIso = new Date(nowMs - STUCK_TREE_HOURS * MS_PER_HOUR).toISOString();
-  const rows = db
-    .prepare(`SELECT id, updated_at FROM task_trees WHERE status = 'running' AND updated_at < ?`)
-    .all(cutoffIso) as StuckTreeRow[];
-  return rows.map(
-    (r) =>
-      `Task tree ${r.id} has been "running" for over ${STUCK_TREE_HOURS}h (since ${r.updated_at})`,
-  );
-}
-
-interface FailedTreeRow {
-  id: string;
-  plan: string | null;
-  updated_at: string;
+export function checkStuckTrees(engine: ExecutionTreeQuery, nowMs: number): string[] {
+  const cutoffMs = nowMs - STUCK_TREE_HOURS * MS_PER_HOUR;
+  return engine
+    .queryTrees()
+    .filter((tree) => tree.status === 'running' && new Date(tree.updatedAt).getTime() < cutoffMs)
+    .map(
+      (tree) =>
+        `Task tree ${tree.id} has been "running" for over ${STUCK_TREE_HOURS}h (since ${tree.updatedAt})`,
+    );
 }
 
 /** Any task tree that reached "failed" in the last 24h — a plan the
  * execution engine gave up on outright, distinct from checkStuckTrees'
  * "still running past deadline" case. `plan` is the tree's free-text
- * description (see task-execution-engine.ts); task_trees has no dedicated
- * name column, so it's the closest thing to one and falls back to the id. */
-export function checkFailedTrees(db: Database.Database, nowMs: number): string[] {
-  const cutoffIso = new Date(nowMs - ONE_DAY_MS).toISOString();
-  const rows = db
-    .prepare(
-      `SELECT id, plan, updated_at FROM task_trees WHERE status = 'failed' AND updated_at >= ?`,
-    )
-    .all(cutoffIso) as FailedTreeRow[];
-  return rows.map((r) => `Task tree "${r.plan ?? r.id}" (${r.id}) failed at ${r.updated_at}`);
+ * description (see task-execution-engine.ts); trees have no dedicated name
+ * field, so it's the closest thing to one and falls back to the id. */
+export function checkFailedTrees(engine: ExecutionTreeQuery, nowMs: number): string[] {
+  const cutoffMs = nowMs - ONE_DAY_MS;
+  return engine
+    .queryTrees()
+    .filter((tree) => tree.status === 'failed' && new Date(tree.updatedAt).getTime() >= cutoffMs)
+    .map((tree) => `Task tree "${tree.plan ?? tree.id}" (${tree.id}) failed at ${tree.updatedAt}`);
 }
 
 /** Mirrors raven.ts's L16 computation (services whose requiresEnv is fully
@@ -159,15 +150,9 @@ export function checkDbIntegrity(db: Database.Database): string[] {
   }
 }
 
-interface CanaryTreeRow {
-  id: string;
-  status: string;
-  created_at: string;
-}
-
 /** The weekly canary fires a dedicated minimal template with
  * scheduleId="weekly-canary" (see template-scheduler.ts / projects/schedules/
- * weekly-canary.yaml), which stamps task_trees.schedule_id — that's the
+ * weekly-canary.yaml), which stamps the tree's scheduleId — that's the
  * correlation, no separate bookkeeping needed. Only the most recent canary
  * tree matters; a fresh one (younger than CANARY_GRACE_HOURS) is given time
  * to finish before being judged.
@@ -176,15 +161,13 @@ interface CanaryTreeRow {
  * `scheduleEnabled` — a disabled canary schedule that has never fired, or
  * hasn't fired recently, is expected, not a violation. */
 export function checkCanary(
-  db: Database.Database,
+  engine: ExecutionTreeQuery,
   nowMs: number,
   scheduleEnabled: boolean,
 ): string[] {
-  const row = db
-    .prepare(
-      `SELECT id, status, created_at FROM task_trees WHERE schedule_id = ? ORDER BY created_at DESC LIMIT 1`,
-    )
-    .get(CANARY_SCHEDULE_NAME) as CanaryTreeRow | undefined;
+  const row = [...engine.queryTrees()]
+    .filter((tree) => tree.scheduleId === CANARY_SCHEDULE_NAME)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
 
   if (!row) {
     if (!scheduleEnabled) return [];
@@ -193,12 +176,12 @@ export function checkCanary(
     ];
   }
 
-  const ageMs = nowMs - new Date(row.created_at).getTime();
+  const ageMs = nowMs - new Date(row.createdAt).getTime();
 
   if (scheduleEnabled && ageMs > CANARY_STALE_DAYS * ONE_DAY_MS) {
     const ageDays = Math.floor(ageMs / ONE_DAY_MS);
     return [
-      `Weekly canary's newest tree ${row.id} is ${String(ageDays)}d old (fired ${row.created_at}) — expected at least one per week`,
+      `Weekly canary's newest tree ${row.id} is ${String(ageDays)}d old (fired ${row.createdAt}) — expected at least one per week`,
     ];
   }
 
@@ -206,7 +189,7 @@ export function checkCanary(
 
   if (row.status !== 'completed') {
     return [
-      `Weekly canary tree ${row.id} (fired ${row.created_at}) did not reach "completed" — status is "${row.status}"`,
+      `Weekly canary tree ${row.id} (fired ${row.createdAt}) did not reach "completed" — status is "${row.status}"`,
     ];
   }
   return [];
@@ -214,6 +197,7 @@ export function checkCanary(
 
 export interface SelfTestDeps {
   db: Database.Database;
+  executionEngine: ExecutionTreeQuery;
   executionLogger: ExecutionLogger;
   pendingApprovals: PendingApprovals;
   serviceRunner: { getRunningCount(): number };
@@ -237,18 +221,18 @@ function isCanaryScheduleEnabled(deps: SelfTestDeps): boolean {
 }
 
 /** Runs every invariant and aggregates the violations. Zero model calls —
- * every check is a DB read, a numeric comparison, or a disk probe. */
+ * every check is a store read, a numeric comparison, or a disk probe. */
 export function runSelfTestChecks(deps: SelfTestDeps, nowMs = Date.now()): SelfTestResult {
   const violations = [
-    ...checkStuckTrees(deps.db, nowMs),
-    ...checkFailedTrees(deps.db, nowMs),
+    ...checkStuckTrees(deps.executionEngine, nowMs),
+    ...checkFailedTrees(deps.executionEngine, nowMs),
     ...checkServicesLoaded(deps.serviceRunner.getRunningCount(), countEnvEligibleServices()),
     ...checkScheduleFires(deps.db),
     ...checkErrorRate(deps.executionLogger.getTaskStats(ONE_DAY_MS)),
     ...checkStaleApprovals(deps.pendingApprovals.query(), nowMs),
     ...checkDataDirWritable(deps.dataDir),
     ...checkDbIntegrity(deps.db),
-    ...checkCanary(deps.db, nowMs, isCanaryScheduleEnabled(deps)),
+    ...checkCanary(deps.executionEngine, nowMs, isCanaryScheduleEnabled(deps)),
   ];
   return { ok: violations.length === 0, violations };
 }

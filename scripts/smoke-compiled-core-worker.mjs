@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { stringify } from 'yaml';
 import { execFileSync } from 'node:child_process';
 import {
   existsSync,
+  mkdirSync,
   readFileSync,
   readdirSync,
   writeFileSync,
@@ -117,6 +119,72 @@ async function checkChat(projectId) {
   }
 }
 
+function seedInterruptedTree(project) {
+  const id = 'compiled-interrupted-tree';
+  const now = new Date().toISOString();
+  const directory = join(paths.projectsDir, project.fsPath, 'tasks/trees');
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, `${id}.yaml`),
+    stringify({
+      id,
+      projectId: project.id,
+      status: 'running',
+      createdAt: now,
+      updatedAt: now,
+      tasks: [
+        {
+          id: 'done',
+          parentTaskId: id,
+          status: 'completed',
+          retryCount: 0,
+          node: {
+            id: 'done',
+            type: 'agent',
+            title: 'Previous work',
+            prompt: 'Done',
+            blockedBy: [],
+          },
+          artifacts: [{ type: 'data', label: 'Retained output', data: { result: 42 } }],
+        },
+        {
+          id: 'interrupted',
+          parentTaskId: id,
+          status: 'in_progress',
+          retryCount: 0,
+          node: {
+            id: 'interrupted',
+            type: 'agent',
+            title: 'Interrupted work',
+            prompt: 'Resume',
+            blockedBy: ['done'],
+          },
+          agentTaskId: 'previous-process-attempt',
+          artifacts: [],
+        },
+      ],
+    }),
+  );
+  return id;
+}
+
+async function verifyInterruptedTree(id) {
+  const tree = await request(`/api/task-trees/${id}`);
+  assert.equal(tree.status, 'pending_approval');
+  assert.equal(tree.tasks.find((task) => task.id === 'interrupted').status, 'blocked');
+  assert.deepEqual(tree.tasks.find((task) => task.id === 'done').artifacts, [
+    { type: 'data', label: 'Retained output', data: { result: 42 } },
+  ]);
+  assert.equal(backendCalls, 1, 'Restart must not automatically replay interrupted work');
+  await request(`/api/task-trees/${id}/approve`, 'POST');
+  const deadline = Date.now() + 10_000;
+  while ((await request(`/api/task-trees/${id}`)).status !== 'completed') {
+    assert(Date.now() < deadline, 'Deliberately resumed tree did not complete');
+    await new Promise((resolveWait) => setTimeout(resolveWait, 20));
+  }
+  assert.equal(backendCalls, 2, 'Deliberate approval must dispatch exactly one new attempt');
+}
+
 async function seedState(migrations) {
   const project = await request('/api/projects', 'POST', {
     name: 'Packaged Smoke Project',
@@ -152,6 +220,7 @@ async function seedState(migrations) {
       context,
       task,
       taskBytes,
+      treeId: seedInterruptedTree(project),
       head: git('rev-parse', 'HEAD'),
       migrations,
     }),
@@ -185,6 +254,7 @@ async function verifyState(migrations) {
     state.taskBytes,
   );
   await checkChat(project.id);
+  await verifyInterruptedTree(state.treeId);
 }
 
 try {

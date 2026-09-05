@@ -14,6 +14,7 @@ function makeExecutionEngine() {
     startTree: vi.fn().mockResolvedValue(undefined),
     onTaskCompleted: vi.fn().mockResolvedValue(undefined),
     onTaskBlocked: vi.fn(),
+    onTaskFailed: vi.fn(),
     getTree: vi.fn().mockReturnValue(undefined),
   };
 }
@@ -29,7 +30,17 @@ describe('buildTaskLifecycleTools', () => {
       eventBus: { emit: vi.fn() } as any,
       executionEngine: engine as any,
     } as any;
-    scope = { role: 'task', treeId: 'tree-1', taskId: 'task-1' };
+    scope = { role: 'task', treeId: 'tree-1', taskId: 'task-1', agentTaskId: 'attempt-1' };
+    engine.getTree.mockReturnValue({
+      id: 'tree-1',
+      status: 'running',
+      tasks: new Map([
+        [
+          'task-1',
+          { id: 'task-1', status: 'in_progress', agentTaskId: 'attempt-1', retryCount: 0 },
+        ],
+      ]),
+    });
   });
 
   it('returns array with expected tool names', () => {
@@ -41,8 +52,35 @@ describe('buildTaskLifecycleTools', () => {
     expect(names).toContain('complete_task');
     expect(names).toContain('fail_task');
     expect(names).toContain('update_task_progress');
-    expect(names).toContain('save_artifact');
-    expect(names).toHaveLength(7);
+    expect(names).not.toContain('save_artifact');
+    expect(names).toHaveLength(6);
+  });
+
+  it.each(['complete_task', 'fail_task', 'update_task_progress'])(
+    'rejects stale attempts for %s',
+    async (name) => {
+      engine.getTree.mockReturnValue({
+        status: 'running',
+        tasks: new Map([['task-1', { status: 'in_progress', agentTaskId: 'new-attempt' }]]),
+      });
+      const tool = buildTaskLifecycleTools(deps, scope).find((entry) => entry.name === name)!;
+      const result = await tool.handler(
+        { summary: 'late', error: 'late', retryable: true, progress: 50, statusText: 'late' },
+        {},
+      );
+      expect(result.isError).toBe(true);
+      expect(engine.onTaskCompleted).not.toHaveBeenCalled();
+      expect(engine.onTaskFailed).not.toHaveBeenCalled();
+      expect(deps.eventBus.emit).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects completion from a different project even with a matching attempt', async () => {
+    const tool = buildTaskLifecycleTools(deps, { ...scope, projectId: 'another-project' }).find(
+      (entry) => entry.name === 'complete_task',
+    )!;
+    expect((await tool.handler({ summary: 'wrong project' }, {})).isError).toBe(true);
+    expect(engine.onTaskCompleted).not.toHaveBeenCalled();
   });
 
   describe('classify_request', () => {
@@ -119,6 +157,7 @@ describe('buildTaskLifecycleTools', () => {
       const callArgs = engine.onTaskCompleted.mock.calls[0][0];
       expect(callArgs.treeId).toBe('tree-1');
       expect(callArgs.taskId).toBe('task-1');
+      expect(callArgs.agentTaskId).toBe('attempt-1');
       expect(callArgs.summary).toBe('Task done successfully');
       expect(callArgs.artifacts).toEqual(artifacts);
 
@@ -152,26 +191,34 @@ describe('buildTaskLifecycleTools', () => {
   });
 
   describe('fail_task', () => {
-    it('calls onTaskBlocked with correct args', async () => {
+    it('requests retry through onTaskFailed and reports the persisted outcome', async () => {
       const tools = buildTaskLifecycleTools(deps, scope);
       const tool = tools.find((t) => t.name === 'fail_task')!;
 
       const result = await tool.handler({ error: 'Something broke', retryable: true }, {});
 
-      expect(engine.onTaskBlocked).toHaveBeenCalledOnce();
-      expect(engine.onTaskBlocked).toHaveBeenCalledWith('tree-1', 'task-1', 'Something broke');
+      expect(engine.onTaskFailed).toHaveBeenCalledOnce();
+      expect(engine.onTaskFailed).toHaveBeenCalledWith('tree-1', 'task-1', {
+        reason: 'Something broke',
+        agentTaskId: 'attempt-1',
+      });
 
       expect(result.isError).toBeFalsy();
       const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.ack).toBe(true);
-      expect(parsed.willRetry).toBe(true);
+      expect(parsed.willRetry).toBe(false);
     });
 
-    it('passes retryable=false to willRetry', async () => {
+    it('blocks non-retryable failure without claiming a retry', async () => {
       const tools = buildTaskLifecycleTools(deps, scope);
       const tool = tools.find((t) => t.name === 'fail_task')!;
 
       const result = await tool.handler({ error: 'fatal', retryable: false }, {});
+      expect(engine.onTaskBlocked).toHaveBeenCalledWith('tree-1', 'task-1', {
+        reason: 'fatal',
+        agentTaskId: 'attempt-1',
+      });
+      expect(engine.onTaskFailed).not.toHaveBeenCalled();
 
       const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.willRetry).toBe(false);
@@ -205,28 +252,6 @@ describe('buildTaskLifecycleTools', () => {
       expect(result.isError).toBeFalsy();
       const parsed = JSON.parse((result.content[0] as any).text);
       expect(parsed.ack).toBe(true);
-    });
-  });
-
-  describe('save_artifact', () => {
-    it('emits event and returns artifactId', async () => {
-      const tools = buildTaskLifecycleTools(deps, scope);
-      const tool = tools.find((t) => t.name === 'save_artifact')!;
-
-      const result = await tool.handler(
-        { name: 'report.txt', content: 'file content', type: 'file' },
-        {},
-      );
-
-      expect(deps.eventBus.emit).toHaveBeenCalledOnce();
-      const emitted = (deps.eventBus.emit as any).mock.calls[0][0];
-      expect(emitted.type).toBe('execution:task:progress');
-      expect(emitted.payload.artifact.name).toBe('report.txt');
-      expect(emitted.payload.taskId).toBe('task-1');
-
-      expect(result.isError).toBeFalsy();
-      const parsed = JSON.parse((result.content[0] as any).text);
-      expect(parsed.artifactId).toBeDefined();
     });
   });
 

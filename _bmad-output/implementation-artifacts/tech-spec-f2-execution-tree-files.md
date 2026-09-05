@@ -2,7 +2,8 @@
 title: Durable project-local execution trees
 type: refactor
 created: '2026-09-05'
-status: planned
+status: complete
+baseline_commit: 977dc6e
 execution_mode: plan-code-review
 context: ['AGENTS.md', 'ARCHITECTURE.md', 'tech-spec-f1-project-task-files.md']
 ---
@@ -95,4 +96,48 @@ or execution events are permitted. No claim about remote provider cancellation.
 
 ## Evidence
 
-Planned while F1 implementation and parent review run. No F2 changes are complete.
+Parent inspection also found `save_artifact` only emitted a progress event, with
+no consumer writing its content. F2 removes that misleading stub from task tool
+advertising. Actual artifact delivery and browser/mobile access are scheduled in
+W1 with the owner's workspace requirements; native filesystem tools remain the
+way to create actual files meanwhile.
+
+F1 is reviewed, tested and pushed as 977dc6e. F2 parent review covered the
+whole-document parser and atomic writes, attempt correlation, validator lifetime,
+retry/backoff ownership, shutdown, interruption recovery, MCP claims, and browser
+resume. Review fixes include strict template extension handling, retry timers
+waiting for project reloads, stale validation/code result rejection, cancellation
+of independent branches in fail mode, and bounded subprocess output with safe
+UTF-8 decoding and POSIX process-group cancellation through the kill grace period.
+The previous unrelated board-task completion heuristic is removed. Browser review
+also fixed the mobile board layout and New Chat creation/selection races, retaining
+drafts and providing recovery when session creation or loading fails.
+
+Verification on Node 22.23.2/npm 10.9.8:
+
+- Default suite: 194 files, 2,079 tests passed; six explicit live TickTick skips
+  (`/tmp/raven-f2-full-final.log`). Earlier failing full-run findings were fixed
+  before this rerun; the first run is not counted as passing evidence.
+- Required `npm run check`, core build, library/project validators and diff
+  whitespace check passed (`/tmp/raven-f2-required-check-final.log`,
+  `/tmp/raven-f2-build-final.log`, `/tmp/raven-f2-library.log`,
+  `/tmp/raven-f2-projects.log`).
+- Isolated packaged restart test passed with two natural process exits, retained
+  board/tree records and artifacts, interrupted work requiring approval and one
+  fresh resumed attempt (`/tmp/raven-f2-compiled-final.log`).
+- All 14 isolated browser journeys passed, using normal clicks at a 390px mobile
+  viewport and checking draft retention, held creation, failed session loading,
+  recovery and failed creation (`/tmp/raven-f2-browser-all-final-final.log`). Parent
+  review rejected an earlier synthetic DOM-click workaround and fixed the layout.
+- The production dashboard build passed (`/tmp/raven-f2-build-web-verified.log`).
+  A restricted attempt returned empty compiler subprocess output; a read-only
+  outside-sandbox comparison proved valid JSON, and the build then passed with
+  normal subprocess access. Owner Next declaration bytes were restored exactly.
+- All 87 original definition files retain their recorded hashes; unrelated IDE,
+  local project and Next declaration changes remain excluded from the commit.
+
+Tests use fake providers and isolated roots; they establish local state and
+process lifetime, not live provider cancellation or notification delivery. The
+browser currently displays artifact metadata/data; actual file viewing belongs
+to W1. Agent-run SQL remains for F3, admitted MCP draining for F4, and obsolete
+schemas/configuration cleanup for F9. No legacy import or restoration was added.

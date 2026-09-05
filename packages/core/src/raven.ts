@@ -30,7 +30,6 @@ import { createExecutionLogger } from './agent-manager/execution-logger.ts';
 import { initializeBackend, setActiveBackend } from './agent-manager/agent-session.ts';
 import type { AgentBackend } from './agent-manager/agent-backend.ts';
 import { createTaskStore } from './task-manager/task-store.ts';
-import { createTaskLifecycle } from './task-manager/task-lifecycle.ts';
 import { createYamlNamedAgentStore } from './agent-registry/yaml-named-agent-store.ts';
 import { createAgentResolver } from './agent-registry/agent-resolver.ts';
 import { CapabilityLibrary } from './capability-library/capability-library.ts';
@@ -246,6 +245,38 @@ export async function createRaven(
     throw err;
   }
 
+  // Validate authoritative task files before any integration or worker starts.
+  const projectRecords = {
+    projectsDir,
+    projects: () => {
+      projectRegistry.assertHealthy();
+      return projectRegistry.listProjects().map((node) => ({
+        id: node.isMeta ? META_PROJECT_ID : (node.metadata?.id ?? node.id),
+        fsPath: node.id,
+      }));
+    },
+  };
+  let taskStore: ReturnType<typeof createTaskStore>;
+  let executionEngine: TaskExecutionEngine;
+  try {
+    taskStore = createTaskStore({ ...projectRecords, eventBus });
+    taskStore.getTaskCountsByStatus();
+    executionEngine = new TaskExecutionEngine({
+      ...projectRecords,
+      eventBus,
+      validationDeps: createValidationDeps(eventBus, {
+        cancelAgentTask: (id) => agentManager.cancelTask(id),
+      }),
+    });
+    executionEngine.queryTrees();
+  } catch (error) {
+    eventBus.removeAllListeners();
+    closeDatabase();
+    await closeFileLogging();
+    throw error;
+  }
+  (globalThis as unknown as Record<string, unknown>).__raven_task_store__ = taskStore;
+
   // L16: count only services whose requiresEnv is fully satisfied — NOT
   // every declared ServiceDefinition. Most deployments only configure a few
   // integrations (Gmail, TickTick, Telegram, ...) out of everything Raven
@@ -324,23 +355,6 @@ export async function createRaven(
   const executionLogger = createExecutionLogger({ db: getDb() });
   log.info('Execution logger initialized');
 
-  // 7e. Init task store
-  const taskStore = createTaskStore({
-    projectsDir,
-    projects: () => {
-      projectRegistry.assertHealthy();
-      return projectRegistry.listProjects().map((node) => ({
-        id: node.isMeta ? META_PROJECT_ID : (node.metadata?.id ?? node.id),
-        fsPath: node.id,
-      }));
-    },
-    eventBus: baseContext.eventBus,
-  });
-  log.info('Task manager initialized');
-
-  // Expose task store globally for suite services
-  (globalThis as unknown as Record<string, unknown>).__raven_task_store__ = taskStore;
-
   // 7f. Init named agent registry (filesystem YAML is the source of truth)
   const namedAgentStore = createYamlNamedAgentStore({
     projectRegistry,
@@ -352,18 +366,6 @@ export async function createRaven(
   const configCommitter = createConfigCommitter({ eventBus });
   configCommitter.start();
   log.info(`Named agent registry initialized (${namedAgentStore.listAgents().length} agents)`);
-
-  // 7g. Task lifecycle bridge — connects agent events to RavenTask lifecycle
-  const taskLifecycle = createTaskLifecycle({ eventBus: baseContext.eventBus, taskStore });
-  taskLifecycle.start();
-
-  // 7h. Init task execution engine
-  const executionEngine = new TaskExecutionEngine({
-    db: dbInterface,
-    eventBus: baseContext.eventBus,
-    validationDeps: createValidationDeps(baseContext.eventBus),
-  });
-  log.info('task execution engine initialized');
 
   // 7i. Init template engine (registry + scheduler). Construction only here —
   // templateScheduler.start() is deferred until after AgentManager exists
@@ -545,9 +547,9 @@ export async function createRaven(
   // memory candidate for the default agent. No model call, no Neo4j dep.
   const systemRetrospectiveDeps = {
     projectsDir,
-    db: getDb(),
     executionLogger,
     namedAgentStore,
+    executionEngine,
   };
 
   // 11a-4. Self-test deps (Phase 3): deterministic invariants over the same
@@ -558,6 +560,7 @@ export async function createRaven(
   // (before registerCoreJobs) while scheduleEngine isn't built until after.
   const selfTestDeps: SelfTestJobDeps = {
     db: getDb(),
+    executionEngine,
     executionLogger,
     pendingApprovals,
     serviceRunner,
@@ -746,25 +749,27 @@ export async function createRaven(
     // Stop HTTP acceptance immediately; let accepted requests drain before graph disposal.
     const serverClosed = cleanup(() => server?.close());
     // Stop admission now; keep completion consumers/stores alive until local tasks settle.
+    executionEngine.stopAdmission();
+    templateScheduler.stop();
     const orchestratorStopped = cleanup(() => _orchestrator.stop());
     const retrospectiveStopped = cleanup(() => sessionRetrospective.stop());
     const agentsStopped = cleanup(() => agentManager.stop());
     const heartbeatStopped = cleanup(() => heartbeat.stop());
     const memoryStopped = cleanup(() => memoryConsolidation.stop());
+    const schedulesStopped = cleanup(() => scheduleEngine.stop());
     await Promise.all([
       orchestratorStopped,
       retrospectiveStopped,
       agentsStopped,
       heartbeatStopped,
       memoryStopped,
+      schedulesStopped,
     ]);
     await cleanup(() => idleDetector.stop());
     await cleanup(() => executionBridge.stop());
-    await cleanup(() => templateScheduler.stop());
-    await cleanup(() => taskLifecycle.stop());
+    await cleanup(() => executionEngine.stop());
     await cleanup(() => configCommitter.stop());
     await cleanup(() => permissionEngine.shutdown());
-    await cleanup(() => scheduleEngine.stop());
     await cleanup(() => serviceRunner.stopAll());
     await serverClosed;
     delete ravenMcpDeps.knowledgeStore;

@@ -154,6 +154,40 @@ describe('validateTaskResult', () => {
         taskId: task.id,
       });
     });
+
+    it('propagates lifetime and project context to the evaluator', async () => {
+      const task = makeTask({ summary: 'Result text' });
+      const controller = new AbortController();
+      const evalFn = vi.fn().mockResolvedValue({ passed: true, reason: 'ok' });
+      await validateTaskResult(
+        task,
+        { requireArtifacts: true, evaluator: true, qualityReview: false },
+        makeDeps({ runEvaluator: evalFn }),
+        { signal: controller.signal, projectId: 'project-1' },
+      );
+      expect(evalFn).toHaveBeenCalledWith('Do the thing', 'Result text', {
+        criteria: undefined,
+        treeId: task.parentTaskId,
+        taskId: task.id,
+        projectId: 'project-1',
+        signal: controller.signal,
+      });
+    });
+
+    it('fails closed when evaluator throws', async () => {
+      const task = makeTask({ summary: 'Done' });
+      const result = await validateTaskResult(
+        task,
+        { requireArtifacts: true, evaluator: true, qualityReview: false },
+        makeDeps({ runEvaluator: vi.fn().mockRejectedValue(new Error('validator failed')) }),
+      );
+      expect(result).toMatchObject({
+        passed: false,
+        gate1Passed: true,
+        gate2Passed: false,
+        gate2Reason: 'Evaluator validation failed',
+      });
+    });
   });
 
   // ── Gate 3 ───────────────────────────────────────────────────────────
@@ -194,6 +228,21 @@ describe('validateTaskResult', () => {
       expect(result.passed).toBe(false);
     });
 
+    it('fails when reviewer claims pass below the configured threshold', async () => {
+      const task = makeTask({ summary: 'Done' });
+      const deps = makeDeps({
+        runQualityReviewer: vi
+          .fn()
+          .mockResolvedValue({ passed: true, score: 2, feedback: 'Too shallow' }),
+      });
+      const result = await validateTaskResult(
+        task,
+        { requireArtifacts: true, evaluator: true, qualityReview: true, qualityThreshold: 3 },
+        deps,
+      );
+      expect(result).toMatchObject({ passed: false, gate3Passed: false, gate3Score: 2 });
+    });
+
     it('skipped when config.qualityReview=false', async () => {
       const task = makeTask({ summary: 'Done' });
       const deps = makeDeps();
@@ -204,6 +253,21 @@ describe('validateTaskResult', () => {
       );
       expect(result.gate3Passed).toBeUndefined();
       expect(deps.runQualityReviewer).not.toHaveBeenCalled();
+    });
+
+    it('runs explicit quality review when evaluator is disabled', async () => {
+      const task = makeTask({ summary: 'Done' });
+      const deps = makeDeps();
+      const result = await validateTaskResult(
+        task,
+        { requireArtifacts: true, evaluator: false, qualityReview: true, qualityThreshold: 3 },
+        deps,
+      );
+
+      expect(deps.runEvaluator).not.toHaveBeenCalled();
+      expect(deps.runQualityReviewer).toHaveBeenCalledOnce();
+      expect(result).toMatchObject({ passed: true, gate1Passed: true, gate3Passed: true });
+      expect(result.gate2Passed).toBeUndefined();
     });
 
     it('only runs after gate 2 passes', async () => {
@@ -218,6 +282,46 @@ describe('validateTaskResult', () => {
       );
       expect(result.gate2Passed).toBe(false);
       expect(result.gate3Passed).toBeUndefined();
+      expect(deps.runQualityReviewer).not.toHaveBeenCalled();
+    });
+
+    it('does not start gate 3 when gate 2 aborts', async () => {
+      const task = makeTask({ summary: 'Done' });
+      const controller = new AbortController();
+      const reason = new Error('stopped');
+      const evalFn = vi.fn().mockImplementation(async () => {
+        controller.abort(reason);
+        return { passed: true, reason: 'late pass' };
+      });
+      const deps = makeDeps({ runEvaluator: evalFn });
+
+      await expect(
+        validateTaskResult(
+          task,
+          { requireArtifacts: true, evaluator: true, qualityReview: true },
+          deps,
+          { signal: controller.signal },
+        ),
+      ).rejects.toBe(reason);
+      expect(deps.runQualityReviewer).not.toHaveBeenCalled();
+    });
+
+    it('does not begin validation when the signal is already aborted', async () => {
+      const task = makeTask({ summary: 'Done' });
+      const controller = new AbortController();
+      const reason = new Error('stopped before validation');
+      controller.abort(reason);
+      const deps = makeDeps();
+
+      await expect(
+        validateTaskResult(
+          task,
+          { requireArtifacts: true, evaluator: true, qualityReview: true },
+          deps,
+          { signal: controller.signal },
+        ),
+      ).rejects.toBe(reason);
+      expect(deps.runEvaluator).not.toHaveBeenCalled();
       expect(deps.runQualityReviewer).not.toHaveBeenCalled();
     });
   });

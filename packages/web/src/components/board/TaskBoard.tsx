@@ -13,6 +13,7 @@ import { BoardColumn } from '@/components/board/BoardColumn';
 import { TaskCard } from '@/components/board/TaskCard';
 import { useTaskStore } from '@/stores/task-store';
 import { TaskDetailPanel } from '@/components/tasks/TaskDetailPanel';
+import { TreeDetailPanel } from '@/components/tasks/TreeDetailPanel';
 
 const POLL_MS = 10_000;
 const HOURS = 48;
@@ -48,8 +49,59 @@ function DraggableCard({
   );
 }
 
+function SelectedDetailPanels({
+  selectedTask,
+  selectedTree,
+  load,
+  closeTree,
+}: {
+  selectedTask: boolean;
+  selectedTree: string | null;
+  load: () => void;
+  closeTree: () => void;
+}) {
+  return (
+    <>
+      {selectedTask && <TaskDetailPanel />}
+      {selectedTree && (
+        <TreeDetailPanel
+          key={selectedTree}
+          treeId={selectedTree}
+          onClose={closeTree}
+          onRefresh={load}
+        />
+      )}
+    </>
+  );
+}
+
+function BoardColumns({
+  board,
+  onDrop,
+  onOpen,
+  onCancelTree,
+}: {
+  board: Board;
+  onDrop: (cardId: string, column: ColKey) => void;
+  onOpen: (card: BoardCard) => void;
+  onCancelTree: (treeId: string) => Promise<void>;
+}) {
+  return (
+    <>
+      {COLUMNS.map((col) => (
+        <BoardColumn key={col} column={col} cards={board[col]} onDropCard={onDrop}>
+          {board[col].map((card) => (
+            <DraggableCard key={card.id} card={card} onOpen={onOpen} onCancelTree={onCancelTree} />
+          ))}
+        </BoardColumn>
+      ))}
+    </>
+  );
+}
+
 export function TaskBoard({ projectId, search }: { projectId?: string; search?: string }) {
-  const { selectTask, selectedTask } = useTaskStore();
+  const { clearSelection, selectTask, selectedTask } = useTaskStore();
+  const [selectedTree, setSelectedTree] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { tasks, trees, load, loadError } = useBoardResources(projectId, search);
 
@@ -69,7 +121,13 @@ export function TaskBoard({ projectId, search }: { projectId?: string; search?: 
   };
 
   const onOpen = (card: BoardCard): void => {
-    if (card.kind === 'task') void selectTask(card.id);
+    if (card.kind === 'task') {
+      setSelectedTree(null);
+      void selectTask(card.id);
+    } else {
+      clearSelection();
+      setSelectedTree(card.id);
+    }
   };
 
   const handleCancelTree = async (treeId: string): Promise<void> => {
@@ -78,21 +136,20 @@ export function TaskBoard({ projectId, search }: { projectId?: string; search?: 
   };
 
   return (
-    <div className="flex gap-3" style={{ minHeight: '320px' }}>
+    <div className="flex flex-col gap-3 sm:flex-row" style={{ minHeight: '320px' }}>
       {(error || loadError) && <p role="alert">{error ?? loadError}</p>}
-      {COLUMNS.map((col) => (
-        <BoardColumn key={col} column={col} cards={board[col]} onDropCard={handleDrop}>
-          {board[col].map((card) => (
-            <DraggableCard
-              key={card.id}
-              card={card}
-              onOpen={onOpen}
-              onCancelTree={handleCancelTree}
-            />
-          ))}
-        </BoardColumn>
-      ))}
-      {selectedTask && <TaskDetailPanel />}
+      <BoardColumns
+        board={board}
+        onDrop={handleDrop}
+        onOpen={onOpen}
+        onCancelTree={handleCancelTree}
+      />
+      <SelectedDetailPanels
+        selectedTask={selectedTask !== null}
+        selectedTree={selectedTree}
+        load={load}
+        closeTree={() => setSelectedTree(null)}
+      />
     </div>
   );
 }

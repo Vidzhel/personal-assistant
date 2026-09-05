@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { initDatabase, getDb } from '../db/database.ts';
 import { TaskExecutionEngine } from '../task-execution/task-execution-engine.ts';
 import type { TaskTreeNode } from '@raven/shared';
 
@@ -30,14 +29,6 @@ function makeMockEventBus() {
   };
 }
 
-function makeDbInterface(db: any) {
-  return {
-    run: (sql: string, ...params: unknown[]) => db.prepare(sql).run(...params),
-    get: <T>(sql: string, ...params: unknown[]) => db.prepare(sql).get(...params) as T | undefined,
-    all: <T>(sql: string, ...params: unknown[]) => db.prepare(sql).all(...params) as T[],
-  };
-}
-
 function agentNode(id: string, overrides: Partial<any> = {}): TaskTreeNode {
   return {
     type: 'agent',
@@ -53,29 +44,29 @@ function agentNode(id: string, overrides: Partial<any> = {}): TaskTreeNode {
 
 describe('task execution integration', () => {
   let tmpDir: string;
-  let rawDb: any;
-  let dbInterface: ReturnType<typeof makeDbInterface>;
+  let projectsDir: string;
+  const projects = [
+    { id: 'meta', fsPath: 'system' },
+    { id: 'proj-integ', fsPath: 'proj-integ' },
+    { id: 'proj-persist', fsPath: 'proj-persist' },
+  ];
   let eventBus: ReturnType<typeof makeMockEventBus>;
   let engine: TaskExecutionEngine;
 
   beforeAll(() => {
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-exec-integration-'));
-    rawDb = initDatabase(join(tmpDir, 'test.db'));
-    dbInterface = makeDbInterface(rawDb);
+    projectsDir = join(tmpDir, 'projects');
+    for (const project of projects)
+      mkdirSync(join(projectsDir, project.fsPath), { recursive: true });
   });
 
   afterAll(() => {
-    try {
-      getDb().close();
-    } catch {
-      /* */
-    }
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
   beforeEach(() => {
     eventBus = makeMockEventBus();
-    engine = new TaskExecutionEngine({ db: dbInterface, eventBus });
+    engine = new TaskExecutionEngine({ projectsDir, projects: () => projects, eventBus });
   });
 
   // ── Full sequential chain A → B → C end-to-end ────────────────────────
@@ -225,7 +216,8 @@ describe('task execution integration', () => {
       .mockResolvedValueOnce({ passed: true, reason: 'Good work' });
 
     const validatedEngine = new TaskExecutionEngine({
-      db: dbInterface,
+      projectsDir,
+      projects: () => projects,
       eventBus,
       validationDeps: {
         runEvaluator: mockEvaluator,
@@ -586,7 +578,7 @@ describe('task execution integration', () => {
 
   // ── DB persistence across engine instances ────────────────────────────
 
-  it('persists tree state to DB and loads it in a new engine instance', async () => {
+  it('persists tree state to YAML and marks interrupted work before a new engine instance', async () => {
     const treeId = uid('tree');
     const a = uid('a');
     const b = uid('b');
@@ -606,16 +598,23 @@ describe('task execution integration', () => {
       artifacts: [{ type: 'data', label: 'result', data: { value: 42 } }],
     });
 
-    // Create a fresh engine pointing at the same DB
+    // Create a fresh engine pointing at the same project files.
     const freshEventBus = makeMockEventBus();
-    const freshEngine = new TaskExecutionEngine({ db: dbInterface, eventBus: freshEventBus });
+    const freshEngine = new TaskExecutionEngine({
+      projectsDir,
+      projects: () => projects,
+      eventBus: freshEventBus,
+    });
 
-    // Load the tree from DB
+    // Load the tree from YAML.
     const loaded = freshEngine.getTree(treeId);
     expect(loaded).toBeDefined();
     expect(loaded!.projectId).toBe('proj-persist');
-    expect(loaded!.status).toBe('running');
+    expect(loaded!.status).toBe('pending_approval');
     expect(loaded!.tasks.size).toBe(2);
+    expect([...loaded!.tasks.values()].filter((task) => task.status !== 'completed')).toHaveLength(
+      1,
+    );
 
     // Task A should show as completed with its artifacts
     const taskA = loaded!.tasks.get(a)!;
@@ -623,9 +622,9 @@ describe('task execution integration', () => {
     expect(taskA.summary).toBe('A completed');
     expect(taskA.artifacts[0].data).toEqual({ value: 42 });
 
-    // Task B should be in_progress (it was triggered when A completed)
+    // Task B is visibly blocked because it was in progress during the restart.
     const taskB = loaded!.tasks.get(b)!;
-    expect(taskB.status).toBe('in_progress');
+    expect(taskB.status).toBe('blocked');
   });
 
   // ── Cancellation mid-flight ───────────────────────────────────────────
@@ -647,7 +646,7 @@ describe('task execution integration', () => {
     await engine.onTaskCompleted({ treeId, taskId: a, summary: 'Done', artifacts: [] });
 
     // Now cancel while B is in progress and C is still todo
-    engine.cancelTree(treeId);
+    await engine.cancelTree(treeId);
 
     const tree = engine.getTree(treeId)!;
     expect(tree.status).toBe('cancelled');

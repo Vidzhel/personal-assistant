@@ -1,9 +1,11 @@
 import { z } from 'zod';
 import { tool } from '@anthropic-ai/claude-agent-sdk';
 import type { SdkMcpToolDefinition } from '@anthropic-ai/claude-agent-sdk';
-import { generateId } from '@raven/shared';
+import { generateId, TaskTreeNodeSchema, TaskArtifactSchema } from '@raven/shared';
+import type { ExecutionTask, TaskTree } from '@raven/shared';
 import type { RavenMcpDeps } from '../types.ts';
 import type { ScopeContext } from '../scope.ts';
+import type { TaskExecutionEngine } from '../../task-execution/task-execution-engine.ts';
 
 const MAX_PROGRESS = 100;
 
@@ -14,31 +16,6 @@ function ok(data: unknown): { content: [{ type: 'text'; text: string }] } {
 function err(message: string): { content: [{ type: 'text'; text: string }]; isError: true } {
   return { content: [{ type: 'text', text: message }], isError: true };
 }
-
-const TaskNodeSchema = z.object({
-  id: z.string(),
-  type: z.enum(['agent', 'code', 'condition', 'notify', 'delay', 'approval']),
-  title: z.string(),
-  prompt: z.string().optional(),
-  blockedBy: z.array(z.string()).default([]),
-  agent: z.string().optional(),
-  script: z.string().optional(),
-  args: z.array(z.string()).optional(),
-  expression: z.string().optional(),
-  channel: z.string().optional(),
-  message: z.string().optional(),
-  duration: z.string().optional(),
-  attachments: z.array(z.string()).optional(),
-  runIf: z.string().optional(),
-});
-
-const ArtifactSchema = z.object({
-  type: z.enum(['file', 'data', 'reference']),
-  label: z.string(),
-  filePath: z.string().optional(),
-  data: z.record(z.string(), z.unknown()).optional(),
-  referenceId: z.string().optional(),
-});
 
 const ClassifyRequestSchema = {
   mode: z.enum(['direct', 'delegated', 'planned']),
@@ -56,7 +33,7 @@ function buildClassifyRequest(): SdkMcpToolDefinition<typeof ClassifyRequestSche
 
 const CreateTaskTreeSchema = {
   plan: z.string(),
-  tasks: z.array(TaskNodeSchema),
+  tasks: z.array(TaskTreeNodeSchema),
   autoApprove: z.boolean(),
 };
 
@@ -75,10 +52,13 @@ function buildCreateTaskTree(
         id: treeId,
         projectId: scope.projectId,
         plan: args.plan,
-        tasks: args.tasks as Parameters<typeof deps.executionEngine.createTree>[0]['tasks'],
+        tasks: args.tasks,
       });
       if (args.autoApprove) await deps.executionEngine.startTree(treeId);
-      return ok({ treeId: tree.id, status: tree.status });
+      return ok({
+        treeId: tree.id,
+        status: deps.executionEngine.getTree(treeId)?.status ?? tree.status,
+      });
     },
   );
 }
@@ -95,11 +75,12 @@ function buildGetTaskContext(
     'get_task_context',
     'Get current task details including optional parent, dependencies, and sibling context.',
     GetTaskContextSchema,
-    async () => {
+    async (args) => {
       if (!scope.treeId || !scope.taskId) return err('scope missing treeId or taskId');
       if (!deps.executionEngine) return err('executionEngine not available');
       const tree = deps.executionEngine.getTree(scope.treeId);
-      if (!tree) return err(`Tree not found: ${scope.treeId}`);
+      if (!tree || tree.projectId !== scope.projectId)
+        return err(`Tree not found in this project: ${scope.treeId}`);
       const task = tree.tasks.get(scope.taskId);
       if (!task) return err(`Task not found: ${scope.taskId}`);
       return ok({
@@ -110,14 +91,65 @@ function buildGetTaskContext(
         summary: task.summary,
         artifacts: task.artifacts,
         plan: tree.plan,
+        ...relatedContext(tree, task, args.include ?? []),
       });
     },
   );
 }
 
+function relatedContext(
+  tree: TaskTree,
+  task: ExecutionTask,
+  include: string[],
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  if (include.includes('parent'))
+    result.parent = { id: tree.id, plan: tree.plan, status: tree.status };
+  if (include.includes('dependencies'))
+    result.dependencies = task.node.blockedBy.map((id) => tree.tasks.get(id));
+  if (include.includes('siblings'))
+    result.siblings = [...tree.tasks.values()].filter((sibling) => sibling.id !== task.id);
+  return result;
+}
+
+interface CurrentAttempt {
+  engine: TaskExecutionEngine;
+  treeId: string;
+  taskId: string;
+  agentTaskId: string;
+  task: ExecutionTask;
+}
+
+function isActiveAttempt(tree: TaskTree, task: ExecutionTask, agentTaskId: string): boolean {
+  return (
+    tree.status === 'running' && task.status === 'in_progress' && task.agentTaskId === agentTaskId
+  );
+}
+
+function currentAttempt(deps: RavenMcpDeps, scope: ScopeContext): CurrentAttempt | string {
+  if (!scope.taskId) return 'scope missing taskId';
+  if (!scope.treeId) return 'scope missing treeId';
+  if (!scope.agentTaskId) return 'scope missing agentTaskId';
+  const engine = deps.executionEngine;
+  if (!engine) return 'executionEngine not available';
+  const tree = engine.getTree(scope.treeId);
+  if (!tree || tree.projectId !== scope.projectId) return 'Tree not found in this project';
+  const task = tree.tasks.get(scope.taskId);
+  if (!task) return 'Task not found';
+  if (!isActiveAttempt(tree, task, scope.agentTaskId))
+    return 'This execution attempt is no longer active';
+  return {
+    engine,
+    treeId: scope.treeId,
+    taskId: scope.taskId,
+    agentTaskId: scope.agentTaskId,
+    task,
+  };
+}
+
 const CompleteTaskSchema = {
   summary: z.string(),
-  artifacts: z.array(ArtifactSchema).optional(),
+  artifacts: z.array(TaskArtifactSchema).optional(),
 };
 
 function buildCompleteTask(
@@ -129,16 +161,14 @@ function buildCompleteTask(
     'Mark the current task as completed with a summary and optional artifacts.',
     CompleteTaskSchema,
     async (args) => {
-      if (!scope.taskId) return err('scope missing taskId');
-      if (!scope.treeId) return err('scope missing treeId');
-      if (!deps.executionEngine) return err('executionEngine not available');
-      await deps.executionEngine.onTaskCompleted({
-        treeId: scope.treeId,
-        taskId: scope.taskId,
+      const attempt = currentAttempt(deps, scope);
+      if (typeof attempt === 'string') return err(attempt);
+      await attempt.engine.onTaskCompleted({
+        treeId: attempt.treeId,
+        taskId: attempt.taskId,
+        agentTaskId: scope.agentTaskId,
         summary: args.summary,
-        artifacts: (args.artifacts ?? []) as Parameters<
-          typeof deps.executionEngine.onTaskCompleted
-        >[0]['artifacts'],
+        artifacts: args.artifacts ?? [],
       });
       return ok({ ack: true });
     },
@@ -156,11 +186,18 @@ function buildFailTask(
     'Mark the current task as failed/blocked with an error message.',
     FailTaskSchema,
     async (args) => {
-      if (!scope.taskId) return err('scope missing taskId');
-      if (!scope.treeId) return err('scope missing treeId');
-      if (!deps.executionEngine) return err('executionEngine not available');
-      deps.executionEngine.onTaskBlocked(scope.treeId, scope.taskId, args.error);
-      return ok({ ack: true, willRetry: args.retryable });
+      const attempt = currentAttempt(deps, scope);
+      if (typeof attempt === 'string') return err(attempt);
+      const { engine, treeId, taskId } = attempt;
+      const failure = { reason: args.error, agentTaskId: scope.agentTaskId };
+      if (args.retryable) await engine.onTaskFailed(treeId, taskId, failure);
+      else await engine.onTaskBlocked(treeId, taskId, failure);
+      const updated = engine.getTree(treeId)?.tasks.get(taskId);
+      const willRetry =
+        !!updated &&
+        updated.retryCount > attempt.task.retryCount &&
+        (updated.status === 'todo' || updated.status === 'in_progress');
+      return ok({ ack: true, status: updated?.status, willRetry });
     },
   );
 }
@@ -179,38 +216,21 @@ function buildUpdateTaskProgress(
     'Emit a progress update for the current task (0-100).',
     UpdateTaskProgressSchema,
     async (args) => {
+      const attempt = currentAttempt(deps, scope);
+      if (typeof attempt === 'string') return err(attempt);
       deps.eventBus.emit({
         id: generateId(),
         timestamp: Date.now(),
         source: 'mcp-server',
         type: 'execution:task:progress',
-        payload: { taskId: scope.taskId, treeId: scope.treeId, ...args },
+        payload: {
+          taskId: scope.taskId,
+          treeId: scope.treeId,
+          agentTaskId: scope.agentTaskId,
+          ...args,
+        },
       });
       return ok({ ack: true });
-    },
-  );
-}
-
-const SaveArtifactSchema = { name: z.string(), content: z.string(), type: z.string() };
-
-function buildSaveArtifact(
-  deps: RavenMcpDeps,
-  scope: ScopeContext,
-): SdkMcpToolDefinition<typeof SaveArtifactSchema> {
-  return tool(
-    'save_artifact',
-    'Save an artifact produced during task execution.',
-    SaveArtifactSchema,
-    async (args) => {
-      const artifactId = generateId();
-      deps.eventBus.emit({
-        id: generateId(),
-        timestamp: Date.now(),
-        source: 'mcp-server',
-        type: 'execution:task:progress',
-        payload: { artifactId, taskId: scope.taskId, treeId: scope.treeId, artifact: args },
-      });
-      return ok({ artifactId });
     },
   );
 }
@@ -235,6 +255,5 @@ export function buildTaskLifecycleTools(
     buildCompleteTask(deps, scope),
     buildFailTask(deps, scope),
     buildUpdateTaskProgress(deps, scope),
-    buildSaveArtifact(deps, scope),
   ];
 }

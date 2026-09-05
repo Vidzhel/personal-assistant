@@ -16,11 +16,12 @@ export interface ValidationResult {
   gate3Feedback?: string;
 }
 
-/** Identifies which tree/task a validation call is for — used for logging
- * only (e.g. a warning on evaluator auto-pass), never for control flow. */
+/** Identifies which tree/task a validation call is for and carries its lifetime. */
 export interface ValidationContext {
   treeId?: string;
   taskId?: string;
+  projectId?: string;
+  signal?: AbortSignal;
 }
 
 export interface ValidationDeps {
@@ -36,6 +37,10 @@ export interface ValidationDeps {
   ) => Promise<{ passed: boolean; score: number; feedback: string }>;
 }
 
+export interface ValidateTaskResultOptions extends ValidationContext {
+  deps: ValidationDeps;
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────
 
 function getTaskPrompt(task: ExecutionTask): string {
@@ -47,6 +52,100 @@ function getTaskPrompt(task: ExecutionTask): string {
 
 function getResultSummary(task: ExecutionTask): string {
   return task.summary ?? '';
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw signal.reason ?? new Error('Validation cancelled');
+  }
+}
+
+function contextOptions(context: ValidationContext): ValidationContext {
+  return {
+    ...(context.treeId === undefined ? {} : { treeId: context.treeId }),
+    ...(context.taskId === undefined ? {} : { taskId: context.taskId }),
+    ...(context.projectId === undefined ? {} : { projectId: context.projectId }),
+    ...(context.signal === undefined ? {} : { signal: context.signal }),
+  };
+}
+
+interface ResolvedValidationOptions {
+  deps: ValidationDeps;
+  signal?: AbortSignal;
+  context: ValidationContext;
+}
+
+function resolveValidationOptions(
+  task: ExecutionTask,
+  args: [ValidationDeps, ValidationContext?] | [ValidateTaskResultOptions],
+): ResolvedValidationOptions {
+  const first = args[0];
+  const options: ValidateTaskResultOptions =
+    'deps' in first ? first : { deps: first, ...(args[1] ?? {}) };
+  const context = {
+    treeId: options.treeId ?? task.parentTaskId,
+    taskId: options.taskId ?? task.id,
+    projectId: options.projectId,
+    signal: options.signal,
+  } satisfies ValidationContext;
+  return { deps: options.deps, signal: options.signal, context };
+}
+
+interface EvaluatorGateOptions {
+  deps: ValidationDeps;
+  taskPrompt: string;
+  resultSummary: string;
+  criteria?: string;
+  context: ValidationContext;
+  taskId: string;
+}
+
+async function runEvaluatorGate(
+  options: EvaluatorGateOptions,
+): Promise<{ passed: boolean; reason: string }> {
+  const { deps, taskPrompt, resultSummary, criteria, context, taskId } = options;
+  try {
+    return await deps.runEvaluator(taskPrompt, resultSummary, {
+      criteria,
+      ...contextOptions(context),
+    });
+  } catch (error) {
+    throwIfAborted(context.signal);
+    log.warn(`Evaluator validation failed closed for task ${taskId}: ${String(error)}`);
+    return { passed: false, reason: 'Evaluator validation failed' };
+  }
+}
+
+interface QualityGateOptions {
+  deps: ValidationDeps;
+  taskPrompt: string;
+  resultSummary: string;
+  threshold: number;
+  context: ValidationContext;
+  taskId: string;
+}
+
+async function runQualityGate(
+  options: QualityGateOptions,
+): Promise<{ passed: boolean; score: number; feedback: string }> {
+  const { deps, taskPrompt, resultSummary, threshold, context, taskId } = options;
+  try {
+    return await deps.runQualityReviewer(taskPrompt, resultSummary, {
+      threshold,
+      ...contextOptions(context),
+    });
+  } catch (error) {
+    throwIfAborted(context.signal);
+    log.warn(`Quality validation failed closed for task ${taskId}: ${String(error)}`);
+    return { passed: false, score: 0, feedback: 'Quality validation failed' };
+  }
+}
+
+function gate2Fields(evalResult: { passed: boolean; reason: string } | undefined): {
+  gate2Passed?: boolean;
+  gate2Reason?: string;
+} {
+  return evalResult ? { gate2Passed: true, gate2Reason: evalResult.reason } : {};
 }
 
 // ── Gate 1: Programmatic checks ────────────────────────────────────────
@@ -66,11 +165,14 @@ function runGate1(task: ExecutionTask, config: TaskValidationConfig): boolean {
 export async function validateTaskResult(
   task: ExecutionTask,
   config: Partial<TaskValidationConfig> | undefined,
-  deps: ValidationDeps,
+  ...args: [ValidationDeps, ValidationContext?] | [ValidateTaskResultOptions]
 ): Promise<ValidationResult> {
   const resolvedConfig = TaskValidationConfigSchema.parse(config ?? {});
   const taskPrompt = getTaskPrompt(task);
   const resultSummary = getResultSummary(task);
+  const { deps, signal, context: validationContext } = resolveValidationOptions(task, args);
+
+  throwIfAborted(signal);
 
   // Gate 1: Programmatic
   const gate1Passed = runGate1(task, resolvedConfig);
@@ -80,12 +182,17 @@ export async function validateTaskResult(
   }
 
   // Gate 2: Evaluator
+  let evalResult: { passed: boolean; reason: string } | undefined;
   if (resolvedConfig.evaluator) {
-    const evalResult = await deps.runEvaluator(taskPrompt, resultSummary, {
+    evalResult = await runEvaluatorGate({
+      deps,
+      taskPrompt,
+      resultSummary,
       criteria: resolvedConfig.evaluatorCriteria,
-      treeId: task.parentTaskId,
+      context: validationContext,
       taskId: task.id,
     });
+    throwIfAborted(signal);
     if (!evalResult.passed) {
       log.info('Gate 2 failed: evaluator rejected result', task.id, evalResult.reason);
       return {
@@ -96,47 +203,43 @@ export async function validateTaskResult(
       };
     }
     log.debug('Gate 2 passed', task.id);
+  }
 
-    // Gate 3: Quality Review (only after gate 2 passes)
-    if (resolvedConfig.qualityReview) {
-      const qrResult = await deps.runQualityReviewer(taskPrompt, resultSummary, {
-        threshold: resolvedConfig.qualityThreshold,
-        treeId: task.parentTaskId,
-        taskId: task.id,
-      });
-      if (!qrResult.passed) {
-        log.info('Gate 3 failed: quality below threshold', task.id, qrResult.score);
-        return {
-          passed: false,
-          gate1Passed: true,
-          gate2Passed: true,
-          gate3Passed: false,
-          gate3Score: qrResult.score,
-          gate3Feedback: qrResult.feedback,
-        };
-      }
-      log.debug('Gate 3 passed', task.id, qrResult.score);
+  // Quality review is an explicit gate and may run without the evaluator.
+  if (resolvedConfig.qualityReview) {
+    throwIfAborted(signal);
+    const qrResult = await runQualityGate({
+      deps,
+      taskPrompt,
+      resultSummary,
+      threshold: resolvedConfig.qualityThreshold,
+      context: validationContext,
+      taskId: task.id,
+    });
+    throwIfAborted(signal);
+    if (!qrResult.passed || qrResult.score < resolvedConfig.qualityThreshold) {
+      log.info('Gate 3 failed: quality below threshold', task.id, qrResult.score);
       return {
-        passed: true,
+        passed: false,
         gate1Passed: true,
-        gate2Passed: true,
-        gate2Reason: evalResult.reason,
-        gate3Passed: true,
+        ...gate2Fields(evalResult),
+        gate3Passed: false,
         gate3Score: qrResult.score,
         gate3Feedback: qrResult.feedback,
       };
     }
-
+    log.debug('Gate 3 passed', task.id, qrResult.score);
     return {
       passed: true,
       gate1Passed: true,
-      gate2Passed: true,
-      gate2Reason: evalResult.reason,
+      ...gate2Fields(evalResult),
+      gate3Passed: true,
+      gate3Score: qrResult.score,
+      gate3Feedback: qrResult.feedback,
     };
   }
 
-  // Gate 2 skipped — check gate 3 independently? No, spec says gate 3 only runs after gate 2
-  return { passed: true, gate1Passed: true };
+  return { passed: true, gate1Passed: true, ...gate2Fields(evalResult) };
 }
 
 // ── Retry prompt builder ───────────────────────────────────────────────

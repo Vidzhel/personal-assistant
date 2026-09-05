@@ -1,5 +1,5 @@
 import { createLogger } from '@raven/shared';
-import type Database from 'better-sqlite3';
+import type { TaskTree } from '@raven/shared';
 import type {
   ExecutionLogger,
   TaskStats,
@@ -17,9 +17,9 @@ const PERCENT = 100;
 
 export interface SystemRetrospectiveDeps {
   projectsDir: string;
-  db: Database.Database;
+  executionEngine: ExecutionTreeQuery;
   executionLogger: ExecutionLogger;
-  namedAgentStore: NamedAgentStore;
+  namedAgentStore: Pick<NamedAgentStore, 'getDefaultAgent'>;
 }
 
 export interface SystemRetrospectiveResult {
@@ -28,15 +28,15 @@ export interface SystemRetrospectiveResult {
   stuckTreeCount: number;
 }
 
-interface StuckTreeRow {
-  cnt: number;
+interface ExecutionTreeQuery {
+  queryTrees(): TaskTree[];
 }
 
-function countStuckTrees(db: Database.Database, cutoffIso: string): number {
-  const row = db
-    .prepare(`SELECT COUNT(*) as cnt FROM task_trees WHERE status = 'running' AND updated_at < ?`)
-    .get(cutoffIso) as StuckTreeRow;
-  return row.cnt;
+function countStuckTrees(engine: ExecutionTreeQuery, cutoffMs: number): number {
+  return engine
+    .queryTrees()
+    .filter((tree) => tree.status === 'running' && new Date(tree.updatedAt).getTime() < cutoffMs)
+    .length;
 }
 
 function buildSummary(stats: TaskStats, perSkill: PerSkillStats[], stuckTreeCount: number): string {
@@ -77,13 +77,13 @@ function buildSummary(stats: TaskStats, perSkill: PerSkillStats[], stuckTreeCoun
 export async function runSystemRetrospective(
   deps: SystemRetrospectiveDeps,
 ): Promise<SystemRetrospectiveResult> {
-  const { projectsDir, db, executionLogger, namedAgentStore } = deps;
+  const { projectsDir, executionEngine, executionLogger, namedAgentStore } = deps;
   const lookbackMs = LOOKBACK_DAYS * MS_PER_DAY;
-  const cutoffIso = new Date(Date.now() - lookbackMs).toISOString();
+  const cutoffMs = Date.now() - lookbackMs;
 
   const stats = executionLogger.getTaskStats(lookbackMs);
   const perSkill = executionLogger.getPerSkillStats(lookbackMs);
-  const stuckTreeCount = countStuckTrees(db, cutoffIso);
+  const stuckTreeCount = countStuckTrees(executionEngine, cutoffMs);
 
   if (stats.failed1h === 0 && stuckTreeCount === 0) {
     log.info('System retrospective: nothing to report this week');

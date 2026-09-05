@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { initDatabase, getDb } from '../db/database.ts';
 import { TaskExecutionEngine } from '../task-execution/task-execution-engine.ts';
 import type { TaskTreeNode } from '@raven/shared';
 
@@ -28,14 +27,6 @@ function makeMockEventBus() {
   };
 }
 
-function makeDbInterface(db: any) {
-  return {
-    run: (sql: string, ...params: unknown[]) => db.prepare(sql).run(...params),
-    get: <T>(sql: string, ...params: unknown[]) => db.prepare(sql).get(...params) as T | undefined,
-    all: <T>(sql: string, ...params: unknown[]) => db.prepare(sql).all(...params) as T[],
-  };
-}
-
 function agentNode(id: string, overrides: Partial<any> = {}): TaskTreeNode {
   return {
     type: 'agent',
@@ -49,29 +40,28 @@ function agentNode(id: string, overrides: Partial<any> = {}): TaskTreeNode {
 
 describe('TaskExecutionEngine', () => {
   let tmpDir: string;
-  let rawDb: any;
-  let dbInterface: ReturnType<typeof makeDbInterface>;
+  let projectsDir: string;
+  const projects = [
+    { id: 'meta', fsPath: 'system' },
+    { id: 'proj-1', fsPath: 'proj-1' },
+  ];
   let eventBus: ReturnType<typeof makeMockEventBus>;
   let engine: TaskExecutionEngine;
 
   beforeAll(() => {
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-exec-engine-'));
-    rawDb = initDatabase(join(tmpDir, 'test.db'));
-    dbInterface = makeDbInterface(rawDb);
+    projectsDir = join(tmpDir, 'projects');
+    for (const project of projects)
+      mkdirSync(join(projectsDir, project.fsPath), { recursive: true });
   });
 
   afterAll(() => {
-    try {
-      getDb().close();
-    } catch {
-      /* */
-    }
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
   beforeEach(() => {
     eventBus = makeMockEventBus();
-    engine = new TaskExecutionEngine({ db: dbInterface, eventBus });
+    engine = new TaskExecutionEngine({ projectsDir, projects: () => projects, eventBus });
   });
 
   // ── createTree ────────────────────────────────────────────────────
@@ -247,7 +237,8 @@ describe('TaskExecutionEngine', () => {
         .mockResolvedValueOnce({ passed: true, reason: 'OK' });
 
       const engineV = new TaskExecutionEngine({
-        db: dbInterface,
+        projectsDir,
+        projects: () => projects,
         eventBus,
         validationDeps: {
           runEvaluator: mockEvaluator,
@@ -308,7 +299,8 @@ describe('TaskExecutionEngine', () => {
       const mockEvaluator = vi.fn().mockResolvedValue({ passed: false, reason: 'Still bad' });
 
       const engineF = new TaskExecutionEngine({
-        db: dbInterface,
+        projectsDir,
+        projects: () => projects,
         eventBus,
         validationDeps: {
           runEvaluator: mockEvaluator,
@@ -571,7 +563,8 @@ describe('TaskExecutionEngine', () => {
       const mockEvaluator = vi.fn().mockResolvedValue({ passed: false, reason: 'Bad' });
 
       const engineF = new TaskExecutionEngine({
-        db: dbInterface,
+        projectsDir,
+        projects: () => projects,
         eventBus,
         validationDeps: {
           runEvaluator: mockEvaluator,
@@ -633,7 +626,7 @@ describe('TaskExecutionEngine', () => {
       });
 
       await engine.startTree(treeId);
-      engine.cancelTree(treeId);
+      await engine.cancelTree(treeId);
 
       const tree = engine.getTree(treeId)!;
       expect(tree.status).toBe('cancelled');
@@ -709,7 +702,7 @@ describe('TaskExecutionEngine', () => {
       });
 
       await engine.startTree(treeId);
-      engine.onTaskBlocked(treeId, taskId, 'Missing resource');
+      await engine.onTaskBlocked(treeId, taskId, 'Missing resource');
 
       const tree = engine.getTree(treeId)!;
       expect(tree.tasks.get(taskId)!.status).toBe('blocked');

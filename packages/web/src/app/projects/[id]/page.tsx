@@ -35,9 +35,17 @@ function ProjectDetail({ id }: { id: string }) {
   }, [id]);
 
   const handleNewSession = useCallback(async () => {
-    const session = await api.createSession(id);
-    setRequestedSessionId(session.id);
-    setActiveTab('sessions');
+    setPending(true);
+    setActionError(null);
+    try {
+      const session = await api.createSession(id);
+      setRequestedSessionId(session.id);
+      setActiveTab('sessions');
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : 'Could not create session.');
+    } finally {
+      setPending(false);
+    }
   }, [id]);
 
   const handleUpdateName = useCallback(
@@ -121,7 +129,7 @@ function ProjectDetail({ id }: { id: string }) {
             </div>
           </div>
           <button
-            onClick={() => void runAction(handleNewSession)}
+            onClick={() => void handleNewSession()}
             disabled={pending}
             className="px-3 py-1.5 rounded text-sm font-medium transition-colors shrink-0"
             style={{ background: 'var(--accent)', color: 'white' }}
@@ -176,6 +184,7 @@ function ProjectDetail({ id }: { id: string }) {
               onProjectUpdated={setProject}
               onNewSession={handleNewSession}
               requestedSessionId={requestedSessionId}
+              sessionSwitchPending={pending}
             />
           </div>
         ))}

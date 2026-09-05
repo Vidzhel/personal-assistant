@@ -15,8 +15,14 @@ const COPY_FEEDBACK_DURATION_MS = 1500;
 const SUMMARY_PREVIEW_LENGTH = 100;
 
 // eslint-disable-next-line max-lines-per-function, complexity -- sessions tab with session list, chat panel, debug, references, cross-refs
-export function ProjectSessionsTab({ projectId, requestedSessionId }: ProjectTabProps) {
+export function ProjectSessionsTab({
+  projectId,
+  requestedSessionId,
+  sessionSwitchPending = false,
+}: ProjectTabProps) {
   const [error, setError] = useState<string | null>(null);
+  const [sessionsRetry, setSessionsRetry] = useState(0);
+  const [sessionLoadFailed, setSessionLoadFailed] = useState(false);
   const [creating, setCreating] = useState(false);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -40,10 +46,12 @@ export function ProjectSessionsTab({ projectId, requestedSessionId }: ProjectTab
   useEffect(() => {
     let active = true;
     setError(null);
+    setSessionLoadFailed(false);
     api
       .getProjectSessions(projectId)
       .then((sessions) => {
         if (!active) return;
+        setSessionLoadFailed(false);
         setSessions(sessions);
         setActiveSessionId(
           (previous) =>
@@ -54,12 +62,14 @@ export function ProjectSessionsTab({ projectId, requestedSessionId }: ProjectTab
         );
       })
       .catch((cause: unknown) => {
-        if (active) setError(cause instanceof Error ? cause.message : 'Could not load sessions.');
+        if (!active) return;
+        setSessionLoadFailed(true);
+        setError(cause instanceof Error ? cause.message : 'Could not load sessions.');
       });
     return () => {
       active = false;
     };
-  }, [projectId, requestedSessionId]);
+  }, [projectId, requestedSessionId, sessionsRetry]);
 
   const handleNewSession = useCallback(async () => {
     if (creating) return;
@@ -127,14 +137,35 @@ export function ProjectSessionsTab({ projectId, requestedSessionId }: ProjectTab
     );
   }, [sessions, searchQuery]);
 
+  // ProjectPage publishes the newly created ID before this tab's session list
+  // refresh completes. Disable the previous composer during that handoff so a
+  // fast send cannot land in the old conversation or be dropped while the
+  // new ChatPanel is still loading its history.
+  const waitingForRequestedSession =
+    requestedSessionId !== undefined &&
+    !sessions.some((session) => session.id === requestedSessionId);
   const activeSession = sessions.find((s) => s.id === activeSessionId);
+  const composerDisabled = sessionSwitchPending || creating || waitingForRequestedSession;
 
   return (
     <div className="flex h-full">
       {error && (
-        <p role="alert" className="p-3" style={{ color: 'var(--error)' }}>
-          {error}
-        </p>
+        <div className="p-3 space-y-2" style={{ color: 'var(--error)' }}>
+          <p role="alert">{error}</p>
+          {sessionLoadFailed && (
+            <button
+              type="button"
+              onClick={() => {
+                setError(null);
+                setSessionsRetry((retry) => retry + 1);
+              }}
+              className="px-2 py-1 rounded text-sm"
+              style={{ background: 'var(--bg-hover)', color: 'var(--text)' }}
+            >
+              Retry loading sessions
+            </button>
+          )}
+        </div>
       )}
       {/* Session list sidebar */}
       <div
@@ -337,7 +368,9 @@ export function ProjectSessionsTab({ projectId, requestedSessionId }: ProjectTab
 
         <div className="flex-1 overflow-hidden">
           {activeSessionId ? (
-            <ChatPanel projectId={projectId} sessionId={activeSessionId} />
+            <fieldset disabled={composerDisabled} className="contents">
+              <ChatPanel projectId={projectId} sessionId={activeSessionId} />
+            </fieldset>
           ) : (
             <div className="flex items-center justify-center h-full">
               <p className="text-sm" style={{ color: 'var(--text-muted)' }}>

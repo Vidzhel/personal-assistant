@@ -34,9 +34,12 @@ interface ScheduleFireRow {
   detail: string;
 }
 
-async function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void> {
+async function waitFor(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs = 5000,
+): Promise<void> {
   const start = Date.now();
-  while (!predicate()) {
+  while (!(await predicate())) {
     if (Date.now() - start > timeoutMs) {
       throw new Error('waitFor: timed out waiting for condition');
     }
@@ -129,13 +132,10 @@ describe('e2e: POST /api/scaffold/schedule goes live without a restart', () => {
     );
     expect(fireRow?.status).toBe('fired');
     expect(fireRow?.detail).toBeTruthy();
-    await waitFor(
-      () =>
-        raven!.db.get<{ status: string }>(
-          'SELECT status FROM task_trees WHERE id = ?',
-          fireRow!.detail,
-        )?.status === 'completed',
-    );
+    await waitFor(async () => {
+      const response = await fetch(`${baseUrl}/api/task-trees/${fireRow!.detail}`);
+      return response.ok && ((await response.json()) as { status: string }).status === 'completed';
+    });
     const treeResponse = await fetch(`${baseUrl}/api/task-trees/${fireRow!.detail}`);
     expect(treeResponse.status).toBe(200);
     expect(await treeResponse.json()).toMatchObject({

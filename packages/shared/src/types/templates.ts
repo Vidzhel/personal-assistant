@@ -42,18 +42,23 @@ export type TemplateTrigger = z.infer<typeof TemplateTriggerSchema>;
 
 // ── Template Task (TaskTreeNode + forEach extension) ───────────────────
 //
-// z.discriminatedUnion doesn't support .and() / z.intersection cleanly.
-// Instead we use z.preprocess to validate both parts independently and
-// merge the results.
+// Validate template extension fields separately from strict executable nodes.
 
 const TemplateTaskExtensionSchema = z.object({
   forEach: z.string().optional(),
   forEachAs: z.string().default('item'),
 });
 
+function executionNodeInput(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
+  return Object.fromEntries(
+    Object.entries(value).filter(([key]) => key !== 'forEach' && key !== 'forEachAs'),
+  );
+}
+
 export const TemplateTaskSchema = z.unknown().transform((val, ctx) => {
   // Parse the base TaskTreeNode fields
-  const baseResult = TaskTreeNodeSchema.safeParse(val);
+  const baseResult = TaskTreeNodeSchema.safeParse(executionNodeInput(val));
   if (!baseResult.success) {
     for (const issue of baseResult.error.issues) {
       ctx.addIssue({

@@ -1,5 +1,12 @@
 # Raven reliability completion — September 5, 2026
 
+This is the historical R7 assessment. Subsequent owner decisions and F1 onward
+are tracked in the [active continuation queue](../../_bmad-output/implementation-artifacts/file-first-completion-2026-09-05.md).
+The owner waived legacy runtime migration and restoration because Raven had not
+been used, chose project-local YAML task state, and authorized flexible repository
+workspaces after F1–F9. References below to required legacy exports, restoration
+and deferred workspace authorization describe the earlier checkpoint only.
+
 The reliability pass is complete through R7: implementation, review, dependency
 fixes, shared Claude/Codex guidance and final regression. Remaining issues have
 explicit resolution plans below. The [current queue and detailed evidence](../../_bmad-output/implementation-artifacts/reliability-completion-2026-09-05.md)

@@ -10,6 +10,7 @@ as permanent limitations. Update the status and evidence when each is resolved.
 
 | Item | State / target | Resolution and verification |
 | --- | --- | --- |
+| save_artifact reports success without writing an artifact | Stub removed in F2; delivery scheduled W1 | The old tool only emitted a progress event and had no persistence consumer. Remove it from advertised task tools; agents can use their actual filesystem tools and report paths in completion. W1 adds real project/repository artifact persistence, registered links and mobile previews with a command→file→Git→browser acceptance journey. |
 | Chat/session UI races, optimistic rejected text, disconnected sends | Complete R5 | Session-scoped state/drafts, correlated acceptance and recoverable rejection, and reconnect history/task reconciliation. Eleven browser journeys include switching, failed sends and a missed completion. |
 | References stream stops updating after the 201-message buffer fills | Complete R5 | References now use the reviewed identity cursor and cancel stale session loads; rollover/extraction regressions pass. |
 | Intentional WebSocket disconnect schedules a reconnect | Complete R5 | Close-state guard/timer cleanup prevent orphan reconnects; focused transport and browser reconnect tests pass. |

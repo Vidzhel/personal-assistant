@@ -201,7 +201,8 @@ function processTasks(
         forEachExpansions.set(task.id, result.expandedIds);
       }
     } else {
-      const interpolated = interpolateObject(task, resolved);
+      const { forEach: _fe, forEachAs: _fea, ...taskNode } = task;
+      const interpolated = interpolateObject(taskNode, resolved);
       resultNodes.push(interpolated as TaskTreeNode);
     }
   }

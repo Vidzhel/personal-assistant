@@ -11,6 +11,15 @@ export function assertProjectMutationAllowed(root: string): void {
   }
 }
 
+/** Wait for a definition mutation, then run a synchronous record transition. */
+export async function runAfterProjectMutations<T>(root: string, operation: () => T): Promise<T> {
+  const key = resolve(root);
+  while (queues.has(key)) {
+    await (queues.get(key) ?? Promise.resolve()).catch(() => undefined);
+  }
+  return operation();
+}
+
 /** Serialize complete project operations across API, scaffold, sync and Telegram callers. */
 export async function withProjectMutation<T>(
   root: string,

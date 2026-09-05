@@ -680,10 +680,12 @@ export interface TaskTreeRecord {
   id: string;
   projectId?: string;
   status: string;
+  interrupted?: boolean;
   plan?: string;
   taskCount: number;
   completedCount: number;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface ExecutionTaskRecord {
@@ -691,10 +693,17 @@ export interface ExecutionTaskRecord {
   title: string;
   type: string;
   status: string;
+  interrupted?: boolean;
   agent?: string;
   blockedBy: string[];
   summary?: string;
-  artifacts: Array<{ type: string; label: string; filePath?: string }>;
+  artifacts: Array<{
+    type: string;
+    label: string;
+    filePath?: string;
+    referenceId?: string;
+    data?: Record<string, unknown>;
+  }>;
   retryCount: number;
   lastError?: string;
   validationResult?: {

@@ -172,7 +172,6 @@ export function projectReferences(db: Database.Database, id: string): string[] {
   const tables = [
     'sessions',
     'agent_tasks',
-    'task_trees',
     'project_data_sources',
     'events',
     'knowledge_rejections',

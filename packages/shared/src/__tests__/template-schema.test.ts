@@ -171,6 +171,16 @@ describe('TemplateTriggerSchema', () => {
 // ── TemplateTaskSchema (forEach extension) ─────────────────────────────
 
 describe('TemplateTaskSchema (forEach)', () => {
+  it('keeps delay parameters unresolved until template instantiation', () => {
+    const task = TemplateTaskSchema.parse({
+      id: 'pause',
+      type: 'delay',
+      title: 'Wait',
+      duration: '{{ params.duration }}',
+    });
+    expect(task.type === 'delay' && task.duration).toBe('{{ params.duration }}');
+  });
+
   it('validates a task with forEach', () => {
     const result = TemplateTaskSchema.parse({
       ...makeAgentTask(),

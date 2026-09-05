@@ -255,7 +255,7 @@ the library and existing scaffold-and-activate tools; do not recreate suites.
 ## Data Layer
 
 - **SQLite** via `better-sqlite3` — single file at `data/raven.db`
-- Operational tables include `events`, `sessions`, `projects`, `schedule_fires`, `preferences`, `task_trees`, `execution_tasks`, `agent_tasks`, `audit_log`, `pending_approvals`, and `intents` (see `migrations/`). The unused old `tasks` table awaits schema cleanup; board tasks no longer read or write it.
+- Operational tables include `events`, `sessions`, `projects`, `schedule_fires`, `preferences`, `agent_tasks`, `audit_log`, `pending_approvals`, and `intents` (see `migrations/`). The unused old `tasks`, `task_trees` and `execution_tasks` tables await schema cleanup; task and tree persistence no longer read or write them.
 - Repositories in `packages/core/src/db/repositories/`
 
 Board tasks are validated YAML documents under
@@ -266,8 +266,19 @@ before task events. Cross-project moves use a durable intent and content hashes
 to finish interrupted moves or report conflicting edits. Parent links stay within
 one project. Task storage directories are reserved and never scanned as projects.
 One Raven process owns a project storage root; record writes cannot race a project
-archive or registry reload. Execution trees and agent-run records move in the next
-checkpoints of the [active queue](_bmad-output/implementation-artifacts/file-first-completion-2026-09-05.md).
+archive or registry reload.
+
+Execution trees use `tasks/trees/<treeId>.yaml` in the same resolved project. The
+whole document includes nodes, exact agent attempt IDs, outcomes and artifact
+metadata. Queries return detached snapshots. Engine-owned timers, code execution
+and validation are drained during shutdown; restart marks interrupted trees for
+explicit approval rather than replaying actions. The board opens plan details,
+shows errors and retained outputs, and offers approval, resume and cancellation.
+Runtime completion uses the exact tree/node/attempt; unrelated work by the same
+agent cannot complete a board task. `save_artifact` was removed because it never
+wrote a file. Browser file delivery is part of the authorized workspace work.
+Agent-run records move next in the
+[active queue](_bmad-output/implementation-artifacts/file-first-completion-2026-09-05.md).
 
 Managed projects store UUID identity and settings in `context.md`'s `ravenProject`
 metadata. The lifecycle writes current file metadata, preserves human context,

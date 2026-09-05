@@ -17,6 +17,7 @@ export function registerTaskTreeRoutes(
       projectId: tree.projectId,
       scheduleId: tree.scheduleId,
       status: tree.status,
+      interrupted: tree.interrupted,
       plan: tree.plan,
       taskCount: tree.tasks.size,
       completedCount: [...tree.tasks.values()].filter((t) => t.status === 'completed').length,
@@ -36,6 +37,7 @@ export function registerTaskTreeRoutes(
       id: tree.id,
       projectId: tree.projectId,
       status: tree.status,
+      interrupted: tree.interrupted,
       plan: tree.plan,
       taskCount: tree.tasks.size,
       completedCount: [...tree.tasks.values()].filter((t) => t.status === 'completed').length,
@@ -52,6 +54,7 @@ export function registerTaskTreeRoutes(
         artifacts: t.artifacts ?? [],
         retryCount: t.retryCount,
         lastError: t.lastError,
+        interrupted: t.interrupted,
         validationResult: t.validationResult,
       })),
     };
@@ -84,8 +87,8 @@ export function registerTaskTreeRoutes(
     if (!tree) {
       return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Task tree not found' });
     }
-    executionEngine.cancelTree(id);
-    return { status: 'cancelled' };
+    await executionEngine.cancelTree(id);
+    return { status: executionEngine.getTree(id)?.status };
   });
 
   // POST /api/task-trees/:id/tasks/:taskId/approve — approve an approval-type task
@@ -99,7 +102,16 @@ export function registerTaskTreeRoutes(
     if (!task) {
       return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Task not found in tree' });
     }
+    if (
+      tree.status !== 'running' ||
+      task.node.type !== 'approval' ||
+      task.status !== 'pending_approval'
+    ) {
+      return reply
+        .status(HTTP_STATUS.CONFLICT)
+        .send({ error: 'Task is not awaiting approval in a running tree' });
+    }
     await executionEngine.onApprovalGranted(id, taskId);
-    return { status: 'approved' };
+    return { status: executionEngine.getTree(id)?.tasks.get(taskId)?.status };
   });
 }

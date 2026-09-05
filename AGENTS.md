@@ -88,8 +88,10 @@ versions; do not copy versions from historical planning documents.
   cannot be recreated from cache settings.
 - Board tasks live in validated YAML at `projects/<fsPath>/tasks/board/<id>.yaml`.
   Resolve project IDs through current definitions; projectless tasks use `system`.
-  SQLite still owns sessions, execution trees, agent-run history, approvals and intents;
-  moving trees and run history is scheduled in the active continuation queue.
+  Execution trees and their nodes commit together at `tasks/trees/<id>.yaml`.
+  Interrupted trees require deliberate resume through the board detail panel/API.
+  SQLite still owns sessions, agent-run history, approvals and intents; moving run
+  history is the next checkpoint in the active continuation queue.
   Knowledge bodies are Markdown; durable links and project membership still live
   in Neo4j. Routine reindexing must preserve those relationships and graph metadata.
 - Agent memory currently lives at `projects/agents/<name>/memory/`, globally by

@@ -20,6 +20,47 @@ function write(relative, content) {
 }
 write('projects/course/context.md', '# Course\n\nBrowser fixture parent.\n');
 write('projects/course/one/context.md', '# Nested Course\n\nBrowser fixture only.\n');
+const treeTime = new Date().toISOString();
+write('projects/course/one/tasks/trees/browser-interrupted-tree.yaml', {
+  id: 'browser-interrupted-tree',
+  projectId: 'course/one',
+  plan: 'Resume reviewed browser work',
+  status: 'running',
+  createdAt: treeTime,
+  updatedAt: treeTime,
+  tasks: [
+    {
+      id: 'done',
+      parentTaskId: 'browser-interrupted-tree',
+      status: 'completed',
+      retryCount: 0,
+      node: {
+        id: 'done',
+        type: 'agent',
+        title: 'Retained research',
+        prompt: 'Done',
+        blockedBy: [],
+      },
+      summary: 'Earlier research is retained.',
+      artifacts: [{ type: 'data', label: 'Research result', data: { value: 42 } }],
+    },
+    {
+      id: 'resume',
+      parentTaskId: 'browser-interrupted-tree',
+      status: 'in_progress',
+      retryCount: 0,
+      node: {
+        id: 'resume',
+        type: 'agent',
+        title: 'Finish reviewed work',
+        prompt: 'resume-browser-tree',
+        blockedBy: ['done'],
+      },
+      artifacts: [],
+      agentTaskId: 'old-browser-attempt',
+    },
+  ],
+});
 write('library/skills/browser-fixture/config.json', {
   name: 'browser-fixture',
   displayName: 'Browser fixture',

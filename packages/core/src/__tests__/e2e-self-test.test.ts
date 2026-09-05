@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { stringify } from 'yaml';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createRaven, type RavenInstance } from '../raven.ts';
@@ -20,7 +21,7 @@ async function waitFor(predicate: () => boolean, timeoutMs = 4000): Promise<void
 
 /**
  * E2E over the real composition root: createRaven -> start -> seed a task
- * tree stuck in "running" for >24h directly in the DB -> trigger the real
+ * tree stuck in "running" for >24h directly in project YAML -> trigger the real
  * `self-test` schedule via `POST /api/schedules/:id/trigger` (the same
  * route the dashboard's schedule "run now" button hits, same as
  * e2e-memory-loop.test.ts) -> the job emits one batched `notification`
@@ -40,8 +41,9 @@ describe('e2e: self-test detects a stuck task tree', () => {
   it('seeded stuck tree -> self-test job -> notification + health violation', async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-e2e-self-test-'));
 
+    const fixture = createRavenTestFixture(tmpDir, { schedule: 'self-test' });
     raven = await createRaven(buildTestConfig(), {
-      ...createRavenTestFixture(tmpDir, { schedule: 'self-test' }),
+      ...fixture,
       agentBackend: async () => ({ result: 'ok', success: true, errors: [] }),
       skipSuites: true,
     });
@@ -51,12 +53,32 @@ describe('e2e: self-test detects a stuck task tree', () => {
 
     // ── Seed a task tree stuck "running" for >24h ───────────────────
     const stuckAt = new Date(Date.now() - 25 * MS_PER_HOUR).toISOString();
-    raven.db.run(
-      `INSERT INTO task_trees (id, project_id, schedule_id, status, plan, created_at, updated_at)
-       VALUES (?, NULL, NULL, 'running', NULL, ?, ?)`,
-      'e2e-stuck-tree',
-      stuckAt,
-      stuckAt,
+    const directory = join(fixture.projectsDir, 'system', 'tasks', 'trees');
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(
+      join(directory, 'e2e-stuck-tree.yaml'),
+      stringify({
+        id: 'e2e-stuck-tree',
+        status: 'running',
+        createdAt: stuckAt,
+        updatedAt: stuckAt,
+        tasks: [
+          {
+            id: 'waiting',
+            parentTaskId: 'e2e-stuck-tree',
+            node: {
+              id: 'waiting',
+              type: 'approval',
+              title: 'Waiting',
+              message: 'Review',
+              blockedBy: [],
+            },
+            status: 'pending_approval',
+            artifacts: [],
+            retryCount: 0,
+          },
+        ],
+      }),
     );
 
     // ── Drive the self-test job deterministically ───────────────────

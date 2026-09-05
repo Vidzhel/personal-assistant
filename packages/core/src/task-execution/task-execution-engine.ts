@@ -1,210 +1,118 @@
-import { execFile as execFileCb } from 'node:child_process';
-import { promisify } from 'node:util';
 import {
-  createLogger,
   generateId,
-  type DatabaseInterface,
   type EventBusInterface,
-  type TaskTree,
-  type TaskTreeNode,
-  type TaskTreeStatus,
   type ExecutionTask,
   type ExecutionTaskStatus,
   type TaskArtifact,
+  type TaskTree,
+  type TaskTreeNode,
+  type TaskTreeStatus,
+  TaskTreeNodeSchema,
 } from '@raven/shared';
+import type { ProjectRecordProject } from '../project-manager/project-records.ts';
+import { runAfterProjectMutations } from '../project-manager/project-mutation.ts';
 import { findReadyTasks } from './dependency-resolver.ts';
-import { validateTaskResult, type ValidationDeps } from './validation-pipeline.ts';
+import { runCodeProcess } from './run-code-process.ts';
+import {
+  readTaskTreeRecords,
+  treeLocation,
+  normalizeTaskTree,
+  writeTaskTreeRecord,
+  type TaskTreeRecord,
+  type TaskTreeRecordDeps,
+} from './task-tree-records.ts';
+import {
+  validateTaskResult,
+  type ValidationDeps,
+  type ValidationResult,
+} from './validation-pipeline.ts';
 
-const execFileAsync = promisify(execFileCb);
-
-const log = createLogger('task-execution-engine');
-
-// ── Magic number constants ──────────────────────────────────────────────
-
-const MS_PER_SECOND = 1000;
+const TREE_LIMIT = 50;
+const ONE_MILLISECOND = 1;
+const MILLISECONDS_PER_SECOND = 1000;
 const SECONDS_PER_MINUTE = 60;
 const MINUTES_PER_HOUR = 60;
 const HOURS_PER_DAY = 24;
-
-// ── Duration parser ─────────────────────────────────────────────────────
+const THIRD_CAPTURE = 3;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+const INTERRUPTED_REASON = 'Execution interrupted by process restart; deliberate resume required';
 
 const DURATION_UNITS: Record<string, number> = {
-  ms: 1,
-  s: MS_PER_SECOND,
-  m: MS_PER_SECOND * SECONDS_PER_MINUTE,
-  h: MS_PER_SECOND * SECONDS_PER_MINUTE * MINUTES_PER_HOUR,
-  d: MS_PER_SECOND * SECONDS_PER_MINUTE * MINUTES_PER_HOUR * HOURS_PER_DAY,
+  ms: ONE_MILLISECOND,
+  s: MILLISECONDS_PER_SECOND,
+  m: SECONDS_PER_MINUTE * MILLISECONDS_PER_SECOND,
+  h: MINUTES_PER_HOUR * SECONDS_PER_MINUTE * MILLISECONDS_PER_SECOND,
+  d: HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_MINUTE * MILLISECONDS_PER_SECOND,
 };
 
 function parseDuration(duration: string): number {
   const match = duration.match(/^(\d+)(ms|s|m|h|d)$/);
-  if (!match) {
-    throw new Error(`Invalid duration format: ${duration}`);
+  if (!match) throw new Error(`Invalid duration format: ${duration}`);
+  const milliseconds = Number(match[1]) * (DURATION_UNITS[match[2]] ?? MILLISECONDS_PER_SECOND);
+  if (!Number.isSafeInteger(milliseconds) || milliseconds > MAX_TIMER_DELAY_MS) {
+    throw new Error(`Duration exceeds supported timer limit: ${duration}`);
   }
-  const value = Number(match[1]);
-  const unit = match[2];
-  return value * (DURATION_UNITS[unit] ?? MS_PER_SECOND);
+  return milliseconds;
 }
 
-// ── DB row types ────────────────────────────────────────────────────────
-
-interface TaskTreeRow {
-  id: string;
-  project_id: string | null;
-  schedule_id: string | null;
-  status: string;
-  plan: string | null;
-  created_at: string;
-  updated_at: string;
+function resolveResultReferences(expression: string, tasks: Map<string, ExecutionTask>): string {
+  return expression.replace(/\{\{\s*([\w-]+)\.result\s*\}\}/g, (_match, taskId: string) => {
+    const task = tasks.get(taskId);
+    if (!task) return 'false';
+    const artifact = task.artifacts.find((candidate) => candidate.type === 'data');
+    return artifact?.data?.['result'] !== undefined
+      ? String(artifact.data['result'])
+      : String(task.status === 'completed');
+  });
 }
 
-interface ExecutionTaskRow {
-  id: string;
-  parent_task_id: string;
-  node_json: string;
-  status: string;
-  agent_task_id: string | null;
-  artifacts_json: string;
-  summary: string | null;
-  retry_count: number;
-  last_error: string | null;
-  needs_replan: number;
-  validation_result_json: string | null;
-  started_at: string | null;
-  completed_at: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-// ── Row mapping ─────────────────────────────────────────────────────────
-
-function rowToExecutionTask(row: ExecutionTaskRow): ExecutionTask {
-  return {
-    id: row.id,
-    parentTaskId: row.parent_task_id,
-    node: JSON.parse(row.node_json) as TaskTreeNode,
-    status: row.status as ExecutionTaskStatus,
-    ...(row.agent_task_id !== null && { agentTaskId: row.agent_task_id }),
-    artifacts: JSON.parse(row.artifacts_json) as TaskArtifact[],
-    ...(row.summary !== null && { summary: row.summary }),
-    retryCount: row.retry_count,
-    ...(row.last_error !== null && { lastError: row.last_error }),
-    ...(row.needs_replan === 1 && { needsReplan: true }),
-    ...(row.validation_result_json !== null && {
-      validationResult: JSON.parse(row.validation_result_json) as ExecutionTask['validationResult'],
-    }),
-    ...(row.started_at !== null && { startedAt: row.started_at }),
-    ...(row.completed_at !== null && { completedAt: row.completed_at }),
-  };
-}
-
-function rowToTaskTree(treeRow: TaskTreeRow, taskRows: ExecutionTaskRow[]): TaskTree {
-  const tasks = new Map<string, ExecutionTask>();
-  for (const row of taskRows) {
-    tasks.set(row.id, rowToExecutionTask(row));
-  }
-  return {
-    id: treeRow.id,
-    ...(treeRow.project_id !== null && { projectId: treeRow.project_id }),
-    ...(treeRow.schedule_id !== null && { scheduleId: treeRow.schedule_id }),
-    status: treeRow.status as TaskTreeStatus,
-    tasks,
-    ...(treeRow.plan !== null && { plan: treeRow.plan }),
-    createdAt: treeRow.created_at,
-    updatedAt: treeRow.updated_at,
-  };
-}
-
-// ── Create tree options ─────────────────────────────────────────────────
-
-export interface CreateTreeOptions {
-  id: string;
-  projectId?: string;
-  scheduleId?: string;
-  plan?: string;
-  tasks: TaskTreeNode[];
-}
-
-// ── Engine deps ─────────────────────────────────────────────────────────
-
-export interface TaskExecutionEngineDeps {
-  db: DatabaseInterface;
-  eventBus: EventBusInterface;
-  validationDeps?: ValidationDeps;
-}
-
-// ── Condition evaluator ─────────────────────────────────────────────────
-
-function evaluateCondition(expression: string, tasks: Map<string, ExecutionTask>): boolean {
-  // Replace {{ taskId.result }} references
-  const resolved = expression.replace(
-    /\{\{\s*([\w-]+)\.result\s*\}\}/g,
-    (_match, taskId: string) => {
-      const task = tasks.get(taskId);
-      if (!task) return 'false';
-      const dataArt = task.artifacts.find((a) => a.type === 'data');
-      if (dataArt?.data?.['result'] !== undefined) {
-        return String(dataArt.data['result']);
-      }
-      return String(task.status === 'completed');
-    },
-  );
-
-  // Replace {{ taskId.artifacts.data.field }} references
-  const fullyResolved = resolved.replace(
+function resolveDataReferences(expression: string, tasks: Map<string, ExecutionTask>): string {
+  return expression.replace(
     /\{\{\s*([\w-]+)\.artifacts\.data\.([\w.]+)\s*\}\}/g,
     (_match, taskId: string, field: string) => {
-      const task = tasks.get(taskId);
-      if (!task) return 'undefined';
-      const dataArt = task.artifacts.find((a) => a.type === 'data');
-      if (!dataArt?.data) return 'undefined';
-      const value = dataArt.data[field];
-      return value === undefined ? 'undefined' : JSON.stringify(value);
+      const data = tasks
+        .get(taskId)
+        ?.artifacts.find((candidate) => candidate.type === 'data')?.data;
+      return data?.[field] === undefined ? 'undefined' : JSON.stringify(data[field]);
     },
   );
+}
 
-  // Simple comparisons
+function evaluateCondition(expression: string, tasks: Map<string, ExecutionTask>): boolean {
+  const fullyResolved = resolveDataReferences(resolveResultReferences(expression, tasks), tasks);
   if (fullyResolved === 'true') return true;
   if (fullyResolved === 'false') return false;
+  const match = fullyResolved.match(/^(.+?)\s*(===|!==|>=|<=|>|<)\s*(.+)$/);
+  if (!match) return isTruthyExpression(fullyResolved);
+  return compareValues(match[1].trim(), match[2], match[THIRD_CAPTURE].trim());
+}
 
-  // Handle simple comparison patterns
-  const COMP_RIGHT_GROUP = 3;
-  const compMatch = fullyResolved.match(/^(.+?)\s*(===|!==|>=|<=|>|<)\s*(.+)$/);
-  if (compMatch) {
-    return evaluateComparison(
-      compMatch[1].trim(),
-      compMatch[2],
-      compMatch[COMP_RIGHT_GROUP].trim(),
-    );
+function isTruthyExpression(expression: string): boolean {
+  return expression !== 'undefined' && expression !== '0' && expression !== '';
+}
+
+function compareValues(leftText: string, operator: string, rightText: string): boolean {
+  const leftNumber = Number(leftText);
+  const rightNumber = Number(rightText);
+  const left: number | string = Number.isNaN(leftNumber) ? leftText : leftNumber;
+  const right: number | string = Number.isNaN(rightNumber) ? rightText : rightNumber;
+  switch (operator) {
+    case '===':
+      return left === right;
+    case '!==':
+      return left !== right;
+    case '>':
+      return left > right;
+    case '<':
+      return left < right;
+    case '>=':
+      return left >= right;
+    case '<=':
+      return left <= right;
+    default:
+      return false;
   }
-
-  // Default: truthy check
-  return fullyResolved !== 'undefined' && fullyResolved !== '0' && fullyResolved !== '';
 }
-
-type ComparisonFn = (a: number | string, b: number | string) => boolean;
-
-const COMPARATORS: Record<string, ComparisonFn> = {
-  '===': (a, b) => a === b,
-  '!==': (a, b) => a !== b,
-  '>': (a, b) => a > b,
-  '<': (a, b) => a < b,
-  '>=': (a, b) => a >= b,
-  '<=': (a, b) => a <= b,
-};
-
-function evaluateComparison(left: string, op: string, right: string): boolean {
-  const comparator = COMPARATORS[op];
-  if (!comparator) return false;
-
-  const leftNum = Number(left);
-  const rightNum = Number(right);
-  const useNum = !isNaN(leftNum) && !isNaN(rightNum);
-
-  return useNum ? comparator(leftNum, rightNum) : comparator(left, right);
-}
-
-// ── Terminal status check ───────────────────────────────────────────────
 
 const TERMINAL_STATUSES = new Set<ExecutionTaskStatus>([
   'completed',
@@ -217,53 +125,93 @@ function isTerminal(status: ExecutionTaskStatus): boolean {
   return TERMINAL_STATUSES.has(status);
 }
 
-// ── TaskExecutionEngine ─────────────────────────────────────────────────
+function cloneTask(task: ExecutionTask): ExecutionTask {
+  return structuredClone(task);
+}
+
+function cloneTree(tree: TaskTree): TaskTree {
+  return {
+    ...tree,
+    tasks: new Map([...tree.tasks].map(([id, task]) => [id, cloneTask(task)])),
+  };
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+export interface CreateTreeOptions {
+  id: string;
+  projectId?: string;
+  scheduleId?: string;
+  plan?: string;
+  tasks: TaskTreeNode[];
+}
+
+export interface TaskExecutionEngineDeps {
+  projectsDir: string;
+  projects: () => ProjectRecordProject[];
+  eventBus: EventBusInterface;
+  validationDeps?: ValidationDeps;
+}
+
+interface LifetimeState {
+  generation: number;
+  admissionStopped: boolean;
+  transitionsClosed: boolean;
+  stopped: boolean;
+}
 
 export class TaskExecutionEngine {
-  private readonly db: DatabaseInterface;
+  private readonly recordDeps: TaskTreeRecordDeps;
   private readonly eventBus: EventBusInterface;
-  private readonly validationDeps: ValidationDeps;
+  private readonly validationDeps?: ValidationDeps;
   private readonly delayTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  private readonly trees = new Map<string, TaskTree>();
+  private readonly codeControllers = new Map<string, AbortController>();
+  private readonly validationControllers = new Map<string, AbortController>();
+  private readonly localWork = new Set<Promise<unknown>>();
+  private readonly lifetime: LifetimeState = {
+    generation: 0,
+    admissionStopped: false,
+    transitionsClosed: false,
+    stopped: false,
+  };
+  private initialized = false;
+  private stopPromise: Promise<void> | undefined;
 
   constructor(deps: TaskExecutionEngineDeps) {
-    this.db = deps.db;
-    this.eventBus = deps.eventBus;
-    this.validationDeps = deps.validationDeps ?? {
-      runEvaluator: async () => ({ passed: true, reason: 'no evaluator configured' }),
-      runQualityReviewer: async () => ({ passed: true, score: 5, feedback: '' }),
+    this.recordDeps = {
+      projectsDir: deps.projectsDir,
+      projects: deps.projects,
     };
+    this.eventBus = deps.eventBus;
+    this.validationDeps = deps.validationDeps;
   }
 
-  // ── Public API ──────────────────────────────────────────────────────
-
   createTree(opts: CreateTreeOptions): TaskTree {
+    this.assertAdmission();
+    this.initialize();
     const now = new Date().toISOString();
-
-    this.db.run(
-      `INSERT INTO task_trees (id, project_id, schedule_id, status, plan, created_at, updated_at)
-       VALUES (?, ?, ?, 'pending_approval', ?, ?, ?)`,
-      opts.id,
-      opts.projectId ?? null,
-      opts.scheduleId ?? null,
-      opts.plan ?? null,
-      now,
-      now,
-    );
-
     const tasks = new Map<string, ExecutionTask>();
-    for (const node of opts.tasks) {
-      this.insertExecutionTask(opts.id, node, now);
+    for (const candidate of opts.tasks) {
+      const node = TaskTreeNodeSchema.parse(candidate);
+      if (tasks.has(node.id)) throw new Error(`Duplicate execution task ID: ${node.id}`);
       tasks.set(node.id, {
         id: node.id,
         parentTaskId: opts.id,
-        node,
+        node: structuredClone(node),
         status: 'todo',
         artifacts: [],
         retryCount: 0,
       });
     }
-
     const tree: TaskTree = {
       id: opts.id,
       ...(opts.projectId !== undefined && { projectId: opts.projectId }),
@@ -274,538 +222,965 @@ export class TaskExecutionEngine {
       createdAt: now,
       updatedAt: now,
     };
-
-    this.trees.set(opts.id, tree);
-    return tree;
+    this.validateCandidate(tree);
+    const location = treeLocation(this.recordDeps, tree.projectId, tree.id);
+    if (this.findRecord(tree.id)) throw new Error(`Task tree already exists: ${tree.id}`);
+    writeTaskTreeRecord(this.recordDeps, location, tree);
+    return cloneTree(tree);
   }
 
-  async startTree(treeId: string): Promise<void> {
-    const tree = this.loadTree(treeId);
-    if (!tree) throw new Error(`Tree not found: ${treeId}`);
-
-    this.updateTreeStatus(tree, 'running');
-    this.processReadyTasks(tree);
+  startTree(treeId: string): Promise<void> {
+    if (!this.admitTransition())
+      return Promise.reject(new Error('Task execution engine is stopping'));
+    const work = runAfterProjectMutations(this.recordDeps.projectsDir, () => {
+      const record = this.loadRecord(treeId);
+      if (!record) throw new Error(`Tree not found: ${treeId}`);
+      if (record.tree.status !== 'pending_approval') {
+        throw new Error(`Tree is not pending approval (status: ${record.tree.status})`);
+      }
+      const tree = record.tree;
+      for (const task of tree.tasks.values()) {
+        if (task.interrupted && task.status === 'blocked') {
+          task.status = 'todo';
+          task.lastError = undefined;
+          task.interrupted = undefined;
+        }
+      }
+      tree.interrupted = undefined;
+      tree.status = 'running';
+      const status = this.persistTransition(tree, record.bytes);
+      if (status) this.emitEvent('execution:tree:completed', { treeId, status });
+      else this.processReadyTasks(tree);
+    });
+    this.track(work);
+    return work;
   }
 
-  async onTaskCompleted(opts: {
+  onTaskCompleted(opts: {
     treeId: string;
     taskId: string;
     summary: string;
     artifacts: TaskArtifact[];
+    agentTaskId?: string;
   }): Promise<void> {
-    const tree = this.loadTree(opts.treeId);
-    if (!tree) return;
+    if (!this.admitCompletion()) return Promise.resolve();
+    const work = this.completeTask(opts);
+    this.track(work);
+    return work;
+  }
 
-    const task = tree.tasks.get(opts.taskId);
-    if (!task) return;
-
-    task.summary = opts.summary;
-    task.artifacts = opts.artifacts;
-
-    if (task.node.type === 'agent' && task.node.validation) {
-      await this.runValidation(tree, task);
-    } else {
-      this.markTaskCompleted(tree, task);
+  private async completeTask(opts: {
+    treeId: string;
+    taskId: string;
+    summary: string;
+    artifacts: TaskArtifact[];
+    agentTaskId?: string;
+  }): Promise<void> {
+    const validation = await runAfterProjectMutations(this.recordDeps.projectsDir, () => {
+      const record = this.loadRecord(opts.treeId);
+      if (!record || this.lifetime.stopped) return undefined;
+      const task = record.tree.tasks.get(opts.taskId);
+      if (!task || task.status !== 'in_progress' || !this.ownsAttempt(task, opts.agentTaskId))
+        return undefined;
+      const attempt = task.agentTaskId;
+      task.summary = opts.summary;
+      task.artifacts = structuredClone(opts.artifacts);
+      if (task.node.type !== 'agent' || !task.node.validation) {
+        this.markTaskCompleted({ tree: record.tree, task, expectedBytes: record.bytes });
+        return undefined;
+      }
+      task.status = 'validating';
+      this.touch(record.tree);
+      this.persist(record.tree, record.bytes);
+      return { attempt, taskSnapshot: stableJson(task) };
+    });
+    if (validation) {
+      const work = this.runValidation({
+        treeId: opts.treeId,
+        taskId: opts.taskId,
+        attempt: validation.attempt,
+        taskSnapshot: validation.taskSnapshot,
+      });
+      this.track(work);
+      await work;
     }
   }
 
-  onTaskBlocked(treeId: string, taskId: string, reason: string): void {
-    const tree = this.loadTree(treeId);
-    if (!tree) return;
-
-    const task = tree.tasks.get(taskId);
-    if (!task) return;
-
-    this.updateTaskStatus(tree, task, 'blocked');
-    task.lastError = reason;
-    this.saveTask(tree.id, task);
-
-    this.emitEvent('execution:task:blocked', { treeId, taskId, reason });
-
-    // the tree deliberately stays non-terminal while a task awaits approval
+  onTaskBlocked(
+    treeId: string,
+    taskId: string,
+    reason: string | { reason: string; agentTaskId?: string },
+  ): Promise<void> {
+    if (!this.admitCompletion()) return Promise.resolve();
+    const work = runAfterProjectMutations(this.recordDeps.projectsDir, () => {
+      const record = this.loadRecord(treeId);
+      if (!record || this.lifetime.stopped) return;
+      const task = record.tree.tasks.get(taskId);
+      const attempt = typeof reason === 'string' ? undefined : reason.agentTaskId;
+      const message = typeof reason === 'string' ? reason : reason.reason;
+      if (!task || isTerminal(task.status) || !this.ownsAttempt(task, attempt)) return;
+      task.status = 'blocked';
+      task.lastError = message;
+      this.touch(record.tree);
+      this.persist(record.tree, record.bytes);
+      this.emitEvent('execution:task:blocked', { treeId, taskId, reason: message });
+    });
+    this.track(work);
+    return work;
   }
 
-  /**
-   * Terminal cancellation path for a dispatched agent task — distinct from
-   * onTaskFailed (which enters the retry/escalate ladder). A cancelled task
-   * must never be retried, so this sets 'cancelled' directly (already a
-   * TERMINAL_STATUS) and lets checkTreeCompletion settle the tree.
-   */
-  onTaskCancelled(treeId: string, taskId: string): void {
-    const tree = this.loadTree(treeId);
-    if (!tree) return;
-
-    const task = tree.tasks.get(taskId);
-    if (!task) return;
-
-    this.updateTaskStatus(tree, task, 'cancelled');
-    this.saveTask(tree.id, task);
-
-    this.checkTreeCompletion(tree);
+  onTaskCancelled(treeId: string, taskId: string, agentTaskId?: string): Promise<void> {
+    if (!this.admitCompletion()) return Promise.resolve();
+    const work = runAfterProjectMutations(this.recordDeps.projectsDir, () => {
+      const record = this.loadRecord(treeId);
+      if (!record || this.lifetime.stopped) return;
+      const task = record.tree.tasks.get(taskId);
+      if (!task || isTerminal(task.status) || !this.ownsAttempt(task, agentTaskId)) return;
+      task.status = 'cancelled';
+      task.interrupted = undefined;
+      this.cancelDependents(record.tree, taskId);
+      const treeStatus = this.persistTransition(record.tree, record.bytes);
+      if (treeStatus) {
+        this.emitEvent('execution:tree:completed', { treeId, status: treeStatus });
+      }
+    });
+    this.track(work);
+    return work;
   }
 
-  /**
-   * Failure path for a dispatched agent task that did not complete
-   * successfully and was not blocked pending approval (see onTaskBlocked).
-   * Reuses the same retry/escalate ladder as a validation failure so the
-   * tree always reaches a terminal state instead of stalling forever.
-   */
-  onTaskFailed(treeId: string, taskId: string, error: string): void {
-    const tree = this.loadTree(treeId);
-    if (!tree) return;
+  onTaskFailed(
+    treeId: string,
+    taskId: string,
+    error: string | { reason: string; agentTaskId?: string },
+  ): Promise<void> {
+    if (!this.admitCompletion()) return Promise.resolve();
+    const work = runAfterProjectMutations(this.recordDeps.projectsDir, () => {
+      const record = this.loadRecord(treeId);
+      if (!record || this.lifetime.stopped) return;
+      const task = record.tree.tasks.get(taskId);
+      const attempt = typeof error === 'string' ? undefined : error.agentTaskId;
+      const message = typeof error === 'string' ? error : error.reason;
+      if (!task || isTerminal(task.status) || !this.ownsAttempt(task, attempt)) return;
+      if (this.retryFailedTask(record, task, message)) return;
+      this.failTask({ tree: record.tree, task, error: message, expectedBytes: record.bytes });
+    });
+    this.track(work);
+    return work;
+  }
 
-    const task = tree.tasks.get(taskId);
-    if (!task) return;
+  private retryFailedTask(record: TaskTreeRecord, task: ExecutionTask, error: string): boolean {
+    const maxRetries = task.node.type === 'agent' ? (task.node.validation?.maxRetries ?? 2) : 2;
+    if (task.retryCount >= maxRetries || this.lifetime.admissionStopped) return false;
+    task.retryCount += 1;
+    task.lastError = error;
+    task.status = 'todo';
+    task.agentTaskId = undefined;
+    this.touch(record.tree);
+    this.persist(record.tree, record.bytes);
+    this.scheduleRetry(record.tree.id, task.id, this.retryBackoff(task));
+    return true;
+  }
 
-    const maxRetries =
-      (task.node.type === 'agent' ? task.node.validation?.maxRetries : undefined) ?? 2;
+  private retryBackoff(task: ExecutionTask): number {
+    return task.node.type === 'agent' ? (task.node.validation?.retryBackoffMs ?? 0) : 0;
+  }
 
-    if (task.retryCount < maxRetries) {
-      task.retryCount += 1;
-      task.lastError = error;
-      this.updateTaskStatus(tree, task, 'todo');
-      this.saveTask(tree.id, task);
-      this.processReadyTasks(tree);
+  private scheduleRetry(treeId: string, taskId: string, delayMs: number): void {
+    const key = `${treeId}:${taskId}`;
+    const previous = this.delayTimers.get(key);
+    if (previous) clearTimeout(previous);
+    const generation = this.lifetime.generation;
+    if (delayMs <= 0) {
+      const record = this.loadRecord(treeId);
+      if (record?.tree.tasks.get(taskId)?.status === 'todo') this.processReadyTasks(record.tree);
       return;
     }
-
-    this.handleTaskFailure(tree, task, error);
-  }
-
-  /**
-   * Persists the agent-manager task id for the in-flight dispatch attempt so
-   * a later `agent:task:complete` can be verified against the task's
-   * *current* attempt — a stale completion from a superseded retry carries
-   * an older agentTaskId and must not be allowed to advance the tree.
-   */
-  setAgentTaskId(treeId: string, taskId: string, agentTaskId: string): void {
-    const tree = this.loadTree(treeId);
-    if (!tree) return;
-
-    const task = tree.tasks.get(taskId);
-    if (!task) return;
-
-    task.agentTaskId = agentTaskId;
-    this.saveTask(tree.id, task);
-  }
-
-  async onApprovalGranted(treeId: string, taskId: string): Promise<void> {
-    const tree = this.loadTree(treeId);
-    if (!tree) return;
-
-    const task = tree.tasks.get(taskId);
-    if (!task) return;
-
-    this.markTaskCompleted(tree, task);
-  }
-
-  cancelTree(treeId: string): void {
-    const tree = this.loadTree(treeId);
-    if (!tree) return;
-
-    for (const [, task] of tree.tasks) {
-      if (!isTerminal(task.status)) {
-        this.updateTaskStatus(tree, task, 'cancelled');
-        this.saveTask(tree.id, task);
-      }
-    }
-
-    // Clear any delay timers
-    for (const [key, timer] of this.delayTimers) {
-      if (key.startsWith(treeId)) {
-        clearTimeout(timer);
+    const timer = setTimeout(() => {
+      const retry = runAfterProjectMutations(this.recordDeps.projectsDir, () => {
+        if (this.delayTimers.get(key) !== timer || !this.isLifetimeCurrent(generation)) return;
         this.delayTimers.delete(key);
+        const record = this.loadRecord(treeId);
+        if (record?.tree.tasks.get(taskId)?.status === 'todo') this.processReadyTasks(record.tree);
+      });
+      this.track(retry);
+    }, delayMs);
+    this.delayTimers.set(key, timer);
+  }
+
+  async setAgentTaskId(treeId: string, taskId: string, agentTaskId: string): Promise<boolean> {
+    if (!this.admitTransition()) return false;
+    const work = runAfterProjectMutations(this.recordDeps.projectsDir, () => {
+      const record = this.loadRecord(treeId);
+      if (!record || this.lifetime.stopped) return false;
+      const task = record.tree.tasks.get(taskId);
+      if (!task || task.status !== 'in_progress' || task.agentTaskId !== undefined) return false;
+      task.agentTaskId = agentTaskId;
+      this.touch(record.tree);
+      this.persist(record.tree, record.bytes);
+      return true;
+    });
+    this.track(work);
+    return work;
+  }
+
+  onApprovalGranted(treeId: string, taskId: string): Promise<void> {
+    if (!this.admitCompletion()) return Promise.resolve();
+    const work = runAfterProjectMutations(this.recordDeps.projectsDir, () => {
+      const record = this.loadRecord(treeId);
+      if (!record || this.lifetime.stopped) return;
+      const task = record.tree.tasks.get(taskId);
+      if (!task || task.status !== 'pending_approval') return;
+      this.markTaskCompleted({ tree: record.tree, task, expectedBytes: record.bytes });
+    });
+    this.track(work);
+    return work;
+  }
+
+  cancelTree(treeId: string): Promise<void> {
+    if (!this.admitCompletion()) return Promise.resolve();
+    const work = runAfterProjectMutations(this.recordDeps.projectsDir, () => {
+      const record = this.loadRecord(treeId);
+      if (!record || this.lifetime.stopped) return;
+      const tree = record.tree;
+      if (tree.status === 'cancelled' || tree.status === 'completed' || tree.status === 'failed')
+        return;
+      for (const task of tree.tasks.values()) {
+        if (!isTerminal(task.status)) task.status = 'cancelled';
+        task.interrupted = undefined;
       }
-    }
-
-    this.updateTreeStatus(tree, 'cancelled');
-
-    // Abort any in-flight agent runs for this tree — the execution bridge
-    // subscribes to this and cancels the corresponding agent-manager tasks
-    // so a cancelled tree doesn't leave orphaned agents running.
-    this.emitEvent('execution:tree:cancelled', { treeId });
+      tree.interrupted = undefined;
+      tree.status = 'cancelled';
+      this.touch(tree);
+      this.persist(tree, record.bytes);
+      this.clearTreeWork(treeId);
+      this.emitEvent('execution:tree:cancelled', { treeId });
+      this.emitEvent('execution:tree:completed', { treeId, status: 'cancelled' });
+    });
+    this.track(work);
+    return work;
   }
 
   getTree(treeId: string): TaskTree | undefined {
-    return this.loadTree(treeId);
+    const record = this.loadRecord(treeId);
+    return record ? cloneTree(record.tree) : undefined;
   }
 
   getActiveTrees(): TaskTree[] {
-    const rows = this.db.all<TaskTreeRow>(
-      `SELECT * FROM task_trees WHERE status IN ('pending_approval', 'running')`,
+    return this.queryTrees().filter(
+      (tree) => tree.status === 'pending_approval' || tree.status === 'running',
     );
-    return rows.map((row) => this.loadTreeFromRow(row)).filter(Boolean) as TaskTree[];
   }
 
   getAllTrees(): TaskTree[] {
-    const rows = this.db.all<TaskTreeRow>(
-      `SELECT * FROM task_trees ORDER BY created_at DESC LIMIT 50`,
-    );
-    return rows.map((row) => this.loadTreeFromRow(row)).filter(Boolean) as TaskTree[];
+    return this.queryTrees().slice(0, TREE_LIMIT);
   }
 
-  // ── Private: task processing ────────────────────────────────────────
+  queryTrees(): TaskTree[] {
+    if (!this.lifetime.stopped) this.initialize();
+    return readTaskTreeRecords(this.recordDeps, !this.lifetime.stopped)
+      .sort(
+        (a, b) =>
+          Date.parse(b.tree.createdAt) - Date.parse(a.tree.createdAt) ||
+          a.tree.id.localeCompare(b.tree.id),
+      )
+      .map((record) => cloneTree(record.tree));
+  }
+
+  stopAdmission(): void {
+    this.lifetime.admissionStopped = true;
+  }
+
+  async stop(): Promise<void> {
+    if (this.stopPromise) return this.stopPromise;
+    this.stopPromise = this.drainStop();
+    return this.stopPromise;
+  }
+
+  private async drainStop(): Promise<void> {
+    if (this.lifetime.stopped) return;
+    this.stopAdmission();
+    this.lifetime.transitionsClosed = true;
+    this.lifetime.generation += 1;
+    for (const timer of this.delayTimers.values()) clearTimeout(timer);
+    this.delayTimers.clear();
+    for (const controller of this.codeControllers.values()) controller.abort();
+    for (const controller of this.validationControllers.values()) controller.abort();
+    while (this.localWork.size > 0) {
+      await Promise.allSettled([...this.localWork]);
+    }
+    this.lifetime.stopped = true;
+    this.codeControllers.clear();
+    this.validationControllers.clear();
+  }
+
+  private assertAdmission(): void {
+    if (this.lifetime.stopped || this.lifetime.admissionStopped) {
+      throw new Error('Task execution engine is stopping');
+    }
+  }
+
+  private admitTransition(): boolean {
+    return (
+      !this.lifetime.admissionStopped && !this.lifetime.transitionsClosed && !this.lifetime.stopped
+    );
+  }
+
+  private admitCompletion(): boolean {
+    return !this.lifetime.transitionsClosed && !this.lifetime.stopped;
+  }
+
+  private ownsAttempt(task: ExecutionTask, agentTaskId?: string): boolean {
+    return task.agentTaskId === undefined
+      ? agentTaskId === undefined
+      : task.agentTaskId === agentTaskId;
+  }
+
+  private initialize(): void {
+    if (this.initialized || this.lifetime.stopped) return;
+    for (const record of readTaskTreeRecords(this.recordDeps)) {
+      if (record.tree.status !== 'running') continue;
+      for (const task of record.tree.tasks.values()) {
+        if (task.status !== 'in_progress' && task.status !== 'validating') continue;
+        task.status = 'blocked';
+        task.lastError = INTERRUPTED_REASON;
+        task.interrupted = true;
+        task.agentTaskId = undefined;
+      }
+      record.tree.interrupted = true;
+      record.tree.status = 'pending_approval';
+      this.touch(record.tree);
+      writeTaskTreeRecord(
+        this.recordDeps,
+        treeLocation(this.recordDeps, record.tree.projectId, record.tree.id),
+        record.tree,
+      );
+    }
+    this.initialized = true;
+  }
+
+  private findRecord(treeId: string): TaskTreeRecord | undefined {
+    return readTaskTreeRecords(this.recordDeps, !this.lifetime.stopped).find(
+      (record) => record.tree.id === treeId,
+    );
+  }
+
+  private loadRecord(treeId: string): TaskTreeRecord | undefined {
+    this.initialize();
+    const record = this.findRecord(treeId);
+    return record;
+  }
+
+  private persist(tree: TaskTree, expectedBytes: string): string {
+    this.validateCandidate(tree);
+    if (this.findRecord(tree.id)?.bytes !== expectedBytes) {
+      throw new Error(`Execution tree changed on disk: ${tree.id}`);
+    }
+    const location = treeLocation(this.recordDeps, tree.projectId, tree.id);
+    return writeTaskTreeRecord(this.recordDeps, location, tree);
+  }
+
+  private validateCandidate(tree: TaskTree): void {
+    const normalized = normalizeTaskTree(tree);
+    tree.tasks = normalized.tasks;
+  }
+
+  private touch(tree: TaskTree): void {
+    tree.updatedAt = new Date().toISOString();
+  }
 
   private processReadyTasks(tree: TaskTree): void {
-    const readyIds = findReadyTasks(tree.tasks);
-    for (const taskId of readyIds) {
+    if (this.lifetime.stopped || this.lifetime.admissionStopped) return;
+    for (const taskId of findReadyTasks(tree.tasks)) {
+      if (this.delayTimers.has(`${tree.id}:${taskId}`)) continue;
       const task = tree.tasks.get(taskId);
-      if (task) {
-        this.executeTask(tree, task);
-      }
+      if (task) this.executeTask(tree.id, taskId);
     }
   }
 
-  private executeTask(tree: TaskTree, task: ExecutionTask): void {
-    try {
-      // Check runIf condition
-      if (task.node.runIf) {
-        const shouldRun = evaluateCondition(task.node.runIf, tree.tasks);
-        if (!shouldRun) {
-          this.updateTaskStatus(tree, task, 'skipped');
-          this.saveTask(tree.id, task);
-          this.checkTreeCompletion(tree);
-          this.processReadyTasks(tree);
-          return;
-        }
-      }
+  private executeTask(treeId: string, taskId: string): void {
+    const record = this.loadRecord(treeId);
+    if (!record || record.tree.status !== 'running' || this.lifetime.stopped) return;
+    const task = record.tree.tasks.get(taskId);
+    if (!task || task.status !== 'todo') return;
+    if (this.skipConditionalTask(record, task)) return;
+    this.dispatchTask(record, taskId);
+  }
 
-      switch (task.node.type) {
-        case 'agent':
-          this.executeAgentTask(tree, task);
-          break;
-        case 'code':
-          this.executeCodeTask(tree, task);
-          break;
-        case 'condition':
-          this.executeConditionTask(tree, task);
-          break;
-        case 'notify':
-          this.executeNotifyTask(tree, task);
-          break;
-        case 'delay':
-          this.executeDelayTask(tree, task);
-          break;
-        case 'approval':
-          this.executeApprovalTask(tree, task);
-          break;
-      }
-    } catch (err) {
-      log.error(`Task execution error (${task.id}): ${err}`);
-      this.handleTaskFailure(tree, task, String(err));
+  private skipConditionalTask(record: TaskTreeRecord, task: ExecutionTask): boolean {
+    if (!task.node.runIf || evaluateCondition(task.node.runIf, record.tree.tasks)) return false;
+    task.status = 'skipped';
+    const treeStatus = this.persistTransition(record.tree, record.bytes);
+    if (treeStatus)
+      this.emitEvent('execution:tree:completed', { treeId: record.tree.id, status: treeStatus });
+    this.processReadyTasks(record.tree);
+    return true;
+  }
+
+  private dispatchTask(record: TaskTreeRecord, taskId: string): void {
+    const task = record.tree.tasks.get(taskId);
+    if (!task) return;
+    switch (task.node.type) {
+      case 'agent':
+        this.executeAgent(record, taskId);
+        break;
+      case 'code':
+        this.executeCode(record, taskId);
+        break;
+      case 'condition':
+        this.executeCondition(record, taskId);
+        break;
+      case 'notify':
+        this.executeNotify(record, taskId);
+        break;
+      case 'delay':
+        this.executeDelay(record, taskId);
+        break;
+      case 'approval':
+        this.executeApproval(record, taskId);
+        break;
     }
   }
 
-  private executeAgentTask(tree: TaskTree, task: ExecutionTask): void {
-    this.updateTaskStatus(tree, task, 'in_progress');
+  private executeAgent(record: TaskTreeRecord, taskId: string): void {
+    const task = record.tree.tasks.get(taskId);
+    if (!task || task.node.type !== 'agent' || task.status !== 'todo') return;
+    task.status = 'in_progress';
     task.startedAt = new Date().toISOString();
-    this.saveTask(tree.id, task);
-
-    // Raw failure reason only — the execution-bridge does the single
-    // buildRetryPrompt wrap (with the real retryCount carried below) so the
-    // feedback isn't embedded into the prompt more than once.
+    this.touch(record.tree);
+    this.persist(record.tree, record.bytes);
     const retryFeedback = task.retryCount > 0 && task.lastError ? task.lastError : undefined;
-
     this.emitEvent('execution:task:run-agent', {
-      treeId: tree.id,
+      treeId: record.tree.id,
       taskId: task.id,
-      agent: task.node.type === 'agent' ? task.node.agent : undefined,
-      prompt: task.node.type === 'agent' ? task.node.prompt : task.node.title,
+      agent: task.node.agent,
+      prompt: task.node.prompt,
       parentTaskId: task.parentTaskId,
-      projectId: tree.projectId,
+      projectId: record.tree.projectId,
       retryCount: task.retryCount,
       ...(retryFeedback !== undefined && { retryFeedback }),
     });
   }
 
-  private executeCodeTask(tree: TaskTree, task: ExecutionTask): void {
-    this.updateTaskStatus(tree, task, 'in_progress');
+  private executeCode(record: TaskTreeRecord, taskId: string): void {
+    const task = record.tree.tasks.get(taskId);
+    if (!task || task.node.type !== 'code') return;
+    task.status = 'in_progress';
     task.startedAt = new Date().toISOString();
-    this.saveTask(tree.id, task);
-
-    if (task.node.type !== 'code') return;
-
-    const { script, args } = task.node;
-
-    execFileAsync(script, args)
-      .then(({ stdout }) => {
-        const artifact: TaskArtifact = {
-          type: 'data',
-          label: 'stdout',
-          data: { output: stdout.trim() },
-        };
-        task.summary = stdout.trim();
-        task.artifacts = [artifact];
-        this.markTaskCompleted(tree, task);
-      })
-      .catch((err: Error) => {
-        this.handleTaskFailure(tree, task, err.message);
+    this.touch(record.tree);
+    this.persist(record.tree, record.bytes);
+    const key = `${record.tree.id}:${task.id}`;
+    const controller = new AbortController();
+    this.codeControllers.set(key, controller);
+    const generation = this.lifetime.generation;
+    const work = runCodeProcess(task.node.script, task.node.args, { signal: controller.signal })
+      .then(({ stdout }) => this.finishCodeTask({ record, task, stdout, generation, controller }))
+      .catch((error: unknown) => this.failCodeTask({ record, task, error, generation, controller }))
+      .finally(() => {
+        if (this.codeControllers.get(key) === controller) this.codeControllers.delete(key);
       });
+    this.track(work);
   }
 
-  private executeConditionTask(tree: TaskTree, task: ExecutionTask): void {
-    if (task.node.type !== 'condition') return;
-
-    const result = evaluateCondition(task.node.expression, tree.tasks);
-    const artifact: TaskArtifact = {
-      type: 'data',
-      label: 'condition-result',
-      data: { result },
-    };
-
-    task.artifacts = [artifact];
-    task.summary = `Condition evaluated to ${String(result)}`;
-    this.markTaskCompleted(tree, task);
-  }
-
-  private executeNotifyTask(tree: TaskTree, task: ExecutionTask): void {
-    if (task.node.type !== 'notify') return;
-
-    this.emitEvent('notification:deliver', {
-      channel: task.node.channel,
-      title: task.node.title,
-      body: task.node.message,
+  private async finishCodeTask(options: {
+    record: TaskTreeRecord;
+    task: ExecutionTask;
+    stdout: string;
+    generation: number;
+    controller: AbortController;
+  }): Promise<void> {
+    const { record, task, stdout, generation, controller } = options;
+    if (
+      !this.isCurrentWork({
+        generation,
+        treeId: record.tree.id,
+        taskId: task.id,
+        status: 'in_progress',
+        controller,
+        taskSnapshot: stableJson(task),
+      })
+    )
+      return;
+    await runAfterProjectMutations(this.recordDeps.projectsDir, () => {
+      if (
+        !this.isCurrentWork({
+          generation,
+          treeId: record.tree.id,
+          taskId: task.id,
+          status: 'in_progress',
+          controller,
+          taskSnapshot: stableJson(task),
+        })
+      )
+        return;
+      const current = this.loadRecord(record.tree.id);
+      const currentTask = current?.tree.tasks.get(task.id);
+      if (!current || !currentTask || currentTask.status !== 'in_progress') return;
+      currentTask.summary = stdout.trim();
+      currentTask.artifacts = [{ type: 'data', label: 'stdout', data: { output: stdout.trim() } }];
+      this.markTaskCompleted({
+        tree: current.tree,
+        task: currentTask,
+        expectedBytes: current.bytes,
+      });
     });
-
-    task.summary = `Notification sent to ${task.node.channel}`;
-    this.markTaskCompleted(tree, task);
   }
 
-  private executeDelayTask(tree: TaskTree, task: ExecutionTask): void {
-    if (task.node.type !== 'delay') return;
+  private failCodeTask(options: {
+    record: TaskTreeRecord;
+    task: ExecutionTask;
+    error: unknown;
+    generation: number;
+    controller: AbortController;
+  }): void {
+    const { record, task, error, generation, controller } = options;
+    if (
+      !this.isCurrentWork({
+        generation,
+        treeId: record.tree.id,
+        taskId: task.id,
+        status: 'in_progress',
+        controller,
+        taskSnapshot: stableJson(task),
+      })
+    )
+      return;
+    void this.onTaskFailed(
+      record.tree.id,
+      task.id,
+      error instanceof Error ? error.message : String(error),
+    ).catch(() => undefined);
+  }
 
-    this.updateTaskStatus(tree, task, 'in_progress');
+  private executeCondition(record: TaskTreeRecord, taskId: string): void {
+    const task = record.tree.tasks.get(taskId);
+    if (!task || task.node.type !== 'condition') return;
+    task.summary = `Condition evaluated to ${String(evaluateCondition(task.node.expression, record.tree.tasks))}`;
+    task.artifacts = [
+      {
+        type: 'data',
+        label: 'condition-result',
+        data: { result: evaluateCondition(task.node.expression, record.tree.tasks) },
+      },
+    ];
+    this.markTaskCompleted({ tree: record.tree, task, expectedBytes: record.bytes });
+  }
+
+  private executeNotify(record: TaskTreeRecord, taskId: string): void {
+    const task = record.tree.tasks.get(taskId);
+    if (!task || task.node.type !== 'notify') return;
+    const node = task.node;
+    task.summary = `Notification requested for ${task.node.channel}`;
+    this.markTaskCompleted({
+      tree: record.tree,
+      task,
+      expectedBytes: record.bytes,
+      beforeEvents: () => {
+        this.emitEvent('notification:deliver', {
+          channel: node.channel,
+          title: node.title,
+          body: node.message,
+        });
+      },
+    });
+  }
+
+  private executeDelay(record: TaskTreeRecord, taskId: string): void {
+    const task = record.tree.tasks.get(taskId);
+    if (!task || task.node.type !== 'delay') return;
+    task.status = 'in_progress';
     task.startedAt = new Date().toISOString();
-    this.saveTask(tree.id, task);
-
-    const ms = parseDuration(task.node.duration);
-    const timerKey = `${tree.id}:${task.id}`;
-
+    this.touch(record.tree);
+    this.persist(record.tree, record.bytes);
+    const key = `${record.tree.id}:${task.id}`;
+    const generation = this.lifetime.generation;
     const timer = setTimeout(() => {
-      this.delayTimers.delete(timerKey);
-      task.summary = `Delayed ${task.node.type === 'delay' ? task.node.duration : ''}`;
-      this.markTaskCompleted(tree, task);
-    }, ms);
-
-    this.delayTimers.set(timerKey, timer);
+      if (this.delayTimers.get(key) !== timer) return;
+      this.delayTimers.delete(key);
+      if (!this.isLifetimeCurrent(generation)) return;
+      const completion = runAfterProjectMutations(this.recordDeps.projectsDir, () => {
+        if (
+          !this.isCurrentWork({
+            generation,
+            treeId: record.tree.id,
+            taskId: task.id,
+            status: 'in_progress',
+            taskSnapshot: stableJson(task),
+          })
+        )
+          return;
+        const current = this.loadRecord(record.tree.id);
+        const currentTask = current?.tree.tasks.get(task.id);
+        if (!current || !currentTask || currentTask.status !== 'in_progress') return;
+        currentTask.summary = `Delayed ${task.node.type === 'delay' ? task.node.duration : ''}`;
+        this.markTaskCompleted({
+          tree: current.tree,
+          task: currentTask,
+          expectedBytes: current.bytes,
+        });
+      });
+      this.track(completion);
+    }, parseDuration(task.node.duration));
+    this.delayTimers.set(key, timer);
   }
 
-  private executeApprovalTask(tree: TaskTree, task: ExecutionTask): void {
-    if (task.node.type !== 'approval') return;
-
-    this.updateTaskStatus(tree, task, 'pending_approval');
-    this.saveTask(tree.id, task);
-
+  private executeApproval(record: TaskTreeRecord, taskId: string): void {
+    const task = record.tree.tasks.get(taskId);
+    if (!task || task.node.type !== 'approval') return;
+    task.status = 'pending_approval';
+    this.touch(record.tree);
+    this.persist(record.tree, record.bytes);
     this.emitEvent('execution:task:approval-needed', {
-      treeId: tree.id,
+      treeId: record.tree.id,
       taskId: task.id,
       message: task.node.message,
     });
   }
 
-  // ── Private: validation ─────────────────────────────────────────────
-
-  private async runValidation(tree: TaskTree, task: ExecutionTask): Promise<void> {
-    this.updateTaskStatus(tree, task, 'validating');
-    this.saveTask(tree.id, task);
-
-    const config = task.node.validation;
-    const result = await validateTaskResult(task, config, this.validationDeps);
-
-    task.validationResult = {
-      gate1Passed: result.gate1Passed,
-      gate2Passed: result.gate2Passed,
-      gate2Reason: result.gate2Reason,
-      gate3Passed: result.gate3Passed,
-      gate3Score: result.gate3Score,
-      gate3Feedback: result.gate3Feedback,
-    };
-
-    if (result.passed) {
-      this.markTaskCompleted(tree, task);
-      return;
-    }
-
-    this.handleValidationFailure(tree, task, result);
-  }
-
-  // eslint-disable-next-line complexity -- branching on retry/maxRetries/onMaxRetriesFailed
-  private handleValidationFailure(
-    tree: TaskTree,
-    task: ExecutionTask,
-    result: { gate2Reason?: string; gate3Feedback?: string },
-  ): void {
-    const config = task.node.validation;
-    const maxRetries = config?.maxRetries ?? 2;
-    const errorMsg = result.gate2Reason ?? result.gate3Feedback ?? 'Validation failed';
-
-    if (task.retryCount < maxRetries) {
-      task.retryCount += 1;
-      task.lastError = errorMsg;
-      this.updateTaskStatus(tree, task, 'todo');
-      this.saveTask(tree.id, task);
-      this.processReadyTasks(tree);
-      return;
-    }
-
-    const onFail = config?.onMaxRetriesFailed ?? 'escalate';
-    task.lastError = errorMsg;
-
-    switch (onFail) {
-      case 'escalate':
-        this.updateTaskStatus(tree, task, 'failed');
-        this.saveTask(tree.id, task);
-        this.emitEvent('execution:task:failed', {
-          treeId: tree.id,
-          taskId: task.id,
-          error: errorMsg,
-        });
-        this.checkTreeCompletion(tree);
-        break;
-      case 'skip':
-        this.updateTaskStatus(tree, task, 'skipped');
-        this.saveTask(tree.id, task);
-        this.checkTreeCompletion(tree);
-        this.processReadyTasks(tree);
-        break;
-      case 'fail':
-        this.updateTaskStatus(tree, task, 'failed');
-        this.saveTask(tree.id, task);
-        this.emitEvent('execution:task:failed', {
-          treeId: tree.id,
-          taskId: task.id,
-          error: errorMsg,
-        });
-        this.updateTreeStatus(tree, 'failed');
-        break;
+  private async runValidation(options: {
+    treeId: string;
+    taskId: string;
+    attempt?: string;
+    taskSnapshot: string;
+  }): Promise<void> {
+    const { treeId, taskId, attempt, taskSnapshot } = options;
+    const record = this.loadRecord(treeId);
+    const task = record?.tree.tasks.get(taskId);
+    if (!record || !task || task.status !== 'validating' || this.lifetime.stopped) return;
+    const controller = new AbortController();
+    const key = `${treeId}:${taskId}`;
+    this.validationControllers.set(key, controller);
+    const generation = this.lifetime.generation;
+    const guard = { generation, treeId, taskId, attempt, controller, taskSnapshot };
+    try {
+      const result = await this.performValidation({
+        tree: record.tree,
+        task,
+        treeId,
+        taskId,
+        controller,
+      });
+      if (!this.validationStillCurrent(guard)) return;
+      await this.applyValidationResult({
+        treeId,
+        taskId,
+        result,
+        generation,
+        attempt,
+        controller,
+        taskSnapshot,
+      });
+    } catch (error) {
+      if (!this.validationStillCurrent(guard)) return;
+      await this.applyValidationFailure({
+        treeId,
+        taskId,
+        error,
+        generation,
+        attempt,
+        controller,
+        taskSnapshot,
+      });
+    } finally {
+      if (this.validationControllers.get(key) === controller)
+        this.validationControllers.delete(key);
     }
   }
 
-  private handleTaskFailure(tree: TaskTree, task: ExecutionTask, error: string): void {
-    this.updateTaskStatus(tree, task, 'failed');
-    task.lastError = error;
-    this.saveTask(tree.id, task);
-    this.emitEvent('execution:task:failed', {
-      treeId: tree.id,
-      taskId: task.id,
-      error,
+  private validationStillCurrent(options: {
+    generation: number;
+    treeId: string;
+    taskId: string;
+    attempt?: string;
+    controller: AbortController;
+    taskSnapshot: string;
+  }): boolean {
+    return this.isCurrentWork({ ...options, status: 'validating' });
+  }
+
+  private async performValidation(options: {
+    tree: TaskTree;
+    task: ExecutionTask;
+    treeId: string;
+    taskId: string;
+    controller: AbortController;
+  }): Promise<ValidationResult> {
+    const { tree, task, treeId, taskId, controller } = options;
+    if (!this.validationDeps) {
+      return {
+        passed: false,
+        gate1Passed: false,
+        gate2Reason: 'Validation dependencies unavailable',
+      };
+    }
+    return validateTaskResult(task, task.node.type === 'agent' ? task.node.validation : undefined, {
+      deps: this.validationDeps,
+      signal: controller.signal,
+      treeId,
+      taskId,
+      projectId: tree.projectId,
     });
-    this.checkTreeCompletion(tree);
   }
 
-  // ── Private: state transitions ──────────────────────────────────────
+  private async applyValidationResult(options: {
+    treeId: string;
+    taskId: string;
+    result: ValidationResult;
+    generation: number;
+    attempt?: string;
+    controller: AbortController;
+    taskSnapshot: string;
+  }): Promise<void> {
+    const { treeId, taskId, result, ...guard } = options;
+    await runAfterProjectMutations(this.recordDeps.projectsDir, () => {
+      if (!this.validationStillCurrent({ treeId, taskId, ...guard })) return;
+      const current = this.loadRecord(treeId);
+      const task = current?.tree.tasks.get(taskId);
+      if (!current || !task || task.status !== 'validating') return;
+      task.validationResult = {
+        gate1Passed: result.gate1Passed,
+        gate2Passed: result.gate2Passed,
+        gate2Reason: result.gate2Reason,
+        gate3Passed: result.gate3Passed,
+        gate3Score: result.gate3Score,
+        gate3Feedback: result.gate3Feedback,
+      };
+      if (result.passed) {
+        this.markTaskCompleted({ tree: current.tree, task, expectedBytes: current.bytes });
+      } else {
+        this.handleValidationFailure({
+          record: current,
+          task,
+          result,
+          expectedBytes: current.bytes,
+        });
+      }
+    });
+  }
 
-  private markTaskCompleted(tree: TaskTree, task: ExecutionTask): void {
-    this.updateTaskStatus(tree, task, 'completed');
+  private async applyValidationFailure(options: {
+    treeId: string;
+    taskId: string;
+    error: unknown;
+    generation: number;
+    attempt?: string;
+    controller: AbortController;
+    taskSnapshot: string;
+  }): Promise<void> {
+    const { treeId, taskId, error, ...guard } = options;
+    await runAfterProjectMutations(this.recordDeps.projectsDir, () => {
+      if (!this.validationStillCurrent({ treeId, taskId, ...guard })) return;
+      const current = this.loadRecord(treeId);
+      const task = current?.tree.tasks.get(taskId);
+      if (!current || !task || task.status !== 'validating') return;
+      this.handleValidationFailure({
+        record: current,
+        task,
+        result: {
+          passed: false,
+          gate1Passed: false,
+          gate2Reason: error instanceof Error ? error.message : String(error),
+        },
+        expectedBytes: current.bytes,
+      });
+    });
+  }
+
+  private handleValidationFailure(options: {
+    record: TaskTreeRecord;
+    task: ExecutionTask;
+    result: ValidationResult;
+    expectedBytes: string;
+  }): void {
+    const { record, task, result, expectedBytes } = options;
+    const error = result.gate2Reason ?? result.gate3Feedback ?? 'Validation failed';
+    if (this.retryValidation({ record, task, error, expectedBytes })) return;
+    if (this.validationFailureMode(task) !== 'skip') {
+      this.failTask({ tree: record.tree, task, error, expectedBytes });
+      return;
+    }
+    task.lastError = error;
+    task.status = 'skipped';
+    const treeStatus = this.persistTransition(record.tree, expectedBytes);
+    if (treeStatus)
+      this.emitEvent('execution:tree:completed', { treeId: record.tree.id, status: treeStatus });
+    this.processReadyTasks(record.tree);
+  }
+
+  private validationFailureMode(task: ExecutionTask): 'fail' | 'escalate' | 'skip' {
+    if (task.node.type !== 'agent') return 'escalate';
+    return task.node.validation?.onMaxRetriesFailed ?? 'escalate';
+  }
+
+  private retryValidation(options: {
+    record: TaskTreeRecord;
+    task: ExecutionTask;
+    error: string;
+    expectedBytes: string;
+  }): boolean {
+    const { record, task, error, expectedBytes } = options;
+    const maxRetries = task.node.type === 'agent' ? (task.node.validation?.maxRetries ?? 2) : 2;
+    if (task.retryCount >= maxRetries || this.lifetime.admissionStopped) return false;
+    task.retryCount += 1;
+    task.lastError = error;
+    task.status = 'todo';
+    task.agentTaskId = undefined;
+    this.touch(record.tree);
+    this.persist(record.tree, expectedBytes);
+    this.scheduleRetry(record.tree.id, task.id, this.retryBackoff(task));
+    return true;
+  }
+
+  private failTask(options: {
+    tree: TaskTree;
+    task: ExecutionTask;
+    error: string;
+    expectedBytes: string;
+  }): void {
+    const { tree, task, error, expectedBytes } = options;
+    task.status = 'failed';
+    task.lastError = error;
+    this.skipDependentsForFailure(tree, task.id, error);
+    if (this.validationFailureMode(task) === 'fail') this.cancelRemainingTasks(tree);
+    const treeStatus = this.persistTransition(tree, expectedBytes);
+    if (treeStatus) this.clearTreeWork(tree.id);
+    this.emitEvent('execution:task:failed', { treeId: tree.id, taskId: task.id, error });
+    if (treeStatus)
+      this.emitEvent('execution:tree:completed', { treeId: tree.id, status: treeStatus });
+  }
+
+  private cancelRemainingTasks(tree: TaskTree): void {
+    for (const task of tree.tasks.values()) {
+      if (isTerminal(task.status)) continue;
+      task.status = 'cancelled';
+      task.interrupted = undefined;
+      task.lastError = 'Execution stopped after a required task failed';
+    }
+    tree.interrupted = undefined;
+  }
+
+  private markTaskCompleted(options: {
+    tree: TaskTree;
+    task: ExecutionTask;
+    expectedBytes: string;
+    beforeEvents?: () => void;
+  }): void {
+    const { tree, task, expectedBytes, beforeEvents } = options;
+    task.status = 'completed';
     task.completedAt = new Date().toISOString();
-    this.saveTask(tree.id, task);
-
+    this.touch(tree);
+    const treeCompleted = this.terminalTreeStatus(tree);
+    if (treeCompleted) tree.status = treeCompleted;
+    this.persist(tree, expectedBytes);
+    beforeEvents?.();
     this.emitEvent('execution:task:completed', {
       treeId: tree.id,
       taskId: task.id,
       summary: task.summary,
       artifacts: task.artifacts,
     });
-
-    this.checkTreeCompletion(tree);
-    this.processReadyTasks(tree);
+    if (treeCompleted)
+      this.emitEvent('execution:tree:completed', { treeId: tree.id, status: treeCompleted });
+    if (!treeCompleted) this.processReadyTasks(tree);
   }
 
-  private updateTaskStatus(tree: TaskTree, task: ExecutionTask, status: ExecutionTaskStatus): void {
-    log.debug(`Task ${task.id} status: ${task.status} -> ${status}`);
-    task.status = status;
+  private persistTransition(tree: TaskTree, expectedBytes: string): TaskTreeStatus | undefined {
+    const status = this.terminalTreeStatus(tree);
+    if (status) {
+      tree.status = status;
+      tree.interrupted = undefined;
+    }
+    this.touch(tree);
+    this.persist(tree, expectedBytes);
+    return status;
   }
 
-  private updateTreeStatus(tree: TaskTree, status: TaskTreeStatus): void {
-    log.info(`Tree ${tree.id} status: ${tree.status} -> ${status}`);
-    tree.status = status;
-    tree.updatedAt = new Date().toISOString();
-    this.db.run(
-      `UPDATE task_trees SET status = ?, updated_at = ? WHERE id = ?`,
-      status,
-      tree.updatedAt,
-      tree.id,
-    );
-    this.trees.set(tree.id, tree);
+  private terminalTreeStatus(tree: TaskTree): TaskTreeStatus | undefined {
+    if (![...tree.tasks.values()].every((task) => isTerminal(task.status))) return undefined;
+    if ([...tree.tasks.values()].some((task) => task.status === 'failed')) return 'failed';
+    if ([...tree.tasks.values()].some((task) => task.status === 'cancelled')) return 'cancelled';
+    return 'completed';
+  }
 
-    if (status === 'completed' || status === 'failed' || status === 'cancelled') {
-      this.emitEvent('execution:tree:completed', {
-        treeId: tree.id,
-        status,
-      });
+  private skipDependentsForFailure(tree: TaskTree, taskId: string, error: string): void {
+    for (const task of tree.tasks.values()) {
+      if (isTerminal(task.status) || !task.node.blockedBy.includes(taskId)) continue;
+      task.status = 'skipped';
+      task.lastError = `Dependency failed: ${error}`;
+      this.skipDependentsForFailure(tree, task.id, error);
     }
   }
 
-  private checkTreeCompletion(tree: TaskTree): void {
-    const allTerminal = [...tree.tasks.values()].every((t) => isTerminal(t.status));
-    if (!allTerminal) return;
-
-    const anyFailed = [...tree.tasks.values()].some((t) => t.status === 'failed');
-    const newStatus: TaskTreeStatus = anyFailed ? 'failed' : 'completed';
-    this.updateTreeStatus(tree, newStatus);
+  private cancelDependents(tree: TaskTree, taskId: string): void {
+    for (const task of tree.tasks.values()) {
+      if (isTerminal(task.status) || !task.node.blockedBy.includes(taskId)) continue;
+      task.status = 'cancelled';
+      task.interrupted = undefined;
+      this.cancelDependents(tree, task.id);
+    }
   }
 
-  // ── Private: DB persistence ─────────────────────────────────────────
+  private clearTreeWork(treeId: string): void {
+    for (const [key, timer] of this.delayTimers) {
+      if (key.startsWith(`${treeId}:`)) {
+        clearTimeout(timer);
+        this.delayTimers.delete(key);
+      }
+    }
+    for (const [key, controller] of this.codeControllers) {
+      if (key.startsWith(`${treeId}:`)) controller.abort();
+    }
+    for (const [key, controller] of this.validationControllers) {
+      if (key.startsWith(`${treeId}:`)) controller.abort();
+    }
+  }
 
-  private insertExecutionTask(treeId: string, node: TaskTreeNode, now: string): void {
-    this.db.run(
-      `INSERT INTO execution_tasks
-       (id, parent_task_id, node_json, status, artifacts_json, retry_count, needs_replan, created_at, updated_at)
-       VALUES (?, ?, ?, 'todo', '[]', 0, 0, ?, ?)`,
-      node.id,
-      treeId,
-      JSON.stringify(node),
-      now,
-      now,
+  private isCurrentWork(options: {
+    generation: number;
+    treeId: string;
+    taskId: string;
+    status: ExecutionTaskStatus;
+    attempt?: string;
+    controller?: AbortController;
+    taskSnapshot?: string;
+  }): boolean {
+    const { generation, treeId, taskId, status, attempt, controller, taskSnapshot } = options;
+    if (!this.isLifetimeCurrent(generation) || !this.ownsController(treeId, taskId, controller))
+      return false;
+    const task = this.loadRecord(treeId)?.tree.tasks.get(taskId);
+    return this.matchesWork({ task, status, attempt, taskSnapshot });
+  }
+
+  private isLifetimeCurrent(generation: number): boolean {
+    return generation === this.lifetime.generation && !this.lifetime.stopped;
+  }
+
+  private ownsController(treeId: string, taskId: string, controller?: AbortController): boolean {
+    if (!controller) return true;
+    const owner =
+      this.codeControllers.get(`${treeId}:${taskId}`) ??
+      this.validationControllers.get(`${treeId}:${taskId}`);
+    return owner === controller;
+  }
+
+  private matchesWork(options: {
+    task: ExecutionTask | undefined;
+    status: ExecutionTaskStatus;
+    attempt?: string;
+    taskSnapshot?: string;
+  }): boolean {
+    const { task, status, attempt, taskSnapshot } = options;
+    return (
+      !!task &&
+      task.status === status &&
+      (attempt === undefined || task.agentTaskId === attempt) &&
+      (taskSnapshot === undefined || stableJson(task) === taskSnapshot)
     );
   }
 
-  private saveTask(treeId: string, task: ExecutionTask): void {
-    this.db.run(
-      `UPDATE execution_tasks SET
-       status = ?, agent_task_id = ?, artifacts_json = ?, summary = ?,
-       retry_count = ?, last_error = ?, needs_replan = ?,
-       validation_result_json = ?, started_at = ?, completed_at = ?, updated_at = ?
-       WHERE id = ? AND parent_task_id = ?`,
-      task.status,
-      task.agentTaskId ?? null,
-      JSON.stringify(task.artifacts),
-      task.summary ?? null,
-      task.retryCount,
-      task.lastError ?? null,
-      task.needsReplan ? 1 : 0,
-      task.validationResult ? JSON.stringify(task.validationResult) : null,
-      task.startedAt ?? null,
-      task.completedAt ?? null,
-      new Date().toISOString(),
-      task.id,
-      treeId,
-    );
+  private track(work: Promise<unknown>): void {
+    this.localWork.add(work);
+    void work.finally(() => this.localWork.delete(work)).catch(() => undefined);
   }
-
-  private loadTree(treeId: string): TaskTree | undefined {
-    // Check cache first
-    const cached = this.trees.get(treeId);
-    if (cached) return cached;
-
-    const treeRow = this.db.get<TaskTreeRow>(`SELECT * FROM task_trees WHERE id = ?`, treeId);
-    if (!treeRow) return undefined;
-
-    return this.loadTreeFromRow(treeRow);
-  }
-
-  private loadTreeFromRow(treeRow: TaskTreeRow): TaskTree {
-    const taskRows = this.db.all<ExecutionTaskRow>(
-      `SELECT * FROM execution_tasks WHERE parent_task_id = ?`,
-      treeRow.id,
-    );
-
-    const tree = rowToTaskTree(treeRow, taskRows);
-    this.trees.set(tree.id, tree);
-    return tree;
-  }
-
-  // ── Private: event emission ─────────────────────────────────────────
 
   private emitEvent(type: string, payload: Record<string, unknown>): void {
     this.eventBus.emit({

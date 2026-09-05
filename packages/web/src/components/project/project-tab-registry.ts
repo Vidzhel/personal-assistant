@@ -14,6 +14,7 @@ export interface ProjectTabProps {
   onProjectUpdated: (project: Project) => void;
   onNewSession: () => Promise<void>;
   requestedSessionId?: string;
+  sessionSwitchPending?: boolean;
 }
 
 export interface ProjectTabDef {

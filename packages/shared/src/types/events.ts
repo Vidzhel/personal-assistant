@@ -856,10 +856,9 @@ export interface ExecutionTaskProgressEvent extends BaseEvent {
   payload: {
     treeId?: string;
     taskId?: string;
+    agentTaskId?: string;
     progress?: number;
     statusText?: string;
-    artifactId?: string;
-    artifact?: { name: string; content: string; type: string };
   };
 }
 

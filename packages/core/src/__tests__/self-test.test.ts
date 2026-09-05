@@ -19,7 +19,7 @@ import {
   getSelfTestStatus,
   type SelfTestJobDeps,
 } from '../services/system/self-test.ts';
-import type { DatabaseInterface } from '@raven/shared';
+import type { DatabaseInterface, TaskTree } from '@raven/shared';
 import type { PendingApproval } from '../permission-engine/pending-approvals.ts';
 
 const MS_PER_HOUR = 3_600_000;
@@ -34,27 +34,26 @@ function makeDbInterface(db: Database.Database): DatabaseInterface {
   };
 }
 
-function insertTree(
-  db: Database.Database,
-  opts: {
-    id: string;
-    status: string;
-    updatedAt: string;
-    scheduleId?: string;
-    plan?: string;
-  },
-): void {
-  db.prepare(
-    `INSERT INTO task_trees (id, project_id, schedule_id, status, plan, created_at, updated_at)
-     VALUES (?, NULL, ?, ?, ?, ?, ?)`,
-  ).run(
-    opts.id,
-    opts.scheduleId ?? null,
-    opts.status,
-    opts.plan ?? null,
-    opts.updatedAt,
-    opts.updatedAt,
-  );
+function makeTree(opts: {
+  id: string;
+  status: TaskTree['status'];
+  updatedAt: string;
+  scheduleId?: string;
+  plan?: string;
+}): TaskTree {
+  return {
+    id: opts.id,
+    status: opts.status,
+    tasks: new Map(),
+    scheduleId: opts.scheduleId,
+    plan: opts.plan,
+    createdAt: opts.updatedAt,
+    updatedAt: opts.updatedAt,
+  };
+}
+
+function treeEngine(trees: TaskTree[]) {
+  return { queryTrees: () => trees };
 }
 
 describe('self-test invariants (pure functions)', () => {
@@ -74,51 +73,59 @@ describe('self-test invariants (pure functions)', () => {
   describe('checkStuckTrees', () => {
     it('flags a tree stuck running for over 24h', () => {
       const now = Date.now();
-      insertTree(db, {
-        id: 'stuck-1',
-        status: 'running',
-        updatedAt: new Date(now - 25 * MS_PER_HOUR).toISOString(),
-      });
+      const trees = Array.from({ length: 60 }, (_, index) =>
+        makeTree({
+          id: index === 0 ? 'stuck-1' : `fresh-${String(index)}`,
+          status: 'running',
+          updatedAt: new Date(now - (index === 0 ? 25 : 1) * MS_PER_HOUR).toISOString(),
+        }),
+      );
 
-      const violations = checkStuckTrees(db, now);
+      const violations = checkStuckTrees(treeEngine(trees), now);
       expect(violations).toHaveLength(1);
       expect(violations[0]).toContain('stuck-1');
     });
 
     it('does not flag a recently-updated running tree', () => {
       const now = Date.now();
-      insertTree(db, {
-        id: 'fresh-1',
-        status: 'running',
-        updatedAt: new Date(now - MS_PER_HOUR).toISOString(),
-      });
+      const trees = [
+        makeTree({
+          id: 'fresh-1',
+          status: 'running',
+          updatedAt: new Date(now - MS_PER_HOUR).toISOString(),
+        }),
+      ];
 
-      expect(checkStuckTrees(db, now)).toEqual([]);
+      expect(checkStuckTrees(treeEngine(trees), now)).toEqual([]);
     });
 
     it('does not flag a completed tree regardless of age', () => {
       const now = Date.now();
-      insertTree(db, {
-        id: 'done-1',
-        status: 'completed',
-        updatedAt: new Date(now - 48 * MS_PER_HOUR).toISOString(),
-      });
+      const trees = [
+        makeTree({
+          id: 'done-1',
+          status: 'completed',
+          updatedAt: new Date(now - 48 * MS_PER_HOUR).toISOString(),
+        }),
+      ];
 
-      expect(checkStuckTrees(db, now)).toEqual([]);
+      expect(checkStuckTrees(treeEngine(trees), now)).toEqual([]);
     });
   });
 
   describe('checkFailedTrees', () => {
     it('flags a tree that failed within the last 24h, naming it', () => {
       const now = Date.now();
-      insertTree(db, {
-        id: 'failed-1',
-        status: 'failed',
-        updatedAt: new Date(now - MS_PER_HOUR).toISOString(),
-        plan: 'Run system maintenance',
-      });
+      const trees = [
+        makeTree({
+          id: 'failed-1',
+          status: 'failed',
+          updatedAt: new Date(now - MS_PER_HOUR).toISOString(),
+          plan: 'Run system maintenance',
+        }),
+      ];
 
-      const violations = checkFailedTrees(db, now);
+      const violations = checkFailedTrees(treeEngine(trees), now);
       expect(violations).toHaveLength(1);
       expect(violations[0]).toContain('Run system maintenance');
       expect(violations[0]).toContain('failed-1');
@@ -126,29 +133,33 @@ describe('self-test invariants (pure functions)', () => {
 
     it('ignores a failed tree older than 24h', () => {
       const now = Date.now();
-      insertTree(db, {
-        id: 'failed-old',
-        status: 'failed',
-        updatedAt: new Date(now - 25 * MS_PER_HOUR).toISOString(),
-      });
+      const trees = [
+        makeTree({
+          id: 'failed-old',
+          status: 'failed',
+          updatedAt: new Date(now - 25 * MS_PER_HOUR).toISOString(),
+        }),
+      ];
 
-      expect(checkFailedTrees(db, now)).toEqual([]);
+      expect(checkFailedTrees(treeEngine(trees), now)).toEqual([]);
     });
 
     it('ignores a running or completed tree', () => {
       const now = Date.now();
-      insertTree(db, {
-        id: 'running-1',
-        status: 'running',
-        updatedAt: new Date(now).toISOString(),
-      });
-      insertTree(db, {
-        id: 'completed-1',
-        status: 'completed',
-        updatedAt: new Date(now).toISOString(),
-      });
+      const trees = [
+        makeTree({
+          id: 'running-1',
+          status: 'running',
+          updatedAt: new Date(now).toISOString(),
+        }),
+        makeTree({
+          id: 'completed-1',
+          status: 'completed',
+          updatedAt: new Date(now).toISOString(),
+        }),
+      ];
 
-      expect(checkFailedTrees(db, now)).toEqual([]);
+      expect(checkFailedTrees(treeEngine(trees), now)).toEqual([]);
     });
   });
 
@@ -264,77 +275,88 @@ describe('self-test invariants (pure functions)', () => {
 
     it('flags the most recent canary tree if it is not completed and past the grace period', () => {
       const now = Date.now();
-      insertTree(db, {
-        id: 'canary-1',
-        status: 'running',
-        updatedAt: new Date(now - 2 * MS_PER_HOUR).toISOString(),
-        scheduleId: 'weekly-canary',
-      });
+      const trees = [
+        makeTree({
+          id: 'canary-1',
+          status: 'running',
+          updatedAt: new Date(now - 2 * MS_PER_HOUR).toISOString(),
+          scheduleId: 'weekly-canary',
+        }),
+      ];
 
-      expect(checkCanary(db, now, true)).toHaveLength(1);
+      expect(checkCanary(treeEngine(trees), now, true)).toHaveLength(1);
     });
 
     it('does not flag a completed canary tree', () => {
       const now = Date.now();
-      insertTree(db, {
-        id: 'canary-2',
-        status: 'completed',
-        updatedAt: new Date(now - 2 * MS_PER_HOUR).toISOString(),
-        scheduleId: 'weekly-canary',
-      });
+      const trees = [
+        makeTree({
+          id: 'canary-2',
+          status: 'completed',
+          updatedAt: new Date(now - 2 * MS_PER_HOUR).toISOString(),
+          scheduleId: 'weekly-canary',
+        }),
+      ];
 
-      expect(checkCanary(db, now, true)).toEqual([]);
+      expect(checkCanary(treeEngine(trees), now, true)).toEqual([]);
     });
 
     it('gives a freshly-fired canary tree grace before judging it', () => {
       const now = Date.now();
-      insertTree(db, {
-        id: 'canary-3',
-        status: 'running',
-        updatedAt: new Date(now).toISOString(),
-        scheduleId: 'weekly-canary',
-      });
+      const trees = [
+        makeTree({
+          id: 'canary-3',
+          status: 'running',
+          updatedAt: new Date(now).toISOString(),
+          scheduleId: 'weekly-canary',
+        }),
+      ];
 
-      expect(checkCanary(db, now, true)).toEqual([]);
+      expect(checkCanary(treeEngine(trees), now, true)).toEqual([]);
     });
 
     it('flags absence when the canary schedule is enabled', () => {
-      expect(checkCanary(db, Date.now(), true)).toHaveLength(1);
-      expect(checkCanary(db, Date.now(), true)[0]).toContain('never fired');
+      const engine = treeEngine([]);
+      expect(checkCanary(engine, Date.now(), true)).toHaveLength(1);
+      expect(checkCanary(engine, Date.now(), true)[0]).toContain('never fired');
     });
 
     it('does not flag absence when the canary schedule is disabled', () => {
-      expect(checkCanary(db, Date.now(), false)).toEqual([]);
+      expect(checkCanary(treeEngine([]), Date.now(), false)).toEqual([]);
     });
 
     it('flags a canary tree older than 8 days while the schedule is enabled', () => {
       const now = Date.now();
-      insertTree(db, {
-        id: 'canary-stale',
-        status: 'completed',
-        updatedAt: new Date(
-          now - (CANARY_STALE_DAYS + 1) * HOURS_PER_DAY * MS_PER_HOUR,
-        ).toISOString(),
-        scheduleId: 'weekly-canary',
-      });
+      const trees = [
+        makeTree({
+          id: 'canary-stale',
+          status: 'completed',
+          updatedAt: new Date(
+            now - (CANARY_STALE_DAYS + 1) * HOURS_PER_DAY * MS_PER_HOUR,
+          ).toISOString(),
+          scheduleId: 'weekly-canary',
+        }),
+      ];
 
-      const violations = checkCanary(db, now, true);
+      const violations = checkCanary(treeEngine(trees), now, true);
       expect(violations).toHaveLength(1);
       expect(violations[0]).toContain('canary-stale');
     });
 
     it('does not flag a stale canary tree when the schedule is disabled', () => {
       const now = Date.now();
-      insertTree(db, {
-        id: 'canary-stale-disabled',
-        status: 'completed',
-        updatedAt: new Date(
-          now - (CANARY_STALE_DAYS + 1) * HOURS_PER_DAY * MS_PER_HOUR,
-        ).toISOString(),
-        scheduleId: 'weekly-canary',
-      });
+      const trees = [
+        makeTree({
+          id: 'canary-stale-disabled',
+          status: 'completed',
+          updatedAt: new Date(
+            now - (CANARY_STALE_DAYS + 1) * HOURS_PER_DAY * MS_PER_HOUR,
+          ).toISOString(),
+          scheduleId: 'weekly-canary',
+        }),
+      ];
 
-      expect(checkCanary(db, now, false)).toEqual([]);
+      expect(checkCanary(treeEngine(trees), now, false)).toEqual([]);
     });
   });
 });
@@ -343,11 +365,13 @@ describe('runSelfTestJob + getSelfTestStatus', () => {
   let dir: string;
   let db: Database.Database;
   let dbInterface: DatabaseInterface;
+  let trees: TaskTree[];
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'raven-self-test-job-'));
     db = initDatabase(join(dir, 'test.db'));
     dbInterface = makeDbInterface(db);
+    trees = [];
   });
 
   afterEach(() => {
@@ -358,6 +382,7 @@ describe('runSelfTestJob + getSelfTestStatus', () => {
   function makeDeps(overrides: Partial<SelfTestJobDeps> = {}): SelfTestJobDeps {
     return {
       db,
+      executionEngine: treeEngine(trees),
       executionLogger: {
         getTaskStats: vi.fn().mockReturnValue({
           total1h: 0,
@@ -393,11 +418,13 @@ describe('runSelfTestJob + getSelfTestStatus', () => {
 
   it('persists a violation and emits one batched notification for a stuck tree', async () => {
     const now = Date.now();
-    insertTree(db, {
-      id: 'stuck-job-1',
-      status: 'running',
-      updatedAt: new Date(now - 25 * MS_PER_HOUR).toISOString(),
-    });
+    trees.push(
+      makeTree({
+        id: 'stuck-job-1',
+        status: 'running',
+        updatedAt: new Date(now - 25 * MS_PER_HOUR).toISOString(),
+      }),
+    );
 
     const deps = makeDeps();
     const result = await runSelfTestJob(deps);
@@ -416,11 +443,13 @@ describe('runSelfTestJob + getSelfTestStatus', () => {
 
   it('does not re-notify a standing violation on a second run, and dedupes new from standing', async () => {
     const now = Date.now();
-    insertTree(db, {
-      id: 'standing-tree',
-      status: 'running',
-      updatedAt: new Date(now - 25 * MS_PER_HOUR).toISOString(),
-    });
+    trees.push(
+      makeTree({
+        id: 'standing-tree',
+        status: 'running',
+        updatedAt: new Date(now - 25 * MS_PER_HOUR).toISOString(),
+      }),
+    );
 
     const deps = makeDeps();
     await runSelfTestJob(deps);
@@ -433,11 +462,13 @@ describe('runSelfTestJob + getSelfTestStatus', () => {
 
     // Third run: a genuinely new violation joins the still-standing one —
     // notify, but only call out the new one plus a "still failing" count.
-    insertTree(db, {
-      id: 'new-tree',
-      status: 'running',
-      updatedAt: new Date(now - 26 * MS_PER_HOUR).toISOString(),
-    });
+    trees.push(
+      makeTree({
+        id: 'new-tree',
+        status: 'running',
+        updatedAt: new Date(now - 26 * MS_PER_HOUR).toISOString(),
+      }),
+    );
     await runSelfTestJob(deps);
     expect(deps.eventBus.emit).toHaveBeenCalledTimes(1);
     const emitted = (deps.eventBus.emit as ReturnType<typeof vi.fn>).mock.calls[0][0];

@@ -22,6 +22,7 @@ const MoveIntentSchema = z
   .object({
     sourcePath: z.string().min(1),
     destinationPath: z.string().min(1),
+    collection: z.string().min(1).optional(),
     sourceHash: z.string().regex(/^[0-9a-f]{64}$/),
     destinationHash: z.string().regex(/^[0-9a-f]{64}$/),
     destinationBytes: z.string(),
@@ -251,6 +252,7 @@ function assertMoveState(
 
 function recoverIntent(deps: ProjectRecordDeps, intentPath: string, collection: string): void {
   const intent = readMoveIntent(intentPath);
+  if ((intent.collection ?? 'tasks/board') !== collection) return;
   const state = assertMoveState(deps, intent, collection);
   if (!state.sourceExists && !state.destinationExists) {
     throw new Error('Cannot recover record move; both files are missing');
@@ -318,6 +320,7 @@ export function moveProjectRecord(options: {
     JSON.stringify({
       sourcePath,
       destinationPath,
+      collection,
       sourceHash: sha256(readFileSync(sourcePath, 'utf8')),
       destinationHash: sha256(destinationBytes),
       destinationBytes,

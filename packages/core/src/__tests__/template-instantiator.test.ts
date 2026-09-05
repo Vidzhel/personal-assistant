@@ -4,7 +4,7 @@ import {
   instantiateTemplate,
   interpolateString,
 } from '../template-engine/template-instantiator.ts';
-import type { TaskTemplate } from '@raven/shared';
+import { TaskTemplateSchema, TaskTreeNodeSchema, type TaskTemplate } from '@raven/shared';
 
 function makeTemplate(overrides: Record<string, unknown> = {}): TaskTemplate {
   return {
@@ -415,4 +415,13 @@ describe('full instantiation', () => {
     expect(nodes[1].validation).toBeDefined();
     expect(nodes[1].validation!.evaluator).toBe(true);
   });
+});
+
+it('removes template loop metadata from ordinary execution nodes', () => {
+  const template = TaskTemplateSchema.parse(makeTemplate());
+  const { nodes, errors } = instantiateTemplate(template, {});
+  expect(errors).toEqual([]);
+  expect(nodes[0]).not.toHaveProperty('forEachAs');
+  expect(nodes[0]).not.toHaveProperty('forEach');
+  expect(TaskTreeNodeSchema.parse(nodes[0])).toEqual(nodes[0]);
 });

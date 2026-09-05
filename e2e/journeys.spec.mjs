@@ -326,7 +326,44 @@ test('New Chat selects the newly created conversation', async ({ page, request }
   const p = await project(request, 'Browser New Chat');
   const original = await session(request, p.id, 'Original conversation');
   await chat(page, p.id);
-  await page.getByRole('button', { name: 'New Chat', exact: true }).click();
+  const originalDraft = 'Original draft survives creating a conversation';
+  const input = page.getByPlaceholder('Ask Raven...');
+  await input.fill(originalDraft);
+  let releaseCreate;
+  const createGate = new Promise((resolve) => {
+    releaseCreate = resolve;
+  });
+  let createStarted = false;
+  await page.route(`${API}/projects/${encodeURIComponent(p.id)}/sessions/new`, async (route) => {
+    createStarted = true;
+    await createGate;
+    await route.continue();
+  });
+  let sessionListStarted = false;
+  let failSessionList = true;
+  await page.route(`${API}/projects/${encodeURIComponent(p.id)}/sessions`, async (route) => {
+    if (route.request().method() === 'GET' && !sessionListStarted) {
+      sessionListStarted = true;
+      if (failSessionList) {
+        failSessionList = false;
+        await route.fulfill({ status: 503, body: 'temporary session list failure' });
+        return;
+      }
+    }
+    await route.continue();
+  });
+  const newChatClick = page.getByRole('button', { name: 'New Chat', exact: true }).click();
+  await expect.poll(() => createStarted).toBe(true);
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+  releaseCreate();
+  await newChatClick;
+  await expect.poll(() => sessionListStarted).toBe(true);
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+  await expect(
+    page.getByRole('button', { name: 'Retry loading sessions', exact: true }),
+  ).toBeVisible();
+  await page.getByRole('button', { name: 'Retry loading sessions', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
   const next = (await state(request)).calls.length + 1;
   await send(page, 'Only in the new conversation');
   await expect(page.getByText(`Browser reply ${next}`, { exact: true })).toBeVisible();
@@ -336,6 +373,31 @@ test('New Chat selects the newly created conversation', async ({ page, request }
   const created = sessions.find((item) => item.id !== original.id);
   const messages = await (await request.get(`${API}/sessions/${created.id}/messages`)).json();
   expect(messages.some((message) => message.content === 'Only in the new conversation')).toBe(true);
+  await page.getByRole('button', { name: /Original conversation/ }).click();
+  await expect(input).toHaveValue(originalDraft);
+});
+
+test('failed New Chat creation keeps the original draft editable', async ({ page, request }) => {
+  const p = await project(request, 'Browser Failed New Chat');
+  await session(request, p.id, 'Original conversation');
+  await chat(page, p.id);
+  const input = page.getByPlaceholder('Ask Raven...');
+  await input.fill('Keep this draft after create failure');
+  await page.route(`${API}/projects/${encodeURIComponent(p.id)}/sessions/new`, async (route) => {
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ message: 'temporary create failure' }),
+    });
+  });
+  await page.getByRole('button', { name: 'New Chat', exact: true }).click();
+  await expect(
+    page.getByRole('alert').filter({ hasText: 'temporary create failure' }),
+  ).toBeVisible();
+  await expect(input).toHaveValue('Keep this draft after create failure');
+  await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
+  await input.fill('Edited draft remains available');
+  await expect(input).toHaveValue('Edited draft remains available');
 });
 
 test('disconnected sends retain the draft and reconnect can deliver it once', async ({
@@ -432,4 +494,49 @@ test('knowledge chat shows a real completion instead of an enqueue acknowledgeme
   await page.getByRole('button', { name: 'Chat', exact: true }).click();
   await expect(page.getByText(`Browser reply ${next}`, { exact: true })).toBeVisible();
   expect(errors).toEqual([]);
+});
+
+test('interrupted execution can be reviewed and deliberately resumed from mobile', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const id = 'browser-interrupted-tree';
+  const before = await (await request.get(`${API}/task-trees/${id}`)).json();
+  expect(before.status).toBe('pending_approval');
+  expect(
+    (await state(request)).calls.filter((call) => call.prompt.includes('resume-browser-tree')),
+  ).toHaveLength(0);
+  await page.goto('/tasks');
+  const planCard = page
+    .getByRole('region', { name: 'To Do', exact: true })
+    .getByRole('button')
+    .filter({ hasText: 'Resume reviewed browser work' });
+  await expect(planCard).toBeVisible();
+  const planBounds = await planCard.boundingBox();
+  expect(planBounds).toBeTruthy();
+  expect(planBounds.x).toBeGreaterThanOrEqual(0);
+  expect(planBounds.x + planBounds.width).toBeLessThanOrEqual(390);
+  await planCard.getByText('Resume reviewed browser work', { exact: true }).click();
+  await expect(page.getByText('Earlier research is retained.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Research result', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Resume', exact: true }).click();
+  await expect
+    .poll(async () => (await (await request.get(`${API}/task-trees/${id}`)).json()).status)
+    .toBe('completed');
+  await page.reload();
+  const completedPlanCard = page
+    .getByRole('region', { name: 'Done', exact: true })
+    .getByRole('button')
+    .filter({ hasText: 'Resume reviewed browser work' });
+  await expect(completedPlanCard).toBeVisible();
+  const completedBounds = await completedPlanCard.boundingBox();
+  expect(completedBounds).toBeTruthy();
+  expect(completedBounds.x).toBeGreaterThanOrEqual(0);
+  expect(completedBounds.x + completedBounds.width).toBeLessThanOrEqual(390);
+  await completedPlanCard.getByText('Resume reviewed browser work', { exact: true }).click();
+  await expect(page.getByText('Earlier research is retained.', { exact: true })).toBeVisible();
+  expect(
+    (await state(request)).calls.filter((call) => call.prompt.includes('resume-browser-tree')),
+  ).toHaveLength(1);
 });

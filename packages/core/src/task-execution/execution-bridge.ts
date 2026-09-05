@@ -4,6 +4,7 @@ import type {
   AgentTaskCompleteEvent,
   ExecutionTaskRunAgentEvent,
   ExecutionTreeCancelledEvent,
+  ExecutionTreeCompletedEvent,
   NamedAgent,
 } from '@raven/shared';
 import type { EventBus } from '../event-bus/event-bus.ts';
@@ -45,7 +46,7 @@ interface PendingEntry {
 function resolveAgent(deps: ExecutionBridgeDeps, agentName?: string): NamedAgent {
   const named = agentName ? deps.namedAgentStore.getAgentByName(agentName) : undefined;
   if (agentName && !named) {
-    log.warn(`Template names unknown agent '${agentName}', using default agent`);
+    throw new Error(`Template names unknown agent '${agentName}'`);
   }
   return named ?? deps.namedAgentStore.getDefaultAgent();
 }
@@ -105,34 +106,37 @@ function handleTaskSuccess(
     .onTaskCompleted({
       treeId: entry.treeId,
       taskId: entry.taskId,
+      agentTaskId: entry.agentTaskId,
       summary: payload.result,
       artifacts: [],
     })
     .catch((err: unknown) => log.error(`onTaskCompleted failed for ${entry.taskId}: ${err}`));
 }
 
-function handleTaskFailure(
+async function handleTaskFailure(
   deps: ExecutionBridgeDeps,
   entry: PendingEntry,
   payload: CompletePayload,
-): void {
+): Promise<void> {
   const reason = payload.errors?.join('; ');
   if (payload.cancelled) {
     // Cancellation is terminal and must never enter the retry ladder — check
     // this before blocked/failed so a cancelled task can't be misread as a
     // retryable failure or an approval-pending block.
-    deps.executionEngine.onTaskCancelled(entry.treeId, entry.taskId);
+    await deps.executionEngine.onTaskCancelled(entry.treeId, entry.taskId, entry.agentTaskId);
     return;
   }
   if (payload.blocked) {
-    deps.executionEngine.onTaskBlocked(
-      entry.treeId,
-      entry.taskId,
-      reason ?? 'agent task blocked pending approval',
-    );
+    await deps.executionEngine.onTaskBlocked(entry.treeId, entry.taskId, {
+      reason: reason ?? 'agent task blocked pending approval',
+      agentTaskId: entry.agentTaskId,
+    });
     return;
   }
-  deps.executionEngine.onTaskFailed(entry.treeId, entry.taskId, reason ?? 'agent task failed');
+  await deps.executionEngine.onTaskFailed(entry.treeId, entry.taskId, {
+    reason: reason ?? 'agent task failed',
+    agentTaskId: entry.agentTaskId,
+  });
 }
 
 /**
@@ -158,11 +162,69 @@ function advanceTree(
     return;
   }
 
-  if (payload.success) {
+  if (payload.success && !payload.cancelled && !payload.blocked) {
     handleTaskSuccess(deps, entry, payload);
   } else {
-    handleTaskFailure(deps, entry, payload);
+    void handleTaskFailure(deps, entry, payload).catch((error: unknown) =>
+      log.error(`Task failure transition failed for ${entry.taskId}: ${String(error)}`),
+    );
   }
+}
+
+function cancelPending(
+  deps: ExecutionBridgeDeps,
+  pending: Map<string, PendingEntry>,
+  treeId?: string,
+): void {
+  for (const [id, entry] of pending) {
+    if (treeId !== undefined && entry.treeId !== treeId) continue;
+    pending.delete(id);
+    deps.cancelAgentTask?.(id);
+  }
+}
+
+interface BridgeState {
+  pending: Map<string, PendingEntry>;
+  started: boolean;
+  generation: number;
+}
+
+function isBoundAttempt(deps: ExecutionBridgeDeps, entry: PendingEntry): boolean {
+  const tree = deps.executionEngine.getTree(entry.treeId);
+  const task = tree?.tasks.get(entry.taskId);
+  return (
+    tree?.status === 'running' &&
+    task?.status === 'in_progress' &&
+    task.agentTaskId === entry.agentTaskId
+  );
+}
+
+async function dispatchAgent(
+  deps: ExecutionBridgeDeps,
+  payload: RunAgentPayload,
+  state: BridgeState,
+): Promise<void> {
+  const generation = state.generation;
+  const agentTaskId = generateId();
+  let request: AgentTaskRequestEvent;
+  try {
+    request = buildAgentTaskRequest(deps, payload, agentTaskId);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    await deps.executionEngine.onTaskFailed(
+      payload.treeId,
+      payload.taskId,
+      `Agent resolution failed: ${reason}`,
+    );
+    return;
+  }
+  if (!(await deps.executionEngine.setAgentTaskId(payload.treeId, payload.taskId, agentTaskId)))
+    return;
+  if (!state.started || state.generation !== generation) return;
+  const entry = { treeId: payload.treeId, taskId: payload.taskId, agentTaskId };
+  if (!isBoundAttempt(deps, entry)) return;
+  state.pending.set(agentTaskId, entry);
+  deps.eventBus.emit(request);
 }
 
 /**
@@ -178,65 +240,47 @@ function advanceTree(
  * raven MCP.
  */
 export function createExecutionBridge(deps: ExecutionBridgeDeps): ExecutionBridge {
-  // agent-task id -> tree coordinates; in-memory is acceptable: an orphaned
-  // entry only means the tree waits for the next manual retry
-  const pending = new Map<string, PendingEntry>();
-
+  const state: BridgeState = { pending: new Map(), started: false, generation: 0 };
   const onRunAgent = (event: ExecutionTaskRunAgentEvent): void => {
-    const payload = event.payload;
-    const agentTaskId = generateId();
-
-    let request: AgentTaskRequestEvent;
-    try {
-      request = buildAgentTaskRequest(deps, payload, agentTaskId);
-    } catch (err) {
-      // e.g. resolveAgent's getDefaultAgent() throws 'No default agent
-      // configured' — never emit a request or register a pending entry for
-      // a task we couldn't actually dispatch; route straight into the
-      // failure/retry ladder instead.
-      const reason = err instanceof Error ? err.message : String(err);
-      log.error(`Agent resolution failed for task ${payload.taskId}: ${reason}`);
-      deps.executionEngine.onTaskFailed(
-        payload.treeId,
-        payload.taskId,
-        `Agent resolution failed: ${reason}`,
-      );
-      return;
-    }
-
-    pending.set(agentTaskId, { treeId: payload.treeId, taskId: payload.taskId, agentTaskId });
-    deps.executionEngine.setAgentTaskId(payload.treeId, payload.taskId, agentTaskId);
-    deps.eventBus.emit(request);
+    void dispatchAgent(deps, event.payload, state).catch((error: unknown) =>
+      log.error(`Agent dispatch failed for ${event.payload.taskId}: ${String(error)}`),
+    );
   };
 
   const onComplete = (event: AgentTaskCompleteEvent): void => {
-    const entry = pending.get(event.payload.taskId);
+    const entry = state.pending.get(event.payload.taskId);
     if (!entry) return;
-    pending.delete(event.payload.taskId);
+    state.pending.delete(event.payload.taskId);
     advanceTree(deps, entry, event.payload);
   };
 
   const onTreeCancelled = (event: ExecutionTreeCancelledEvent): void => {
-    // Always drop this tree's pending entries — even when cancelAgentTask
-    // isn't wired (e.g. some test doubles), a cancelled tree's tasks must
-    // stop being tracked so a later completion for them can't advance it.
-    for (const [agentTaskId, entry] of pending) {
-      if (entry.treeId !== event.payload.treeId) continue;
-      deps.cancelAgentTask?.(agentTaskId);
-      pending.delete(agentTaskId);
-    }
+    cancelPending(deps, state.pending, event.payload.treeId);
+  };
+
+  const onTreeCompleted = (event: ExecutionTreeCompletedEvent): void => {
+    if (event.payload.status === 'failed') cancelPending(deps, state.pending, event.payload.treeId);
   };
 
   return {
     start(): void {
+      if (state.started) return;
+      state.started = true;
+      state.generation += 1;
       deps.eventBus.on<ExecutionTaskRunAgentEvent>('execution:task:run-agent', onRunAgent);
       deps.eventBus.on<AgentTaskCompleteEvent>('agent:task:complete', onComplete);
       deps.eventBus.on<ExecutionTreeCancelledEvent>('execution:tree:cancelled', onTreeCancelled);
+      deps.eventBus.on<ExecutionTreeCompletedEvent>('execution:tree:completed', onTreeCompleted);
     },
     stop(): void {
+      if (!state.started) return;
+      state.started = false;
+      state.generation += 1;
       deps.eventBus.off<ExecutionTaskRunAgentEvent>('execution:task:run-agent', onRunAgent);
       deps.eventBus.off<AgentTaskCompleteEvent>('agent:task:complete', onComplete);
       deps.eventBus.off<ExecutionTreeCancelledEvent>('execution:tree:cancelled', onTreeCancelled);
+      deps.eventBus.off<ExecutionTreeCompletedEvent>('execution:tree:completed', onTreeCompleted);
+      cancelPending(deps, state.pending);
     },
   };
 }

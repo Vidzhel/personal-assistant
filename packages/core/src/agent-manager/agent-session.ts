@@ -317,6 +317,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       sessionId: task.sessionId,
       treeId: task.treeId,
       taskId: task.executionTaskId,
+      agentTaskId: task.id,
     };
 
     // Add Raven MCP (in-process, scoped to this task)
