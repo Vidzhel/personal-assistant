@@ -62,7 +62,7 @@ import { createNeo4jClient } from './knowledge-engine/neo4j-client.ts';
 import type { Neo4jClient } from './knowledge-engine/neo4j-client.ts';
 import { syncProjectNodes } from './knowledge-engine/project-knowledge.ts';
 import { getMetaProject } from './project-manager/meta-project.ts';
-import { runProjectSync } from './project-manager/project-sync.ts';
+import { runProjectSync, syncProjectCache } from './project-manager/project-sync.ts';
 import { createIdleDetector } from './session-manager/idle-detector.ts';
 import { createSessionRetrospective } from './session-manager/session-retrospective.ts';
 import { createKnowledgeConsolidation } from './knowledge-engine/knowledge-consolidation.ts';
@@ -242,6 +242,9 @@ export async function createRaven(
   const scaffoldingApi = createScaffoldingApi({
     projectsDir,
     projectRegistry,
+    syncProjects: () => {
+      syncProjectCache({ db: getDb(), projectRegistry });
+    },
     agentYamlStore,
     capabilityLibrary,
     libraryDir,
@@ -727,6 +730,9 @@ export async function createRaven(
   // since AgentManager (which holds ravenMcpDeps) was already constructed
   // above per the INVARIANT comment on ravenMcpDeps's first assignment.
   const scaffoldAndActivateDeps = {
+    syncProjects: () => {
+      syncProjectCache({ db: getDb(), projectRegistry });
+    },
     scaffoldingApi,
     projectRegistry,
     templateRegistry,

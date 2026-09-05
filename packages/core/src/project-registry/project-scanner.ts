@@ -5,7 +5,14 @@ import yaml from 'js-yaml';
 const { load: yamlLoad } = yaml;
 
 import { createLogger, AgentYamlSchema, ScheduleYamlSchema } from '@raven/shared';
-import type { AgentYaml, ScheduleYaml, ProjectNode, ProjectIndex } from '@raven/shared';
+import type {
+  AgentYaml,
+  ScheduleYaml,
+  ProjectNode,
+  ProjectIndex,
+  ProjectMetadata,
+} from '@raven/shared';
+import { readProjectDefinition } from './project-definition.ts';
 
 const log = createLogger('project-scanner');
 
@@ -18,8 +25,9 @@ function shouldSkipDir(name: string): boolean {
 async function readTextFile(path: string): Promise<string | null> {
   try {
     return await readFile(path, 'utf-8');
-  } catch {
-    return null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
   }
 }
 
@@ -89,6 +97,7 @@ interface ScanContext {
 }
 
 function deriveProjectName(rel: string): string {
+  if (rel === '_global') throw new Error('The _global project path is reserved');
   const parts = rel.split('/');
   return parts[parts.length - 1] ?? '_global';
 }
@@ -97,8 +106,9 @@ async function scanSubdirectories(dirPath: string, id: string, ctx: ScanContext)
   let entries;
   try {
     entries = await readdir(dirPath, { withFileTypes: true });
-  } catch {
-    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
   }
 
   for (const entry of entries) {
@@ -106,6 +116,17 @@ async function scanSubdirectories(dirPath: string, id: string, ctx: ScanContext)
       await scanDir(join(dirPath, entry.name), id, ctx);
     }
   }
+}
+
+function metadataFields(
+  metadata?: ProjectMetadata,
+): Pick<ProjectNode, 'metadata' | 'displayName' | 'description' | 'systemAccess'> {
+  return {
+    metadata,
+    displayName: metadata?.displayName,
+    description: metadata?.description,
+    systemAccess: metadata?.systemAccess ?? 'none',
+  };
 }
 
 async function scanDir(dirPath: string, parentId: string | null, ctx: ScanContext): Promise<void> {
@@ -120,6 +141,8 @@ async function scanDir(dirPath: string, parentId: string | null, ctx: ScanContex
     return;
   }
 
+  const definition = readProjectDefinition(contextMd ?? '');
+
   const agents = await loadAgentYamls(join(dirPath, 'agents'));
   const schedules = await loadScheduleYamls(join(dirPath, 'schedules'));
   const isMeta = parentId === '_global' && name === 'system';
@@ -127,12 +150,12 @@ async function scanDir(dirPath: string, parentId: string | null, ctx: ScanContex
   const node: ProjectNode = {
     id,
     name,
+    ...metadataFields(definition.metadata),
     path: dirPath,
     relativePath: rel || '.',
     parentId,
-    systemAccess: 'none',
     isMeta,
-    contextMd: contextMd ?? '',
+    contextMd: definition.body,
     agents,
     schedules,
     children: [],

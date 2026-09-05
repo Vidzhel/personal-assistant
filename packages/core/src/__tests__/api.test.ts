@@ -22,6 +22,11 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { RavenEvent } from '@raven/shared';
+import { createRavenTestFixture } from './fixtures/raven-fixture.ts';
+import { ProjectRegistry } from '../project-registry/project-registry.ts';
+import { createScaffoldingApi } from '../scaffolding/scaffolding-api.ts';
+import { createAgentYamlStore } from '../project-registry/agent-yaml-store.ts';
+import { runProjectSync, syncProjectCache } from '../project-manager/project-sync.ts';
 
 // Minimal mock for AgentManager
 function makeMockAgentManager() {
@@ -77,8 +82,21 @@ describe('API routes', () => {
       configuredServiceCount: 0,
     } as any;
 
+    const { projectsDir } = createRavenTestFixture(tmpDir);
+    const projectRegistry = new ProjectRegistry();
+    await projectRegistry.load(projectsDir);
+    const scaffoldingApi = createScaffoldingApi({
+      projectsDir,
+      projectRegistry,
+      agentYamlStore: createAgentYamlStore(),
+      syncProjects: () => {
+        syncProjectCache({ db: getDb(), projectRegistry });
+      },
+    });
+    await runProjectSync({ db: getDb(), projectsDir, projectRegistry, scaffoldingApi });
+
     registerHealthRoute(app, deps);
-    registerProjectRoutes(app, { eventBus });
+    registerProjectRoutes(app, { eventBus, projectsDir, projectRegistry, scaffoldingApi });
     registerChatRoute(app, deps);
     registerSuiteRoutes(app, deps);
     registerScheduleRoutes(app, deps);

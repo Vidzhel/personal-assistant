@@ -122,6 +122,19 @@ describe('buildSystemTools', () => {
   });
 
   describe('list_projects', () => {
+    it('exposes operational UUIDs separately from registry paths', async () => {
+      (deps.projectRegistry!.listProjects as any).mockReturnValue([
+        makeProject({ id: 'folder', parentId: '_global' }),
+      ]);
+      deps.db = { get: vi.fn().mockReturnValue({ id: 'persisted-uuid' }) } as never;
+      const tool = buildSystemTools(deps, scope).find((entry) => entry.name === 'list_projects')!;
+      const result = await tool.handler({}, {});
+      expect(JSON.parse((result.content[0] as any).text).projects[0]).toMatchObject({
+        id: 'persisted-uuid',
+        fsPath: 'folder',
+        parentFsPath: '_global',
+      });
+    });
     it('returns projects from registry', async () => {
       const projects = [makeProject({ id: 'proj-1', name: 'alpha' })];
       (deps.projectRegistry!.listProjects as any).mockReturnValue(projects);

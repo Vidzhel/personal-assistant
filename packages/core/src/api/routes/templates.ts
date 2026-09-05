@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { HTTP_STATUS } from '@raven/shared';
 import type { TemplateRegistry } from '../../template-engine/template-registry.ts';
 import type { TemplateScheduler } from '../../template-engine/template-scheduler.ts';
+import { getDb } from '../../db/database.ts';
 
 interface TemplateDeps {
   templateRegistry: TemplateRegistry;
@@ -12,10 +13,19 @@ export function registerTemplateRoutes(app: FastifyInstance, deps: TemplateDeps)
   const { templateRegistry, templateScheduler } = deps;
 
   // GET /api/templates — list templates (optionally filtered by projectId)
-  app.get('/api/templates', async (req) => {
+  app.get('/api/templates', async (req, reply) => {
     const { projectId } = req.query as { projectId?: string };
+    const project = projectId
+      ? (getDb().prepare('SELECT fs_path FROM projects WHERE id = ?').get(projectId) as
+          { fs_path: string | null } | undefined)
+      : undefined;
+    if (projectId && !project) {
+      return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
+    }
     const templates = projectId
-      ? templateRegistry.listTemplates(projectId)
+      ? project?.fs_path
+        ? templateRegistry.listTemplates(project.fs_path)
+        : []
       : templateRegistry.getAllTemplates();
     return templates.map((t) => ({
       name: t.name,

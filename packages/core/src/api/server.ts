@@ -128,6 +128,7 @@ export async function createApiServer(
     templateRegistry: deps.templateRegistry,
     scaffoldingApi: deps.scaffoldingApi,
     projectsDir: deps.projectsDir,
+    neo4jClient: deps.neo4jClient,
   });
   registerSessionRoutes(app, deps);
   registerChatRoute(app, deps);
@@ -209,6 +210,7 @@ export async function createApiServer(
   // Project knowledge (data sources + knowledge links)
   registerProjectKnowledgeRoutes(app, {
     neo4j: deps.neo4jClient,
+    projectsDir: deps.projectsDir,
     knowledgeStore: deps.knowledgeStore,
   });
 

@@ -3,8 +3,14 @@ import { join, relative } from 'node:path';
 
 import yaml from 'js-yaml';
 
-import { AgentYamlSchema, ScheduleYamlSchema, TaskTemplateSchema } from '@raven/shared';
+import {
+  AgentYamlSchema,
+  ScheduleYamlSchema,
+  TaskTemplateSchema,
+  META_PROJECT_ID,
+} from '@raven/shared';
 import type { TaskTemplate } from '@raven/shared';
+import { readProjectDefinition } from './project-definition.ts';
 
 const yamlLoad = yaml.load;
 
@@ -31,7 +37,10 @@ async function validateYamlFiles(opts: YamlValidateOpts): Promise<string[]> {
   let entries;
   try {
     entries = await readdir(opts.dir, { withFileTypes: true });
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      errors.push(`Cannot read ${opts.kind} definitions ${opts.dir}: ${String(error)}`);
+    }
     return errors;
   }
 
@@ -213,7 +222,10 @@ async function validateAgentsDir(options: ValidateAgentsDirOptions): Promise<Age
   let entries;
   try {
     entries = await readdir(agentsDir, { withFileTypes: true });
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      errors.push(`Cannot read agent definitions ${agentsDir}: ${String(error)}`);
+    }
     return { errors, warnings };
   }
 
@@ -241,25 +253,65 @@ interface ValidateContext {
   errors: string[];
   warnings: string[];
   opts?: ValidatorOptions;
+  projectIds: Map<string, string>;
 }
 
-async function isProjectDir(dirPath: string, isRoot: boolean): Promise<boolean> {
-  if (isRoot) return true;
-  try {
-    await readFile(join(dirPath, 'context.md'), 'utf-8');
-    return true;
-  } catch {
-    return false;
+function validateProjectIdentity(id: string | undefined, rel: string, ctx: ValidateContext): void {
+  if (!rel) return;
+  const isSystem = rel === 'system';
+  const effectiveId = id ?? (isSystem ? META_PROJECT_ID : rel);
+  if (
+    (isSystem && effectiveId !== META_PROJECT_ID) ||
+    (!isSystem && effectiveId === META_PROJECT_ID)
+  ) {
+    ctx.errors.push(`System project identity conflicts at ${rel}/context.md`);
+    return;
+  }
+  const previous = ctx.projectIds.get(effectiveId);
+  if (previous) {
+    ctx.errors.push(`Duplicate project identity ${effectiveId} in ${previous} and ${rel}`);
+  } else {
+    ctx.projectIds.set(effectiveId, rel);
   }
 }
 
-async function getSubdirectories(dirPath: string): Promise<string[]> {
+async function validateProjectContext(
+  dirPath: string,
+  isRoot: boolean,
+  ctx: ValidateContext,
+): Promise<boolean> {
+  let raw: string;
+  try {
+    raw = await readFile(join(dirPath, 'context.md'), 'utf-8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      ctx.errors.push(
+        `Cannot read project context ${relative(ctx.projectsDir, dirPath) || '_global'}: ${String(error)}`,
+      );
+    }
+    return isRoot;
+  }
+  try {
+    const definition = readProjectDefinition(raw);
+    validateProjectIdentity(definition.metadata?.id, relative(ctx.projectsDir, dirPath), ctx);
+  } catch (error) {
+    ctx.errors.push(
+      `Invalid project context ${relative(ctx.projectsDir, dirPath) || '_global'}/context.md: ${String(error)}`,
+    );
+  }
+  return true;
+}
+
+async function getSubdirectories(dirPath: string, ctx: ValidateContext): Promise<string[]> {
   try {
     const entries = await readdir(dirPath, { withFileTypes: true });
     return entries
       .filter((e) => e.isDirectory() && !shouldSkipDir(e.name))
       .map((e) => join(dirPath, e.name));
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      ctx.errors.push(`Cannot enumerate project directory ${dirPath}: ${String(error)}`);
+    }
     return [];
   }
 }
@@ -372,7 +424,10 @@ async function validateTemplatesDir(templatesDir: string, projectRel: string): P
   let entries;
   try {
     entries = await readdir(templatesDir, { withFileTypes: true });
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      errors.push(`Cannot read template definitions ${templatesDir}: ${String(error)}`);
+    }
     return errors;
   }
 
@@ -401,12 +456,17 @@ async function validateDir(dirPath: string, depth: number, ctx: ValidateContext)
   const rel = relative(ctx.projectsDir, dirPath);
   const isRoot = rel === '' || rel === '.';
 
+  if (rel === '_global') {
+    ctx.errors.push('The _global project path is reserved');
+    return;
+  }
+
   if (!isRoot && depth > MAX_DEPTH) {
     ctx.errors.push(`Project nested too deep (>${MAX_DEPTH} levels): ${rel}`);
     return;
   }
 
-  if (!(await isProjectDir(dirPath, isRoot))) return;
+  if (!(await validateProjectContext(dirPath, isRoot, ctx))) return;
 
   const agentNames = new Set<string>();
   const agentResult = await validateAgentsDir({
@@ -429,7 +489,7 @@ async function validateDir(dirPath: string, depth: number, ctx: ValidateContext)
   const templateErrors = await validateTemplatesDir(join(dirPath, 'templates'), rel || '_global');
   ctx.errors.push(...templateErrors);
 
-  const subdirs = await getSubdirectories(dirPath);
+  const subdirs = await getSubdirectories(dirPath, ctx);
   for (const subdir of subdirs) {
     await validateDir(subdir, depth + 1, ctx);
   }
@@ -443,6 +503,7 @@ export async function validateProjects(
     projectsDir,
     errors: [],
     warnings: [],
+    projectIds: new Map(),
     opts,
   };
 

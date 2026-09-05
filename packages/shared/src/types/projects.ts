@@ -3,6 +3,24 @@ import { z } from 'zod';
 export const SystemAccessLevel = z.enum(['none', 'read', 'read-write']);
 export type SystemAccessLevel = z.infer<typeof SystemAccessLevel>;
 
+/** File-owned metadata inside context.md; absent fields on legacy files inherit the cache. */
+export const ProjectMetadataSchema = z
+  .object({
+    version: z.literal(1),
+    id: z
+      .string()
+      .min(1)
+      .refine((id) => id !== '_global', 'The global identity is reserved')
+      .optional(),
+    displayName: z.string().min(1).optional(),
+    description: z.string().optional(),
+    skills: z.array(z.string()).optional(),
+    systemPrompt: z.string().optional(),
+    systemAccess: SystemAccessLevel.optional(),
+  })
+  .strict();
+export type ProjectMetadata = z.infer<typeof ProjectMetadataSchema>;
+
 export interface Project {
   id: string;
   name: string;

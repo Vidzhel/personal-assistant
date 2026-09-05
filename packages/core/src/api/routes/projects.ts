@@ -1,6 +1,5 @@
 import type { FastifyInstance } from 'fastify';
 import {
-  createLogger,
   generateId,
   HTTP_STATUS,
   type Project,
@@ -12,12 +11,17 @@ import type { ProjectRegistry } from '../../project-registry/project-registry.ts
 import type { TemplateRegistry } from '../../template-engine/template-registry.ts';
 import type { ScaffoldingApi } from '../../scaffolding/scaffolding-api.ts';
 import { getDb } from '../../db/database.ts';
-import { kebabCase } from '../../project-manager/project-sync.ts';
-
-const log = createLogger('api:projects');
+import {
+  createManagedProject,
+  updateManagedProject,
+  deleteManagedProject,
+  type ProjectLifecycleDeps,
+} from '../../project-manager/project-lifecycle.ts';
+import { parseProjectRow, type ProjectRow } from '../../project-manager/project-cache.ts';
+import { ProjectMutationError } from '../../project-manager/project-mutation.ts';
+import type { Neo4jClient } from '../../knowledge-engine/neo4j-client.ts';
 
 const BAD_REQUEST = 400;
-const INTERNAL_SERVER_ERROR = 500;
 
 interface ProjectRouteDeps {
   eventBus: EventBus;
@@ -25,6 +29,7 @@ interface ProjectRouteDeps {
   templateRegistry?: TemplateRegistry;
   scaffoldingApi?: ScaffoldingApi;
   projectsDir?: string;
+  neo4jClient?: Neo4jClient;
 }
 
 // eslint-disable-next-line max-lines-per-function -- route registration for all project CRUD endpoints
@@ -33,7 +38,11 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
     const db = getDb();
     const rows = db.prepare('SELECT * FROM projects ORDER BY updated_at DESC').all();
     return rows.map((row) =>
-      enrichWithRegistry(parseProjectRow(row), deps.projectRegistry, deps.templateRegistry),
+      enrichWithRegistry(
+        parseProjectRow(row as ProjectRow),
+        deps.projectRegistry,
+        deps.templateRegistry,
+      ),
     );
   });
 
@@ -41,7 +50,11 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
     const db = getDb();
     const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
     if (!row) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
-    return enrichWithRegistry(parseProjectRow(row), deps.projectRegistry, deps.templateRegistry);
+    return enrichWithRegistry(
+      parseProjectRow(row as ProjectRow),
+      deps.projectRegistry,
+      deps.templateRegistry,
+    );
   });
 
   // GET /api/projects/:id/children — list sub-projects from the filesystem registry
@@ -70,7 +83,7 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
 
     const children = deps.projectRegistry.getProjectChildren(registryNode.id);
     return children.map((child) => ({
-      id: child.id,
+      id: cacheProjectId(child.id),
       name: child.name,
       displayName: child.displayName,
       description: child.description,
@@ -91,27 +104,17 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
       return reply.status(BAD_REQUEST).send({ error: 'Cannot create a meta-project via API' });
     }
 
-    const outcome = await createProjectRow(deps, parsed.data);
-    if (outcome.kind === 'conflict') {
-      return reply
-        .status(BAD_REQUEST)
-        .send({ error: `Project path "${outcome.fsPath}" already exists` });
-    }
-    if (outcome.kind === 'scaffold-failed') {
-      return reply
-        .status(INTERNAL_SERVER_ERROR)
-        .send({ error: 'Failed to scaffold project directory' });
-    }
+    const project = await createManagedProject(lifecycleDeps(deps), parsed.data);
 
     deps.eventBus.emit({
       id: generateId(),
-      timestamp: outcome.project.createdAt,
+      timestamp: project.createdAt,
       source: 'api',
       type: 'project:created',
-      payload: { projectId: outcome.project.id, projectName: outcome.project.name },
+      payload: { projectId: project.id, projectName: project.name },
     });
 
-    return outcome.project;
+    return project;
   });
 
   app.put<{ Params: { id: string } }>('/api/projects/:id', async (req, reply) => {
@@ -125,40 +128,13 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
       return reply.status(BAD_REQUEST).send({ error: 'Cannot modify the is_meta field' });
     }
 
-    const db = getDb();
-    const existing = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
-    if (!existing) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
-
-    const updates = parsed.data;
-    const now = Date.now();
-    db.prepare(
-      'UPDATE projects SET name = COALESCE(?, name), description = COALESCE(?, description), skills = COALESCE(?, skills), system_prompt = COALESCE(?, system_prompt), system_access = COALESCE(?, system_access), updated_at = ? WHERE id = ?',
-    ).run(
-      updates.name ?? null,
-      updates.description ?? null,
-      updates.skills ? JSON.stringify(updates.skills) : null,
-      updates.systemPrompt ?? null,
-      updates.systemAccess ?? null,
-      now,
-      req.params.id,
-    );
+    await updateManagedProject(lifecycleDeps(deps), req.params.id, parsed.data);
 
     return { success: true };
   });
 
-  app.delete<{ Params: { id: string } }>('/api/projects/:id', async (req, reply) => {
-    const db = getDb();
-
-    // Prevent deletion of meta-project
-    const row = db.prepare('SELECT is_meta FROM projects WHERE id = ?').get(req.params.id) as
-      { is_meta: number } | undefined;
-    if (row?.is_meta === 1) {
-      return reply.status(BAD_REQUEST).send({ error: 'Cannot delete the system meta-project' });
-    }
-
-    const result = db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id);
-    if (result.changes === 0)
-      return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
+  app.delete<{ Params: { id: string } }>('/api/projects/:id', async (req) => {
+    const result = await deleteManagedProject(lifecycleDeps(deps), req.params.id);
 
     deps.eventBus.emit({
       id: generateId(),
@@ -168,100 +144,31 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
       payload: { projectId: req.params.id },
     });
 
-    return { success: true };
+    return { success: true, ...result };
   });
 }
 
-/**
- * Scaffolds a directory for `fsPath` when the registry has no node there
- * yet, reloading the registry so the caller can immediately look it up.
- * Returns the linked registry node id, or undefined when scaffolding deps
- * aren't wired (degraded/isolated-test mode — caller falls back to a
- * DB-only row, same as before this invariant existed).
- */
-async function scaffoldProjectDir(
-  deps: ProjectRouteDeps,
-  fsPath: string,
-  input: { displayName: string; description?: string },
-): Promise<string | undefined> {
-  if (!deps.scaffoldingApi || !deps.projectRegistry || !deps.projectsDir) return undefined;
-
-  if (!deps.projectRegistry.getProject(fsPath)) {
-    await deps.scaffoldingApi.createProject({
-      path: fsPath,
-      displayName: input.displayName,
-      description: input.description,
-    });
-    await deps.projectRegistry.load(deps.projectsDir);
+function lifecycleDeps(deps: ProjectRouteDeps): ProjectLifecycleDeps {
+  if (!deps.projectsDir || !deps.projectRegistry || !deps.scaffoldingApi) {
+    throw new ProjectMutationError(
+      'Project definition storage is unavailable',
+      HTTP_STATUS.SERVICE_UNAVAILABLE,
+    );
   }
-
-  return deps.projectRegistry.getProject(fsPath)?.id;
+  return {
+    ...deps,
+    db: getDb(),
+    projectsDir: deps.projectsDir,
+    projectRegistry: deps.projectRegistry,
+    scaffoldingApi: deps.scaffoldingApi,
+  };
 }
 
-type CreateProjectOutcome =
-  | { kind: 'conflict'; fsPath: string }
-  | { kind: 'scaffold-failed' }
-  | { kind: 'ok'; project: Project };
-
-/**
- * Scaffolds (or reuses) the directory for the project's kebab-cased name,
- * then inserts the DB cache row keyed to it. A pre-existing row at that
- * fs_path is treated as a conflict rather than silently reused, since two
- * distinct names that kebab-case to the same path would otherwise clobber
- * each other's directory.
- */
-async function createProjectRow(
-  deps: ProjectRouteDeps,
-  data: ProjectCreateInput,
-): Promise<CreateProjectOutcome> {
-  const { name, description, skills, systemPrompt, systemAccess } = data;
-  const db = getDb();
-  const fsPath = kebabCase(name);
-
-  if (db.prepare('SELECT 1 FROM projects WHERE fs_path = ?').get(fsPath)) {
-    return { kind: 'conflict', fsPath };
-  }
-
-  let linkedFsPath: string | undefined;
-  try {
-    linkedFsPath = await scaffoldProjectDir(deps, fsPath, { displayName: name, description });
-  } catch (err) {
-    log.error(`Failed to scaffold project directory "${fsPath}": ${err}`);
-    return { kind: 'scaffold-failed' };
-  }
-
-  const id = linkedFsPath ?? generateId();
-  const now = Date.now();
-
-  db.prepare(
-    'INSERT INTO projects (id, name, description, skills, system_prompt, system_access, fs_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-  ).run(
-    id,
-    name,
-    description ?? null,
-    JSON.stringify(skills ?? []),
-    systemPrompt ?? null,
-    systemAccess,
-    linkedFsPath ?? null,
-    now,
-    now,
-  );
-
-  return {
-    kind: 'ok',
-    project: {
-      id,
-      name,
-      description,
-      skills: skills ?? [],
-      systemPrompt,
-      systemAccess,
-      isMeta: false,
-      fsPath: linkedFsPath,
-      createdAt: now,
-      updatedAt: now,
-    },
-  };
+function cacheProjectId(fsPath: string): string | undefined {
+  return (
+    getDb().prepare('SELECT id FROM projects WHERE fs_path = ?').get(fsPath) as
+      { id: string } | undefined
+  )?.id;
 }
 
 interface EnrichedProject extends Project {
@@ -288,37 +195,10 @@ function enrichWithRegistry(
 
   return {
     ...project,
-    parentId: node.parentId ?? undefined,
-    children: node.children,
+    parentId: node.parentId ? cacheProjectId(node.parentId) : undefined,
+    children: node.children.map(cacheProjectId).filter((id): id is string => id !== undefined),
     hasContextMd: node.contextMd.length > 0,
     agentCount: node.agents.length,
     templateCount: templateRegistry ? templateRegistry.listTemplates(node.id).length : 0,
-  };
-}
-
-function parseProjectRow(row: unknown): Project {
-  const r = row as {
-    id: string;
-    name: string;
-    description: string | null;
-    skills: string;
-    system_prompt: string | null;
-    system_access: string;
-    is_meta: number;
-    fs_path: string | null;
-    created_at: number;
-    updated_at: number;
-  };
-  return {
-    id: r.id,
-    name: r.name,
-    description: r.description ?? undefined,
-    skills: JSON.parse(r.skills),
-    systemPrompt: r.system_prompt ?? undefined,
-    systemAccess: (r.system_access ?? 'none') as Project['systemAccess'],
-    isMeta: r.is_meta === 1,
-    fsPath: r.fs_path ?? undefined,
-    createdAt: r.created_at,
-    updatedAt: r.updated_at,
   };
 }

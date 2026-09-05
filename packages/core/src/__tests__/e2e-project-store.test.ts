@@ -87,7 +87,7 @@ describe('e2e: filesystem-first project store', () => {
     expect(createRes.status).toBe(200);
     const project = (await createRes.json()) as { id: string; fsPath?: string };
     expect(project.fsPath).toBe('marketing-team');
-    expect(project.id).toBe('marketing-team');
+    expect(project.id).toMatch(/^[0-9a-f-]{36}$/);
 
     // Directory + registry node exist on disk.
     expect(existsSync(join(projectsDir, 'marketing-team', 'context.md'))).toBe(true);

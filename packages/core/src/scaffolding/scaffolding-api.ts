@@ -8,6 +8,7 @@ import { Cron } from 'croner';
 
 import {
   createLogger,
+  gitAutoCommit,
   AgentYamlSchema,
   ScheduleYamlSchema,
   TaskTemplateSchema,
@@ -17,6 +18,8 @@ import type { AgentYaml, ScheduleYaml, TaskTemplate, SkillConfig } from '@raven/
 import type { ProjectRegistry } from '../project-registry/project-registry.ts';
 import type { AgentYamlStore } from '../project-registry/agent-yaml-store.ts';
 import type { CapabilityLibrary } from '../capability-library/capability-library.ts';
+import { createProjectDefinition } from '../project-manager/create-project-definition.ts';
+import { withProjectMutation } from '../project-manager/project-mutation.ts';
 
 const log = createLogger('scaffolding-api');
 
@@ -27,8 +30,11 @@ const DOMAIN_RE = /^[a-z][a-z0-9-]*$/;
 
 export interface ScaffoldProjectInput {
   path: string;
+  id?: string;
   displayName?: string;
   description?: string;
+  skills?: string[];
+  systemPrompt?: string;
   systemAccess?: 'none' | 'read' | 'read-write';
 }
 
@@ -86,6 +92,7 @@ export interface ScaffoldResult {
 export interface ScaffoldingDeps {
   projectsDir: string;
   projectRegistry: ProjectRegistry;
+  syncProjects?: () => void;
   agentYamlStore: AgentYamlStore;
   /** Needed only by createSkill (validates mcp refs, reloaded by the caller
    * after a write — see scaffold-and-activate.ts). Optional so existing
@@ -98,7 +105,7 @@ export interface ScaffoldingDeps {
 // ── Public API type ──────────────────────────────────────────────────────
 
 export interface ScaffoldingApi {
-  createProject(input: ScaffoldProjectInput): Promise<string>;
+  createProject(input: ScaffoldProjectInput, options?: { system?: boolean }): Promise<string>;
   createAgent(input: ScaffoldAgentInput): Promise<string>;
   createTemplate(input: ScaffoldTemplateInput): Promise<string>;
   createSchedule(input: ScaffoldScheduleInput): Promise<string>;
@@ -204,17 +211,11 @@ export function createScaffoldingApi(deps: ScaffoldingDeps): ScaffoldingApi {
     return resolveProjectDir(projectsDir, relativePath);
   }
 
-  async function createProject(input: ScaffoldProjectInput): Promise<string> {
-    const projectDir = projectDirFor(input.path);
-    await mkdir(projectDir, { recursive: true });
-
-    const title = input.displayName ?? input.path;
-    const body = input.description ?? '';
-    const contextMd = `# ${title}\n\n${body}\n`.trimEnd() + '\n';
-
-    await writeFile(join(projectDir, 'context.md'), contextMd, 'utf-8');
-    log.info(`Created project: ${input.path}`);
-    return input.path;
+  async function createProject(
+    input: ScaffoldProjectInput,
+    options?: { system?: boolean },
+  ): Promise<string> {
+    return createProjectDefinition(deps, input, options?.system);
   }
 
   async function createAgent(input: ScaffoldAgentInput): Promise<string> {
@@ -318,6 +319,10 @@ export function createScaffoldingApi(deps: ScaffoldingDeps): ScaffoldingApi {
     for (const p of plan.projects) {
       try {
         result.projectsCreated.push(await createProject(p));
+        await gitAutoCommit(
+          [join(projectDirFor(p.path), 'context.md')],
+          `feat(project): scaffold ${p.path}`,
+        );
       } catch (err) {
         result.errors.push(
           `project ${p.path}: ${err instanceof Error ? err.message : String(err)}`,
@@ -372,10 +377,10 @@ export function createScaffoldingApi(deps: ScaffoldingDeps): ScaffoldingApi {
 
   return {
     createProject,
-    createAgent,
-    createTemplate,
-    createSchedule,
+    createAgent: (input) => withProjectMutation(projectsDir, () => createAgent(input)),
+    createTemplate: (input) => withProjectMutation(projectsDir, () => createTemplate(input)),
+    createSchedule: (input) => withProjectMutation(projectsDir, () => createSchedule(input)),
     createSkill,
-    scaffoldDomain,
+    scaffoldDomain: (plan) => withProjectMutation(projectsDir, () => scaffoldDomain(plan)),
   };
 }

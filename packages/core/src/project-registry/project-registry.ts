@@ -1,12 +1,27 @@
 import type { ProjectNode, ResolvedProjectContext, ProjectIndex, AgentYaml } from '@raven/shared';
 
 import { scanProjects } from './project-scanner.ts';
+import { withProjectMutation } from '../project-manager/project-mutation.ts';
 
 export class ProjectRegistry {
   private index: ProjectIndex = { projects: new Map(), rootProjects: [] };
+  private loadError?: unknown;
 
   async load(projectsDir: string): Promise<void> {
-    this.index = await scanProjects(projectsDir);
+    await withProjectMutation(projectsDir, async () => {
+      try {
+        this.index = await scanProjects(projectsDir);
+        this.loadError = undefined;
+      } catch (error) {
+        this.loadError = error;
+        throw error;
+      }
+    });
+  }
+
+  assertHealthy(): void {
+    if (this.loadError) throw this.loadError;
+    this.getGlobal();
   }
 
   getProject(id: string): ProjectNode | undefined {
@@ -52,6 +67,7 @@ export class ProjectRegistry {
       if (node.contextMd) {
         contextChain.push(node.contextMd);
       }
+      if (node.metadata?.systemPrompt) contextChain.push(node.metadata.systemPrompt);
 
       for (const agent of node.agents) {
         agents.set(agent.name, agent);
@@ -65,9 +81,12 @@ export class ProjectRegistry {
 
   private buildAncestorChain(projectId: string): ProjectNode[] {
     const chain: ProjectNode[] = [];
+    const seen = new Set<string>();
     let current = this.index.projects.get(projectId);
 
     while (current) {
+      if (seen.has(current.id)) throw new Error('Project hierarchy contains a cycle');
+      seen.add(current.id);
       chain.unshift(current);
       if (current.parentId === null) break;
       current = this.index.projects.get(current.parentId);

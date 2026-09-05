@@ -210,10 +210,10 @@ describe('Orchestrator', () => {
     const rowB = db.prepare('SELECT fs_path FROM projects WHERE id = ?').get('chat-b') as {
       fs_path: string | null;
     };
-    // First claimant gets the real slug; the second is left unreconciled
-    // (fs_path: null) rather than throwing a UNIQUE violation.
+    // Each caller receives a separate managed definition immediately.
     expect(rowA.fs_path).toBe('inbox');
-    expect(rowB.fs_path).toBeNull();
+    expect(rowB.fs_path).toBe('inbox-2');
+    expect(projectRegistry.getProject('inbox-2')).toBeDefined();
 
     // The actual bug this guards against: neither user message was lost.
     const sessionA = sessionManager.getOrCreateSession('chat-a');

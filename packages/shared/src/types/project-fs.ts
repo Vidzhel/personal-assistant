@@ -1,4 +1,5 @@
 import type { z } from 'zod';
+import type { ProjectMetadata } from './projects.ts';
 
 import type {
   AgentYamlSchema,
@@ -20,6 +21,7 @@ export interface ProjectNode {
   id: string;
   name: string;
   displayName?: string;
+  metadata?: ProjectMetadata;
   description?: string;
   path: string;
   relativePath: string;

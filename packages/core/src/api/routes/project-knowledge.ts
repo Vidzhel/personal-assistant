@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { resolve } from 'node:path';
 import {
   HTTP_STATUS,
   CreateDataSourceSchema,
@@ -21,10 +22,34 @@ import {
 } from '../../knowledge-engine/project-knowledge.ts';
 import { recordKnowledgeRejection } from '../../knowledge-engine/knowledge-rejections.ts';
 import { getDb } from '../../db/database.ts';
+import { projectRoot } from '../../config.ts';
+import {
+  ProjectMutationError,
+  withProjectMutation,
+} from '../../project-manager/project-mutation.ts';
 
 export interface ProjectKnowledgeRouteDeps {
   neo4j?: Neo4jClient;
   knowledgeStore?: KnowledgeStore;
+  projectsDir?: string;
+}
+
+function assertProjectExists(projectId: string): void {
+  if (!getDb().prepare('SELECT 1 FROM projects WHERE id = ?').get(projectId)) {
+    throw new ProjectMutationError('Project not found', HTTP_STATUS.NOT_FOUND);
+  }
+}
+
+/** Hold the same lock as archive/delete through the entire asynchronous graph write. */
+function mutateKnowledge<T>(
+  deps: ProjectKnowledgeRouteDeps,
+  projectId: string,
+  operation: () => Promise<T>,
+): Promise<T> {
+  return withProjectMutation(deps.projectsDir ?? resolve(projectRoot, 'projects'), async () => {
+    assertProjectExists(projectId);
+    return operation();
+  });
 }
 
 // eslint-disable-next-line max-lines-per-function -- route registration
@@ -92,6 +117,7 @@ export function registerProjectKnowledgeRoutes(
   // --- Knowledge Links (Neo4j) ---
 
   app.get<{ Params: { id: string } }>('/api/projects/:id/knowledge-links', async (req, reply) => {
+    assertProjectExists(req.params.id);
     if (!deps.neo4j) {
       return reply.status(HTTP_STATUS.SERVICE_UNAVAILABLE).send({ error: 'Neo4j not available' });
     }
@@ -100,29 +126,35 @@ export function registerProjectKnowledgeRoutes(
   });
 
   app.post<{ Params: { id: string } }>('/api/projects/:id/knowledge-links', async (req, reply) => {
-    if (!deps.neo4j) {
-      return reply.status(HTTP_STATUS.SERVICE_UNAVAILABLE).send({ error: 'Neo4j not available' });
-    }
-    const parsed = CreateProjectKnowledgeLinkSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: parsed.error.message });
-    }
-    const link = await linkBubbleToProject({
-      neo4j: deps.neo4j,
-      projectId: req.params.id,
-      bubbleId: parsed.data.bubbleId,
+    return mutateKnowledge(deps, req.params.id, async () => {
+      if (!deps.neo4j) {
+        return reply.status(HTTP_STATUS.SERVICE_UNAVAILABLE).send({ error: 'Neo4j not available' });
+      }
+      const parsed = CreateProjectKnowledgeLinkSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: parsed.error.message });
+      }
+      const link = await linkBubbleToProject({
+        neo4j: deps.neo4j,
+        projectId: req.params.id,
+        bubbleId: parsed.data.bubbleId,
+      });
+      return reply.status(HTTP_STATUS.CREATED).send(link);
     });
-    return reply.status(HTTP_STATUS.CREATED).send(link);
   });
 
   app.delete<{ Params: { id: string; bubbleId: string } }>(
     '/api/projects/:id/knowledge-links/:bubbleId',
     async (req, reply) => {
-      if (!deps.neo4j) {
-        return reply.status(HTTP_STATUS.SERVICE_UNAVAILABLE).send({ error: 'Neo4j not available' });
-      }
-      await unlinkBubbleFromProject(deps.neo4j, req.params.id, req.params.bubbleId);
-      return reply.status(HTTP_STATUS.NO_CONTENT).send();
+      return mutateKnowledge(deps, req.params.id, async () => {
+        if (!deps.neo4j) {
+          return reply
+            .status(HTTP_STATUS.SERVICE_UNAVAILABLE)
+            .send({ error: 'Neo4j not available' });
+        }
+        await unlinkBubbleFromProject(deps.neo4j, req.params.id, req.params.bubbleId);
+        return reply.status(HTTP_STATUS.NO_CONTENT).send();
+      });
     },
   );
 
@@ -130,48 +162,55 @@ export function registerProjectKnowledgeRoutes(
 
   app.post<{ Params: { id: string; action: string } }>(
     '/api/projects/:id/knowledge-proposals/:action',
-    // eslint-disable-next-line complexity -- branching on approve/reject/modify actions
     async (req, reply) => {
-      const parsed = KnowledgeProposalResponseSchema.safeParse(req.body);
-      if (!parsed.success) {
-        return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: parsed.error.message });
-      }
+      // eslint-disable-next-line complexity -- branching on approve/reject/modify actions
+      return mutateKnowledge(deps, req.params.id, async () => {
+        const parsed = KnowledgeProposalResponseSchema.safeParse(req.body);
+        if (!parsed.success) {
+          return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: parsed.error.message });
+        }
 
-      const { action } = parsed.data;
-      const projectId = req.params.id;
-      const body = req.body as Record<string, unknown>;
+        const { action } = parsed.data;
+        const projectId = req.params.id;
+        const body = req.body as Record<string, unknown>;
 
-      if (action === 'reject') {
-        const contentHash = (body.contentHash as string) ?? '';
-        const sessionId = (body.sessionId as string) ?? '';
-        recordKnowledgeRejection({ projectId, sessionId, contentHash, reason: parsed.data.reason });
-        return reply.send({ status: 'rejected' });
-      }
+        if (action === 'reject') {
+          const contentHash = (body.contentHash as string) ?? '';
+          const sessionId = (body.sessionId as string) ?? '';
+          recordKnowledgeRejection({
+            projectId,
+            sessionId,
+            contentHash,
+            reason: parsed.data.reason,
+          });
+          return reply.send({ status: 'rejected' });
+        }
 
-      if (!deps.knowledgeStore || !deps.neo4j) {
-        return reply
-          .status(HTTP_STATUS.SERVICE_UNAVAILABLE)
-          .send({ error: 'Knowledge store not available' });
-      }
+        if (!deps.knowledgeStore || !deps.neo4j) {
+          return reply
+            .status(HTTP_STATUS.SERVICE_UNAVAILABLE)
+            .send({ error: 'Knowledge store not available' });
+        }
 
-      // approve or modify: create bubble and link to project
-      const content =
-        action === 'modify'
-          ? (parsed.data.modifiedContent ?? '')
-          : ((body.content as string) ?? '');
-      const title = (body.title as string) ?? 'Discovered Knowledge';
-      const tags = (body.tags as string[]) ?? [];
+        // approve or modify: create bubble and link to project
+        const content =
+          action === 'modify'
+            ? (parsed.data.modifiedContent ?? '')
+            : ((body.content as string) ?? '');
+        const title = (body.title as string) ?? 'Discovered Knowledge';
+        const tags = (body.tags as string[]) ?? [];
 
-      const bubble = await deps.knowledgeStore.insert({
-        title,
-        content,
-        source: `project:${projectId}`,
-        tags,
+        const bubble = await deps.knowledgeStore.insert({
+          title,
+          content,
+          source: `project:${projectId}`,
+          tags,
+        });
+
+        await linkBubbleToProject({ neo4j: deps.neo4j, projectId, bubbleId: bubble.id });
+
+        return reply.status(HTTP_STATUS.CREATED).send({ status: action, bubbleId: bubble.id });
       });
-
-      await linkBubbleToProject({ neo4j: deps.neo4j, projectId, bubbleId: bubble.id });
-
-      return reply.status(HTTP_STATUS.CREATED).send({ status: action, bubbleId: bubble.id });
     },
   );
 }

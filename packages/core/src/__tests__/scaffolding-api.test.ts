@@ -103,6 +103,7 @@ describe('ScaffoldingApi', () => {
 
   describe('createProject', () => {
     it('creates directory and context.md', async () => {
+      await api.createProject({ path: 'uni' });
       await api.createProject({ path: 'uni/calculus' });
 
       const contextPath = join(tmpDir, 'uni/calculus', 'context.md');
@@ -113,6 +114,7 @@ describe('ScaffoldingApi', () => {
     });
 
     it('uses displayName and description when provided', async () => {
+      await api.createProject({ path: 'work' });
       await api.createProject({
         path: 'work/project-x',
         displayName: 'Project X',
@@ -124,10 +126,11 @@ describe('ScaffoldingApi', () => {
       expect(content).toContain('Top secret project');
     });
 
-    it('creates nested project paths (parent created)', async () => {
-      await api.createProject({ path: 'deep/nested/project' });
-
-      expect(existsSync(join(tmpDir, 'deep/nested/project', 'context.md'))).toBe(true);
+    it('rejects nested project paths without parent definitions', async () => {
+      await expect(api.createProject({ path: 'deep/nested/project' })).rejects.toThrow(
+        'Parent project',
+      );
+      expect(existsSync(join(tmpDir, 'deep'))).toBe(false);
     });
   });
 
@@ -270,7 +273,9 @@ describe('ScaffoldingApi', () => {
       await expect(api.createAgent({ projectPath: '', agent })).resolves.toBe('global-ok');
     });
 
-    it('still allows an ordinary nested relative path', async () => {
+    it('still allows an ordinary nested relative path with defined parents', async () => {
+      await api.createProject({ path: 'a' });
+      await api.createProject({ path: 'a/b' });
       await expect(api.createProject({ path: 'a/b/c' })).resolves.toBe('a/b/c');
     });
   });

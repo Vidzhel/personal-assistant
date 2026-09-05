@@ -9,7 +9,6 @@ import { createScaffoldingApi } from '../scaffolding/scaffolding-api.ts';
 import { createAgentYamlStore } from '../project-registry/agent-yaml-store.ts';
 import {
   kebabCase,
-  uniqueFsPath,
   runProjectSync,
   type ProjectSyncDeps,
 } from '../project-manager/project-sync.ts';
@@ -25,16 +24,6 @@ describe('kebabCase', () => {
 
   it('falls back to "untitled" for inputs that reduce to nothing', () => {
     expect(kebabCase('!!! 🎉 !!!')).toBe('untitled');
-  });
-});
-
-describe('uniqueFsPath', () => {
-  it('returns the base path when there is no collision', async () => {
-    const reg = new ProjectRegistry();
-    const dir = mkdtempSync(join(tmpdir(), 'raven-unique-fs-'));
-    await reg.load(dir);
-    expect(uniqueFsPath(reg, 'inbox')).toBe('inbox');
-    rmSync(dir, { recursive: true, force: true });
   });
 });
 

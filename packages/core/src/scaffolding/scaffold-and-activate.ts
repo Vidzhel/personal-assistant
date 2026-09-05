@@ -13,6 +13,7 @@ import type { ProjectRegistry } from '../project-registry/project-registry.ts';
 import type { TemplateRegistry } from '../template-engine/template-registry.ts';
 import type { ScheduleEngine } from '../scheduler/schedule-engine.ts';
 import type { CapabilityLibrary } from '../capability-library/capability-library.ts';
+import { withProjectMutation } from '../project-manager/project-mutation.ts';
 
 const log = createLogger('scaffold-and-activate');
 
@@ -49,6 +50,7 @@ export interface ReloadRegistriesResult {
 }
 
 export interface ScaffoldAndActivateDeps {
+  syncProjects?: () => void;
   scaffoldingApi: ScaffoldingApi;
   projectRegistry: ProjectRegistry;
   templateRegistry: TemplateRegistry;
@@ -90,7 +92,6 @@ async function activateProject(
   deps: ScaffoldAndActivateDeps,
 ): Promise<ScaffoldActivateResult> {
   const relPath = await deps.scaffoldingApi.createProject(input);
-  await deps.projectRegistry.load(deps.projectsDir);
   const filePath = join(resolveProjectDir(deps.projectsDir, relPath), 'context.md');
   return commit(filePath, `feat(project): scaffold "${relPath}"`);
 }
@@ -186,7 +187,10 @@ export function createReloadRegistries(
     };
 
     try {
-      await deps.projectRegistry.load(deps.projectsDir);
+      await withProjectMutation(deps.projectsDir, async () => {
+        await deps.projectRegistry.load(deps.projectsDir);
+        deps.syncProjects?.();
+      });
       result.project = true;
     } catch (err) {
       log.warn(`Project registry reload failed: ${String(err)}`);

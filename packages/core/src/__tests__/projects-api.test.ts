@@ -6,6 +6,11 @@ import { EventBus } from '../event-bus/event-bus.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { createRavenTestFixture } from './fixtures/raven-fixture.ts';
+import { ProjectRegistry } from '../project-registry/project-registry.ts';
+import { createScaffoldingApi } from '../scaffolding/scaffolding-api.ts';
+import { createAgentYamlStore } from '../project-registry/agent-yaml-store.ts';
+import { runProjectSync } from '../project-manager/project-sync.ts';
 
 describe('Projects API — system access fields', () => {
   let tmpDir: string;
@@ -17,7 +22,16 @@ describe('Projects API — system access fields', () => {
     initDatabase(join(tmpDir, 'test.db'));
     eventBus = new EventBus();
     app = Fastify({ logger: false });
-    registerProjectRoutes(app, { eventBus });
+    const { projectsDir } = createRavenTestFixture(tmpDir);
+    const projectRegistry = new ProjectRegistry();
+    await projectRegistry.load(projectsDir);
+    const scaffoldingApi = createScaffoldingApi({
+      projectsDir,
+      projectRegistry,
+      agentYamlStore: createAgentYamlStore(),
+    });
+    await runProjectSync({ db: getDb(), projectsDir, projectRegistry, scaffoldingApi });
+    registerProjectRoutes(app, { eventBus, projectsDir, projectRegistry, scaffoldingApi });
     await app.ready();
   });
 
@@ -122,10 +136,10 @@ describe('Projects API — system access fields', () => {
     expect(JSON.parse(res.payload).error).toContain('is_meta');
   });
 
-  it('DELETE /api/projects/meta rejects with 400', async () => {
+  it('DELETE /api/projects/meta rejects with 409', async () => {
     const res = await app.inject({ method: 'DELETE', url: '/api/projects/meta' });
-    expect(res.statusCode).toBe(400);
-    expect(JSON.parse(res.payload).error).toContain('meta-project');
+    expect(res.statusCode).toBe(409);
+    expect(JSON.parse(res.payload).message).toContain('meta-project');
   });
 
   it('DELETE /api/projects/:id works for regular projects', async () => {

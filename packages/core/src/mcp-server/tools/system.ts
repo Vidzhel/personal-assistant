@@ -3,6 +3,7 @@ import { tool } from '@anthropic-ai/claude-agent-sdk';
 import type { SdkMcpToolDefinition } from '@anthropic-ai/claude-agent-sdk';
 import type { RavenMcpDeps } from '../types.ts';
 import type { ScopeContext } from '../scope.ts';
+import type { ProjectNode } from '@raven/shared';
 
 const MAX_TURNS = 100;
 
@@ -17,6 +18,11 @@ const errorResult = (message: string): ErrResult => ({
   content: [{ type: 'text', text: message }],
   isError: true,
 });
+
+function projectIdentity(deps: RavenMcpDeps, node: ProjectNode): { id: string; fsPath: string } {
+  const row = deps.db?.get<{ id: string }>('SELECT id FROM projects WHERE fs_path = ?', node.id);
+  return { id: row?.id ?? node.metadata?.id ?? node.id, fsPath: node.id };
+}
 
 // Heterogeneous collection: listAgents/createAgent/updateAgent/listProjects
 // each carry a different concrete, zod-inferred schema (no `any` anywhere
@@ -128,7 +134,15 @@ export function buildSystemTools(
     'List all projects.',
     {},
     async (_args) => {
-      const projects = deps.projectRegistry?.listProjects() ?? [];
+      const projects = (deps.projectRegistry?.listProjects() ?? []).map((node) => {
+        const { parentId, children, ...definition } = node;
+        return {
+          ...definition,
+          ...projectIdentity(deps, node),
+          parentFsPath: parentId,
+          childFsPaths: children,
+        };
+      });
       return okResult({ projects });
     },
     {

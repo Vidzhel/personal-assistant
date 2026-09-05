@@ -1,11 +1,17 @@
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import * as fs from 'node:fs/promises';
 
 import { dump as yamlDump } from 'js-yaml';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import { validateProjects } from '../project-registry/project-validator.ts';
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof fs>();
+  return { ...actual, readdir: vi.fn(actual.readdir) };
+});
 
 let tmpDir: string;
 
@@ -14,6 +20,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.mocked(fs.readdir).mockReset();
   rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -86,6 +93,77 @@ const VALID_TEMPLATE = {
 };
 
 describe('validateProjects', () => {
+  it('rejects duplicate effective identities including a legacy path identity', async () => {
+    mkProject('legacy', '# Legacy');
+    mkProject('managed', '---\nravenProject: {version: 1, id: legacy}\n---\n# Managed');
+
+    expect((await validateProjects(tmpDir)).errors).toEqual([
+      expect.stringContaining('Duplicate project identity legacy'),
+    ]);
+  });
+
+  it.each([
+    ['ordinary', 'meta'],
+    ['system', 'another-id'],
+    ['meta', undefined],
+  ] as const)('rejects misplaced system identity at %s', async (path, id) => {
+    mkProject(path, id ? `---\nravenProject: {version: 1, id: ${id}}\n---\n# Context` : '# Legacy');
+
+    expect((await validateProjects(tmpDir)).errors).toEqual([
+      expect.stringContaining('System project identity conflicts'),
+    ]);
+  });
+
+  it.each(['', 'agents', 'schedules', 'templates'])(
+    'reports inaccessible project definitions instead of claiming valid: %s',
+    async (folder) => {
+      mkProject('', '# Root context');
+      const actual = await vi.importActual<typeof fs>('node:fs/promises');
+      vi.mocked(fs.readdir).mockImplementation(async (...args) => {
+        const [path] = args;
+        if (String(path) === join(tmpDir, folder)) {
+          throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+        }
+        return actual.readdir(...args);
+      });
+
+      expect((await validateProjects(tmpDir)).errors).toEqual([
+        expect.stringContaining('permission denied'),
+      ]);
+    },
+  );
+
+  it('rejects a folder that would replace the synthetic global project', async () => {
+    mkProject('_global', '# Reserved project\n');
+
+    expect((await validateProjects(tmpDir)).errors).toEqual([
+      'The _global project path is reserved',
+    ]);
+  });
+
+  it('accepts current project metadata and legacy human context together', async () => {
+    mkProject('', 'Global context');
+    mkProject('legacy', '# Legacy human context\n');
+    mkProject(
+      'current',
+      '---\nravenProject:\n  version: 1\n  id: stable-id\n  displayName: Current\n  systemAccess: read\ncustom: keep\n---\n# Current human context\n',
+    );
+
+    expect((await validateProjects(tmpDir)).errors).toEqual([]);
+  });
+
+  it.each([
+    '---\nravenProject: [broken\n---\nHuman context',
+    '---\nravenProject:\n  version: 2\n---\nHuman context',
+    '---\nravenProject:\n  version: 1\n  systemAccess: full\n---\nHuman context',
+  ])('reports invalid project frontmatter before runtime startup: %s', async (context) => {
+    mkProject('broken', context);
+
+    expect((await validateProjects(tmpDir)).errors).toEqual([
+      expect.stringContaining('Invalid project context broken/context.md'),
+    ]);
+  });
+
   it('returns no errors for valid structure', async () => {
     mkProject('', 'Global context');
     mkProject('work', 'Work project');
