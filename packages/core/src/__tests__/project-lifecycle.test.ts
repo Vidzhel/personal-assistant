@@ -110,7 +110,7 @@ describe('managed project lifecycle failures and legacy data', () => {
     });
   });
 
-  it('preserves plain-file DB settings across two syncs and scaffolds access-only orphans', async () => {
+  it('uses path-derived plain-file identity and defaults across two syncs', async () => {
     mkdirSync(join(deps.projectsDir, 'legacy'));
     writeFileSync(file('legacy'), '# Legacy context\n');
     const legacy = {
@@ -136,11 +136,19 @@ describe('managed project lifecycle failures and legacy data', () => {
     await deps.projectRegistry.load(deps.projectsDir);
     await runProjectSync(deps);
     await runProjectSync(deps);
-    expect(parseProjectRow(getProjectRow(deps.db, legacy.id))).toMatchObject(legacy);
+    expect(parseProjectRow(getProjectRow(deps.db, 'legacy'))).toMatchObject({
+      id: 'legacy',
+      name: 'legacy',
+      description: undefined,
+      systemPrompt: undefined,
+      skills: [],
+      systemAccess: 'none',
+      fsPath: 'legacy',
+    });
+    expect(() => getProjectRow(deps.db, legacy.id)).toThrow('Project not found');
+    expect(() => getProjectRow(deps.db, 'access-only')).toThrow('Project not found');
     expect(readFileSync(file('legacy'), 'utf8')).toBe('# Legacy context\n');
-    expect(readProjectDefinition(readFileSync(file('access-only'), 'utf8')).metadata).toMatchObject(
-      { id: 'access-only', systemAccess: 'read' },
-    );
+    expect(existsSync(file('access-only'))).toBe(false);
   });
 
   it('invalid metadata cannot turn a failed registry load into orphan deletion', async () => {
@@ -201,7 +209,7 @@ describe('managed project lifecycle failures and legacy data', () => {
     const original = '# Owner context\n';
     writeFileSync(file('legacy-empty'), original);
     saveProjectRow(deps.db, {
-      id: 'legacy-uuid',
+      id: 'legacy-empty',
       name: 'Legacy',
       fsPath: 'legacy-empty',
       systemPrompt: 'DB prompt',
@@ -211,15 +219,14 @@ describe('managed project lifecycle failures and legacy data', () => {
       updatedAt: 1,
     });
     await deps.projectRegistry.load(deps.projectsDir);
-    await deleteManagedProject(deps, 'legacy-uuid');
+    await deleteManagedProject(deps, 'legacy-empty');
     const archived = readdirSync(join(deps.projectsDir, '.archive'))[0];
     const dir = join(deps.projectsDir, '.archive', archived);
     expect(readFileSync(join(dir, 'context.md'), 'utf8')).toBe(original);
     expect(JSON.parse(readFileSync(join(dir, 'archive.json'), 'utf8'))).toMatchObject({
-      id: 'legacy-uuid',
+      id: 'legacy-empty',
       fsPath: 'legacy-empty',
-      systemPrompt: 'DB prompt',
-      systemAccess: 'read',
+      systemAccess: 'none',
     });
   });
 
@@ -236,6 +243,23 @@ describe('managed project lifecycle failures and legacy data', () => {
     await expect(deleteManagedProject(deps, project.id)).rejects.toThrow('identity conflicts');
     expect(existsSync(file())).toBe(true);
   });
+
+  it.each(['update', 'delete'] as const)(
+    'rejects a %s after metadata is removed from the current file',
+    async (operation) => {
+      const project = await create();
+      writeFileSync(file(), '# Metadata removed externally\n');
+
+      const action =
+        operation === 'update'
+          ? updateManagedProject(deps, project.id, { name: 'Should not apply' })
+          : deleteManagedProject(deps, project.id);
+      await expect(action).rejects.toThrow('identity conflicts');
+      expect(existsSync(file())).toBe(true);
+      expect(getProjectRow(deps.db, project.id)).toBeDefined();
+      expect(existsSync(join(deps.projectsDir, '.archive'))).toBe(false);
+    },
+  );
 
   it('serializes same-slug creation and disjoint updates', async () => {
     const results = await Promise.allSettled([create('Same Name'), create('same-name')]);
@@ -314,7 +338,7 @@ describe('managed project lifecycle failures and legacy data', () => {
     expect(getProjectRow(deps.db, project.id).name).toBe('Edited externally');
   });
 
-  it('orphan scaffolding with the production cache callback performs one linking write', async () => {
+  it('drops an unreferenced stale row without scaffolding', async () => {
     saveProjectRow(deps.db, {
       id: 'orphan-access',
       name: 'Orphan Access',
@@ -323,12 +347,9 @@ describe('managed project lifecycle failures and legacy data', () => {
       createdAt: 1,
       updatedAt: 1,
     });
-    deps.db.exec(
-      "CREATE TRIGGER no_second_link BEFORE UPDATE ON projects WHEN OLD.id = 'orphan-access' AND OLD.fs_path IS NOT NULL BEGIN SELECT RAISE(ABORT, 'duplicate link'); END",
-    );
     await runProjectSync(deps);
-    expect(getProjectRow(deps.db, 'orphan-access').fs_path).toBe('orphan-access');
-    expect(existsSync(file('orphan-access'))).toBe(true);
+    expect(() => getProjectRow(deps.db, 'orphan-access')).toThrow('Project not found');
+    expect(existsSync(file('orphan-access'))).toBe(false);
   });
 
   it('creates the supported third hierarchy level and rejects a fourth', async () => {

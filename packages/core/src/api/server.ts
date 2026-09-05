@@ -212,6 +212,7 @@ export async function createApiServer(
     neo4j: deps.neo4jClient,
     projectsDir: deps.projectsDir,
     knowledgeStore: deps.knowledgeStore,
+    projectRegistry: deps.projectRegistry,
   });
 
   // File download (agents save files to data/files/ and clients download via this route)

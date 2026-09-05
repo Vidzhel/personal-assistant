@@ -282,8 +282,8 @@ describe('Orchestrator context injection integration', () => {
     const db = getDb();
     const now = Date.now();
     db.prepare(
-      'INSERT INTO projects (id, name, skills, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-    ).run('proj-1', 'Test', '[]', now, now);
+      'INSERT INTO projects (id, name, skills, fs_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+    ).run('proj-1', 'Test', '[]', 'proj-1', now, now);
 
     const _orchestrator = new Orchestrator({
       eventBus,
@@ -315,8 +315,8 @@ describe('Orchestrator context injection integration', () => {
     const db = getDb();
     const now = Date.now();
     db.prepare(
-      'INSERT INTO projects (id, name, skills, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-    ).run('proj-1', 'Test', '[]', now, now);
+      'INSERT INTO projects (id, name, skills, fs_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+    ).run('proj-1', 'Test', '[]', 'proj-1', now, now);
 
     const _orchestrator = new Orchestrator({
       eventBus,

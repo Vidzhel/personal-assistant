@@ -4,6 +4,8 @@ import { HTTP_STATUS } from '@raven/shared';
 import type { ApiDeps } from '../server.ts';
 import type { StoredMessage } from '../../session-manager/message-store.ts';
 import { getDb } from '../../db/database.ts';
+import { isCurrentProject } from '../../project-manager/project-active.ts';
+import type { ProjectRegistry } from '../../project-registry/project-registry.ts';
 import {
   createReference,
   getAllReferences,
@@ -99,6 +101,19 @@ function parseReferencesFromContextMessages(
   return grouped;
 }
 
+function hasProject(db: ReturnType<typeof getDb>, projectId: string): boolean {
+  return Boolean(db.prepare('SELECT 1 FROM projects WHERE id = ?').get(projectId));
+}
+
+function replyIfInactiveProject(
+  reply: { status: (code: number) => { send: (body: unknown) => unknown } },
+  projectId: string,
+  projectRegistry?: ProjectRegistry,
+): unknown | undefined {
+  if (isCurrentProject(getDb(), projectId, projectRegistry)) return undefined;
+  return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
+}
+
 async function enrichReferences(
   grouped: Record<string, ParsedReference[]>,
   deps: ApiDeps,
@@ -141,7 +156,7 @@ async function enrichReferences(
 // eslint-disable-next-line max-lines-per-function -- multiple session route handlers with auth/validation logic
 export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void {
   app.get<{ Params: { id: string } }>('/api/projects/:id/sessions', async (req, reply) => {
-    if (!getDb().prepare('SELECT 1 FROM projects WHERE id = ?').get(req.params.id)) {
+    if (!hasProject(getDb(), req.params.id)) {
       return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
     }
     return deps.sessionManager.getProjectSessions(req.params.id);
@@ -149,7 +164,9 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
 
   // Get or create the active session for a project
   app.post<{ Params: { id: string } }>('/api/projects/:id/sessions', async (req, reply) => {
-    if (!getDb().prepare('SELECT 1 FROM projects WHERE id = ?').get(req.params.id)) {
+    const missing = replyIfInactiveProject(reply, req.params.id, deps.projectRegistry);
+    if (missing) return missing;
+    if (!hasProject(getDb(), req.params.id)) {
       return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
     }
     return deps.sessionManager.getOrCreateSession(req.params.id);
@@ -157,7 +174,9 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
 
   // Force-create a new session (archives existing active sessions)
   app.post<{ Params: { id: string } }>('/api/projects/:id/sessions/new', async (req, reply) => {
-    if (!getDb().prepare('SELECT 1 FROM projects WHERE id = ?').get(req.params.id)) {
+    const missing = replyIfInactiveProject(reply, req.params.id, deps.projectRegistry);
+    if (missing) return missing;
+    if (!hasProject(getDb(), req.params.id)) {
       return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
     }
     return deps.sessionManager.createSession(req.params.id);
@@ -213,6 +232,8 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
   app.patch<{ Params: { id: string } }>('/api/sessions/:id', async (req, reply) => {
     const session = deps.sessionManager.getSession(req.params.id);
     if (!session) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Session not found' });
+    const missing = replyIfInactiveProject(reply, session.projectId, deps.projectRegistry);
+    if (missing) return missing;
 
     const schema = z.object({
       name: z.string().optional(),
@@ -242,6 +263,8 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
   app.post<{ Params: { id: string } }>('/api/sessions/:id/cross-references', async (req, reply) => {
     const session = deps.sessionManager.getSession(req.params.id);
     if (!session) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Session not found' });
+    const missing = replyIfInactiveProject(reply, session.projectId, deps.projectRegistry);
+    if (missing) return missing;
 
     const schema = z.object({
       targetSessionId: z.string().min(1),
@@ -257,6 +280,8 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
     const target = deps.sessionManager.getSession(result.data.targetSessionId);
     if (!target)
       return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Target session not found' });
+    const targetMissing = replyIfInactiveProject(reply, target.projectId, deps.projectRegistry);
+    if (targetMissing) return targetMissing;
 
     const ref = createReference(req.params.id, result.data.targetSessionId, result.data.context);
     return ref;
@@ -266,9 +291,12 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
   app.delete<{ Params: { id: string; refId: string } }>(
     '/api/sessions/:id/cross-references/:refId',
     async (req, reply) => {
-      if (!deps.sessionManager.getSession(req.params.id)) {
+      const session = deps.sessionManager.getSession(req.params.id);
+      if (!session) {
         return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Session not found' });
       }
+      const missing = replyIfInactiveProject(reply, session.projectId, deps.projectRegistry);
+      if (missing) return missing;
       const deleted = deleteReference(req.params.refId, req.params.id);
       if (!deleted)
         return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Reference not found' });
@@ -280,6 +308,8 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
   app.post<{ Params: { id: string } }>('/api/sessions/:id/retrospective', async (req, reply) => {
     const session = deps.sessionManager.getSession(req.params.id);
     if (!session) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Session not found' });
+    const missing = replyIfInactiveProject(reply, session.projectId, deps.projectRegistry);
+    if (missing) return missing;
 
     if (!deps.sessionRetrospective) {
       return reply
@@ -308,6 +338,8 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
     if (!session) {
       return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Session not found' });
     }
+    const missing = replyIfInactiveProject(reply, session.projectId, deps.projectRegistry);
+    if (missing) return missing;
 
     const result = EnqueueBodySchema.safeParse(req.body);
     if (!result.success) {

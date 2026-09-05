@@ -16,7 +16,7 @@ import { readProjectDefinition } from './project-definition.ts';
 
 const log = createLogger('project-scanner');
 
-const SKIP_DIRS = new Set(['agents', 'templates', 'schedules', 'node_modules', '.git']);
+const SKIP_DIRS = new Set(['agents', 'templates', 'schedules', 'tasks', 'node_modules', '.git']);
 
 function shouldSkipDir(name: string): boolean {
   return name.startsWith('.') || SKIP_DIRS.has(name);

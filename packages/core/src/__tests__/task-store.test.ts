@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { initDatabase, getDb } from '../db/database.ts';
-import { createTaskStore } from '../task-manager/task-store.ts';
 import type { TaskStore } from '../task-manager/task-store.ts';
 import type { TaskCreateInput, RavenTask } from '@raven/shared';
+import { parse, stringify } from 'yaml';
+import { createTaskStoreFixture } from './fixtures/task-store.ts';
 
 function makeMockEventBus() {
   const events: Array<{ type: string; payload: any }> = [];
@@ -24,6 +24,17 @@ function makeInput(overrides: Partial<TaskCreateInput> = {}): TaskCreateInput {
   };
 }
 
+function boardFiles(tmpDir: string, project = 'system'): string[] {
+  const path = join(tmpDir, 'projects', project, 'tasks', 'board');
+  try {
+    return readdirSync(path)
+      .filter((name) => name.endsWith('.yaml'))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
 describe('TaskStore', () => {
   let tmpDir: string;
   let store: TaskStore;
@@ -31,25 +42,11 @@ describe('TaskStore', () => {
 
   beforeAll(() => {
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-taskstore-'));
-    const db = initDatabase(join(tmpDir, 'test.db'));
     eventBus = makeMockEventBus();
-    store = createTaskStore({
-      db: {
-        run: (sql: string, ...params: unknown[]) => db.prepare(sql).run(...params),
-        get: <T>(sql: string, ...params: unknown[]) =>
-          db.prepare(sql).get(...params) as T | undefined,
-        all: <T>(sql: string, ...params: unknown[]) => db.prepare(sql).all(...params) as T[],
-      },
-      eventBus,
-    });
+    store = createTaskStoreFixture(join(tmpDir, 'projects'), eventBus);
   });
 
   afterAll(() => {
-    try {
-      getDb().close();
-    } catch {
-      /* */
-    }
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -100,6 +97,11 @@ describe('TaskStore', () => {
       const created = eventBus.events.slice(before).find((e: any) => e.type === 'task:created');
       expect(created).toBeDefined();
       expect(created!.payload.title).toBe('Event test');
+    });
+
+    it('stamps completedAt when created completed', () => {
+      const task = store.createTask(makeInput({ title: 'Already done', status: 'completed' }));
+      expect(task.completedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     });
   });
 
@@ -182,11 +184,27 @@ describe('TaskStore', () => {
     it('throws for nonexistent task', () => {
       expect(() => store.completeTask('nonexistent')).toThrow('Task not found');
     });
+
+    it('is idempotent for repeated artifacts and timestamps', () => {
+      const created = store.createTask(makeInput({ title: 'Repeat completion' }));
+      const first = store.completeTask(created.id, ['same.txt']);
+      const second = store.completeTask(created.id, ['same.txt']);
+      expect(second.artifacts).toEqual(['same.txt']);
+      expect(second.completedAt).toBe(first.completedAt);
+      expect(second.updatedAt).toBe(first.updatedAt);
+    });
+
+    it('clears completedAt when reopened', () => {
+      const created = store.createTask(makeInput({ title: 'Reopen me' }));
+      store.completeTask(created.id);
+      const reopened = store.updateTask(created.id, { status: 'todo' });
+      expect(reopened.completedAt).toBeUndefined();
+    });
   });
 
   describe('subtasks', () => {
     it('creates parent-child relationship and queries subtasks', () => {
-      const parent = store.createTask(makeInput({ title: 'Parent' }));
+      const parent = store.createTask(makeInput({ title: 'Parent', projectId: 'proj-inherit' }));
       store.createTask(
         makeInput({
           title: 'Child 1',
@@ -198,6 +216,7 @@ describe('TaskStore', () => {
         makeInput({
           title: 'Child 2',
           parentTaskId: parent.id,
+          projectId: 'proj-inherit',
         }),
       );
 
@@ -206,14 +225,83 @@ describe('TaskStore', () => {
       expect(subtasks[0].title).toBe('Child 1');
       expect(subtasks[1].title).toBe('Child 2');
     });
+
+    it('rejects a parent-child relationship across projects', () => {
+      const parent = store.createTask(makeInput({ title: 'Project parent' }));
+      expect(() =>
+        store.createTask(
+          makeInput({ title: 'Foreign child', parentTaskId: parent.id, projectId: 'proj-inherit' }),
+        ),
+      ).toThrow(/same project/);
+    });
+
+    it('rejects an unknown parent without writing or emitting', () => {
+      const beforeFiles = boardFiles(tmpDir);
+      const beforeEvents = eventBus.events.length;
+      expect(() => store.createTask(makeInput({ parentTaskId: 'missing-parent' }))).toThrow(
+        'Unknown parent task',
+      );
+      expect(boardFiles(tmpDir)).toEqual(beforeFiles);
+      expect(eventBus.events.length).toBe(beforeEvents);
+    });
+
+    it('rejects a cross-project parent without writing or emitting', () => {
+      const parent = store.createTask(makeInput({ title: 'Foreign parent' }));
+      const beforeFiles = boardFiles(tmpDir, 'proj-inherit');
+      const beforeEvents = eventBus.events.length;
+      expect(() =>
+        store.createTask(makeInput({ parentTaskId: parent.id, projectId: 'proj-inherit' })),
+      ).toThrow('same project');
+      expect(boardFiles(tmpDir, 'proj-inherit')).toEqual(beforeFiles);
+      expect(eventBus.events.length).toBe(beforeEvents);
+    });
+
+    it('rejects a parent cycle without changing bytes', () => {
+      const parent = store.createTask(makeInput({ title: 'Cycle parent', projectId: 'proj-1' }));
+      const child = store.createTask(
+        makeInput({ title: 'Cycle child', projectId: 'proj-1', parentTaskId: parent.id }),
+      );
+      const path = join(tmpDir, 'projects', 'proj-1', 'tasks', 'board', `${parent.id}.yaml`);
+      const before = readFileSync(path, 'utf8');
+      expect(() => store.updateTask(parent.id, { parentTaskId: child.id })).toThrow('cycle');
+      expect(readFileSync(path, 'utf8')).toBe(before);
+    });
+
+    it('rejects moving a parent while its child remains behind', () => {
+      const parent = store.createTask(makeInput({ title: 'Move parent', projectId: 'proj-1' }));
+      store.createTask(
+        makeInput({ title: 'Move child', projectId: 'proj-1', parentTaskId: parent.id }),
+      );
+      const source = join(tmpDir, 'projects', 'proj-1', 'tasks', 'board', `${parent.id}.yaml`);
+      const before = readFileSync(source, 'utf8');
+      expect(() => store.updateTask(parent.id, { projectId: 'proj-2' })).toThrow('child remains');
+      expect(readFileSync(source, 'utf8')).toBe(before);
+      expect(boardFiles(tmpDir, 'proj-2')).not.toContain(`${parent.id}.yaml`);
+    });
+
+    it('moves a task across projects and reopens it from a new store', () => {
+      const task = store.createTask(makeInput({ title: 'Transfer', projectId: 'proj-1' }));
+      const source = join(tmpDir, 'projects', 'proj-1', 'tasks', 'board', `${task.id}.yaml`);
+      const destination = join(tmpDir, 'projects', 'proj-2', 'tasks', 'board', `${task.id}.yaml`);
+      const moved = store.updateTask(task.id, { projectId: 'proj-2' });
+      expect(moved.projectId).toBe('proj-2');
+      expect(readFileSync(destination, 'utf8')).toContain('projectId: proj-2');
+      expect(() => readFileSync(source, 'utf8')).toThrow();
+      expect(
+        createTaskStoreFixture(join(tmpDir, 'projects'), eventBus).getTask(task.id)?.projectId,
+      ).toBe('proj-2');
+    });
   });
 
   describe('queryTasks', () => {
     it('excludes archived by default', () => {
       const task = store.createTask(makeInput({ title: 'To archive' }));
       store.completeTask(task.id);
-      // Force archive by directly updating
-      getDb().prepare("UPDATE tasks SET status = 'archived' WHERE id = ?").run(task.id);
+      // Force archive by updating the authoritative file.
+      const path = join(tmpDir, 'projects', 'system', 'tasks', 'board', `${task.id}.yaml`);
+      const record = parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+      record.status = 'archived';
+      writeFileSync(path, stringify(record));
 
       const results = store.queryTasks({});
       const found = results.find((t: RavenTask) => t.id === task.id);
@@ -288,9 +376,12 @@ describe('TaskStore', () => {
     it('archives tasks completed more than 24h ago', () => {
       const task = store.createTask(makeInput({ title: 'Old completed' }));
       store.completeTask(task.id);
-      // Backdate completed_at to 25h ago
+      // Backdate completedAt in the authoritative file.
       const pastDate = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
-      getDb().prepare('UPDATE tasks SET completed_at = ? WHERE id = ?').run(pastDate, task.id);
+      const path = join(tmpDir, 'projects', 'system', 'tasks', 'board', `${task.id}.yaml`);
+      const record = parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+      record.completedAt = pastDate;
+      writeFileSync(path, stringify(record));
 
       const count = store.archiveCompletedTasks();
       expect(count).toBeGreaterThanOrEqual(1);

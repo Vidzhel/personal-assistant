@@ -27,11 +27,14 @@ import {
   ProjectMutationError,
   withProjectMutation,
 } from '../../project-manager/project-mutation.ts';
+import { isCurrentProject } from '../../project-manager/project-active.ts';
+import type { ProjectRegistry } from '../../project-registry/project-registry.ts';
 
 export interface ProjectKnowledgeRouteDeps {
   neo4j?: Neo4jClient;
   knowledgeStore?: KnowledgeStore;
   projectsDir?: string;
+  projectRegistry?: ProjectRegistry;
 }
 
 function assertProjectExists(projectId: string): void {
@@ -47,7 +50,9 @@ function mutateKnowledge<T>(
   operation: () => Promise<T>,
 ): Promise<T> {
   return withProjectMutation(deps.projectsDir ?? resolve(projectRoot, 'projects'), async () => {
-    assertProjectExists(projectId);
+    if (!isCurrentProject(getDb(), projectId, deps.projectRegistry)) {
+      throw new ProjectMutationError('Project not found', HTTP_STATUS.NOT_FOUND);
+    }
     return operation();
   });
 }
@@ -68,7 +73,7 @@ export function registerProjectKnowledgeRoutes(
   });
 
   app.post<{ Params: { id: string } }>('/api/projects/:id/data-sources', async (req, reply) => {
-    if (!getDb().prepare('SELECT 1 FROM projects WHERE id = ?').get(req.params.id)) {
+    if (!isCurrentProject(getDb(), req.params.id, deps.projectRegistry)) {
       return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
     }
     const parsed = CreateDataSourceSchema.safeParse(req.body);
@@ -82,7 +87,7 @@ export function registerProjectKnowledgeRoutes(
   app.put<{ Params: { id: string; dsId: string } }>(
     '/api/projects/:id/data-sources/:dsId',
     async (req, reply) => {
-      if (!getDb().prepare('SELECT 1 FROM projects WHERE id = ?').get(req.params.id)) {
+      if (!isCurrentProject(getDb(), req.params.id, deps.projectRegistry)) {
         return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
       }
       const existing = getDataSource(req.params.dsId);
@@ -102,7 +107,7 @@ export function registerProjectKnowledgeRoutes(
   app.delete<{ Params: { id: string; dsId: string } }>(
     '/api/projects/:id/data-sources/:dsId',
     async (req, reply) => {
-      if (!getDb().prepare('SELECT 1 FROM projects WHERE id = ?').get(req.params.id)) {
+      if (!isCurrentProject(getDb(), req.params.id, deps.projectRegistry)) {
         return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
       }
       const existing = getDataSource(req.params.dsId);

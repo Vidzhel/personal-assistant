@@ -20,6 +20,11 @@ import {
 import { parseProjectRow, type ProjectRow } from '../../project-manager/project-cache.ts';
 import { ProjectMutationError } from '../../project-manager/project-mutation.ts';
 import type { Neo4jClient } from '../../knowledge-engine/neo4j-client.ts';
+import {
+  isActiveProject,
+  isCurrentProject,
+  isCurrentProjectLink,
+} from '../../project-manager/project-active.ts';
 
 const BAD_REQUEST = 400;
 
@@ -36,25 +41,28 @@ interface ProjectRouteDeps {
 export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDeps): void {
   app.get('/api/projects', async () => {
     const db = getDb();
-    const rows = db.prepare('SELECT * FROM projects ORDER BY updated_at DESC').all();
-    return rows.map((row) =>
-      enrichWithRegistry(
-        parseProjectRow(row as ProjectRow),
-        deps.projectRegistry,
-        deps.templateRegistry,
-      ),
-    );
+    const rows = db
+      .prepare(
+        'SELECT * FROM projects WHERE fs_path IS NOT NULL AND fs_path <> ? ORDER BY updated_at DESC',
+      )
+      .all('');
+    return rows
+      .map((row) => parseProjectRow(row as ProjectRow))
+      .filter((project) => isCurrentProjectLink(project.id, project.fsPath, deps.projectRegistry))
+      .map((project) => enrichWithRegistry(project, deps.projectRegistry, deps.templateRegistry));
   });
 
   app.get<{ Params: { id: string } }>('/api/projects/:id', async (req, reply) => {
     const db = getDb();
-    const row = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+    const row = db
+      .prepare('SELECT * FROM projects WHERE id = ? AND fs_path IS NOT NULL AND fs_path <> ?')
+      .get(req.params.id, '') as ProjectRow | undefined;
     if (!row) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
-    return enrichWithRegistry(
-      parseProjectRow(row as ProjectRow),
-      deps.projectRegistry,
-      deps.templateRegistry,
-    );
+    const project = parseProjectRow(row);
+    if (!isCurrentProject(getDb(), project.id, deps.projectRegistry)) {
+      return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
+    }
+    return enrichWithRegistry(project, deps.projectRegistry, deps.templateRegistry);
   });
 
   // GET /api/projects/:id/children — list sub-projects from the filesystem registry
@@ -65,20 +73,16 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
 
     const { id } = req.params;
 
-    // fs_path is the authoritative link (project-manager/project-sync.ts);
-    // name match and direct id lookup are fallbacks for unreconciled rows.
+    // fs_path is the authoritative link (project-manager/project-sync.ts).
     const db = getDb();
-    const dbRow = db.prepare('SELECT name, fs_path FROM projects WHERE id = ?').get(id) as
-      { name: string; fs_path: string | null } | undefined;
+    const dbRow = db
+      .prepare('SELECT fs_path FROM projects WHERE id = ? AND fs_path IS NOT NULL AND fs_path <> ?')
+      .get(id, '') as { fs_path: string } | undefined;
 
-    const registryNode = dbRow?.fs_path
-      ? deps.projectRegistry.getProject(dbRow.fs_path)
-      : dbRow
-        ? deps.projectRegistry.findByName(dbRow.name)
-        : deps.projectRegistry.getProject(id);
+    const registryNode = dbRow ? deps.projectRegistry.getProject(dbRow.fs_path) : undefined;
 
     if (!registryNode) {
-      return [];
+      return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
     }
 
     const children = deps.projectRegistry.getProjectChildren(registryNode.id);
@@ -118,6 +122,9 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
   });
 
   app.put<{ Params: { id: string } }>('/api/projects/:id', async (req, reply) => {
+    if (!isActiveProject(getDb(), req.params.id)) {
+      return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
+    }
     const parsed = ProjectUpdateInput.safeParse(req.body);
     if (!parsed.success) {
       return reply.status(BAD_REQUEST).send({ error: parsed.error.message });
@@ -133,7 +140,10 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
     return { success: true };
   });
 
-  app.delete<{ Params: { id: string } }>('/api/projects/:id', async (req) => {
+  app.delete<{ Params: { id: string } }>('/api/projects/:id', async (req, reply) => {
+    if (!isActiveProject(getDb(), req.params.id)) {
+      return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
+    }
     const result = await deleteManagedProject(lifecycleDeps(deps), req.params.id);
 
     deps.eventBus.emit({
@@ -166,8 +176,9 @@ function lifecycleDeps(deps: ProjectRouteDeps): ProjectLifecycleDeps {
 
 function cacheProjectId(fsPath: string): string | undefined {
   return (
-    getDb().prepare('SELECT id FROM projects WHERE fs_path = ?').get(fsPath) as
-      { id: string } | undefined
+    getDb()
+      .prepare('SELECT id FROM projects WHERE fs_path = ? AND fs_path <> ?')
+      .get(fsPath, '') as { id: string } | undefined
   )?.id;
 }
 
@@ -186,11 +197,9 @@ function enrichWithRegistry(
 ): EnrichedProject {
   if (!registry) return project;
 
-  // fs_path is the authoritative link; name match is a fallback for rows
-  // not yet reconciled by project-manager/project-sync.ts.
-  const node = project.fsPath
-    ? registry.getProject(project.fsPath)
-    : registry.findByName(project.name);
+  // fs_path is the authoritative link. A project without one is historical
+  // cache state and is filtered before enrichment.
+  const node = project.fsPath ? registry.getProject(project.fsPath) : undefined;
   if (!node) return project;
 
   return {

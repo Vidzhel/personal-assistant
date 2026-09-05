@@ -7,6 +7,7 @@ import {
   initFileLogging,
   closeFileLogging,
   UNSNOOZABLE_CATEGORIES,
+  META_PROJECT_ID,
   type DatabaseInterface,
   type RavenEvent,
   type RavenEventType,
@@ -212,7 +213,11 @@ export async function createRaven(
     await projectRegistry.load(projectsDir);
     log.info('Project registry loaded');
   } catch (err) {
-    log.warn(`Project registry failed to load, continuing without: ${err}`);
+    log.error(`Project registry failed to load: ${err}`);
+    eventBus.removeAllListeners();
+    closeDatabase();
+    await closeFileLogging();
+    throw err;
   }
 
   // Create agent YAML store (filesystem-backed agent definitions)
@@ -230,14 +235,15 @@ export async function createRaven(
     libraryDir,
   });
 
-  // One project store: reconcile the DB cache against the filesystem
-  // registry — link/create rows for every directory, scaffold or drop
-  // whatever legacy rows have neither a registry node nor references left.
-  // See project-manager/project-sync.ts.
+  // Refresh the operational project projection from current definitions.
   try {
     await runProjectSync({ db: getDb(), projectRegistry, scaffoldingApi, projectsDir });
   } catch (err) {
-    log.warn(`Project sync failed, continuing with unreconciled cache rows: ${err}`);
+    log.error(`Project definitions could not refresh the operational cache: ${err}`);
+    eventBus.removeAllListeners();
+    closeDatabase();
+    await closeFileLogging();
+    throw err;
   }
 
   // L16: count only services whose requiresEnv is fully satisfied — NOT
@@ -319,7 +325,17 @@ export async function createRaven(
   log.info('Execution logger initialized');
 
   // 7e. Init task store
-  const taskStore = createTaskStore({ db: dbInterface, eventBus: baseContext.eventBus });
+  const taskStore = createTaskStore({
+    projectsDir,
+    projects: () => {
+      projectRegistry.assertHealthy();
+      return projectRegistry.listProjects().map((node) => ({
+        id: node.isMeta ? META_PROJECT_ID : (node.metadata?.id ?? node.id),
+        fsPath: node.id,
+      }));
+    },
+    eventBus: baseContext.eventBus,
+  });
   log.info('Task manager initialized');
 
   // Expose task store globally for suite services

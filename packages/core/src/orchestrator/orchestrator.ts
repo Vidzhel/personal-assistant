@@ -1,6 +1,7 @@
 import {
   createLogger,
   generateId,
+  HTTP_STATUS,
   SOURCE_ORCHESTRATOR,
   SKILL_ORCHESTRATOR,
   type NewEmailEvent,
@@ -9,7 +10,6 @@ import {
   type SystemAccessLevel,
   type BashAccess,
 } from '@raven/shared';
-import type Database from 'better-sqlite3';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { SessionManager } from '../session-manager/session-manager.ts';
 import type { MessageStore } from '../session-manager/message-store.ts';
@@ -26,8 +26,10 @@ import type { ScaffoldingApi } from '../scaffolding/scaffolding-api.ts';
 import { getDb } from '../db/database.ts';
 import { resolveSystemAccessInstructions } from '../project-manager/system-access-gate.ts';
 import { createAuditLog } from '../permission-engine/audit-log.ts';
-import { createManagedProject } from '../project-manager/project-lifecycle.ts';
 import { validateChatTarget } from '../session-manager/chat-validation.ts';
+import { assertActiveProject } from '../project-manager/project-active.ts';
+import { createManagedProject } from '../project-manager/project-lifecycle.ts';
+import { ProjectMutationError } from '../project-manager/project-mutation.ts';
 
 const log = createLogger('orchestrator');
 
@@ -35,21 +37,6 @@ const LOG_MESSAGE_PREVIEW_LENGTH = 100;
 // Library skill name for Gmail (library/skills/communication/email/gmail/config.json) —
 // distinct from the retired suite name 'email'.
 const GMAIL_SKILL = 'gmail';
-
-/** ensureProject fallback for callers with no registry/scaffolding wired
- * (minimal test harnesses) — keeps chat working via a DB-only row rather
- * than hard-failing, same as the pre-Task-1 behavior. */
-function insertDegradedProjectRow(
-  db: Database.Database,
-  projectId: string,
-  topicName: string | undefined,
-): void {
-  const now = Date.now();
-  db.prepare(
-    'INSERT INTO projects (id, name, description, skills, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-  ).run(projectId, topicName ?? projectId, 'Auto-created (registry unavailable)', '[]', now, now);
-  log.warn(`Project "${projectId}" cache-only — project registry/scaffolding not wired`);
-}
 
 export interface OrchestratorDeps {
   eventBus: EventBus;
@@ -169,21 +156,25 @@ export class Orchestrator {
   }
 
   /**
-   * Ensure a project row exists for auto-created project ids (Telegram
-   * topics, direct-mode chat). Filesystem is the source of truth: when no
-   * registry node backs `projectId` yet, scaffold one — kebab-cased topic
-   * name when available, else the "inbox" catch-all for unnameable sources
-   * (e.g. legacy direct-mode messages, which carry no topic at all) —
-   * before upserting the DB cache row.
+   * Existing project IDs must already be linked to a definition. A missing
+   * ID may create a managed definition through the normal lifecycle when
+   * project definition storage is available; no cache-only project is ever
+   * inserted when that storage is unavailable.
    */
   private async ensureProject(projectId: string, topicName: string | undefined): Promise<void> {
     const db = getDb();
-    if (db.prepare('SELECT 1 FROM projects WHERE id = ?').get(projectId)) return;
-
+    const existing = db.prepare('SELECT fs_path FROM projects WHERE id = ?').get(projectId) as
+      { fs_path: string | null } | undefined;
+    if (existing) {
+      assertActiveProject(db, projectId);
+      return;
+    }
     const { projectRegistry, scaffoldingApi, projectsDir } = this;
     if (!projectRegistry || !scaffoldingApi || !projectsDir) {
-      insertDegradedProjectRow(db, projectId, topicName);
-      return;
+      throw new ProjectMutationError(
+        'Project definition storage is unavailable',
+        HTTP_STATUS.SERVICE_UNAVAILABLE,
+      );
     }
 
     await createManagedProject(
@@ -246,7 +237,10 @@ export class Orchestrator {
       return;
     }
 
-    const target = validateChatTarget(this.sessionManager, projectId, sessionId);
+    const target = validateChatTarget(this.sessionManager, projectId, {
+      sessionId,
+      projectRegistry: this.projectRegistry,
+    });
     if (!target.ok) {
       this.rejectChat(event, target.error);
       return;
@@ -339,12 +333,11 @@ export class Orchestrator {
     // Look up project for system access level
     const db = getDb();
     const projectRow = db
-      .prepare('SELECT name, system_access, system_prompt, fs_path FROM projects WHERE id = ?')
+      .prepare('SELECT name, system_access, fs_path FROM projects WHERE id = ?')
       .get(projectId) as
       | {
           name: string;
           system_access: string;
-          system_prompt: string | null;
           fs_path: string | null;
         }
       | undefined;
@@ -362,17 +355,13 @@ export class Orchestrator {
     let projectContextChain: string | undefined;
     if (this.projectRegistry && projectRow) {
       try {
-        // fs_path is the authoritative link (see project-manager/project-sync.ts);
-        // name-based lookup is a fallback for rows not yet reconciled.
+        // fs_path is the authoritative link (see project-manager/project-sync.ts).
         const fsProject = projectRow.fs_path
           ? this.projectRegistry.getProject(projectRow.fs_path)
-          : this.projectRegistry.findByName(projectRow.name);
+          : undefined;
         if (fsProject) {
           const resolved = this.projectRegistry.resolveProjectContext(fsProject.id);
           const contexts = [...resolved.contextChain];
-          if (projectRow.system_prompt && fsProject.metadata?.systemPrompt === undefined) {
-            contexts.push(projectRow.system_prompt);
-          }
           const chain = contexts.filter(Boolean).join('\n\n---\n\n');
           if (chain) {
             projectContextChain = chain;

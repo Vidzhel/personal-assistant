@@ -2,9 +2,8 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { initDatabase, getDb } from '../db/database.ts';
-import { createTaskStore } from '../task-manager/task-store.ts';
 import { createTaskLifecycle } from '../task-manager/task-lifecycle.ts';
+import { createTaskStoreFixture } from './fixtures/task-store.ts';
 
 function makeMockEventBus() {
   const handlers = new Map<string, Set<(event: unknown) => void>>();
@@ -32,29 +31,15 @@ describe('TaskLifecycle', () => {
 
   beforeAll(() => {
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-lifecycle-'));
-    initDatabase(join(tmpDir, 'test.db'));
   });
 
   afterAll(() => {
-    try {
-      getDb().close();
-    } catch {
-      /* */
-    }
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
   it('registers both agent:task:request and agent:task:complete handlers on start', () => {
     eventBus = makeMockEventBus();
-    const db = getDb();
-    const taskStore = createTaskStore({
-      db: {
-        run: (sql: string, ...p: unknown[]) => db.prepare(sql).run(...p),
-        get: <T>(sql: string, ...p: unknown[]) => db.prepare(sql).get(...p) as T | undefined,
-        all: <T>(sql: string, ...p: unknown[]) => db.prepare(sql).all(...p) as T[],
-      },
-      eventBus,
-    });
+    const taskStore = createTaskStoreFixture(join(tmpDir, 'projects'), eventBus);
 
     const lifecycle = createTaskLifecycle({ eventBus, taskStore });
     lifecycle.start();
@@ -69,15 +54,7 @@ describe('TaskLifecycle', () => {
 
   it('auto-completes mapped RavenTask on successful agent completion', () => {
     eventBus = makeMockEventBus();
-    const db = getDb();
-    const taskStore = createTaskStore({
-      db: {
-        run: (sql: string, ...p: unknown[]) => db.prepare(sql).run(...p),
-        get: <T>(sql: string, ...p: unknown[]) => db.prepare(sql).get(...p) as T | undefined,
-        all: <T>(sql: string, ...p: unknown[]) => db.prepare(sql).all(...p) as T[],
-      },
-      eventBus,
-    });
+    const taskStore = createTaskStoreFixture(join(tmpDir, 'projects'), eventBus);
 
     const lifecycle = createTaskLifecycle({ eventBus, taskStore });
     lifecycle.start();
@@ -128,15 +105,7 @@ describe('TaskLifecycle', () => {
 
   it('does not complete tasks when agent fails', () => {
     eventBus = makeMockEventBus();
-    const db = getDb();
-    const taskStore = createTaskStore({
-      db: {
-        run: (sql: string, ...p: unknown[]) => db.prepare(sql).run(...p),
-        get: <T>(sql: string, ...p: unknown[]) => db.prepare(sql).get(...p) as T | undefined,
-        all: <T>(sql: string, ...p: unknown[]) => db.prepare(sql).all(...p) as T[],
-      },
-      eventBus,
-    });
+    const taskStore = createTaskStoreFixture(join(tmpDir, 'projects'), eventBus);
 
     const lifecycle = createTaskLifecycle({ eventBus, taskStore });
     lifecycle.start();
@@ -184,15 +153,7 @@ describe('TaskLifecycle', () => {
 
   it('does not complete unrelated tasks when a different agent completes', () => {
     eventBus = makeMockEventBus();
-    const db = getDb();
-    const taskStore = createTaskStore({
-      db: {
-        run: (sql: string, ...p: unknown[]) => db.prepare(sql).run(...p),
-        get: <T>(sql: string, ...p: unknown[]) => db.prepare(sql).get(...p) as T | undefined,
-        all: <T>(sql: string, ...p: unknown[]) => db.prepare(sql).all(...p) as T[],
-      },
-      eventBus,
-    });
+    const taskStore = createTaskStoreFixture(join(tmpDir, 'projects'), eventBus);
 
     const lifecycle = createTaskLifecycle({ eventBus, taskStore });
     lifecycle.start();

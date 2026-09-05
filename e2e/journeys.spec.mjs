@@ -50,6 +50,45 @@ test.beforeEach(async ({ context }) => {
   });
 });
 
+test('project task board persists completion and displays file-backed task details', async ({
+  page,
+  request,
+}) => {
+  const p = await project(request, 'Browser Task Files');
+  const response = await request.post(`${API}/tasks`, {
+    data: {
+      title: 'Review task-file methods',
+      projectId: p.id,
+      description: 'Read assumptions and keep open questions.',
+      artifacts: ['notes/methods.md'],
+    },
+  });
+  expect(response.status()).toBe(201);
+  const task = await response.json();
+  await page.goto('/tasks');
+  await page.getByPlaceholder('Search tasks…').fill(task.title);
+  const card = page
+    .getByRole('region', { name: 'To Do', exact: true })
+    .locator('[draggable="true"]')
+    .filter({ hasText: task.title });
+  await expect(card).toBeVisible();
+  await card.dragTo(page.getByRole('region', { name: 'Done', exact: true }));
+  await expect(
+    page.getByRole('region', { name: 'Done', exact: true }).getByText(task.title),
+  ).toBeVisible();
+  await page.reload();
+  await page.getByRole('region', { name: 'Done', exact: true }).getByText(task.title).click();
+  await expect(page.getByRole('heading', { name: task.title, exact: true })).toBeVisible();
+  await expect(
+    page.getByText('Read assumptions and keep open questions.', { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText('notes/methods.md', { exact: true })).toBeVisible();
+  const persisted = await (await request.get(`${API}/tasks/${task.id}`)).json();
+  expect(persisted.status).toBe('completed');
+  expect(persisted.completedAt).toBeTruthy();
+  expect(persisted.projectId).toBe(p.id);
+});
+
 test('create project, persist instructions, and manage data sources with knowledge disabled', async ({
   page,
   request,

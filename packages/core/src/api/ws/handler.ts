@@ -4,6 +4,7 @@ import { createLogger } from '@raven/shared';
 import type { RavenEvent, WsMessageFromClient } from '@raven/shared';
 import type { EventBus } from '../../event-bus/event-bus.ts';
 import type { SessionManager } from '../../session-manager/session-manager.ts';
+import type { ProjectRegistry } from '../../project-registry/project-registry.ts';
 import {
   CHAT_REQUEST_ID_MAX_LENGTH,
   ChatRequestSchema,
@@ -15,6 +16,7 @@ const log = createLogger('ws');
 interface ChatDeps {
   eventBus: EventBus;
   sessionManager: SessionManager;
+  projectRegistry?: ProjectRegistry;
 }
 
 function handleChatSend(socket: WebSocket, deps: ChatDeps, msg: WsMessageFromClient): void {
@@ -33,7 +35,10 @@ function handleChatSend(socket: WebSocket, deps: ChatDeps, msg: WsMessageFromCli
     return;
   }
   const { projectId, sessionId, requestId } = parsed.data;
-  const target = validateChatTarget(deps.sessionManager, projectId, sessionId);
+  const target = validateChatTarget(deps.sessionManager, projectId, {
+    sessionId,
+    projectRegistry: deps.projectRegistry,
+  });
   if (!target.ok) {
     socket.send(
       JSON.stringify({

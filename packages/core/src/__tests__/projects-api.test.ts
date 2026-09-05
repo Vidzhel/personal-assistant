@@ -50,6 +50,22 @@ describe('Projects API — system access fields', () => {
     expect(meta.isMeta).toBe(true);
   });
 
+  it('hides a tombstoned cache row from active project reads', async () => {
+    getDb()
+      .prepare(
+        'INSERT INTO projects (id, name, skills, fs_path, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, ?)',
+      )
+      .run('historical-only', 'Historical Only', '[]', Date.now(), Date.now());
+
+    const listed = await app.inject({ method: 'GET', url: '/api/projects' });
+    expect(listed.json().some((project: { id: string }) => project.id === 'historical-only')).toBe(
+      false,
+    );
+
+    const detail = await app.inject({ method: 'GET', url: '/api/projects/historical-only' });
+    expect(detail.statusCode).toBe(404);
+  });
+
   it('POST /api/projects defaults systemAccess to none', async () => {
     const res = await app.inject({
       method: 'POST',

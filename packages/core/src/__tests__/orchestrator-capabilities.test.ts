@@ -36,6 +36,9 @@ describe('chat capability preflight', () => {
     vi.clearAllMocks();
     root = mkdtempSync(join(tmpdir(), 'raven-chat-capabilities-'));
     initDatabase(join(root, 'test.db'));
+    getDb()
+      .prepare('UPDATE projects SET fs_path = ?, is_meta = 1 WHERE id = ?')
+      .run('system', 'meta');
     const eventBus = new EventBus();
     eventBus.on('agent:task:request', requests);
     eventBus.on('user:chat:rejected', rejected);

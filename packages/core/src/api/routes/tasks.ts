@@ -2,12 +2,15 @@ import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import {
   HTTP_STATUS,
+  TaskCompletionInputSchema,
   TaskCreateInputSchema,
   TaskUpdateInputSchema,
   TaskStatusValues,
   TaskSourceValues,
 } from '@raven/shared';
 import type { TaskStore } from '../../task-manager/task-store.ts';
+import { TaskStoreError } from '../../task-manager/task-validation.ts';
+import { ProjectMutationError } from '../../project-manager/project-mutation.ts';
 
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_PAGE_SIZE = 200;
@@ -31,6 +34,25 @@ const TaskQuerySchema = z.object({
 const CountsQuerySchema = z.object({
   projectId: z.string().optional(),
 });
+
+function taskErrorStatus(error: unknown): number {
+  if (error instanceof ProjectMutationError) return error.statusCode;
+  if (!(error instanceof TaskStoreError)) return HTTP_STATUS.INTERNAL_SERVER_ERROR;
+  if (error.kind === 'not-found') return HTTP_STATUS.NOT_FOUND;
+  if (error.kind === 'conflict') return HTTP_STATUS.CONFLICT;
+  if (error.kind === 'bad-request') return HTTP_STATUS.BAD_REQUEST;
+  return HTTP_STATUS.INTERNAL_SERVER_ERROR;
+}
+
+function sendTaskError(
+  reply: { status: (code: number) => { send: (body: unknown) => unknown } },
+  error: unknown,
+): unknown {
+  const status = taskErrorStatus(error);
+  return reply
+    .status(status)
+    .send({ error: error instanceof Error ? error.message : String(error) });
+}
 
 // eslint-disable-next-line max-lines-per-function -- route registration
 export function registerTaskRoutes(app: FastifyInstance, deps: { taskStore: TaskStore }): void {
@@ -60,13 +82,16 @@ export function registerTaskRoutes(app: FastifyInstance, deps: { taskStore: Task
   // GET /api/tasks/:id — full task detail with subtasks
   app.get('/api/tasks/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const task = taskStore.getTask(id);
-    if (!task) {
-      return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Task not found' });
+    try {
+      const task = taskStore.getTask(id);
+      if (!task) {
+        return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Task not found' });
+      }
+      const subtasks = taskStore.getSubtasks(id);
+      return { ...task, subtasks };
+    } catch (error) {
+      return sendTaskError(reply, error);
     }
-
-    const subtasks = taskStore.getSubtasks(id);
-    return { ...task, subtasks };
   });
 
   // POST /api/tasks — create task (manual)
@@ -79,8 +104,12 @@ export function registerTaskRoutes(app: FastifyInstance, deps: { taskStore: Task
       });
     }
 
-    const task = taskStore.createTask(result.data);
-    return reply.status(HTTP_STATUS.CREATED).send(task);
+    try {
+      const task = taskStore.createTask(result.data);
+      return reply.status(HTTP_STATUS.CREATED).send(task);
+    } catch (error) {
+      return sendTaskError(reply, error);
+    }
   });
 
   // PATCH /api/tasks/:id — update task fields
@@ -98,21 +127,26 @@ export function registerTaskRoutes(app: FastifyInstance, deps: { taskStore: Task
       const task = taskStore.updateTask(id, result.data);
       return task;
     } catch (err) {
-      return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: (err as Error).message });
+      return sendTaskError(reply, err);
     }
   });
 
   // POST /api/tasks/:id/complete — complete with optional artifacts
   app.post('/api/tasks/:id/complete', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const body = (req.body ?? {}) as { artifacts?: string[] };
-    const artifacts = Array.isArray(body.artifacts) ? body.artifacts : undefined;
+    const result = TaskCompletionInputSchema.safeParse(req.body ?? {});
+    if (!result.success) {
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({
+        error: 'Invalid completion input',
+        details: result.error.issues,
+      });
+    }
 
     try {
-      const task = taskStore.completeTask(id, artifacts);
+      const task = taskStore.completeTask(id, result.data.artifacts);
       return task;
     } catch (err) {
-      return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: (err as Error).message });
+      return sendTaskError(reply, err);
     }
   });
 }

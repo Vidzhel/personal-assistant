@@ -4,6 +4,13 @@ import { resolve } from 'node:path';
 const active = new AsyncLocalStorage<string>();
 const queues = new Map<string, Promise<unknown>>();
 
+/** Synchronous record writes must not race an asynchronous project move or reload. */
+export function assertProjectMutationAllowed(root: string): void {
+  if (queues.has(resolve(root))) {
+    throw new ProjectMutationError('Project definitions are being updated; retry the task change');
+  }
+}
+
 /** Serialize complete project operations across API, scaffold, sync and Telegram callers. */
 export async function withProjectMutation<T>(
   root: string,

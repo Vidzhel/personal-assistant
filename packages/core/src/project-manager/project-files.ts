@@ -4,7 +4,15 @@ import { join, resolve, dirname } from 'node:path';
 import { HTTP_STATUS } from '@raven/shared';
 import { ProjectMutationError } from './project-mutation.ts';
 
-const RESERVED = new Set(['agents', 'templates', 'schedules', 'node_modules', 'meta', '_global']);
+const RESERVED = new Set([
+  'agents',
+  'templates',
+  'schedules',
+  'tasks',
+  'node_modules',
+  'meta',
+  '_global',
+]);
 const MAX_PROJECT_DEPTH = 3;
 
 export function assertProjectPath(path: string, system = false): void {

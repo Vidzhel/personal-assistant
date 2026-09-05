@@ -73,6 +73,14 @@ async function setupThreeLevels(): Promise<void> {
 }
 
 describe('ProjectRegistry', () => {
+  it('does not discover projects from task storage folders', async () => {
+    mkProject('research');
+    mkProject('research/tasks', 'Task storage is not a project definition');
+    mkProject('research/tasks/board', 'Neither are its record collections');
+    await registry.load(tmpDir);
+    expect(registry.listProjects().map((project) => project.id)).toEqual(['research']);
+  });
+
   it('resolves context chain from root to leaf', async () => {
     await setupThreeLevels();
 

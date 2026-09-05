@@ -39,6 +39,31 @@ export interface RavenTask {
   completedAt?: string;
 }
 
+/** Strict on-disk representation for project-local board task files. */
+export const TaskRecordSchema = z
+  .object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    description: z.string().optional(),
+    prompt: z.string().optional(),
+    status: z.enum(TaskStatusValues),
+    assignedAgentId: z.string().min(1).optional(),
+    projectId: z.string().min(1).optional(),
+    pipelineId: z.string().min(1).optional(),
+    scheduleId: z.string().min(1).optional(),
+    parentTaskId: z.string().min(1).optional(),
+    source: z.enum(TaskSourceValues),
+    externalId: z.string().min(1).optional(),
+    artifacts: z.array(z.string()),
+    createdAt: z.string().pipe(z.iso.datetime({ offset: true })),
+    updatedAt: z.string().pipe(z.iso.datetime({ offset: true })),
+    completedAt: z
+      .string()
+      .pipe(z.iso.datetime({ offset: true }))
+      .optional(),
+  })
+  .strict();
+
 /** Simple task template (see templates.ts for the unified pipeline template format) */
 export interface SimpleTaskTemplate {
   name: string;
@@ -54,13 +79,13 @@ export const TaskCreateInputSchema = z.object({
   description: z.string().optional(),
   prompt: z.string().optional(),
   status: z.enum(TaskStatusValues).default('todo'),
-  assignedAgentId: z.string().optional(),
-  projectId: z.string().optional(),
-  pipelineId: z.string().optional(),
-  scheduleId: z.string().optional(),
-  parentTaskId: z.string().optional(),
+  assignedAgentId: z.string().min(1).optional(),
+  projectId: z.string().min(1).optional(),
+  pipelineId: z.string().min(1).optional(),
+  scheduleId: z.string().min(1).optional(),
+  parentTaskId: z.string().min(1).optional(),
   source: z.enum(TaskSourceValues).default('manual'),
-  externalId: z.string().optional(),
+  externalId: z.string().min(1).optional(),
   artifacts: z.array(z.string()).default([]),
 });
 
@@ -71,15 +96,19 @@ export const TaskUpdateInputSchema = z.object({
   description: z.string().optional(),
   prompt: z.string().optional(),
   status: z.enum(TaskStatusValues).optional(),
-  assignedAgentId: z.string().nullable().optional(),
-  projectId: z.string().nullable().optional(),
-  pipelineId: z.string().nullable().optional(),
-  scheduleId: z.string().nullable().optional(),
-  parentTaskId: z.string().nullable().optional(),
+  assignedAgentId: z.string().min(1).nullable().optional(),
+  projectId: z.string().min(1).nullable().optional(),
+  pipelineId: z.string().min(1).nullable().optional(),
+  scheduleId: z.string().min(1).nullable().optional(),
+  parentTaskId: z.string().min(1).nullable().optional(),
   artifacts: z.array(z.string()).optional(),
 });
 
 export type TaskUpdateInput = z.infer<typeof TaskUpdateInputSchema>;
+
+export const TaskCompletionInputSchema = z
+  .object({ artifacts: z.array(z.string()).optional() })
+  .strict();
 
 /** Simple task template schema (see templates.ts for the unified pipeline template format) */
 export const SimpleTaskTemplateSchema = z.object({
@@ -88,5 +117,5 @@ export const SimpleTaskTemplateSchema = z.object({
   description: z.string().optional(),
   prompt: z.string().optional(),
   defaultAgentId: z.string().optional(),
-  projectId: z.string().optional(),
+  projectId: z.string().min(1).optional(),
 });

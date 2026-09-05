@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { HTTP_STATUS, type AgentSession } from '@raven/shared';
 import { getDb } from '../db/database.ts';
+import { isCurrentProject } from '../project-manager/project-active.ts';
+import type { ProjectRegistry } from '../project-registry/project-registry.ts';
 import type { SessionManager } from './session-manager.ts';
 
 export const CHAT_REQUEST_ID_MAX_LENGTH = 128;
@@ -20,13 +22,20 @@ export const ChatRequestSchema = z.object({
 type ChatTarget =
   { ok: true; session?: AgentSession } | { ok: false; statusCode: number; error: string };
 
+interface ChatTargetOptions {
+  sessionId: string | undefined;
+  projectRegistry?: ProjectRegistry;
+}
+
 /** Read-only preflight, also enforced by the orchestrator before any chat writes. */
 export function validateChatTarget(
   sessionManager: SessionManager,
   projectId: string,
-  sessionId: string | undefined,
+  options: ChatTargetOptions,
 ): ChatTarget {
-  if (!getDb().prepare('SELECT 1 FROM projects WHERE id = ?').get(projectId)) {
+  const { sessionId, projectRegistry } = options;
+  const db = getDb();
+  if (!isCurrentProject(db, projectId, projectRegistry)) {
     return { ok: false, statusCode: HTTP_STATUS.NOT_FOUND, error: 'Project not found' };
   }
   if (sessionId === undefined) return { ok: true };

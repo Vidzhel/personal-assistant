@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type Database from 'better-sqlite3';
@@ -30,8 +30,11 @@ describe('kebabCase', () => {
 async function buildDeps(projectsDir: string): Promise<ProjectSyncDeps> {
   const projectRegistry = new ProjectRegistry();
   await projectRegistry.load(projectsDir);
-  const agentYamlStore = createAgentYamlStore();
-  const scaffoldingApi = createScaffoldingApi({ projectsDir, projectRegistry, agentYamlStore });
+  const scaffoldingApi = createScaffoldingApi({
+    projectsDir,
+    projectRegistry,
+    agentYamlStore: createAgentYamlStore(),
+  });
   return { db: getDb(), projectRegistry, scaffoldingApi, projectsDir };
 }
 
@@ -57,14 +60,46 @@ describe('runProjectSync', () => {
     await runProjectSync(deps);
 
     expect(existsSync(join(projectsDir, 'system', 'context.md'))).toBe(true);
-
-    const row = db.prepare('SELECT fs_path FROM projects WHERE id = ?').get('meta') as {
-      fs_path: string | null;
-    };
-    expect(row.fs_path).toBe('system');
+    expect(db.prepare('SELECT fs_path FROM projects WHERE id = ?').get('meta')).toMatchObject({
+      fs_path: 'system',
+    });
   });
 
-  it('creates a cache row for a directory that exists but has no DB row', async () => {
+  it('keeps built-in system identity and read-write access for plain context.md', async () => {
+    mkdirSync(join(projectsDir, 'system'));
+    writeFileSync(join(projectsDir, 'system', 'context.md'), '# System body\n');
+    const deps = await buildDeps(projectsDir);
+
+    await runProjectSync(deps);
+
+    expect(db.prepare('SELECT * FROM projects WHERE id = ?').get('meta')).toMatchObject({
+      name: 'Raven System',
+      system_access: 'read-write',
+      is_meta: 1,
+      fs_path: 'system',
+    });
+  });
+
+  it('keeps explicit system metadata authoritative over built-in defaults', async () => {
+    mkdirSync(join(projectsDir, 'system'));
+    writeFileSync(
+      join(projectsDir, 'system', 'context.md'),
+      '---\nravenProject:\n  version: 1\n  id: meta\n  displayName: Controlled System\n  skills: [system-skill]\n  systemPrompt: Explicit system prompt\n  systemAccess: none\n---\nSystem body\n',
+    );
+    const deps = await buildDeps(projectsDir);
+
+    await runProjectSync(deps);
+
+    expect(db.prepare('SELECT * FROM projects WHERE id = ?').get('meta')).toMatchObject({
+      name: 'Controlled System',
+      skills: '["system-skill"]',
+      system_prompt: 'Explicit system prompt',
+      system_access: 'none',
+      fs_path: 'system',
+    });
+  });
+
+  it('creates a cache row for a current directory with a path-derived ID', async () => {
     mkdirSync(join(projectsDir, 'design'));
     writeFileSync(join(projectsDir, 'design', 'context.md'), '# Design\n');
 
@@ -72,173 +107,170 @@ describe('runProjectSync', () => {
     const result = await runProjectSync(deps);
 
     expect(result.created).toBeGreaterThanOrEqual(1);
-    const row = db
-      .prepare('SELECT id, name, fs_path FROM projects WHERE fs_path = ?')
-      .get('design') as { id: string; name: string; fs_path: string } | undefined;
-    expect(row).toBeDefined();
-    expect(row!.id).toBe('design');
+    expect(
+      db.prepare('SELECT id, name, fs_path FROM projects WHERE fs_path = ?').get('design'),
+    ).toEqual({
+      id: 'design',
+      name: 'design',
+      fs_path: 'design',
+    });
   });
 
-  it('links a legacy row (fs_path NULL) to a registry node with a matching name', async () => {
+  it('uses a stable path ID for plain files and ignores SQL name matches/settings', async () => {
     mkdirSync(join(projectsDir, 'legacy-project'));
-    writeFileSync(join(projectsDir, 'legacy-project', 'context.md'), '# Legacy Project\n');
-
+    const body = '# Legacy Project\n\nHuman-owned body.\n';
+    writeFileSync(join(projectsDir, 'legacy-project', 'context.md'), body);
     const now = Date.now();
     db.prepare(
-      "INSERT INTO projects (id, name, description, skills, created_at, updated_at) VALUES ('legacy-uuid', 'Legacy Project', NULL, '[]', ?, ?)",
+      "INSERT INTO projects (id, name, description, skills, system_access, created_at, updated_at) VALUES ('legacy-uuid', 'Legacy Project', 'stale', '[\"stale\"]', 'read', ?, ?)",
     ).run(now, now);
 
     const deps = await buildDeps(projectsDir);
     const result = await runProjectSync(deps);
 
-    expect(result.linked).toBeGreaterThanOrEqual(1);
-    const row = db.prepare('SELECT fs_path FROM projects WHERE id = ?').get('legacy-uuid') as {
-      fs_path: string | null;
-    };
-    expect(row.fs_path).toBe('legacy-project');
+    expect(result.created).toBeGreaterThanOrEqual(1);
+    expect(result.dropped).toBeGreaterThanOrEqual(1);
+    expect(db.prepare('SELECT 1 FROM projects WHERE id = ?').get('legacy-uuid')).toBeUndefined();
+    expect(db.prepare('SELECT * FROM projects WHERE id = ?').get('legacy-project')).toMatchObject({
+      name: 'legacy-project',
+      description: null,
+      skills: '[]',
+      system_access: 'none',
+      fs_path: 'legacy-project',
+    });
+    expect(readFileSync(join(projectsDir, 'legacy-project', 'context.md'), 'utf8')).toBe(body);
   });
 
-  it('scaffolds a directory for an orphan row still referenced by a session', async () => {
+  it('takes omitted metadata fields from file defaults instead of the cache', async () => {
+    mkdirSync(join(projectsDir, 'current'));
+    writeFileSync(
+      join(projectsDir, 'current', 'context.md'),
+      '---\nravenProject:\n  version: 1\n  id: current\n  displayName: Current\n---\nOwner body\n',
+    );
     const now = Date.now();
     db.prepare(
-      "INSERT INTO projects (id, name, description, skills, created_at, updated_at) VALUES ('orphan-referenced', 'Orphan Referenced', NULL, '[]', ?, ?)",
-    ).run(now, now);
-    db.prepare(
-      "INSERT INTO sessions (id, project_id, status, created_at, last_active_at, turn_count) VALUES ('sess-1', 'orphan-referenced', 'idle', ?, ?, 0)",
+      "INSERT INTO projects (id, name, description, skills, system_prompt, system_access, fs_path, created_at, updated_at) VALUES ('current', 'Old name', 'Old description', '[\"old\"]', 'Old prompt', 'read', 'current', ?, ?)",
     ).run(now, now);
 
     const deps = await buildDeps(projectsDir);
     const result = await runProjectSync(deps);
 
-    expect(result.scaffolded).toBeGreaterThanOrEqual(1);
-    const row = db
-      .prepare('SELECT fs_path FROM projects WHERE id = ?')
-      .get('orphan-referenced') as {
-      fs_path: string | null;
-    };
-    expect(row.fs_path).toBe('orphan-referenced');
-    expect(existsSync(join(projectsDir, 'orphan-referenced', 'context.md'))).toBe(true);
+    expect(result.scaffolded).toBe(0);
+    expect(db.prepare('SELECT * FROM projects WHERE id = ?').get('current')).toMatchObject({
+      name: 'Current',
+      description: null,
+      skills: '[]',
+      system_prompt: null,
+      system_access: 'none',
+      fs_path: 'current',
+    });
   });
 
-  it('drops an orphan row with no registry node and no references', async () => {
+  it('rebuilds metadata and plain projects after cache loss', async () => {
+    mkdirSync(join(projectsDir, 'plain'));
+    writeFileSync(join(projectsDir, 'plain', 'context.md'), '# Plain\n');
+    mkdirSync(join(projectsDir, 'managed'));
+    writeFileSync(
+      join(projectsDir, 'managed', 'context.md'),
+      '---\nravenProject: {version: 1, id: stable-managed, displayName: Managed}\n---\nBody\n',
+    );
+    const deps = await buildDeps(projectsDir);
+    await runProjectSync(deps);
+    db.prepare('DELETE FROM projects WHERE is_meta = 0').run();
+
+    const result = await runProjectSync(deps);
+
+    expect(result.created).toBe(2);
+    expect(db.prepare('SELECT fs_path FROM projects WHERE id = ?').get('plain')).toEqual({
+      fs_path: 'plain',
+    });
+    expect(db.prepare('SELECT fs_path FROM projects WHERE id = ?').get('stable-managed')).toEqual({
+      fs_path: 'managed',
+    });
+  });
+
+  it('drops an unreferenced stale row without recreating its directory', async () => {
     const now = Date.now();
     db.prepare(
       "INSERT INTO projects (id, name, description, skills, created_at, updated_at) VALUES ('orphan-unreferenced', 'Orphan Unreferenced', NULL, '[]', ?, ?)",
     ).run(now, now);
-
     const deps = await buildDeps(projectsDir);
+
     const result = await runProjectSync(deps);
 
     expect(result.dropped).toBeGreaterThanOrEqual(1);
-    const row = db.prepare('SELECT 1 FROM projects WHERE id = ?').get('orphan-unreferenced');
-    expect(row).toBeUndefined();
+    expect(
+      db.prepare('SELECT 1 FROM projects WHERE id = ?').get('orphan-unreferenced'),
+    ).toBeUndefined();
+    expect(existsSync(join(projectsDir, 'orphan-unreferenced'))).toBe(false);
   });
 
-  it('scaffolds (does not drop) an orphan row only referenced by an events row', async () => {
+  it('retains referenced stale rows as tombstones without scaffolding', async () => {
     const now = Date.now();
     db.prepare(
-      "INSERT INTO projects (id, name, description, skills, created_at, updated_at) VALUES ('orphan-event-ref', 'Orphan Event Ref', NULL, '[]', ?, ?)",
+      "INSERT INTO projects (id, name, description, skills, fs_path, created_at, updated_at) VALUES ('orphan-referenced', 'Orphan Referenced', NULL, '[]', 'old-path', ?, ?)",
     ).run(now, now);
     db.prepare(
-      "INSERT INTO events (id, type, source, project_id, payload, timestamp) VALUES ('evt-1', 'user:chat:message', 'test', 'orphan-event-ref', '{}', ?)",
-    ).run(now);
-
+      "INSERT INTO sessions (id, project_id, status, created_at, last_active_at, turn_count) VALUES ('sess-1', 'orphan-referenced', 'idle', ?, ?, 0)",
+    ).run(now, now);
     const deps = await buildDeps(projectsDir);
+
     const result = await runProjectSync(deps);
 
-    expect(result.scaffolded).toBeGreaterThanOrEqual(1);
-    const row = db.prepare('SELECT fs_path FROM projects WHERE id = ?').get('orphan-event-ref') as
-      { fs_path: string | null } | undefined;
-    expect(row?.fs_path).toBe('orphan-event-ref');
+    expect(result.scaffolded).toBe(0);
+    expect(
+      db.prepare('SELECT fs_path FROM projects WHERE id = ?').get('orphan-referenced'),
+    ).toEqual({
+      fs_path: null,
+    });
+    expect(existsSync(join(projectsDir, 'orphan-referenced'))).toBe(false);
   });
 
-  it('scaffolds (does not drop) an orphan row only referenced by a knowledge_rejections row', async () => {
+  it('does not automatically rebind a referenced stale ID', async () => {
     const now = Date.now();
     db.prepare(
-      "INSERT INTO projects (id, name, description, skills, created_at, updated_at) VALUES ('orphan-rejection-ref', 'Orphan Rejection Ref', NULL, '[]', ?, ?)",
+      "INSERT INTO projects (id, name, description, skills, created_at, updated_at) VALUES ('rebind-me', 'Old project', 'Old data', '[]', ?, ?)",
     ).run(now, now);
     db.prepare(
-      "INSERT INTO knowledge_rejections (id, project_id, session_id, content_hash, reason, created_at) VALUES ('rej-1', 'orphan-rejection-ref', 'sess-1', 'hash1', NULL, ?)",
-    ).run(new Date(now).toISOString());
-
+      "INSERT INTO sessions (id, project_id, status, created_at, last_active_at, turn_count) VALUES ('sess-rebind', 'rebind-me', 'idle', ?, ?, 0)",
+    ).run(now, now);
+    mkdirSync(join(projectsDir, 'rebind-me'));
+    writeFileSync(join(projectsDir, 'rebind-me', 'context.md'), '# Recreated\n');
     const deps = await buildDeps(projectsDir);
-    const result = await runProjectSync(deps);
 
-    expect(result.scaffolded).toBeGreaterThanOrEqual(1);
-    const row = db
-      .prepare('SELECT fs_path FROM projects WHERE id = ?')
-      .get('orphan-rejection-ref') as { fs_path: string | null } | undefined;
-    expect(row?.fs_path).toBe('orphan-rejection-ref');
+    await expect(runProjectSync(deps)).rejects.toThrow('cannot be rebound');
+    expect(db.prepare('SELECT fs_path FROM projects WHERE id = ?').get('rebind-me')).toEqual({
+      fs_path: null,
+    });
+    expect(readFileSync(join(projectsDir, 'rebind-me', 'context.md'), 'utf8')).toBe(
+      '# Recreated\n',
+    );
   });
 
-  it('scaffolds (does not drop) an unreferenced orphan row that carries its own config', async () => {
+  it('rejects a same-path metadata identity change', async () => {
     const now = Date.now();
+    mkdirSync(join(projectsDir, 'identity'));
+    writeFileSync(
+      join(projectsDir, 'identity', 'context.md'),
+      '---\nravenProject: {version: 1, id: current-id}\n---\nBody\n',
+    );
     db.prepare(
-      "INSERT INTO projects (id, name, description, skills, system_prompt, created_at, updated_at) VALUES ('orphan-with-config', 'Orphan With Config', 'has a description', '[]', NULL, ?, ?)",
+      "INSERT INTO projects (id, name, description, skills, fs_path, created_at, updated_at) VALUES ('old-id', 'Old', NULL, '[]', 'identity', ?, ?)",
     ).run(now, now);
-
     const deps = await buildDeps(projectsDir);
-    const result = await runProjectSync(deps);
 
-    expect(result.scaffolded).toBeGreaterThanOrEqual(1);
-    expect(result.dropped).toBe(0);
-    const row = db
-      .prepare('SELECT fs_path, description FROM projects WHERE id = ?')
-      .get('orphan-with-config') as { fs_path: string | null; description: string } | undefined;
-    expect(row?.fs_path).toBe('orphan-with-config');
-    // The original config text survives — scaffolding only links fs_path,
-    // it never overwrites the row's own config columns.
-    expect(row?.description).toBe('has a description');
-  });
-
-  it('does not silently lose one of two legacy rows that collide on the same kebab slug', async () => {
-    mkdirSync(join(projectsDir, 'legacy-project'));
-    writeFileSync(join(projectsDir, 'legacy-project', 'context.md'), '# Legacy Project\n');
-
-    const now = Date.now();
-    // Both kebab to "legacy-project" — only the exact-name match should
-    // link to the registry node; the other must survive the sync pass
-    // (referenced, so it gets scaffolded its own directory) rather than
-    // vanish from the Map silently.
-    db.prepare(
-      "INSERT INTO projects (id, name, description, skills, created_at, updated_at) VALUES ('legacy-exact', 'Legacy Project', NULL, '[]', ?, ?)",
-    ).run(now, now);
-    db.prepare(
-      "INSERT INTO projects (id, name, description, skills, created_at, updated_at) VALUES ('legacy-other', 'legacy   project', NULL, '[]', ?, ?)",
-    ).run(now, now);
-    db.prepare(
-      "INSERT INTO sessions (id, project_id, status, created_at, last_active_at, turn_count) VALUES ('sess-collision', 'legacy-other', 'idle', ?, ?, 0)",
-    ).run(now, now);
-
-    const deps = await buildDeps(projectsDir);
-    const result = await runProjectSync(deps);
-
-    const exact = db.prepare('SELECT fs_path FROM projects WHERE id = ?').get('legacy-exact') as {
-      fs_path: string | null;
-    };
-    expect(exact.fs_path).toBe('legacy-project');
-
-    // The colliding row is not dropped and not silently forgotten — it
-    // still exists, linked to its own scaffolded directory.
-    const other = db.prepare('SELECT fs_path FROM projects WHERE id = ?').get('legacy-other') as {
-      fs_path: string | null;
-    };
-    expect(other.fs_path).not.toBeNull();
-    expect(other.fs_path).not.toBe('legacy-project');
-    expect(result.dropped).toBe(0);
+    await expect(runProjectSync(deps)).rejects.toThrow('identity conflicts');
+    expect(db.prepare('SELECT fs_path FROM projects WHERE id = ?').get('old-id')).toMatchObject({
+      fs_path: 'identity',
+    });
   });
 
   it('is idempotent — running twice does not duplicate or error', async () => {
     const deps = await buildDeps(projectsDir);
     await runProjectSync(deps);
-
-    // Registry must be reloaded before the second pass to see anything
-    // scaffolded by the first (mirrors boot behavior: the registry the
-    // process holds is refreshed after every scaffold call).
     await deps.projectRegistry.load(projectsDir);
     await expect(runProjectSync(deps)).resolves.not.toThrow();
 
-    const count = db.prepare('SELECT COUNT(*) as c FROM projects').get() as { c: number };
-    expect(count.c).toBe(1); // just the meta-project row
+    expect(db.prepare('SELECT COUNT(*) AS c FROM projects').get()).toEqual({ c: 1 });
   });
 });

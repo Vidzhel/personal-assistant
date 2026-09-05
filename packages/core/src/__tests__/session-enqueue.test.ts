@@ -14,6 +14,7 @@ describe('Session Enqueue API', () => {
   let app: ReturnType<typeof Fastify>;
   let sessionManager: SessionManager;
   let activeSessionId: string | null = null;
+  let historicalSessionId: string;
 
   // Mock agent manager that considers a session "active" only if activeSessionId matches
   const mockAgentManager = {
@@ -44,10 +45,14 @@ describe('Session Enqueue API', () => {
     // Create a test project and session
     const db = getDb();
     db.prepare(
-      'INSERT OR IGNORE INTO projects (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)',
-    ).run('test-proj', 'Test Project', Date.now(), Date.now());
+      'INSERT OR IGNORE INTO projects (id, name, fs_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+    ).run('test-proj', 'Test Project', 'test-proj', Date.now(), Date.now());
+    db.prepare(
+      'INSERT OR IGNORE INTO projects (id, name, fs_path, created_at, updated_at) VALUES (?, ?, NULL, ?, ?)',
+    ).run('historical-proj', 'Historical Project', Date.now(), Date.now());
 
     sessionManager.getOrCreateSession('test-proj');
+    historicalSessionId = sessionManager.getOrCreateSession('historical-proj').id;
 
     app = Fastify({ logger: false });
     await app.register(cors, { origin: true });
@@ -114,6 +119,18 @@ describe('Session Enqueue API', () => {
       payload: { message: 'test' },
     });
     expect(res.statusCode).toBe(400);
+  });
+
+  it('rejects enqueue for a historical session whose project is inactive', async () => {
+    activeSessionId = historicalSessionId;
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/sessions/${historicalSessionId}/enqueue`,
+      payload: { message: 'Should remain historical' },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(JSON.parse(res.payload).error).toBe('Project not found');
   });
 
   it('returns 400 for empty message', async () => {

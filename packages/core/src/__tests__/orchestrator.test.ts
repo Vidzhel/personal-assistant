@@ -36,6 +36,9 @@ describe('Orchestrator', () => {
   beforeEach(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-orch-'));
     initDatabase(join(tmpDir, 'test.db'));
+    getDb()
+      .prepare('UPDATE projects SET fs_path = ?, is_meta = 1 WHERE id = ?')
+      .run('system', 'meta');
     eventBus = new EventBus();
   });
 
@@ -61,8 +64,8 @@ describe('Orchestrator', () => {
     const db = getDb();
     const now = Date.now();
     db.prepare(
-      'INSERT INTO projects (id, name, skills, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-    ).run('proj-1', 'Test', '["gmail"]', now, now);
+      'INSERT INTO projects (id, name, skills, fs_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+    ).run('proj-1', 'Test', '["gmail"]', 'proj-1', now, now);
 
     const taskRequestPromise = new Promise<RavenEvent>((resolve) => {
       eventBus.on('agent:task:request', (e) => resolve(e));
@@ -182,9 +185,8 @@ describe('Orchestrator', () => {
     eventBus.on('agent:task:request', (e) => taskRequests.push(e));
 
     // Neither event carries a topicName, so both default to displayName
-    // "Inbox" and both kebab to fs_path "inbox" — simulating two unrelated
-    // auto-created projects (e.g. two direct-mode chats, or two Telegram
-    // topics literally named "Inbox") landing on the same slug.
+    // "Inbox" and both kebab to fs_path "inbox". The lifecycle still owns
+    // this explicit internal creation flow and allocates a distinct path.
     eventBus.emit({
       id: 'evt-a',
       timestamp: Date.now(),
@@ -210,12 +212,10 @@ describe('Orchestrator', () => {
     const rowB = db.prepare('SELECT fs_path FROM projects WHERE id = ?').get('chat-b') as {
       fs_path: string | null;
     };
-    // Each caller receives a separate managed definition immediately.
     expect(rowA.fs_path).toBe('inbox');
     expect(rowB.fs_path).toBe('inbox-2');
     expect(projectRegistry.getProject('inbox-2')).toBeDefined();
 
-    // The actual bug this guards against: neither user message was lost.
     const sessionA = sessionManager.getOrCreateSession('chat-a');
     const sessionB = sessionManager.getOrCreateSession('chat-b');
     expect(messageStore.getMessages(sessionA.id).some((m) => m.content === 'first message')).toBe(

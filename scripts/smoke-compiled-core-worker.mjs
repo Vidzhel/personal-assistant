@@ -84,7 +84,7 @@ const memoryText = '# Compiled smoke memory\n\nThis note must survive a fresh pr
 const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
 let raven;
 
-async function request(path, method = 'GET', body) {
+async function request(path, method = 'GET', body, expectedStatus = 200) {
   const response = await fetch(`http://127.0.0.1:${raven.port}${path}`, {
     method,
     signal: AbortSignal.timeout(10_000),
@@ -92,7 +92,11 @@ async function request(path, method = 'GET', body) {
       ? {}
       : { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }),
   });
-  assert.equal(response.status, 200, `${method} ${path}: ${await response.clone().text()}`);
+  assert.equal(
+    response.status,
+    expectedStatus,
+    `${method} ${path}: ${await response.clone().text()}`,
+  );
   return response.json();
 }
 
@@ -128,9 +132,29 @@ async function seedState(migrations) {
   const context = readFileSync(join(paths.projectsDir, project.fsPath, 'context.md'), 'utf8');
   assert(context.includes(project.id));
   assert.equal(git('show', `HEAD:projects/${project.fsPath}/context.md`), context.trim());
+  const task = await request(
+    '/api/tasks',
+    'POST',
+    {
+      projectId: project.id,
+      title: 'Compiled task persistence',
+      description: 'Project-local task survives a new process.',
+    },
+    201,
+  );
+  const taskPath = join(paths.projectsDir, project.fsPath, 'tasks/board', `${task.id}.yaml`);
+  const taskBytes = readFileSync(taskPath, 'utf8');
+  assert(taskBytes.includes(task.id));
   writeFileSync(
     statePath,
-    JSON.stringify({ project, context, head: git('rev-parse', 'HEAD'), migrations }),
+    JSON.stringify({
+      project,
+      context,
+      task,
+      taskBytes,
+      head: git('rev-parse', 'HEAD'),
+      migrations,
+    }),
   );
 }
 
@@ -153,6 +177,13 @@ async function verifyState(migrations) {
   assert(memories.some((item) => item.file === 'smoke.md' && item.content === memoryText));
   assert.equal(git('show', 'HEAD:projects/agents/raven/memory/smoke.md'), memoryText.trim());
   assert((await request(`/api/projects/${project.id}/sessions`)).length > 0);
+  const task = await request(`/api/tasks/${state.task.id}`);
+  assert.equal(task.title, state.task.title);
+  assert.equal(task.projectId, project.id);
+  assert.equal(
+    readFileSync(join(paths.projectsDir, project.fsPath, 'tasks/board', `${task.id}.yaml`), 'utf8'),
+    state.taskBytes,
+  );
   await checkChat(project.id);
 }
 

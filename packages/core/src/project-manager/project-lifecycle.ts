@@ -111,6 +111,14 @@ function linkedProject(deps: ProjectLifecycleDeps, id: string): Project & { fsPa
       'Project has no managed definition; reconcile it before changing it',
     );
   assertProjectPath(project.fsPath, project.id === META_PROJECT_ID);
+  const node = deps.projectRegistry.getProject(project.fsPath);
+  if (!node) throw new ProjectMutationError('Project definition is unavailable');
+  const authoritativeId = node.isMeta ? META_PROJECT_ID : (node.metadata?.id ?? node.id);
+  if (authoritativeId !== project.id) {
+    throw new ProjectMutationError(
+      `Project identity no longer matches its managed definition at ${project.fsPath}`,
+    );
+  }
   return { ...project, fsPath: project.fsPath };
 }
 

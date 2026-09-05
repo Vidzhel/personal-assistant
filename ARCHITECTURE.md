@@ -255,8 +255,19 @@ the library and existing scaffold-and-activate tools; do not recreate suites.
 ## Data Layer
 
 - **SQLite** via `better-sqlite3` — single file at `data/raven.db`
-- Tables include `events`, `sessions`, `projects`, `schedule_fires`, `preferences`, `tasks`, `task_trees`, `execution_tasks`, `agent_tasks`, `audit_log`, `pending_approvals`, and `intents` (see `migrations/`)
+- Operational tables include `events`, `sessions`, `projects`, `schedule_fires`, `preferences`, `task_trees`, `execution_tasks`, `agent_tasks`, `audit_log`, `pending_approvals`, and `intents` (see `migrations/`). The unused old `tasks` table awaits schema cleanup; board tasks no longer read or write it.
 - Repositories in `packages/core/src/db/repositories/`
+
+Board tasks are validated YAML documents under
+`projects/<resolved-fsPath>/tasks/board/<id>.yaml`. Projectless tasks use the system
+project physically. Queries read current files, including external edits; there
+is no SQLite import or fallback. Atomic replacement flushes the file and directory
+before task events. Cross-project moves use a durable intent and content hashes
+to finish interrupted moves or report conflicting edits. Parent links stay within
+one project. Task storage directories are reserved and never scanned as projects.
+One Raven process owns a project storage root; record writes cannot race a project
+archive or registry reload. Execution trees and agent-run records move in the next
+checkpoints of the [active queue](_bmad-output/implementation-artifacts/file-first-completion-2026-09-05.md).
 
 Managed projects store UUID identity and settings in `context.md`'s `ravenProject`
 metadata. The lifecycle writes current file metadata, preserves human context,
@@ -267,8 +278,11 @@ it, an otherwise empty project can archive with `knowledgeReferencesChecked: fal
 this does not prove that it has no graph memberships.
 Handled filesystem/cache failures have compensation. Startup reconciliation after
 process interruption remains deferred; cross-store power-loss atomicity is not
-claimed. Plain legacy definitions still need a controlled metadata migration before
-their SQLite identity/settings can be treated as rebuildable.
+claimed. Plain definitions use their relative path as identity and intrinsic
+defaults for settings; no fields fall back to old database values. Missing
+definitions never reappear from SQLite. Referenced missing projects remain
+inactive historical rows; unreferenced stale rows are removed. Invalid definitions
+or identity conflicts stop startup instead of activating stale cache permissions.
 
 Data-source rows hold labeled URIs. Their ownership-checked CRUD is available even
 when graph knowledge is disabled, but a row does not attach a repository, grant
@@ -286,8 +300,9 @@ Knowledge bodies are Markdown under the configured `data/knowledge` root.
 Neo4j owns durable relationships, project membership and additional graph metadata.
 Routine file reindex preserves those records; it is not a destructive graph
 rebuild. Missing-file reconciliation and changed-content embedding/chunk refresh
-remain explicit follow-ups. Back up/export and prove restoration of links,
-membership and metadata before any graph replacement.
+remain explicit follow-ups. The owner waived legacy migration/restoration because
+Raven has not been used. Future task and knowledge writes still require reliable
+storage; graph replacement remains part of the deferred workspace design.
 
 Graph initialization publishes dependencies only after success and disposes
 partially started processors on failure. Shutdown stops admission, aborts local

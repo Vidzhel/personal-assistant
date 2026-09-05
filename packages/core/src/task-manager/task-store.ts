@@ -1,22 +1,42 @@
 import {
   createLogger,
   generateId,
-  type DatabaseInterface,
   type EventBusInterface,
   type RavenTask,
   type TaskCreateInput,
-  type TaskUpdateInput,
   type TaskStatus,
+  type TaskUpdateInput,
 } from '@raven/shared';
+import {
+  assertSafeRecordId,
+  type ProjectRecordLocation,
+} from '../project-manager/project-records.ts';
+import {
+  moveTaskRecord,
+  readTaskRecords,
+  taskLocation,
+  writeTaskRecord,
+  type TaskRecord,
+  type TaskRecordDeps,
+} from './task-records.ts';
+import {
+  parseCreateInput,
+  parseUpdateInput,
+  TaskStoreError,
+  taskOwner,
+  taskRecord,
+  validateCompletionArtifacts,
+  validateTaskRecords,
+} from './task-validation.ts';
 
 const log = createLogger('task-store');
-
 const DEFAULT_QUERY_LIMIT = 50;
 const HOURS_PER_DAY = 24;
 const MINUTES_PER_HOUR = 60;
 const SECONDS_PER_MINUTE = 60;
-const MS_PER_SECOND = 1000;
-const ARCHIVE_THRESHOLD_MS = HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_MINUTE * MS_PER_SECOND;
+const MILLISECONDS_PER_SECOND = 1000;
+const ARCHIVE_THRESHOLD_MS =
+  HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_MINUTE * MILLISECONDS_PER_SECOND;
 
 export interface TaskQueryFilters {
   status?: TaskStatus;
@@ -31,47 +51,6 @@ export interface TaskQueryFilters {
   offset?: number;
 }
 
-interface TaskRow {
-  id: string;
-  title: string;
-  description: string | null;
-  prompt: string | null;
-  status: string;
-  assigned_agent_id: string | null;
-  project_id: string | null;
-  pipeline_id: string | null;
-  schedule_id: string | null;
-  parent_task_id: string | null;
-  source: string;
-  external_id: string | null;
-  artifacts: string | null;
-  created_at: string;
-  updated_at: string;
-  completed_at: string | null;
-}
-
-// eslint-disable-next-line complexity -- one conditional spread per optional column field
-function rowToTask(row: TaskRow): RavenTask {
-  return {
-    id: row.id,
-    title: row.title,
-    ...(row.description !== null && { description: row.description }),
-    ...(row.prompt !== null && { prompt: row.prompt }),
-    status: row.status as TaskStatus,
-    ...(row.assigned_agent_id !== null && { assignedAgentId: row.assigned_agent_id }),
-    ...(row.project_id !== null && { projectId: row.project_id }),
-    ...(row.pipeline_id !== null && { pipelineId: row.pipeline_id }),
-    ...(row.schedule_id !== null && { scheduleId: row.schedule_id }),
-    ...(row.parent_task_id !== null && { parentTaskId: row.parent_task_id }),
-    source: row.source as RavenTask['source'],
-    ...(row.external_id !== null && { externalId: row.external_id }),
-    artifacts: row.artifacts ? (JSON.parse(row.artifacts) as string[]) : [],
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    ...(row.completed_at !== null && { completedAt: row.completed_at }),
-  };
-}
-
 export interface TaskStore {
   createTask: (input: TaskCreateInput) => RavenTask;
   updateTask: (id: string, input: TaskUpdateInput) => RavenTask;
@@ -83,264 +62,351 @@ export interface TaskStore {
   getTaskCountsByStatus: (projectId?: string) => Record<TaskStatus, number>;
 }
 
-// eslint-disable-next-line max-lines-per-function -- factory initializing all store methods
-export function createTaskStore(deps: {
-  db: DatabaseInterface;
+export interface TaskStoreDeps extends TaskRecordDeps {
   eventBus: EventBusInterface;
-}): TaskStore {
-  const { db, eventBus } = deps;
+}
 
-  function emitTaskEvent(
-    type: 'task:created' | 'task:updated' | 'task:completed' | 'task:archived',
-    task: RavenTask,
-    extra?: Record<string, unknown>,
-  ): void {
-    eventBus.emit({
-      id: generateId(),
-      timestamp: Date.now(),
-      source: 'task-manager',
-      projectId: task.projectId,
-      type,
-      payload: { taskId: task.id, title: task.title, ...extra },
+type TaskEvent = 'task:created' | 'task:updated' | 'task:completed' | 'task:archived';
+
+function emitTaskEvent(options: {
+  eventBus: EventBusInterface;
+  type: TaskEvent;
+  task: RavenTask;
+  extra?: Record<string, unknown>;
+}): void {
+  const { eventBus, type, task, extra } = options;
+  eventBus.emit({
+    id: generateId(),
+    timestamp: Date.now(),
+    source: 'task-manager',
+    projectId: task.projectId,
+    type,
+    payload: { taskId: task.id, title: task.title, ...extra },
+  });
+}
+
+function loadRecords(deps: TaskStoreDeps): TaskRecord[] {
+  const records = readTaskRecords(deps);
+  validateTaskRecords(records);
+  return records;
+}
+
+function findRecord(records: TaskRecord[], id: string): TaskRecord | undefined {
+  return records.find((record) => record.task.id === id);
+}
+
+function notFound(id: string): never {
+  throw new TaskStoreError(`Task not found: ${id}`, 'not-found');
+}
+
+function assertTaskId(id: string): void {
+  try {
+    assertSafeRecordId(id);
+  } catch (error) {
+    throw new TaskStoreError(error instanceof Error ? error.message : String(error), 'bad-request');
+  }
+}
+
+function applyPatch(task: RavenTask, input: TaskUpdateInput): RavenTask {
+  let next = { ...task };
+  for (const key of [
+    'title',
+    'description',
+    'prompt',
+    'assignedAgentId',
+    'projectId',
+    'pipelineId',
+    'scheduleId',
+    'parentTaskId',
+  ] as const) {
+    if (!(key in input)) continue;
+    const value = input[key];
+    if (value === undefined) continue;
+    if (value === null) {
+      next = Object.fromEntries(
+        Object.entries(next).filter(([name]) => name !== key),
+      ) as unknown as RavenTask;
+    } else next[key] = value;
+  }
+  if (input.artifacts !== undefined) next.artifacts = [...input.artifacts];
+  if (input.status !== undefined) next.status = input.status;
+  return next;
+}
+
+function applyCompletion(task: RavenTask, artifacts: string[] | undefined, now: string): RavenTask {
+  const merged = [...task.artifacts];
+  for (const artifact of artifacts ?? []) {
+    if (!merged.includes(artifact)) merged.push(artifact);
+  }
+  return {
+    ...task,
+    status: 'completed',
+    artifacts: merged,
+    completedAt: task.status === 'completed' && task.completedAt ? task.completedAt : now,
+    updatedAt:
+      task.status === 'completed' && merged.length === task.artifacts.length ? task.updatedAt : now,
+  };
+}
+
+function validateNext(options: {
+  records: TaskRecord[];
+  current: TaskRecord;
+  next: RavenTask;
+  location: ProjectRecordLocation;
+}): void {
+  const { records, current, next, location } = options;
+  const nextRecords = records.map((record) =>
+    record.task.id === current.task.id ? taskRecord(next, location) : record,
+  );
+  validateTaskRecords(nextRecords);
+}
+
+function assertParentMoveAllowed(
+  records: TaskRecord[],
+  current: TaskRecord,
+  destination: string,
+): void {
+  for (const child of records) {
+    if (child.task.parentTaskId === current.task.id && taskOwner(child) !== destination) {
+      throw new TaskStoreError(
+        `Cannot move parent task while child remains in another project: ${child.task.id}`,
+        'conflict',
+      );
+    }
+  }
+}
+
+function queryMatches(task: RavenTask, filters: TaskQueryFilters): boolean {
+  const term = filters.search?.toLowerCase();
+  const searchable = term === undefined || searchMatches(task, term);
+  return [
+    filters.includeArchived || task.status !== 'archived',
+    filters.status === undefined || task.status === filters.status,
+    filters.projectId === undefined || task.projectId === filters.projectId,
+    filters.assignedAgentId === undefined || task.assignedAgentId === filters.assignedAgentId,
+    filters.parentTaskId === undefined || task.parentTaskId === filters.parentTaskId,
+    filters.source === undefined || task.source === filters.source,
+    filters.scheduleId === undefined || task.scheduleId === filters.scheduleId,
+    searchable,
+  ].every(Boolean);
+}
+
+function searchMatches(task: RavenTask, term: string): boolean {
+  return (
+    task.title.toLowerCase().includes(term) ||
+    (task.description?.toLowerCase().includes(term) ?? false)
+  );
+}
+
+function byCreatedDesc(a: TaskRecord, b: TaskRecord): number {
+  return (
+    Date.parse(b.task.createdAt) - Date.parse(a.task.createdAt) ||
+    a.task.id.localeCompare(b.task.id)
+  );
+}
+
+function byCreatedAsc(a: TaskRecord, b: TaskRecord): number {
+  return (
+    Date.parse(a.task.createdAt) - Date.parse(b.task.createdAt) ||
+    a.task.id.localeCompare(b.task.id)
+  );
+}
+
+function locate(
+  deps: TaskStoreDeps,
+  projectId: string | undefined,
+  id: string,
+): ProjectRecordLocation {
+  try {
+    return taskLocation(deps, projectId, id);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.startsWith('Unknown project') || message.startsWith('Invalid record id')) {
+      throw new TaskStoreError(message, 'bad-request');
+    }
+    throw error;
+  }
+}
+
+function getRecord(deps: TaskStoreDeps, id: string): TaskRecord {
+  assertTaskId(id);
+  return findRecord(loadRecords(deps), id) ?? notFound(id);
+}
+
+function createTask(deps: TaskStoreDeps, input: TaskCreateInput): RavenTask {
+  const parsed = parseCreateInput(input);
+  const records = loadRecords(deps);
+  const now = new Date().toISOString();
+  const task: RavenTask = {
+    id: generateId(),
+    title: parsed.title,
+    status: parsed.status,
+    source: parsed.source,
+    artifacts: [...parsed.artifacts],
+    createdAt: now,
+    updatedAt: now,
+    ...(parsed.status === 'completed' && { completedAt: now }),
+    ...(parsed.description !== undefined && { description: parsed.description }),
+    ...(parsed.prompt !== undefined && { prompt: parsed.prompt }),
+    ...(parsed.assignedAgentId !== undefined && { assignedAgentId: parsed.assignedAgentId }),
+    ...(parsed.projectId !== undefined && { projectId: parsed.projectId }),
+    ...(parsed.pipelineId !== undefined && { pipelineId: parsed.pipelineId }),
+    ...(parsed.scheduleId !== undefined && { scheduleId: parsed.scheduleId }),
+    ...(parsed.parentTaskId !== undefined && { parentTaskId: parsed.parentTaskId }),
+    ...(parsed.externalId !== undefined && { externalId: parsed.externalId }),
+  };
+  const location = locate(deps, task.projectId, task.id);
+  const candidate = { ...location, task, bytes: '' };
+  validateTaskRecords([...records, candidate]);
+  writeTaskRecord(deps, location, task);
+  log.info(`Task created: ${task.id} "${task.title}"`);
+  emitTaskEvent({
+    eventBus: deps.eventBus,
+    type: 'task:created',
+    task,
+    extra: {
+      source: task.source,
+      assignedAgentId: task.assignedAgentId,
+      parentTaskId: task.parentTaskId,
+    },
+  });
+  return task;
+}
+
+function updateTask(deps: TaskStoreDeps, id: string, input: TaskUpdateInput): RavenTask {
+  assertTaskId(id);
+  const parsed = parseUpdateInput(input);
+  const records = loadRecords(deps);
+  const current = findRecord(records, id) ?? notFound(id);
+  if (Object.keys(parsed).length === 0) return current.task;
+  const next = applyPatch(current.task, parsed);
+  const now = new Date().toISOString();
+  next.updatedAt = now;
+  if (next.status === 'completed' && current.task.status !== 'completed') next.completedAt = now;
+  if (next.status !== 'completed' && next.status !== 'archived') delete next.completedAt;
+  const location = locate(deps, next.projectId, id);
+  const destination = location.system ? 'system' : location.fsPath;
+  if (location.filePath !== current.filePath) {
+    assertParentMoveAllowed(records, current, destination);
+    validateNext({ records, current, next, location });
+    moveTaskRecord({ deps, source: current, destination: location, task: next });
+  } else {
+    validateNext({ records, current, next, location });
+    writeTaskRecord(deps, location, next);
+  }
+  const changes = Object.keys(parsed);
+  log.info(`Task updated: ${id} [${changes.join(', ')}]`);
+  emitTaskEvent({ eventBus: deps.eventBus, type: 'task:updated', task: next, extra: { changes } });
+  return next;
+}
+
+function completeTask(deps: TaskStoreDeps, id: string, artifacts?: string[]): RavenTask {
+  const additional = validateCompletionArtifacts(artifacts);
+  const current = getRecord(deps, id);
+  const records = loadRecords(deps);
+  const next = applyCompletion(current.task, additional, new Date().toISOString());
+  if (
+    current.task.status === 'completed' &&
+    next.completedAt === current.task.completedAt &&
+    next.artifacts.length === current.task.artifacts.length
+  ) {
+    return current.task;
+  }
+  validateNext({ records, current, next, location: current });
+  writeTaskRecord(deps, current, next);
+  log.info(`Task completed: ${id} "${next.title}"`);
+  emitTaskEvent({
+    eventBus: deps.eventBus,
+    type: 'task:completed',
+    task: next,
+    extra: {
+      artifacts: next.artifacts,
+      assignedAgentId: next.assignedAgentId,
+      projectId: next.projectId,
+    },
+  });
+  return next;
+}
+
+function archiveCompletedTasks(deps: TaskStoreDeps): number {
+  const cutoff = new Date(Date.now() - ARCHIVE_THRESHOLD_MS).toISOString();
+  const records = loadRecords(deps);
+  const toArchive = records.filter(
+    (record) =>
+      record.task.status === 'completed' &&
+      record.task.completedAt !== undefined &&
+      Date.parse(record.task.completedAt) <= Date.parse(cutoff),
+  );
+  const now = new Date().toISOString();
+  for (const record of toArchive) {
+    const next = { ...record.task, status: 'archived' as const, updatedAt: now };
+    validateNext({ records, current: record, next, location: record });
+    writeTaskRecord(deps, record, next);
+    emitTaskEvent({
+      eventBus: deps.eventBus,
+      type: 'task:archived',
+      task: {
+        ...record.task,
+        status: 'archived',
+        updatedAt: now,
+      },
     });
   }
+  if (toArchive.length > 0) log.info(`Archived ${toArchive.length} completed tasks`);
+  return toArchive.length;
+}
 
+function getTask(deps: TaskStoreDeps, id: string): RavenTask | undefined {
+  assertTaskId(id);
+  return findRecord(loadRecords(deps), id)?.task;
+}
+
+function getSubtasks(deps: TaskStoreDeps, parentId: string): RavenTask[] {
+  assertTaskId(parentId);
+  return loadRecords(deps)
+    .filter((record) => record.task.parentTaskId === parentId)
+    .sort(byCreatedAsc)
+    .map((record) => record.task);
+}
+
+function queryTasks(deps: TaskStoreDeps, filters: TaskQueryFilters): RavenTask[] {
+  const limit = filters.limit ?? DEFAULT_QUERY_LIMIT;
+  const offset = filters.offset ?? 0;
+  return loadRecords(deps)
+    .filter((record) => queryMatches(record.task, filters))
+    .sort(byCreatedDesc)
+    .slice(offset, offset + limit)
+    .map((record) => record.task);
+}
+
+function getTaskCountsByStatus(
+  deps: TaskStoreDeps,
+  projectId?: string,
+): Record<TaskStatus, number> {
+  const counts: Record<TaskStatus, number> = {
+    pending_approval: 0,
+    todo: 0,
+    in_progress: 0,
+    completed: 0,
+    blocked: 0,
+    archived: 0,
+  };
+  for (const record of loadRecords(deps)) {
+    if (projectId !== undefined && record.task.projectId !== projectId) continue;
+    counts[record.task.status]++;
+  }
+  return counts;
+}
+
+export function createTaskStore(deps: TaskStoreDeps): TaskStore {
   return {
-    // eslint-disable-next-line complexity -- many optional fields mapped from input with null coalescing
-    createTask(input: TaskCreateInput): RavenTask {
-      const id = generateId();
-      const now = new Date().toISOString();
-      const artifacts = JSON.stringify(input.artifacts ?? []);
-
-      db.run(
-        `INSERT INTO tasks (id, title, description, prompt, status, assigned_agent_id, project_id,
-         pipeline_id, schedule_id, parent_task_id, source, external_id, artifacts, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        id,
-        input.title,
-        input.description ?? null,
-        input.prompt ?? null,
-        input.status ?? 'todo',
-        input.assignedAgentId ?? null,
-        input.projectId ?? null,
-        input.pipelineId ?? null,
-        input.scheduleId ?? null,
-        input.parentTaskId ?? null,
-        input.source ?? 'manual',
-        input.externalId ?? null,
-        artifacts,
-        now,
-        now,
-      );
-
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guaranteed to exist after successful INSERT/UPDATE
-      const task = this.getTask(id)!;
-      log.info(`Task created: ${task.id} "${task.title}"`);
-      emitTaskEvent('task:created', task, {
-        source: task.source,
-        assignedAgentId: task.assignedAgentId,
-        parentTaskId: task.parentTaskId,
-      });
-      return task;
-    },
-
-    updateTask(id: string, input: TaskUpdateInput): RavenTask {
-      const existing = this.getTask(id);
-      if (!existing) throw new Error(`Task not found: ${id}`);
-
-      const sets: string[] = [];
-      const params: unknown[] = [];
-      const changes: string[] = [];
-
-      const fields: Array<[keyof TaskUpdateInput, string]> = [
-        ['title', 'title'],
-        ['description', 'description'],
-        ['prompt', 'prompt'],
-        ['status', 'status'],
-        ['assignedAgentId', 'assigned_agent_id'],
-        ['projectId', 'project_id'],
-        ['pipelineId', 'pipeline_id'],
-        ['scheduleId', 'schedule_id'],
-        ['parentTaskId', 'parent_task_id'],
-      ];
-
-      for (const [key, col] of fields) {
-        if (key in input) {
-          sets.push(`${col} = ?`);
-          params.push(input[key] ?? null);
-          changes.push(key);
-        }
-      }
-
-      if (input.artifacts !== undefined) {
-        sets.push('artifacts = ?');
-        params.push(JSON.stringify(input.artifacts));
-        changes.push('artifacts');
-      }
-
-      if (sets.length === 0) return existing;
-
-      sets.push('updated_at = ?');
-      params.push(new Date().toISOString());
-      params.push(id);
-
-      db.run(`UPDATE tasks SET ${sets.join(', ')} WHERE id = ?`, ...params);
-
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guaranteed to exist after successful INSERT/UPDATE
-      const task = this.getTask(id)!;
-      log.info(`Task updated: ${id} [${changes.join(', ')}]`);
-      emitTaskEvent('task:updated', task, { changes });
-      return task;
-    },
-
-    completeTask(id: string, artifacts?: string[]): RavenTask {
-      const existing = this.getTask(id);
-      if (!existing) throw new Error(`Task not found: ${id}`);
-
-      const now = new Date().toISOString();
-      const mergedArtifacts = [...existing.artifacts, ...(artifacts ?? [])];
-
-      db.run(
-        `UPDATE tasks SET status = 'completed', completed_at = ?, artifacts = ?, updated_at = ? WHERE id = ?`,
-        now,
-        JSON.stringify(mergedArtifacts),
-        now,
-        id,
-      );
-
-      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guaranteed to exist after successful INSERT/UPDATE
-      const task = this.getTask(id)!;
-      log.info(`Task completed: ${id} "${task.title}"`);
-      emitTaskEvent('task:completed', task, {
-        artifacts: task.artifacts,
-        assignedAgentId: task.assignedAgentId,
-        projectId: task.projectId,
-      });
-      return task;
-    },
-
-    archiveCompletedTasks(): number {
-      const cutoff = new Date(Date.now() - ARCHIVE_THRESHOLD_MS).toISOString();
-      const now = new Date().toISOString();
-
-      // Get tasks to archive for event emission
-      const toArchive = db.all<TaskRow>(
-        `SELECT * FROM tasks WHERE status = 'completed' AND completed_at <= ?`,
-        cutoff,
-      );
-
-      if (toArchive.length === 0) return 0;
-
-      db.run(
-        `UPDATE tasks SET status = 'archived', updated_at = ? WHERE status = 'completed' AND completed_at <= ?`,
-        now,
-        cutoff,
-      );
-
-      for (const row of toArchive) {
-        const task = rowToTask(row);
-        emitTaskEvent('task:archived', task);
-      }
-
-      log.info(`Archived ${toArchive.length} completed tasks`);
-      return toArchive.length;
-    },
-
-    getTask(id: string): RavenTask | undefined {
-      const row = db.get<TaskRow>('SELECT * FROM tasks WHERE id = ?', id);
-      return row ? rowToTask(row) : undefined;
-    },
-
-    getSubtasks(parentId: string): RavenTask[] {
-      const rows = db.all<TaskRow>(
-        'SELECT * FROM tasks WHERE parent_task_id = ? ORDER BY created_at ASC',
-        parentId,
-      );
-      return rows.map(rowToTask);
-    },
-
-    // eslint-disable-next-line complexity -- dynamic query builder with one branch per filter field
-    queryTasks(filters: TaskQueryFilters): RavenTask[] {
-      const conditions: string[] = [];
-      const params: unknown[] = [];
-
-      if (!filters.includeArchived) {
-        conditions.push("status != 'archived'");
-      }
-
-      if (filters.status) {
-        conditions.push('status = ?');
-        params.push(filters.status);
-      }
-
-      if (filters.projectId) {
-        conditions.push('project_id = ?');
-        params.push(filters.projectId);
-      }
-
-      if (filters.assignedAgentId) {
-        conditions.push('assigned_agent_id = ?');
-        params.push(filters.assignedAgentId);
-      }
-
-      if (filters.parentTaskId) {
-        conditions.push('parent_task_id = ?');
-        params.push(filters.parentTaskId);
-      }
-
-      if (filters.source) {
-        conditions.push('source = ?');
-        params.push(filters.source);
-      }
-
-      if (filters.scheduleId) {
-        conditions.push('schedule_id = ?');
-        params.push(filters.scheduleId);
-      }
-
-      if (filters.search) {
-        conditions.push('(title LIKE ? OR description LIKE ?)');
-        const term = `%${filters.search}%`;
-        params.push(term, term);
-      }
-
-      const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-      const limit = filters.limit ?? DEFAULT_QUERY_LIMIT;
-      const offset = filters.offset ?? 0;
-
-      const rows = db.all<TaskRow>(
-        `SELECT * FROM tasks ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-        ...params,
-        limit,
-        offset,
-      );
-
-      return rows.map(rowToTask);
-    },
-
-    getTaskCountsByStatus(projectId?: string): Record<TaskStatus, number> {
-      const condition = projectId ? 'WHERE project_id = ?' : '';
-      const params = projectId ? [projectId] : [];
-
-      const rows = db.all<{ status: string; count: number }>(
-        `SELECT status, COUNT(*) as count FROM tasks ${condition} GROUP BY status`,
-        ...params,
-      );
-
-      const counts: Record<TaskStatus, number> = {
-        pending_approval: 0,
-        todo: 0,
-        in_progress: 0,
-        completed: 0,
-        blocked: 0,
-        archived: 0,
-      };
-
-      for (const row of rows) {
-        counts[row.status as TaskStatus] = row.count;
-      }
-
-      return counts;
-    },
+    createTask: (input) => createTask(deps, input),
+    updateTask: (id, input) => updateTask(deps, id, input),
+    completeTask: (id, artifacts) => completeTask(deps, id, artifacts),
+    archiveCompletedTasks: () => archiveCompletedTasks(deps),
+    getTask: (id) => getTask(deps, id),
+    getSubtasks: (parentId) => getSubtasks(deps, parentId),
+    queryTasks: (filters) => queryTasks(deps, filters),
+    getTaskCountsByStatus: (projectId) => getTaskCountsByStatus(deps, projectId),
   };
 }

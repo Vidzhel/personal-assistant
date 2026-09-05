@@ -23,6 +23,8 @@ export function BoardColumn({
 }) {
   return (
     <div
+      role="region"
+      aria-label={TITLES[column]}
       className="flex-1 min-w-0 flex flex-col rounded-lg"
       style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}
       onDragOver={(e) => {

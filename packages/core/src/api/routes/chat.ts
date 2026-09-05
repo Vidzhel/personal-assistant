@@ -5,7 +5,7 @@ import { ChatRequestSchema, validateChatTarget } from '../../session-manager/cha
 
 export function registerChatRoute(
   app: FastifyInstance,
-  deps: Pick<ApiDeps, 'eventBus' | 'sessionManager'>,
+  deps: Pick<ApiDeps, 'eventBus' | 'sessionManager' | 'projectRegistry'>,
 ): void {
   app.post<{
     Params: { id: string };
@@ -17,7 +17,10 @@ export function registerChatRoute(
       return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Invalid chat message' });
     }
     const { message, sessionId } = parsed.data;
-    const target = validateChatTarget(deps.sessionManager, projectId, sessionId);
+    const target = validateChatTarget(deps.sessionManager, projectId, {
+      sessionId,
+      projectRegistry: deps.projectRegistry,
+    });
     if (!target.ok) return reply.status(target.statusCode).send({ error: target.error });
 
     deps.eventBus.emit({

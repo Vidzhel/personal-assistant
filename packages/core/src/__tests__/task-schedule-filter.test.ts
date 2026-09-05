@@ -2,9 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { initDatabase } from '../db/database.ts';
-import { createTaskStore } from '../task-manager/task-store.ts';
 import type { TaskStore } from '../task-manager/task-store.ts';
+import { createTaskStoreFixture } from './fixtures/task-store.ts';
 
 function makeMockEventBus(): {
   emit: (event: unknown) => void;
@@ -24,17 +23,8 @@ describe('queryTasks scheduleId filter', () => {
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'raven-schedfilter-'));
-    const db = initDatabase(join(dir, 't.db'));
     const eventBus = makeMockEventBus();
-    store = createTaskStore({
-      db: {
-        run: (sql: string, ...params: unknown[]) => db.prepare(sql).run(...params),
-        get: <T>(sql: string, ...params: unknown[]) =>
-          db.prepare(sql).get(...params) as T | undefined,
-        all: <T>(sql: string, ...params: unknown[]) => db.prepare(sql).all(...params) as T[],
-      },
-      eventBus,
-    });
+    store = createTaskStoreFixture(join(dir, 'projects'), eventBus);
   });
 
   afterEach(() => {

@@ -26,6 +26,7 @@ describe('Project ownership across APIs and chat dispatch', () => {
   let sessions: SessionManager;
   let messages: MessageStore;
   let sessionA: AgentSession;
+  let historicalSession: AgentSession;
   let requests: AgentTaskRequestEvent[];
   let rejections: UserChatRejectedEvent[];
   let sockets: WebSocket[];
@@ -36,16 +37,23 @@ describe('Project ownership across APIs and chat dispatch', () => {
     for (const id of ['project-a', 'project-b', 'project-c']) {
       getDb()
         .prepare(
-          'INSERT INTO projects (id, name, skills, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+          'INSERT INTO projects (id, name, skills, fs_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
         )
-        .run(id, id, '[]', Date.now(), Date.now());
+        .run(id, id, '[]', id, Date.now(), Date.now());
     }
+    getDb()
+      .prepare(
+        'INSERT INTO projects (id, name, skills, fs_path, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, ?)',
+      )
+      .run('historical-project', 'Historical Project', '[]', Date.now(), Date.now());
     eventBus = new EventBus();
     sessions = new SessionManager();
     messages = createMessageStore({ basePath: join(dir, 'sessions') });
     sessionA = sessions.createSession('project-a');
     sessions.linkSdkSession(sessionA.id, 'fake-sdk-session-a');
     messages.appendMessage(sessionA.id, { role: 'user', content: 'Existing project A context' });
+    historicalSession = sessions.createSession('historical-project');
+    messages.appendMessage(historicalSession.id, { role: 'user', content: 'Historical context' });
     requests = [];
     rejections = [];
     sockets = [];
@@ -291,11 +299,45 @@ describe('Project ownership across APIs and chat dispatch', () => {
     expect(sessions.getSession(sessionA.id)).toEqual(original);
   });
 
-  it('internal new-topic chat can still auto-create a project', async () => {
+  it('keeps historical sessions readable while rejecting inactive project mutations', async () => {
+    const history = await app.inject({
+      method: 'GET',
+      url: '/api/projects/historical-project/sessions',
+    });
+    expect(history.statusCode).toBe(200);
+    expect(history.json()).toEqual([expect.objectContaining({ id: historicalSession.id })]);
+
+    const newSession = await app.inject({
+      method: 'POST',
+      url: '/api/projects/historical-project/sessions',
+    });
+    expect(newSession.statusCode).toBe(404);
+
+    const chat = await app.inject({
+      method: 'POST',
+      url: '/api/projects/historical-project/chat',
+      payload: { message: 'Do not append this' },
+    });
+    expect(chat.statusCode).toBe(404);
+
+    const source = await app.inject({
+      method: 'POST',
+      url: '/api/projects/historical-project/data-sources',
+      payload: { label: 'New', uri: '/fake', sourceType: 'file' },
+    });
+    expect(source.statusCode).toBe(404);
+    expect(sessions.getProjectSessions('historical-project')).toEqual([
+      expect.objectContaining({ id: historicalSession.id, projectId: 'historical-project' }),
+    ]);
+    expect(messages.getMessages(historicalSession.id)).toHaveLength(1);
+  });
+
+  it('internal chat rejects a missing project without auto-recreating it', async () => {
     sendEvent('new-topic');
-    await vi.waitFor(() => expect(requests).toHaveLength(1));
-    expect(sessions.getProjectSessions('new-topic')).toHaveLength(1);
-    expect(rejections).toEqual([]);
+    await vi.waitFor(() => expect(rejections).toHaveLength(1));
+    expect(requests).toEqual([]);
+    expect(sessions.getProjectSessions('new-topic')).toHaveLength(0);
+    expect(getDb().prepare('SELECT 1 FROM projects WHERE id = ?').get('new-topic')).toBeUndefined();
   });
 
   it.each(['foreign', 'missing', 'unknown-parent'] as const)(

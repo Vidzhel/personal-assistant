@@ -9,8 +9,10 @@ Keep the custom runtime small; use the existing agent SDK for model execution.
 - This is the canonical development guide for both Claude and Codex. `CLAUDE.md`
   loads it for Claude; `_bmad-output/project-context.md` points BMAD workflows here.
 - Read [ARCHITECTURE.md](ARCHITECTURE.md) for current wiring. The
+  [file-based continuation queue](_bmad-output/implementation-artifacts/file-first-completion-2026-09-05.md)
+  is the active work plan; the earlier
   [completion record](_bmad-output/implementation-artifacts/reliability-completion-2026-09-05.md)
-  is the current task queue and verification record; the
+  records R0–R7 verification. The
   [deferred ledger](_bmad-output/implementation-artifacts/deferred-work.md)
   gives concrete remaining fixes and their acceptance plans.
 - The [current assessment](docs/assessments/2026-09-05-reliability-completion.md)
@@ -20,9 +22,15 @@ Keep the custom runtime small; use the existing agent SDK for model execution.
   implementation and subsequent commits before reviving old work.
 - Codex development support does not change Raven's runtime provider: it still
   uses `@anthropic-ai/claude-agent-sdk` and the owner's Claude CLI authentication.
-- Repository attachments, project-owned memory and graph replacement remain
-  deferred. The [workspace proposal](docs/superpowers/specs/2026-09-05-project-workspaces-design.md)
-  describes proposed behavior, not an available feature.
+- Repository workspaces are authorized after F1–F9 in the active queue. Read the
+  owner's flexible-layout, direct-repository execution and mobile artifact
+  requirements there before designing them. The
+  [workspace proposal](docs/superpowers/specs/2026-09-05-project-workspaces-design.md)
+  remains a proposal; it is not an available feature or a fixed directory contract.
+- Updated owner decision: Raven has not been used; legacy runtime data may be
+  discarded. Do not build legacy exports, migrations or restoration flows.
+  Task state is moving to validated YAML inside each project. Use cheaper
+  implementation agents when delegated work is appropriate; the parent reviews.
 
 ## Repository and conventions
 
@@ -74,10 +82,14 @@ versions; do not copy versions from historical planning documents.
   projects with known SQLite references cannot be deleted. Graph memberships
   prevent deletion when Neo4j is available; an otherwise empty project can archive
   without that check when unavailable, reporting `knowledgeReferencesChecked: false`.
-  Preserve human context and legacy IDs. Plain legacy
-  definitions may still depend on SQLite settings/IDs until their controlled
-  migration; the database cannot yet be discarded as a wholly rebuildable cache.
-- SQLite owns operational state, including sessions, tasks, approvals and intents.
+  Preserve human context. Plain definitions use their relative path as identity;
+  managed definitions use their explicit metadata ID. Missing settings take file
+  defaults. Referenced missing definitions remain inactive historical rows and
+  cannot be recreated from cache settings.
+- Board tasks live in validated YAML at `projects/<fsPath>/tasks/board/<id>.yaml`.
+  Resolve project IDs through current definitions; projectless tasks use `system`.
+  SQLite still owns sessions, execution trees, agent-run history, approvals and intents;
+  moving trees and run history is scheduled in the active continuation queue.
   Knowledge bodies are Markdown; durable links and project membership still live
   in Neo4j. Routine reindexing must preserve those relationships and graph metadata.
 - Agent memory currently lives at `projects/agents/<name>/memory/`, globally by

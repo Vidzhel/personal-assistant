@@ -4,20 +4,11 @@ import cors from '@fastify/cors';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { initDatabase, getDb } from '../db/database.ts';
-import { createTaskStore } from '../task-manager/task-store.ts';
 import { registerTaskRoutes } from '../api/routes/tasks.ts';
+import { createTaskStoreFixture } from './fixtures/task-store.ts';
 
 function makeMockEventBus() {
   return { emit: vi.fn(), on: vi.fn(), off: vi.fn() };
-}
-
-function makeDbInterface(db: ReturnType<typeof getDb>) {
-  return {
-    run: (sql: string, ...p: unknown[]) => db.prepare(sql).run(...p),
-    get: <T>(sql: string, ...p: unknown[]) => db.prepare(sql).get(...p) as T | undefined,
-    all: <T>(sql: string, ...p: unknown[]) => db.prepare(sql).all(...p) as T[],
-  };
 }
 
 describe('Tasks API', () => {
@@ -27,10 +18,8 @@ describe('Tasks API', () => {
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-tasks-api-'));
 
-    const db = initDatabase(join(tmpDir, 'test.db'));
-    const dbIface = makeDbInterface(db);
     const eventBus = makeMockEventBus();
-    const taskStore = createTaskStore({ db: dbIface, eventBus });
+    const taskStore = createTaskStoreFixture(join(tmpDir, 'projects'), eventBus);
 
     // Seed tasks
     taskStore.createTask({ title: 'Task A', projectId: 'proj-1', source: 'manual' });
@@ -57,11 +46,6 @@ describe('Tasks API', () => {
 
   afterAll(async () => {
     await app.close();
-    try {
-      getDb().close();
-    } catch {
-      /* */
-    }
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -174,6 +158,18 @@ describe('Tasks API', () => {
       });
       expect(res.statusCode).toBe(400);
     });
+
+    it.each(['missing-project', ''])(
+      'returns 400 for an invalid project reference: %s',
+      async (projectId) => {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/api/tasks',
+          payload: { title: 'Unknown project', projectId },
+        });
+        expect(res.statusCode).toBe(400);
+      },
+    );
   });
 
   describe('PATCH /api/tasks/:id', () => {
@@ -224,6 +220,21 @@ describe('Tasks API', () => {
       const completed = JSON.parse(res.payload);
       expect(completed.status).toBe('completed');
       expect(completed.artifacts).toContain('result.md');
+    });
+
+    it('returns 400 for invalid completion artifacts', async () => {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: '/api/tasks',
+        payload: { title: 'Bad completion' },
+      });
+      const created = JSON.parse(createRes.payload);
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/tasks/${created.id}/complete`,
+        payload: { artifacts: [42] },
+      });
+      expect(res.statusCode).toBe(400);
     });
   });
 });
