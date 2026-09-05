@@ -91,6 +91,8 @@ export interface RavenOverrides {
   libraryDir?: string;
   /** Configuration storage shared by composition loaders and background services. */
   configDir?: string;
+  /** Restrict HTTP binding for embedded callers and isolated smoke processes. */
+  apiHost?: string;
   skipSuites?: boolean;
 }
 
@@ -694,6 +696,7 @@ export async function createRaven(
         intentStore,
       },
       config.RAVEN_PORT,
+      overrides.apiHost,
     );
 
     const address = server.addresses()[0];

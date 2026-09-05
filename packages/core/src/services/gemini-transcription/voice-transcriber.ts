@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { GoogleAIFileManager, type FileMetadataResponse } from '@google/generative-ai/server';
 import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import {
   generateId,
   createLogger,
@@ -16,7 +16,6 @@ import type { ServiceContext, RavenService } from '../types.ts';
 const log = createLogger('voice-transcriber');
 const TRANSCRIPTION_TIMEOUT_MS = 30_000;
 const FILE_TRANSCRIPTION_TIMEOUT_MS = 600_000; // 10 minutes for long files
-const TRANSCRIPTS_DIR = 'data/files/transcripts';
 const FILE_PROCESSING_POLL_INTERVAL_MS = 5000; // delay between "still processing" checks
 const ISO_DATE_LENGTH = 10; // length of the YYYY-MM-DD prefix of an ISO timestamp
 const TRANSCRIPTION_LOG_PREVIEW_LENGTH = 100; // chars of transcript to include in log lines
@@ -140,14 +139,14 @@ async function transcribeFile(filePath: string, mimeType: string): Promise<strin
   }
 }
 
-function saveTranscript(filePath: string, transcript: string): string {
-  if (!existsSync(TRANSCRIPTS_DIR)) {
-    mkdirSync(TRANSCRIPTS_DIR, { recursive: true });
+function saveTranscript(outputDir: string, filePath: string, transcript: string): string {
+  if (!existsSync(outputDir)) {
+    mkdirSync(outputDir, { recursive: true });
   }
 
   const date = new Date().toISOString().slice(0, ISO_DATE_LENGTH);
   const sourceName = basename(filePath).replace(/\.[^.]+$/, '');
-  const transcriptPath = join(TRANSCRIPTS_DIR, `${date}-${sourceName}.txt`);
+  const transcriptPath = join(outputDir, `${date}-${sourceName}.txt`);
 
   writeFileSync(transcriptPath, transcript, 'utf-8');
   log.info(`Transcript saved to ${transcriptPath}`);
@@ -291,12 +290,13 @@ function emitTranscriptionSuccess(
 async function processTranscriptionRequest(
   bus: EventBusInterface,
   data: TranscriptionRequestEvent['payload'],
+  outputDir: string,
 ): Promise<void> {
   const { filePath, mimeType, projectId } = data;
 
   try {
     const transcript = await transcribeFile(filePath, mimeType);
-    const transcriptPath = saveTranscript(filePath, transcript);
+    const transcriptPath = saveTranscript(outputDir, filePath, transcript);
 
     emitTranscriptionSuccess(bus, transcriptPath, data);
   } catch (err) {
@@ -312,7 +312,10 @@ async function processTranscriptionRequest(
   }
 }
 
-function createTranscriptionRequestHandler(bus: EventBusInterface): (event: unknown) => void {
+function createTranscriptionRequestHandler(
+  bus: EventBusInterface,
+  outputDir: string,
+): (event: unknown) => void {
   return (event: unknown): void => {
     const parsed = TranscriptionRequestPayloadSchema.safeParse(
       (event as Record<string, unknown>).payload,
@@ -322,7 +325,7 @@ function createTranscriptionRequestHandler(bus: EventBusInterface): (event: unkn
       return;
     }
 
-    processTranscriptionRequest(bus, parsed.data).catch((err) => {
+    processTranscriptionRequest(bus, parsed.data, outputDir).catch((err) => {
       log.error(`Unhandled error in transcription handler: ${err}`);
     });
   };
@@ -349,7 +352,10 @@ const service: RavenService = {
 
     context.eventBus.on('voice:received', voiceHandler);
 
-    transcriptionHandler = createTranscriptionRequestHandler(context.eventBus);
+    transcriptionHandler = createTranscriptionRequestHandler(
+      context.eventBus,
+      resolve(context.projectRoot, 'data/files/transcripts'),
+    );
     context.eventBus.on('transcription:request', transcriptionHandler);
     log.info('Voice transcriber service started');
   },

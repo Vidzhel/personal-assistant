@@ -1,5 +1,7 @@
 'use client';
 
+import { CORE_API_URL } from '@/lib/core-endpoints';
+
 import { useEffect } from 'react';
 import { useAppStore } from '@/stores/app-store';
 import { usePolling } from '@/hooks/usePolling';
@@ -57,9 +59,7 @@ export default function SettingsPage() {
           </div>
           <div>
             <p style={{ color: 'var(--text-muted)' }}>API URL</p>
-            <p className="font-mono text-xs">
-              {process.env.NEXT_PUBLIC_CORE_API_URL || 'http://localhost:4001/api'}
-            </p>
+            <p className="font-mono text-xs">{CORE_API_URL}</p>
           </div>
         </div>
       </div>

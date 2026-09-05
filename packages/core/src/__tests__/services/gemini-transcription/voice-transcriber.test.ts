@@ -95,6 +95,16 @@ describe('voice-transcriber service', () => {
     return mod;
   }
 
+  function createContext() {
+    return {
+      eventBus: mockEventBus,
+      logger: mockLogger,
+      db: {},
+      config: {},
+      projectRoot: '/tmp/unused-transcription-test',
+    };
+  }
+
   function createVoiceEvent(overrides: Record<string, any> = {}) {
     return {
       id: 'ev-1',
@@ -118,7 +128,7 @@ describe('voice-transcriber service', () => {
   describe('start and event subscription', () => {
     it('subscribes to voice:received on start', async () => {
       await loadService();
-      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+      await service.start(createContext());
 
       expect(mockEventBus.on).toHaveBeenCalledWith('voice:received', expect.any(Function));
     });
@@ -126,7 +136,7 @@ describe('voice-transcriber service', () => {
     it('skips start when GOOGLE_API_KEY is not set', async () => {
       delete process.env.GOOGLE_API_KEY;
       await loadService();
-      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+      await service.start(createContext());
 
       expect(mockEventBus.on).not.toHaveBeenCalled();
     });
@@ -139,7 +149,7 @@ describe('voice-transcriber service', () => {
       });
 
       await loadService();
-      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+      await service.start(createContext());
 
       const handler = eventHandlers['voice:received']?.[0];
       expect(handler).toBeDefined();
@@ -204,7 +214,7 @@ describe('voice-transcriber service', () => {
       mockGenerateContent.mockRejectedValue(abortError);
 
       await loadService();
-      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+      await service.start(createContext());
 
       const handler = eventHandlers['voice:received']?.[0];
       handler(createVoiceEvent());
@@ -230,7 +240,7 @@ describe('voice-transcriber service', () => {
       mockGenerateContent.mockRejectedValue(new Error('Network error'));
 
       await loadService();
-      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+      await service.start(createContext());
 
       const handler = eventHandlers['voice:received']?.[0];
       handler(createVoiceEvent());
@@ -253,7 +263,7 @@ describe('voice-transcriber service', () => {
       mockGenerateContent.mockRejectedValue(new Error('PERMISSION_DENIED: quota exceeded'));
 
       await loadService();
-      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+      await service.start(createContext());
 
       const handler = eventHandlers['voice:received']?.[0];
       handler(createVoiceEvent());
@@ -280,7 +290,7 @@ describe('voice-transcriber service', () => {
       });
 
       await loadService();
-      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+      await service.start(createContext());
 
       const handler = eventHandlers['voice:received']?.[0];
       handler(
@@ -314,7 +324,7 @@ describe('voice-transcriber service', () => {
   describe('transcription:request handling', () => {
     it('subscribes to transcription:request on start', async () => {
       await loadService();
-      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+      await service.start(createContext());
 
       expect(mockEventBus.on).toHaveBeenCalledWith('transcription:request', expect.any(Function));
     });
@@ -325,7 +335,7 @@ describe('voice-transcriber service', () => {
       });
 
       await loadService();
-      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+      await service.start(createContext());
 
       const handler = eventHandlers['transcription:request']?.[0];
       expect(handler).toBeDefined();
@@ -369,7 +379,7 @@ describe('voice-transcriber service', () => {
       mockGenerateContent.mockRejectedValue(new Error('Gemini quota exceeded'));
 
       await loadService();
-      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+      await service.start(createContext());
 
       const handler = eventHandlers['transcription:request']?.[0];
       handler({
@@ -400,7 +410,7 @@ describe('voice-transcriber service', () => {
   describe('stop and cleanup', () => {
     it('unsubscribes from event bus on stop', async () => {
       await loadService();
-      await service.start({ eventBus: mockEventBus, logger: mockLogger, db: {}, config: {} });
+      await service.start(createContext());
       await service.stop();
 
       expect(mockEventBus.off).toHaveBeenCalledWith('voice:received', expect.any(Function));

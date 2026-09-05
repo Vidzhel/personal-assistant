@@ -1,4 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_CORE_API_URL || 'http://localhost:4001/api';
+import { CORE_API_URL as API_URL } from '@/lib/core-endpoints';
 
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { ...(opts?.headers as Record<string, string>) };

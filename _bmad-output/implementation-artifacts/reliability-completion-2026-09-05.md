@@ -12,7 +12,7 @@ plans are reconciled against code, not blindly reimplemented.
 | R0 | Isolate all composed tests from owner definitions and mutable roots | Complete | Full suite: 159 files, 1763 passed / 6 skipped; check passed; 87 owner definition files unchanged. |
 | R2 | Finish current project metadata/update/delete persistence | Complete | 163 files; 1818 passed / 6 skipped; check passed; restart, archive, failure and graph-race coverage. |
 | R3 | Correct capability failure behavior and knowledge availability | Complete | 171 files, 1907 passed / 6 skipped; check passed; 30 disposable Neo4j tests; independent review fixes verified. |
-| R4 | Repair current build/deployment paths and runtime persistence | Pending | Web/core builds and isolated boot; container config/build checked where available. |
+| R4 | Repair current build/deployment paths and runtime persistence | Complete | 174 files, 1913 passed / 6 skipped; check/builds; compiled two-process and offline Docker restart proof; 9 real Git tests. |
 | R5 | Review current learning/schedule/approval loops and run isolated journeys | Pending | Outcome-based E2E and browser verification; defects fixed or recorded below. |
 | R6 | Reconcile Claude/Codex/docs and old plan status with final behavior | Pending | One truthful current status entry; specific remaining tasks, not stale phase checklists. |
 | R7 | Final regression/review and resolution ledger | Pending | check, tests, definition validators, builds; evidence and limits documented. |
@@ -130,3 +130,40 @@ replacement-file preservation (`/tmp/raven-r3-reindex-neo4j-final.log`). The 13
 default reindex/disposal cases passed; all 87 original definition files remain
 unchanged. Interrupted cross-store recovery and external-edit derived-index refresh
 have concrete follow-up plans in deferred-work.md.
+
+## R4 completion
+
+Current workspace manifests replace deleted package paths; core builds package
+all 33 SQL migrations. The dashboard serves the verified monorepo standalone
+output with one API/WebSocket endpoint contract, supplied as explicit build
+arguments. Neo4j is opt-in in Compose; development no longer starts Docker
+automatically. The filtered image context contains only deliberate source and
+seed inputs. Actual exported context verification checked 362 paths, and CI now
+runs that check before building images.
+
+Fresh deployments seed only empty definition roots. Data, project/agent memory,
+library, config, Claude authentication/session state and definition Git metadata
+have explicit persistence locations. A bootstrap journal recovers interrupted
+seed copies or first commits without overwriting edits. Real temporary Git tests
+prove exact-path commits, preservation of unrelated staged files, restart and
+recovery. Optional integration installation/authentication is documented in
+docs/deployment.md; no live account calls were made.
+
+Compiled verification exposed a logger-worker shutdown defect that source tests
+had missed. The worker now stays referenced during final drain, with two standalone
+process regressions. Voice transcript output now follows its configured runtime
+root, tested with real temporary files from another CWD and across restart.
+Voice request cancellation remains scheduled in R5.
+
+Final full regression: 174 files, 1913 passed / 6 skipped
+(`/tmp/raven-r4-full.log`); npm run check passed (`/tmp/raven-r4-check.log`).
+Shared/core and Webpack production web builds passed. The approved runner was
+required for Next's TypeScript subprocess output and isolated loopback tests.
+Both Docker images built; web installs only shared/web dependencies, and core
+has native SQLite build prerequisites. Offline container smoke passed core
+HTTP/restart with exact project/memory/Git preservation and standalone web page
+and static-asset retrieval (`/tmp/raven-r4-container-smoke-first.log`).
+The final compiled smoke passed 33 migrations, six real services, fake chat,
+persisted state and two natural exits (`/tmp/raven-r4-compiled-smoke-final.log`).
+Nine real Git tests passed. Two independent reused review perspectives and parent
+review cleared all reported findings; original 87 definition files are unchanged.

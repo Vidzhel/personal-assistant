@@ -73,12 +73,23 @@ export function closeFileLogging(): Promise<void> {
   if (!stream) return Promise.resolve();
 
   return new Promise((resolve) => {
+    // The installed thread-stream runtime exposes ref(), but its declarations
+    // omit it. Narrow the runtime method without weakening the stream type.
+    const keepAlive = (): void => {
+      if ('ref' in stream && typeof stream.ref === 'function') stream.ref();
+    };
+    // Pino also unrefs on ready, which can arrive after an immediate shutdown.
+    stream.once('ready', keepAlive);
     stream.once('close', () => {
+      stream.removeListener('ready', keepAlive);
       pinoInstance = null;
       logDir = null;
       transportStream = null;
       resolve();
     });
+    // Pino unrefs its worker during normal operation. Keep shutdown alive until
+    // the final writes and worker close complete, even with no other open handles.
+    keepAlive();
     stream.end();
   });
 }

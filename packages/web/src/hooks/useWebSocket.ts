@@ -3,7 +3,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { WsClient, type WsMessage } from '@/lib/ws-client';
 
-const WS_URL = process.env.NEXT_PUBLIC_CORE_WS_URL || 'ws://localhost:4001/ws';
+import { CORE_WS_URL as WS_URL } from '@/lib/core-endpoints';
 const MESSAGE_BUFFER_OFFSET = -200;
 
 export function useWebSocket(channels: string[]): {

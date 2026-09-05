@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import type { EnrichedReference, ExternalRef } from '@/components/session/ReferencesPanel';
 import { useWebSocket } from './useWebSocket';
 
-const API_URL = process.env.NEXT_PUBLIC_CORE_API_URL || 'http://localhost:4001/api';
+import { CORE_API_URL as API_URL } from '@/lib/core-endpoints';
 
 const URL_REGEX = /https?:\/\/[^\s)\]>"']+/g;
 const MARKDOWN_LINK_REGEX = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g;

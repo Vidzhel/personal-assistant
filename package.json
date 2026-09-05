@@ -10,7 +10,7 @@
     "packages/mcp-ticktick"
   ],
   "scripts": {
-    "build": "npm run build -w packages/shared && npm run build -w packages/core && npm run build -ws --if-present",
+    "build": "npm run build:core && npm run build:web",
     "dev": "concurrently -n core,web -c blue,green \"npm run dev:core\" \"npm run dev:web\"",
     "dev:core": "npm run dev -w packages/core",
     "dev:web": "npm run dev -w packages/web",
@@ -30,7 +30,13 @@
     "validate:library": "node --experimental-strip-types scripts/validate-library.ts",
     "validate:projects": "node --experimental-strip-types scripts/validate-projects.ts",
     "test:ticktick": "node --experimental-strip-types scripts/test-ticktick-manual.ts",
-    "update:gws": "bash scripts/update-gws-skills.sh"
+    "update:gws": "bash scripts/update-gws-skills.sh",
+    "build:core": "npm run build -w packages/shared && npm run build -w packages/core && npm run build -w packages/mcp-ticktick",
+    "build:web": "npm run build -w packages/web -- --webpack",
+    "test:compiled": "node scripts/smoke-compiled-core.mjs",
+    "test:containers": "node scripts/smoke-containers.mjs",
+    "test:deployment": "node --experimental-strip-types --test deployment/runtime-init.test.mjs",
+    "test:docker-context": "node scripts/check-docker-context.mjs"
   },
   "engines": {
     "node": ">=22.0.0"

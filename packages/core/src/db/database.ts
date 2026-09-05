@@ -9,14 +9,12 @@ const log = createLogger('db');
 
 let db: Database.Database | null = null;
 
-const defaultMigrationsDir = join(
-  dirname(fileURLToPath(import.meta.url)),
-  '..',
-  '..',
-  '..',
-  '..',
-  'migrations',
-);
+const modulePath = fileURLToPath(import.meta.url);
+// Source development uses canonical SQL; a compiled package carries its own
+// copy. Never let a missing packaged migration directory silently use checkout SQL.
+const defaultMigrationsDir = modulePath.endsWith('.ts')
+  ? join(dirname(modulePath), '..', '..', '..', '..', 'migrations')
+  : join(dirname(modulePath), '..', 'migrations');
 
 export function initDatabase(dbPath: string, migrationsDir?: string): Database.Database {
   if (db) {

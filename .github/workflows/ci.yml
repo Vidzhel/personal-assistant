@@ -6,7 +6,7 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -16,6 +16,27 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run check
-      - run: npm test
+      - run: npm test -- --maxWorkers=2
       - run: npm run validate:library
       - run: npm run validate:projects
+      - run: npm run test:compiled
+      - run: npm run test:deployment
+      - name: Preserve durable knowledge during reindex
+        run: RAVEN_TEST_KNOWLEDGE=1 npx vitest run --project knowledge-neo4j packages/core/src/__tests__/knowledge-store.test.ts --maxWorkers=1
+
+  containers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify actual Docker context allowlist
+        run: node scripts/check-docker-context.mjs
+      - name: Build isolated core image
+        run: docker build -f Dockerfile.core -t raven-core:ci .
+      - name: Build standalone web image
+        run: docker build -f Dockerfile.web -t raven-web:ci .
+      - name: Verify offline images and persisted restart
+        run: node scripts/smoke-containers.mjs raven-core:ci raven-web:ci

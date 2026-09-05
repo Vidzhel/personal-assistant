@@ -15,7 +15,7 @@ interface CommitDetail extends ConfigCommit {
   diffs: Array<{ file: string; diff: string }>;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_CORE_API_URL || 'http://localhost:4001/api';
+import { CORE_API_URL as API_BASE } from '@/lib/core-endpoints';
 const PAGE_SIZE = 20;
 const COMMIT_HASH_DISPLAY_LENGTH = 7;
 const TOAST_DURATION_MS = 4000;

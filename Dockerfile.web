@@ -1,25 +1,31 @@
 FROM node:22-slim AS builder
 WORKDIR /app
 
-COPY package.json package-lock.json* tsconfig.base.json ./
-COPY packages/shared/package.json packages/shared/tsconfig.json packages/shared/
+COPY package.json package-lock.json tsconfig.base.json ./
+COPY packages/shared/package.json packages/shared/
+COPY packages/core/package.json packages/core/
 COPY packages/web/package.json packages/web/
+COPY packages/mcp-ticktick/package.json packages/mcp-ticktick/
+RUN npm ci --workspace packages/shared --workspace packages/web --include-workspace-root=false
 
-RUN npm ci
-
-COPY packages/shared/src/ packages/shared/src/
+COPY packages/shared/ packages/shared/
 COPY packages/web/ packages/web/
 
-RUN npm run build -w packages/shared && npm run build -w packages/web
+ARG NEXT_PUBLIC_CORE_API_URL=http://localhost:4001/api
+ARG NEXT_PUBLIC_CORE_WS_URL=ws://localhost:4001/ws
+ENV NEXT_PUBLIC_CORE_API_URL=$NEXT_PUBLIC_CORE_API_URL
+ENV NEXT_PUBLIC_CORE_WS_URL=$NEXT_PUBLIC_CORE_WS_URL
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm run build -w packages/shared && npm run build:web
 
 FROM node:22-slim
 WORKDIR /app
-
-COPY --from=builder /app/node_modules node_modules
-COPY --from=builder /app/package.json .
-COPY --from=builder /app/packages/web/.next packages/web/.next
-COPY --from=builder /app/packages/web/public packages/web/public
-COPY --from=builder /app/packages/web/package.json packages/web/
-
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=4000
+ENV HOSTNAME=0.0.0.0
+COPY --from=builder --chown=node:node /app/packages/web/.next/standalone ./
+COPY --from=builder --chown=node:node /app/packages/web/.next/static packages/web/.next/static
+USER node
 EXPOSE 4000
-CMD ["npm", "run", "start", "-w", "packages/web"]
+CMD ["node", "packages/web/server.js"]

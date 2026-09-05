@@ -5,7 +5,7 @@ import { useWebSocket } from './useWebSocket';
 import type { WsMessage } from '@/lib/ws-client';
 import { consumeWsMessages } from '@/lib/ws-message-cursor';
 
-const API_URL = process.env.NEXT_PUBLIC_CORE_API_URL || 'http://localhost:4001/api';
+import { CORE_API_URL as API_URL } from '@/lib/core-endpoints';
 
 export interface ChatMessage {
   id: string;

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-const API_URL = process.env.NEXT_PUBLIC_CORE_API_URL || 'http://localhost:4001/api';
+import { CORE_API_URL as API_URL } from '@/lib/core-endpoints';
 
 export interface SSEEvent {
   event: string;

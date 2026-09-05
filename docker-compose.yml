@@ -1,18 +1,16 @@
-version: '3.8'
-
 services:
   neo4j:
     image: neo4j:5-community
+    profiles: [knowledge]
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - '127.0.0.1:7474:7474'
+      - '127.0.0.1:7687:7687'
     environment:
-      - NEO4J_AUTH=neo4j/ravenpassword
-      - NEO4J_PLUGINS=["apoc"]
+      NEO4J_AUTH: 'neo4j/${NEO4J_PASSWORD:-raven-local-graph}'
     volumes:
       - neo4j_data:/data
     healthcheck:
-      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "ravenpassword", "RETURN 1"]
+      test: [CMD-SHELL, 'cypher-shell -u neo4j -p "$${NEO4J_AUTH#*/}" "RETURN 1"']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -24,43 +22,55 @@ services:
       context: .
       dockerfile: Dockerfile.core
     ports:
-      - "4001:4001"
+      - '127.0.0.1:4001:4001'
     volumes:
-      - ./data:/app/data
-      - ./config:/app/config
-    env_file:
-      - .env
+      - raven_data:/app/data
+      - raven_projects:/app/projects
+      - raven_library:/app/library
+      - raven_config:/app/config
+      - raven_claude:/home/node/.claude
     environment:
-      - NODE_ENV=production
-      - DATABASE_PATH=/app/data/raven.db
-      - SESSION_PATH=/app/data/sessions
-      - NEO4J_URI=bolt://neo4j:7687
-      - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=ravenpassword
-    depends_on:
-      neo4j:
-        condition: service_healthy
+      NODE_ENV: production
+      DATABASE_PATH: /app/data/raven.db
+      SESSION_PATH: /app/data/sessions
+      CLAUDE_CONFIG_DIR: /home/node/.claude
+      NEO4J_ENABLED: '${NEO4J_ENABLED:-false}'
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: '${NEO4J_PASSWORD:-raven-local-graph}'
+      RAVEN_TIMEZONE: '${RAVEN_TIMEZONE:-UTC}'
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4001/api/health"]
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://127.0.0.1:4001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
       interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 20s
 
   raven-web:
     build:
       context: .
       dockerfile: Dockerfile.web
+      args:
+        NEXT_PUBLIC_CORE_API_URL: '${NEXT_PUBLIC_CORE_API_URL:-http://localhost:4001/api}'
+        NEXT_PUBLIC_CORE_WS_URL: '${NEXT_PUBLIC_CORE_WS_URL:-ws://localhost:4001/ws}'
     ports:
-      - "4000:4000"
-    environment:
-      - NEXT_PUBLIC_CORE_WS_URL=ws://localhost:4001/ws
-      - NEXT_PUBLIC_CORE_API_URL=http://localhost:4001/api
-      - CORE_INTERNAL_URL=http://raven-core:4001
+      - '127.0.0.1:4000:4000'
     depends_on:
       raven-core:
         condition: service_healthy
     restart: unless-stopped
 
 volumes:
+  raven_data:
+  raven_projects:
+  raven_library:
+  raven_config:
+  raven_claude:
   neo4j_data:
