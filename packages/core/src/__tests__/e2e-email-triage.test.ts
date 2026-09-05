@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createRaven, type RavenInstance } from '../raven.ts';
-import type { AppConfig } from '../config.ts';
+import { buildTestConfig, createRavenTestFixture } from './fixtures/raven-fixture.ts';
 import type { AgentBackend, BackendOptions } from '../agent-manager/agent-backend.ts';
 import {
   generateId,
@@ -24,15 +24,9 @@ import {
  * the injected fake backend — then the service emits the real
  * `email:triage:processed` event.
  *
- * Coupling verified by reading the source: email-triage.ts pulls its
- * `agentManager` from `context.config.agentManager` (raven.ts wires this in
- * via `Object.assign(baseContext.config, { agentManager })`), and its rules
- * from the real `config/email-rules.json` on disk (via `context.projectRoot`,
- * not the temp `dataDir` override — same as templates in
- * e2e-schedule-roundtrip.test.ts). The email used here matches ONLY that
- * file's "automated-noreply" rule (archive + markRead, no label/flag/
- * extractActions), so email-triage's own dispatch count stays deterministic
- * — no cascading action-extractor calls.
+ * Rules are a single deterministic automated-noreply fixture under the
+ * temporary config root. Services honor configDir even when it differs
+ * from dataDir/config; other service paths follow the temporary runtime root.
  *
  * `email:new` also has a SECOND, independent subscriber: orchestrator.ts's
  * own `handleNewEmail` (registered in the Orchestrator constructor, not
@@ -66,35 +60,6 @@ import {
  * that let the Gmail service group's `requiresEnv` gate (services/registry
  * .ts) pass.
  */
-
-function buildTestConfig(): AppConfig {
-  return {
-    ANTHROPIC_API_KEY: '',
-    CLAUDE_MODEL: 'claude-sonnet-4-6',
-    RAVEN_PORT: 0,
-    RAVEN_TIMEZONE: 'UTC',
-    RAVEN_DIGEST_TIME: '08:00',
-    RAVEN_MAX_CONCURRENT_AGENTS: 3,
-    RAVEN_AGENT_MAX_TURNS: 25,
-    RAVEN_MAX_BUDGET_USD_PER_DAY: 5,
-    DATABASE_PATH: './data/raven.db',
-    SESSION_PATH: './data/sessions',
-    LOG_LEVEL: 'info',
-    // No Neo4j runs in this test environment. cross-domain-detector
-    // (requiresEnv: []) starts unconditionally and probes Neo4j once at
-    // boot (see services/proactive-intelligence/cross-domain-detector.ts) —
-    // connecting to a closed local port fails immediately (ECONNREFUSED),
-    // so it degrades to no-op well within this test's budget, same
-    // resilience path boot-smoke.test.ts exercises.
-    NEO4J_URI: 'bolt://localhost:7687',
-    NEO4J_USER: 'neo4j',
-    NEO4J_PASSWORD: 'ravenpassword',
-    RAVEN_SESSION_IDLE_TIMEOUT_MS: 1_800_000,
-    RAVEN_CONSOLIDATION_CRON: '0 3 * * 0',
-    RAVEN_AUTO_RETROSPECTIVE_ENABLED: true,
-    RAVEN_HEARTBEAT_ACTIVE_HOURS: '08-22',
-  };
-}
 
 async function waitFor(predicate: () => boolean, timeoutMs = 8000): Promise<void> {
   const start = Date.now();
@@ -141,14 +106,21 @@ describe('e2e: email triage round-trip over the real composition root', () => {
     };
 
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-e2e-triage-'));
-    const dbPath = join(tmpDir, 'test.db');
+    const fixture = createRavenTestFixture(tmpDir, {
+      agents: ['raven', 'gmail'],
+      gmailActions: true,
+      emailRules: true,
+    });
+    // Prove services honor configDir independently of dataDir/config.
+    const configDir = join(tmpDir, 'custom-config');
+    renameSync(fixture.configDir, configDir);
 
     // Deliberately no `skipSuites` override — the whole point is exercising
     // the real registered services (services/registry.ts), started by
     // services/runner.ts's env-gating exactly as production boot does.
     raven = await createRaven(buildTestConfig(), {
-      dbPath,
-      dataDir: tmpDir,
+      ...fixture,
+      configDir,
       agentBackend: fakeBackend,
     });
     await raven.start();
@@ -167,10 +139,8 @@ describe('e2e: email triage round-trip over the real composition root', () => {
       processed.push(e);
     });
 
-    // Matches config/email-rules.json's "automated-noreply" rule ONLY (from
-    // contains "noreply@" AND has "automated"): not "newsletter-archive"
-    // (no "unsubscribe") and not "important-senders" (from doesn't match
-    // any listed contact) — keeps the dispatch count deterministic.
+    // Only the deterministic fixture rule is loaded: sender contains
+    // noreply@ and the body contains automated, producing two triage actions.
     const emailEvent: NewEmailEvent = {
       id: generateId(),
       timestamp: Date.now(),

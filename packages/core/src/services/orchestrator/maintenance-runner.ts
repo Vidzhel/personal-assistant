@@ -20,6 +20,7 @@ const DEFAULT_PORT = 4001;
 
 let eventBus: EventBusInterface;
 let projectRoot: string;
+let configDir: string;
 let port: number;
 let running = false;
 
@@ -27,6 +28,7 @@ const service: RavenService = {
   async start(context: ServiceContext): Promise<void> {
     eventBus = context.eventBus;
     projectRoot = context.projectRoot;
+    configDir = context.configDir ?? resolve(context.projectRoot, 'config');
     port = (context.config.port as number) ?? DEFAULT_PORT;
 
     // Listen for agent:task:complete events from pipeline nodes that trigger maintenance
@@ -82,7 +84,6 @@ async function gatherMaintenanceData(): Promise<GatheredMaintenanceData> {
   const logDir = getLogDir() ?? resolve(projectRoot, 'data/logs');
   const dataDir = resolve(projectRoot, 'data');
   const healthUrl = `http://localhost:${String(port)}/api/health`;
-  const configDir = resolve(projectRoot, 'config');
 
   const [logAnalysis, dependencyReport, resourceReport, conventionAuditReport] = await Promise.all([
     analyzeLogs(logDir),

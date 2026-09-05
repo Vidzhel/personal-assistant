@@ -273,7 +273,10 @@ const service: RavenService = {
   async start(context: ServiceContext): Promise<void> {
     eventBus = context.eventBus;
     serviceConfig = context.config;
-    configPath = resolve(context.projectRoot, 'config/email-rules.json');
+    configPath = resolve(
+      context.configDir ?? resolve(context.projectRoot, 'config'),
+      'email-rules.json',
+    );
 
     triageConfig = await loadRules();
     if (triageConfig) {

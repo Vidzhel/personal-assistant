@@ -93,7 +93,8 @@ const log = createLogger('raven');
  * - `agentBackend`: skip the SDK entirely, run a fake backend.
  * - `dbPath`: point at a temp SQLite file instead of `data/raven.db`.
  * - `dataDir`: redirect all `data/*` runtime directories (logs, sessions,
- *   knowledge, media) away from the real project tree.
+ *   knowledge, media) and the background service project root away from
+ *   the real project tree.
  * - `skipSuites`: skip starting real background services (Telegram bot,
  *   IMAP watcher, etc.) at boot.
  */
@@ -108,6 +109,10 @@ export interface RavenOverrides {
    * `data/*` runtime state; `projects/` holds source-of-truth definitions
    * resolved against `projectRoot` by default. */
   projectsDir?: string;
+  /** Writable capability definitions, including scaffolded skills. */
+  libraryDir?: string;
+  /** Configuration storage shared by composition loaders and background services. */
+  configDir?: string;
   skipSuites?: boolean;
 }
 
@@ -201,13 +206,13 @@ export async function createRaven(
   });
 
   // 5. Init config dir + integrations config
-  const configDir = resolve(projectRoot, 'config');
+  const configDir = overrides.configDir ?? resolve(projectRoot, 'config');
   const integrationsConfig = loadIntegrationsConfig(configDir);
 
   // Load capability library — the sole capability system (skills, MCPs,
   // agent definitions, actions all come from library/).
   const capabilityLibrary = new CapabilityLibrary();
-  const libraryDir = resolve(projectRoot, 'library');
+  const libraryDir = overrides.libraryDir ?? resolve(projectRoot, 'library');
   try {
     await capabilityLibrary.load(libraryDir);
     log.info(
@@ -288,7 +293,8 @@ export async function createRaven(
     db: dbInterface,
     logger: log,
     config: { intentStore } as Record<string, unknown>,
-    projectRoot,
+    projectRoot: dataRoot,
+    configDir,
     integrationsConfig,
     jobRegistry,
   };

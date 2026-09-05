@@ -27,7 +27,7 @@ let categorySyncTimer: ReturnType<typeof setInterval> | null = null;
 let eventBus: EventBusInterface;
 let logger: LoggerInterface;
 let db: DatabaseInterface;
-let projectRoot: string;
+let configDir: string;
 let integrationsConfig: IntegrationsConfig;
 let ynabClient: YnabClient | null = null;
 let syncIntervalMs: number;
@@ -467,7 +467,7 @@ function startPolling(): void {
 }
 
 function reloadIntegrationsConfig(): void {
-  const intPath = resolve(projectRoot, 'config', 'integrations.json');
+  const intPath = resolve(configDir, 'integrations.json');
   if (!existsSync(intPath)) return;
   const parsed = IntegrationsConfigSchema.safeParse(JSON.parse(readFileSync(intPath, 'utf-8')));
   if (!parsed.success) {
@@ -497,7 +497,7 @@ const service: RavenService = {
     eventBus = context.eventBus;
     logger = context.logger;
     db = context.db;
-    projectRoot = context.projectRoot;
+    configDir = context.configDir ?? resolve(context.projectRoot, 'config');
     integrationsConfig = context.integrationsConfig;
 
     resolveServiceConfig(context.config as Record<string, unknown>);

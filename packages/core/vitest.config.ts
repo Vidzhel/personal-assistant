@@ -12,7 +12,11 @@ export default defineConfig({
     // prefix scan before each test file's module graph loads. Defense in
     // depth on top of config.ts's own VITEST/NODE_ENV guard. See
     // src/__tests__/setup/env-guard.ts for the incident this backstops.
-    setupFiles: ['./src/__tests__/setup/env-guard.ts'],
+    setupFiles: [
+      './src/__tests__/setup/env-guard.ts',
+      './src/__tests__/setup/neo4j-guard.ts',
+      './src/__tests__/setup/composition-guard.ts',
+    ],
   },
   resolve: {
     alias: {

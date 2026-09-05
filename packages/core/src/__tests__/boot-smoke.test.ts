@@ -3,13 +3,13 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createRaven, type RavenInstance } from '../raven.ts';
-import type { AppConfig } from '../config.ts';
+import { buildTestConfig, createRavenTestFixture } from './fixtures/raven-fixture.ts';
 import type { AgentBackend } from '../agent-manager/agent-backend.ts';
 
 /**
- * E2E boot test over the real composition root: no mocked SDK, no mocked
- * database — just a temp dir, a fake agent backend, and Neo4j genuinely
- * absent (there is no local Neo4j in this test environment). Exercises the
+ * E2E boot test over the real composition root: real SQLite and files in a
+ * temp dir, a fake agent backend, and the default suite's Neo4j boundary
+ * guard rejecting client creation regardless of local services. Exercises the
  * exact path production takes: createRaven -> start -> serve -> stop.
  *
  * The critical assertion isn't in any `expect()` — it's that this test file
@@ -22,31 +22,6 @@ const fakeBackend: AgentBackend = async (opts) => {
   opts.onAssistantMessage('ok');
   return { sessionId: 'fake-session-1', result: 'ok', success: true, errors: [] };
 };
-
-function buildTestConfig(): AppConfig {
-  return {
-    ANTHROPIC_API_KEY: '',
-    CLAUDE_MODEL: 'claude-sonnet-4-6',
-    RAVEN_PORT: 0,
-    RAVEN_TIMEZONE: 'UTC',
-    RAVEN_DIGEST_TIME: '08:00',
-    RAVEN_MAX_CONCURRENT_AGENTS: 3,
-    RAVEN_AGENT_MAX_TURNS: 25,
-    RAVEN_MAX_BUDGET_USD_PER_DAY: 5,
-    DATABASE_PATH: './data/raven.db',
-    SESSION_PATH: './data/sessions',
-    LOG_LEVEL: 'info',
-    // No Neo4j runs in this test environment — deliberately left at the
-    // default, unreachable address so the resilience path is exercised.
-    NEO4J_URI: 'bolt://localhost:7687',
-    NEO4J_USER: 'neo4j',
-    NEO4J_PASSWORD: 'ravenpassword',
-    RAVEN_SESSION_IDLE_TIMEOUT_MS: 1_800_000,
-    RAVEN_CONSOLIDATION_CRON: '0 3 * * 0',
-    RAVEN_AUTO_RETROSPECTIVE_ENABLED: true,
-    RAVEN_HEARTBEAT_ACTIVE_HOURS: '08-22',
-  };
-}
 
 describe('boot-smoke: createRaven over the real composition root', () => {
   let tmpDir: string | undefined;
@@ -61,11 +36,9 @@ describe('boot-smoke: createRaven over the real composition root', () => {
 
   it('boots without Neo4j, serves health, and shuts down cleanly', async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-boot-smoke-'));
-    const dbPath = join(tmpDir, 'test.db');
 
     raven = await createRaven(buildTestConfig(), {
-      dbPath,
-      dataDir: tmpDir,
+      ...createRavenTestFixture(tmpDir),
       agentBackend: fakeBackend,
       skipSuites: true,
     });
@@ -86,10 +59,10 @@ describe('boot-smoke: createRaven over the real composition root', () => {
       subsystems: Record<string, unknown>;
     };
 
-    // No Neo4j reachable in this environment -> knowledge engine degrades.
+    // The Neo4j boundary rejects initialization -> knowledge engine degrades.
     expect(body.knowledge).toBe('unavailable');
-    // skipSuites: true -> no real services were started, whatever suites
-    // declare services-wise (count is environment-dependent, not asserted).
+    // skipSuites: true -> no background services were started. The configured
+    // count is environment-dependent, so only its type is asserted.
     expect(body.services.loaded).toBe(0);
     expect(typeof body.services.configured).toBe('number');
     expect(body.subsystems).toBeDefined();

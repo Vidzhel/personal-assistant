@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createRaven, type RavenInstance } from '../raven.ts';
-import type { AppConfig } from '../config.ts';
+import { buildTestConfig, createRavenTestFixture } from './fixtures/raven-fixture.ts';
 import type { AgentBackend } from '../agent-manager/agent-backend.ts';
 import type { NotificationDeliverEvent } from '@raven/shared';
 
@@ -27,29 +27,6 @@ import type { NotificationDeliverEvent } from '@raven/shared';
  * leading seconds field; `* * * * * *` fires every second, which is what
  * makes a sub-2s deterministic poll (no sleep-guessing) below possible.
  */
-
-function buildTestConfig(): AppConfig {
-  return {
-    ANTHROPIC_API_KEY: '',
-    CLAUDE_MODEL: 'claude-sonnet-4-6',
-    RAVEN_PORT: 0,
-    RAVEN_TIMEZONE: 'UTC',
-    RAVEN_DIGEST_TIME: '08:00',
-    RAVEN_MAX_CONCURRENT_AGENTS: 3,
-    RAVEN_AGENT_MAX_TURNS: 25,
-    RAVEN_MAX_BUDGET_USD_PER_DAY: 5,
-    DATABASE_PATH: './data/raven.db',
-    SESSION_PATH: './data/sessions',
-    LOG_LEVEL: 'info',
-    NEO4J_URI: 'bolt://localhost:7687',
-    NEO4J_USER: 'neo4j',
-    NEO4J_PASSWORD: 'ravenpassword',
-    RAVEN_SESSION_IDLE_TIMEOUT_MS: 1_800_000,
-    RAVEN_CONSOLIDATION_CRON: '0 3 * * 0',
-    RAVEN_AUTO_RETROSPECTIVE_ENABLED: true,
-    RAVEN_HEARTBEAT_ACTIVE_HOURS: '08-22',
-  };
-}
 
 interface ScheduleFireRow {
   schedule_name: string;
@@ -97,16 +74,13 @@ describe('e2e: POST /api/scaffold/schedule goes live without a restart', () => {
     const fakeBackend: AgentBackend = async () => ({ result: 'ok', success: true, errors: [] });
 
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-e2e-scaffold-schedule-'));
-    const dbPath = join(tmpDir, 'test.db');
     const projectsDir = join(tmpDir, 'projects');
     const templatesDir = join(projectsDir, 'templates');
     mkdirSync(templatesDir, { recursive: true });
     writeFileSync(join(templatesDir, 'quick-ping.yaml'), QUICK_PING_TEMPLATE, 'utf-8');
 
     raven = await createRaven(buildTestConfig(), {
-      dbPath,
-      dataDir: tmpDir,
-      projectsDir,
+      ...createRavenTestFixture(tmpDir),
       agentBackend: fakeBackend,
       skipSuites: true,
     });

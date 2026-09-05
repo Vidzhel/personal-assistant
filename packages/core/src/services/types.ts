@@ -17,6 +17,8 @@ export interface ServiceContext {
   logger: LoggerInterface;
   config: Record<string, unknown>;
   projectRoot: string;
+  /** Override configuration storage without changing runtime data locations. */
+  configDir?: string;
   integrationsConfig: IntegrationsConfig;
   jobRegistry: JobRegistry;
 }

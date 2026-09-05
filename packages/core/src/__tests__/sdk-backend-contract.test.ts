@@ -87,9 +87,7 @@ describe('SDK backend contract (real subprocess spawn via fake executable)', () 
     const backend = createSdkBackend();
     const result = await backend(baseOpts());
 
-    expect(result.sessionId).toBe('fake-123');
-    expect(result.success).toBe(true);
-    expect(result.result).toBe('ok');
+    expect(result).toMatchObject({ sessionId: 'fake-123', success: true, result: 'ok' });
   });
 
   it('does not pass --resume on a cold turn (no resume option set)', async () => {

@@ -3,16 +3,15 @@ import { mkdtempSync, rmSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createRaven, type RavenInstance } from '../raven.ts';
-import type { AppConfig } from '../config.ts';
+import { buildTestConfig, createRavenTestFixture } from './fixtures/raven-fixture.ts';
 import type { AgentBackend, BackendOptions } from '../agent-manager/agent-backend.ts';
 import type { AgentTaskCompleteEvent, UserChatMessageEvent } from '@raven/shared';
 
 /**
  * E2E coverage of Phase 3 Task 1's invariant — "a project EXISTS iff a
  * registry node (directory under projects/) exists" — over the real
- * composition root, starting from a completely empty projects/ tree (no
- * pre-existing system/, agents/, etc.) so both creation surfaces are
- * exercised from nothing:
+ * composition root, starting with only a no-skills default agent and no
+ * pre-existing ordinary projects, so both creation surfaces scaffold files:
  *
  *  1. POST /api/projects (web/API surface) → scaffolds a directory,
  *     reloads the registry, and links the DB cache row by fs_path — then
@@ -21,29 +20,6 @@ import type { AgentTaskCompleteEvent, UserChatMessageEvent } from '@raven/shared
  *     by a `user:chat:message` event carrying a topic name instead of an
  *     HTTP call.
  */
-
-function buildTestConfig(): AppConfig {
-  return {
-    ANTHROPIC_API_KEY: '',
-    CLAUDE_MODEL: 'claude-sonnet-4-6',
-    RAVEN_PORT: 0,
-    RAVEN_TIMEZONE: 'UTC',
-    RAVEN_DIGEST_TIME: '08:00',
-    RAVEN_MAX_CONCURRENT_AGENTS: 3,
-    RAVEN_AGENT_MAX_TURNS: 25,
-    RAVEN_MAX_BUDGET_USD_PER_DAY: 5,
-    DATABASE_PATH: './data/raven.db',
-    SESSION_PATH: './data/sessions',
-    LOG_LEVEL: 'info',
-    NEO4J_URI: 'bolt://localhost:7687',
-    NEO4J_USER: 'neo4j',
-    NEO4J_PASSWORD: 'ravenpassword',
-    RAVEN_SESSION_IDLE_TIMEOUT_MS: 1_800_000,
-    RAVEN_CONSOLIDATION_CRON: '0 3 * * 0',
-    RAVEN_AUTO_RETROSPECTIVE_ENABLED: true,
-    RAVEN_HEARTBEAT_ACTIVE_HOURS: '08-22',
-  };
-}
 
 async function waitFor(predicate: () => boolean, timeoutMs = 4000): Promise<void> {
   const start = Date.now();
@@ -90,9 +66,7 @@ describe('e2e: filesystem-first project store', () => {
     const { backend: fakeBackend } = buildFakeBackend();
 
     raven = await createRaven(buildTestConfig(), {
-      dbPath: join(tmpDir, 'test.db'),
-      dataDir: tmpDir,
-      projectsDir,
+      ...createRavenTestFixture(tmpDir),
       agentBackend: fakeBackend,
       skipSuites: true,
     });
@@ -150,9 +124,7 @@ describe('e2e: filesystem-first project store', () => {
     const { backend: fakeBackend } = buildFakeBackend();
 
     raven = await createRaven(buildTestConfig(), {
-      dbPath: join(tmpDir, 'test.db'),
-      dataDir: tmpDir,
-      projectsDir,
+      ...createRavenTestFixture(tmpDir),
       agentBackend: fakeBackend,
       skipSuites: true,
     });

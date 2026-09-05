@@ -348,9 +348,9 @@ function checkSnoozeExpiry(now: string): void {
   }
 }
 
-function loadRulesFromFile(projectRoot: string): ClassificationRule[] | undefined {
+function loadRulesFromFile(configDir: string): ClassificationRule[] | undefined {
   try {
-    const rulesPath = resolve(projectRoot, 'config', 'notification-rules.json');
+    const rulesPath = resolve(configDir, 'notification-rules.json');
     const content = readFileSync(rulesPath, 'utf-8');
     const parsed = JSON.parse(content);
     const rules = loadClassificationRules(parsed);
@@ -377,7 +377,9 @@ const service: RavenService = {
     const flushInterval = (config.flushIntervalMinutes as number) ?? DEFAULT_FLUSH_INTERVAL_MINUTES;
 
     // Load classification rules from config file
-    classificationRules = loadRulesFromFile(context.projectRoot);
+    classificationRules = loadRulesFromFile(
+      context.configDir ?? resolve(context.projectRoot, 'config'),
+    );
 
     // Subscribe to notification events
     eventBus.on('notification', handleNotification);

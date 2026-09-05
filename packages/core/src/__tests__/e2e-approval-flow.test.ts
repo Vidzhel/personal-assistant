@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createRaven, type RavenInstance } from '../raven.ts';
-import type { AppConfig } from '../config.ts';
+import { buildTestConfig, createRavenTestFixture } from './fixtures/raven-fixture.ts';
 import type { AgentBackend, BackendOptions } from '../agent-manager/agent-backend.ts';
 import type { PendingApproval } from '../permission-engine/pending-approvals.ts';
 import {
@@ -32,36 +32,12 @@ import {
  * route.
  *
  * `gmail:send-email` / `gmail:delete-email` are red-tier by declaration
- * (library/skills/communication/email/gmail/config.json) — resolved via the
- * real CapabilityLibrary the same way production permission-engine.ts does,
- * not stubbed.
+ * in the isolated fixture — resolved through the real CapabilityLibrary
+ * and permission engine, with no executable external MCP definition.
  *
  * No mocked SDK: the same fake `AgentBackend` seam boot-smoke.test.ts and
  * the other e2e-*.test.ts files use.
  */
-
-function buildTestConfig(): AppConfig {
-  return {
-    ANTHROPIC_API_KEY: '',
-    CLAUDE_MODEL: 'claude-sonnet-4-6',
-    RAVEN_PORT: 0,
-    RAVEN_TIMEZONE: 'UTC',
-    RAVEN_DIGEST_TIME: '08:00',
-    RAVEN_MAX_CONCURRENT_AGENTS: 3,
-    RAVEN_AGENT_MAX_TURNS: 25,
-    RAVEN_MAX_BUDGET_USD_PER_DAY: 5,
-    DATABASE_PATH: './data/raven.db',
-    SESSION_PATH: './data/sessions',
-    LOG_LEVEL: 'info',
-    NEO4J_URI: 'bolt://localhost:7687',
-    NEO4J_USER: 'neo4j',
-    NEO4J_PASSWORD: 'ravenpassword',
-    RAVEN_SESSION_IDLE_TIMEOUT_MS: 1_800_000,
-    RAVEN_CONSOLIDATION_CRON: '0 3 * * 0',
-    RAVEN_AUTO_RETROSPECTIVE_ENABLED: true,
-    RAVEN_HEARTBEAT_ACTIVE_HOURS: '08-22',
-  };
-}
 
 async function waitFor(predicate: () => boolean, timeoutMs = 4000): Promise<void> {
   const start = Date.now();
@@ -131,13 +107,11 @@ describe('e2e: approval flow round-trip over the real composition root', () => {
     };
 
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-e2e-approval-'));
-    const dbPath = join(tmpDir, 'test.db');
 
     // No background services needed for this flow — the gate lives entirely
     // in agent-manager/agent-session/permission-engine.
     raven = await createRaven(buildTestConfig(), {
-      dbPath,
-      dataDir: tmpDir,
+      ...createRavenTestFixture(tmpDir, { gmailActions: true }),
       agentBackend: fakeBackend,
       skipSuites: true,
     });
@@ -176,7 +150,7 @@ describe('e2e: approval flow round-trip over the real composition root', () => {
         taskId: taskId1,
         prompt: 'Email the board with the quarterly numbers.',
         skillName: 'gmail',
-        actionName: 'gmail:send-email', // red tier (library/skills/communication/email/gmail/config.json)
+        actionName: 'gmail:send-email', // red tier in the isolated fixture
         mcpServers: {},
         priority: 'normal',
       },
