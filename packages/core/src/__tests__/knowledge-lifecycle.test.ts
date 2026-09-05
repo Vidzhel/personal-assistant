@@ -37,6 +37,14 @@ function createMockKnowledgeStore(): KnowledgeStore {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     })),
+    mergeOwned: vi.fn().mockImplementation(async (input) => ({
+      ...makeBubble(),
+      id: 'merged-id',
+      title: input.title,
+      content: input.content,
+      filePath: 'merged.md',
+    })),
+    recoverMerge: vi.fn(),
     update: vi.fn().mockResolvedValue(undefined),
     remove: vi.fn().mockResolvedValue(true),
     getById: vi.fn().mockResolvedValue(undefined),
@@ -288,18 +296,14 @@ describe('Knowledge Lifecycle', () => {
       const mergedId = await lifecycle.mergeBubbles(['b1', 'b2']);
 
       expect(mergedId).toBe('merged-id');
-      expect(knowledgeStore.insert).toHaveBeenCalledWith(
+      expect(knowledgeStore.mergeOwned).toHaveBeenCalledWith(
         expect.objectContaining({
           title: expect.stringContaining('Note A'),
         }),
       );
-      // Should re-point both incoming and outgoing links (2 neo4j.run calls for links)
-      const runCalls = (neo4j.run as any).mock.calls.map((c: any) => c[0] as string);
-      const repointCalls = runCalls.filter((c: string) => c.includes('repointed'));
-      expect(repointCalls).toHaveLength(2);
-      // Should remove old bubbles
-      expect(knowledgeStore.remove).toHaveBeenCalledWith('b1');
-      expect(knowledgeStore.remove).toHaveBeenCalledWith('b2');
+      expect(neo4j.run).not.toHaveBeenCalled();
+      expect(knowledgeStore.remove).not.toHaveBeenCalled();
+      expect(knowledgeStore.getById).toHaveBeenCalledWith('b1', { trackAccess: false });
     });
 
     it('uses LLM-synthesized content when agent responds', async () => {
@@ -312,20 +316,19 @@ describe('Knowledge Lifecycle', () => {
       await lifecycle.mergeBubbles(['b1', 'b2']);
 
       // The insert should receive the synthesized content from the mock agent
-      expect(knowledgeStore.insert).toHaveBeenCalledWith(
+      expect(knowledgeStore.mergeOwned).toHaveBeenCalledWith(
         expect.objectContaining({
           content: 'Synthesized summary of merged content.',
         }),
       );
     });
 
-    it('returns undefined when less than 2 valid bubbles', async () => {
+    it('rejects missing sources before synthesis or mutation', async () => {
       (knowledgeStore.getById as any).mockResolvedValue(undefined);
 
       const lifecycle = createLifecycle();
-      const result = await lifecycle.mergeBubbles(['b1', 'b2']);
-
-      expect(result).toBeUndefined();
+      await expect(lifecycle.mergeBubbles(['b1', 'b2'])).rejects.toThrow('missing');
+      expect(knowledgeStore.mergeOwned).not.toHaveBeenCalled();
     });
 
     it('generates embedding and chunks for merged bubble', async () => {

@@ -1,3 +1,4 @@
+import type { ManagedTransaction, QueryResult } from 'neo4j-driver';
 import { createHubEngine } from '../knowledge-engine/hub-ops.ts';
 import type { LinkEngine } from '../knowledge-engine/link-ops.ts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,12 +8,7 @@ import { createEmbeddingEngine, resetPipeline } from '../knowledge-engine/embedd
 import { createChunkingEngine } from '../knowledge-engine/chunking.ts';
 import { createClusteringEngine } from '../knowledge-engine/clustering.ts';
 import { createKnowledgeLifecycle } from '../knowledge-engine/knowledge-lifecycle.ts';
-import {
-  deferred,
-  fakeGraph,
-  fakeKnowledgeStore,
-  fakeExecutionLogger,
-} from './fixtures/knowledge-fixture.ts';
+import { deferred, fakeGraph, fakeKnowledgeStore } from './fixtures/knowledge-fixture.ts';
 import type { RavenEvent, AgentTaskRequestEvent } from '@raven/shared';
 import { knowledgeRevision } from '../knowledge-engine/knowledge-revision.ts';
 
@@ -51,7 +47,6 @@ function fixture() {
     eventBus,
     knowledgeStore,
     mediaDir: '/tmp/unused-knowledge-fixture',
-    executionLogger: fakeExecutionLogger(),
   });
   const lifecycle = createKnowledgeLifecycle({
     eventBus,
@@ -108,9 +103,12 @@ describe('knowledge processor disposal', () => {
         if (reason === 'dispatch-error') throw new Error('dispatch refused');
       });
       f.ingestion.start();
-      await f.ingestion.ingest({ type: 'text', content: 'Test' });
+      const pending = f.ingestion.ingest({ type: 'text', content: 'Test' });
+      const rejected = expect(pending).rejects.toThrow();
+      await vi.advanceTimersByTimeAsync(0);
       if (reason === 'timeout') await vi.advanceTimersByTimeAsync(120_000);
       await f.ingestion.stop();
+      await rejected;
       expect(vi.getTimerCount()).toBe(0);
       expect(f.eventBus.listenerCount()).toBe(1);
       f.eventBus.emit(
@@ -173,7 +171,7 @@ describe('knowledge processor disposal', () => {
 
   it('successful merge synthesis clears its timeout immediately', async () => {
     const f = fixture();
-    vi.spyOn(f.embeddingEngine, 'generateAndStore').mockResolvedValue();
+    vi.spyOn(f.embeddingEngine, 'refreshBubble').mockResolvedValue();
     vi.spyOn(f.chunkingEngine, 'indexBubble').mockResolvedValue();
     f.eventBus.on<AgentTaskRequestEvent>('agent:task:request', (request) => {
       f.eventBus.emit(
@@ -185,7 +183,7 @@ describe('knowledge processor disposal', () => {
       );
     });
     await f.lifecycle.mergeBubbles(['one', 'two']);
-    expect(f.knowledgeStore.insert).toHaveBeenCalledWith(
+    expect(f.knowledgeStore.mergeOwned).toHaveBeenCalledWith(
       expect.objectContaining({ content: 'Merged result' }),
     );
     expect(vi.getTimerCount()).toBe(0);
@@ -225,13 +223,13 @@ describe('knowledge processor disposal', () => {
     },
   );
 
-  it('removes both nested clustering completion handlers and ignores retained callbacks', async () => {
+  it('removes the clustering listener and ignores its retained callback', async () => {
     const f = fixture();
     const on = vi.spyOn(f.eventBus, 'on');
     const clustering = createClusteringEngine({ ...f, domainConfig: [] });
     await clustering.start();
     await clustering.start();
-    expect(f.eventBus.listenerCount()).toBe(3);
+    expect(f.eventBus.listenerCount()).toBe(1);
     const callbacks = on.mock.calls.map((call) => call[1]);
     await clustering.stop();
     await clustering.stop();
@@ -272,9 +270,12 @@ describe('knowledge processor disposal', () => {
       requests.push(request);
     });
     await clustering.start();
-    await clustering.runClustering();
+    const pending = clustering.runClustering();
+    const rejected = expect(pending).rejects.toThrow('stopped');
+    await vi.advanceTimersByTimeAsync(0);
     expect(requests).toHaveLength(1);
     await clustering.stop();
+    await rejected;
     const calls = vi.mocked(f.neo4j.run).mock.calls.length;
     f.eventBus.emit(
       event('agent:task:complete', {
@@ -287,8 +288,8 @@ describe('knowledge processor disposal', () => {
     expect(f.neo4j.run).toHaveBeenCalledTimes(calls);
   });
 
-  it.each(['placeholder', 'link'])(
-    'prevents hub continuation after a held %s write',
+  it.each(['insert', 'transaction'])(
+    'prevents hub continuation after a held %s operation',
     async (stage) => {
       const f = fixture();
       const links = Array.from({ length: 10 }, (_, i) => ({
@@ -301,37 +302,44 @@ describe('knowledge processor disposal', () => {
         status: 'accepted',
         createdAt: '2026-01-01',
       }));
-      const linkEngine = {
-        getLinksForBubble: vi.fn(async () => links),
-        createLinkInternal: vi.fn(async () => links[0]),
-      } as unknown as LinkEngine;
+      const linkEngine = { getLinksForBubble: vi.fn(async () => links) } as unknown as LinkEngine;
       vi.spyOn(f.embeddingEngine, 'getEmbedding').mockResolvedValue(new Float32Array([1, 0]));
-      const saved = await f.knowledgeStore.insert({ title: 'test', content: 'test', tags: [] });
+      const saved = { id: 'saved', title: 'Synthesis', filePath: 'saved.md' } as Awaited<
+        ReturnType<typeof f.knowledgeStore.insert>
+      >;
       const heldInsert = deferred<typeof saved>();
-      const heldLink = deferred<Awaited<ReturnType<LinkEngine['createLinkInternal']>>>();
-      if (stage === 'placeholder')
+      const heldTransaction = deferred<undefined>();
+      const txRun = vi.fn(async () => ({ records: [] }) as unknown as QueryResult);
+      if (stage === 'insert')
         vi.mocked(f.knowledgeStore.insert).mockReturnValueOnce(heldInsert.promise);
-      else vi.mocked(linkEngine.createLinkInternal).mockReturnValueOnce(heldLink.promise);
+      vi.mocked(f.neo4j.withTransaction).mockImplementation(async (operation) => {
+        if (stage === 'transaction') await heldTransaction.promise;
+        return operation({ run: txRun } as unknown as ManagedTransaction);
+      });
+      f.eventBus.on<AgentTaskRequestEvent>('agent:task:request', (request) => {
+        f.eventBus.emit(
+          event('agent:task:complete', {
+            taskId: request.payload.taskId,
+            success: true,
+            result: '{"title":"Synthesis","summary":"Current facts"}',
+          }),
+        );
+      });
       const hub = createHubEngine({ ...f, linkEngine });
       hub.start();
-      const emitted: RavenEvent[] = [];
-      f.eventBus.on('*', (output) => {
-        emitted.push(output);
-      });
       const pending = hub.splitHub('hub');
       const rejection = expect(pending).rejects.toThrow('stopped');
       await vi.advanceTimersByTimeAsync(0);
+      if (stage === 'insert') expect(f.knowledgeStore.insert).toHaveBeenCalledTimes(1);
+      else expect(f.neo4j.withTransaction).toHaveBeenCalledTimes(1);
       const stopping = hub.stop();
       await vi.advanceTimersByTimeAsync(1_000);
       await stopping;
-      const calls = vi.mocked(linkEngine.createLinkInternal).mock.calls.length;
-      const events = emitted.length;
-      if (stage === 'placeholder') heldInsert.resolve(saved);
-      else heldLink.resolve(links[0]);
+      heldInsert.resolve(saved);
+      heldTransaction.resolve(undefined);
       await rejection;
-      expect(linkEngine.createLinkInternal).toHaveBeenCalledTimes(calls);
-      expect(emitted).toHaveLength(events);
-      expect(f.neo4j.run).not.toHaveBeenCalled();
+      expect(txRun).not.toHaveBeenCalled();
+      expect(f.knowledgeStore.remove).not.toHaveBeenCalled();
     },
   );
   it('suppresses the nested merge notification after a held final write settles', async () => {

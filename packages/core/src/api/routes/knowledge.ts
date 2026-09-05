@@ -2,7 +2,6 @@ import type { FastifyInstance } from 'fastify';
 import {
   HTTP_STATUS,
   generateId,
-  createLogger,
   CreateKnowledgeBubbleSchema,
   UpdateKnowledgeBubbleSchema,
   KnowledgeQuerySchema,
@@ -25,7 +24,6 @@ import type { EmbeddingEngine } from '../../knowledge-engine/embeddings.ts';
 import type { ClusteringEngine } from '../../knowledge-engine/clustering.ts';
 import type { ChunkingEngine } from '../../knowledge-engine/chunking.ts';
 import type { RetrievalEngine } from '../../knowledge-engine/retrieval.ts';
-import type { ExecutionLogger } from '../../agent-manager/execution-logger.ts';
 import type { Neo4jClient } from '../../knowledge-engine/neo4j-client.ts';
 import type { KnowledgeLifecycle } from '../../knowledge-engine/knowledge-lifecycle.ts';
 import type { Retrospective } from '../../knowledge-engine/retrospective.ts';
@@ -34,13 +32,10 @@ import {
   type KnowledgeRefreshReport,
 } from '../../knowledge-engine/knowledge-refresh.ts';
 
-const log = createLogger('knowledge-api');
-
 export interface KnowledgeRouteDeps {
   eventBus: EventBus;
   knowledgeStore: KnowledgeStore;
   ingestionProcessor: IngestionProcessor;
-  executionLogger: ExecutionLogger;
   neo4j?: Neo4jClient;
   embeddingEngine?: EmbeddingEngine;
   clusteringEngine?: ClusteringEngine;
@@ -234,7 +229,7 @@ async function buildGraphData(
 
 // eslint-disable-next-line max-lines-per-function -- route registration for all knowledge endpoints
 export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRouteDeps): void {
-  const { eventBus, knowledgeStore, ingestionProcessor, executionLogger } = deps;
+  const { eventBus, knowledgeStore, ingestionProcessor } = deps;
   const { clusteringEngine } = deps;
 
   // --- Existing routes ---
@@ -255,14 +250,8 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
     if (!result.success) {
       return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: result.error.message });
     }
-    const { taskId } = await ingestionProcessor.ingest(result.data);
-    return reply.status(HTTP_STATUS.ACCEPTED).send({ taskId });
-  });
-
-  app.get<{ Params: { taskId: string } }>('/api/knowledge/ingest/:taskId', async (req, reply) => {
-    const task = executionLogger.getTaskById(req.params.taskId);
-    if (!task) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Task not found' });
-    return { taskId: task.id, status: task.status, result: task.result };
+    const ingestion = await ingestionProcessor.ingest(result.data);
+    return reply.status(HTTP_STATUS.CREATED).send(ingestion);
   });
 
   // --- New routes: domains ---
@@ -278,28 +267,12 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
   });
 
   // --- New routes: clustering ---
-  // M1 FIX: Added .catch() to runClustering() promise
   app.post('/api/knowledge/cluster', async (_req, reply) => {
     if (!clusteringEngine) {
       return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Clustering not available' });
     }
-    const taskId = generateId();
-    clusteringEngine
-      .runClustering()
-      .then((result) => {
-        eventBus.emit({
-          id: generateId(),
-          timestamp: Date.now(),
-          source: 'knowledge-api',
-          type: 'knowledge:clustering:complete',
-          payload: { ...result, taskId },
-        });
-      })
-      .catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error(`Clustering failed for task ${taskId}: ${msg}`);
-      });
-    return reply.status(HTTP_STATUS.ACCEPTED).send({ taskId });
+    const result = await clusteringEngine.runClustering();
+    return reply.status(HTTP_STATUS.OK).send(result);
   });
 
   app.get('/api/knowledge/clusters', async () => {
@@ -353,17 +326,8 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
     if (!clusteringEngine) {
       return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Not available' });
     }
-    const taskId = generateId();
-    clusteringEngine
-      .splitHub(req.params.id)
-      .then(() => {
-        log.info(`Hub split complete for ${req.params.id} (task ${taskId})`);
-      })
-      .catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error(`Hub split failed for ${req.params.id}: ${msg}`);
-      });
-    return reply.status(HTTP_STATUS.ACCEPTED).send({ taskId, status: 'splitting' });
+    const result = await clusteringEngine.splitHub(req.params.id);
+    return reply.status(HTTP_STATUS.OK).send(result);
   });
 
   // --- New routes: links ---
@@ -485,6 +449,14 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
     }
     return reply.status(HTTP_STATUS.CREATED).send({ mergedBubbleId: mergedId });
   });
+
+  app.post<{ Params: { targetId: string } }>(
+    '/api/knowledge/merges/:targetId/recover',
+    async (req, reply) => {
+      const result = await knowledgeStore.recoverMerge(req.params.targetId);
+      return reply.status(HTTP_STATUS.OK).send(result);
+    },
+  );
 
   app.get('/api/knowledge/retrospective', async (req, reply) => {
     if (!retrospective) {

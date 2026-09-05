@@ -15,7 +15,7 @@ import type { Neo4jClient } from './neo4j-client.ts';
 import type { KnowledgeStore } from './knowledge-store.ts';
 import { createTagTreeEngine, type TagTreeEngine } from './tag-tree.ts';
 import { createLinkEngine, type LinkEngine } from './link-ops.ts';
-import { createHubEngine, type HubEngine } from './hub-ops.ts';
+import { createHubEngine, type HubEngine, type HubSplitResult } from './hub-ops.ts';
 import { createClusteringOps, type ClusteringOps } from './clustering-ops.ts';
 import { createMergeEngine, type MergeEngine } from './merge-ops.ts';
 
@@ -47,7 +47,7 @@ export interface ClusteringEngine {
   }) => Promise<KnowledgeLink>;
   resolveLink: (linkId: string, action: 'accept' | 'dismiss') => Promise<boolean>;
   detectHubs: () => Promise<Array<{ bubbleId: string; linkCount: number }>>;
-  splitHub: (hubBubbleId: string) => Promise<void>;
+  splitHub: (hubBubbleId: string) => Promise<HubSplitResult>;
   runClustering: () => Promise<{ clusterCount: number; clusteredBubbles: number }>;
   getClusters: () => Promise<KnowledgeCluster[]>;
   getClusterMembers: (clusterId: string) => Promise<string[]>;
@@ -89,7 +89,12 @@ export function createClusteringEngine(deps: ClusteringDeps): ClusteringEngine {
     knowledgeStore,
     linkEngine,
   });
-  const clusteringOps: ClusteringOps = createClusteringOps({ neo4j, eventBus, embeddingEngine });
+  const clusteringOps: ClusteringOps = createClusteringOps({
+    neo4j,
+    eventBus,
+    embeddingEngine,
+    knowledgeStore,
+  });
   const mergeEngine: MergeEngine = createMergeEngine({
     neo4j,
     eventBus: lifetime.guard(eventBus),
@@ -154,7 +159,7 @@ export function createClusteringEngine(deps: ClusteringDeps): ClusteringEngine {
     const rows = await neo4j.query<{ domain: string; count: number }>(
       `MATCH (d:Domain)
        OPTIONAL MATCH (b:Bubble)-[:IN_DOMAIN]->(d)
-       RETURN d.name AS domain, count(b) AS count`,
+       RETURN d.name AS domain, count(DISTINCT b) AS count`,
     );
     return domainConfig.map((d) => ({
       name: d.name,

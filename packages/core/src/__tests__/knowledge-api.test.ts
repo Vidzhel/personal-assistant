@@ -90,16 +90,19 @@ describe('Knowledge API routes', () => {
     app = Fastify({ logger: false });
     await app.register(cors, { origin: true });
     const mockIngestion = {
-      ingest: async () => ({ taskId: 'mock' }),
+      ingest: async () => ({
+        taskId: 'mock-task',
+        bubbleId: 'mock-bubble',
+        title: 'Mock bubble',
+        filePath: 'mock-bubble.md',
+      }),
       start: () => {},
       stop: async () => {},
     };
-    const mockExecLogger = { getTaskById: () => undefined } as any;
     registerKnowledgeRoutes(app, {
       eventBus,
       knowledgeStore: store,
       ingestionProcessor: mockIngestion,
-      executionLogger: mockExecLogger,
       neo4j,
       embeddingEngine,
       clusteringEngine,
@@ -265,11 +268,14 @@ describe('Knowledge API routes', () => {
     expect(body).toHaveProperty('restructured');
   });
 
-  it('POST /api/knowledge/cluster returns 202 with taskId', async () => {
+  it('POST /api/knowledge/cluster awaits and returns cluster counts', async () => {
     const res = await app.inject({ method: 'POST', url: '/api/knowledge/cluster' });
-    expect(res.statusCode).toBe(202);
+    expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.taskId).toBeDefined();
+    expect(body).toEqual({
+      clusterCount: expect.any(Number),
+      clusteredBubbles: expect.any(Number),
+    });
   });
 
   it('GET /api/knowledge/clusters returns array', async () => {
@@ -311,7 +317,7 @@ describe('Knowledge API routes', () => {
     expect(Array.isArray(res.json())).toBe(true);
   });
 
-  it('POST /api/knowledge/:id/split-hub returns 202', async () => {
+  it('POST /api/knowledge/:id/split-hub awaits the split result', async () => {
     const createRes = await app.inject({
       method: 'POST',
       url: '/api/knowledge',
@@ -323,10 +329,11 @@ describe('Knowledge API routes', () => {
       method: 'POST',
       url: `/api/knowledge/${bubble.id}/split-hub`,
     });
-    expect(res.statusCode).toBe(202);
+    expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.taskId).toBeDefined();
-    expect(body.status).toBe('splitting');
+    expect(body.hubBubbleId).toBe(bubble.id);
+    expect(body.createdIds).toEqual(expect.any(Array));
+    expect(['completed', 'noop']).toContain(body.status);
   });
 
   it('GET /api/knowledge/:id/links returns array', async () => {

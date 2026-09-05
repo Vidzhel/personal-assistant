@@ -376,6 +376,29 @@ There is no atomic transaction across Markdown and Neo4j or automatic restoratio
 of deleted relationships. The owner waived legacy migration/restoration because
 Raven has not been used. Graph replacement remains part of the workspace design.
 
+Manual merges and consolidation use the same queued, file-owned operation. A
+merge creates a new Markdown identity, preserves external typed links and their
+properties, retains project/domain/cluster memberships, and replaces graph nodes
+in one transaction. Input-only links collapse with their merged endpoints. Parallel
+membership annotations are retained; project lists deduplicate logical membership.
+All original files remain until the graph commit is known to have succeeded.
+Extended deletion intents record the target and sources, block ordinary mutations
+and reindex for unfinished merges, and make recovery explicit through
+`POST /api/knowledge/merges/:targetId/recover`. A definite rollback removes only the
+unchanged proposed target; a definite commit finishes unchanged source cleanup.
+Ambiguous or externally edited state remains a conflict, with files retained.
+
+Consolidation reads current Markdown, validates every project plan before writes,
+and checks source revisions again after model work. It persists real digest files
+with project membership and refreshes derived data for new identities. Failed or
+partial operations reject with known completed identities and recovery guidance;
+they do not claim success or roll back already committed work. Ingestion now
+returns the saved bubble after extraction, model parsing and insertion finish;
+the former agent-only polling endpoint is removed. Cluster and hub routes await
+real results. Cluster labels and hub syntheses finish before structural writes;
+failed synthesis leaves the prior structure intact, and uncertain graph failures
+retain new synthesis files for inspection. These routes add no operation database.
+
 Graph initialization publishes dependencies only after success and disposes
 partially started processors on failure. Shutdown stops admission, aborts local
 waits and drains tracked runtime work before disposing stores. Voice requests,

@@ -4,11 +4,14 @@ import { z } from 'zod';
 import type { Neo4jClient } from './neo4j-client.ts';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { EmbeddingEngine } from './embeddings.ts';
+import type { KnowledgeStore } from './knowledge-store.ts';
 import { agglomerativeCluster } from './clustering-utils.ts';
+import { waitForAgentTask } from './task-completion.ts';
+import { readKnowledgeSnapshots, type KnowledgeSnapshot } from './knowledge-snapshots.ts';
 
 const log = createLogger('clustering-ops');
-
 const CLUSTER_SIMILARITY_THRESHOLD = 0.6;
+const LABEL_TIMEOUT_MS = 30_000;
 
 export interface ClusteringOps {
   runClustering: () => Promise<{ clusterCount: number; clusteredBubbles: number }>;
@@ -23,106 +26,183 @@ interface ClusteringOpsDeps {
   neo4j: Neo4jClient;
   eventBus: EventBus;
   embeddingEngine: EmbeddingEngine;
+  knowledgeStore: KnowledgeStore;
 }
 
-// eslint-disable-next-line max-lines-per-function -- factory function for clustering ops
+interface PreparedCluster {
+  memberIds: string[];
+  promptContent: string;
+  snapshots: KnowledgeSnapshot[];
+}
+
+interface ClusterLabel {
+  label: string;
+  description: string;
+}
+
+const LabelResultSchema = z
+  .object({
+    label: z.string().trim().min(1),
+    description: z.string().trim().min(1),
+  })
+  .strict();
+
+// eslint-disable-next-line max-lines-per-function -- factory wires lifecycle and graph collaborators
 export function createClusteringOps(deps: ClusteringOpsDeps): ClusteringOps {
   const { eventBus } = deps;
   const lifetime = createProcessorLifecycle(eventBus, 'clustering-ops');
   const neo4j = lifetime.guard(deps.neo4j);
   const embeddingEngine = lifetime.guard(deps.embeddingEngine);
+  const knowledgeStore = lifetime.guard(deps.knowledgeStore);
   let started = false;
+  let busy = false;
 
-  // Track pending LLM label tasks: taskId → clusterId
-  const pendingLabelTasks = new Map<string, string>();
+  async function prepareClusters(): Promise<PreparedCluster[]> {
+    const embeddings = await embeddingEngine.getAllEmbeddings();
+    const groups = agglomerativeCluster(
+      embeddings.map((item) => ({ id: item.bubbleId, embedding: item.embedding })),
+      CLUSTER_SIMILARITY_THRESHOLD,
+    ).filter((group) => group.length >= 2);
+    const prepared: PreparedCluster[] = [];
+    for (const memberIds of groups) {
+      const snapshots = await readKnowledgeSnapshots(knowledgeStore, memberIds);
+      prepared.push({
+        memberIds,
+        promptContent: snapshots
+          .map(({ bubble }) => `### ${bubble.title}\n${bubble.content}`)
+          .join('\n\n'),
+        snapshots,
+      });
+    }
+    return prepared;
+  }
+
+  async function labelCluster(group: PreparedCluster): Promise<ClusterLabel> {
+    const taskId = generateId();
+    const completion = waitForAgentTask({
+      eventBus,
+      taskId,
+      timeoutMs: LABEL_TIMEOUT_MS,
+      signal: lifetime.signal,
+      dispatch: () => {
+        lifetime.emit({
+          id: generateId(),
+          timestamp: Date.now(),
+          source: 'clustering-ops',
+          type: 'agent:task:request',
+          payload: {
+            taskId,
+            prompt: `Generate a concise label and description for a knowledge cluster. Member IDs: ${group.memberIds.join(', ')}.\n\nCanonical member Markdown:\n${group.promptContent}\n\nReturn JSON: {"label":"...","description":"..."}`,
+            skillName: 'knowledge-clustering',
+            mcpServers: {},
+            priority: 'low',
+          },
+        } as RavenEvent);
+      },
+    });
+    const result = await completion;
+    if (result.error || !result.result) {
+      throw new Error(result.error ?? `Cluster label task ${taskId} returned no result`);
+    }
+    let raw: unknown;
+    try {
+      raw = JSON.parse(result.result);
+    } catch {
+      throw new Error(`Cluster label task ${taskId} returned invalid JSON`);
+    }
+    const parsed = LabelResultSchema.safeParse(raw);
+    if (!parsed.success) throw new Error(`Invalid cluster label response: ${parsed.error.message}`);
+    return parsed.data;
+  }
+
+  async function replaceClusters(groups: PreparedCluster[], labels: ClusterLabel[]): Promise<void> {
+    const now = new Date().toISOString();
+    await neo4j.withTransaction(async (tx) => {
+      const guardedTx = lifetime.guard(tx);
+      const memberIds = groups.flatMap((group) => group.memberIds);
+      const existing = await guardedTx.run(
+        `UNWIND $memberIds AS bubbleId
+         OPTIONAL MATCH (b:Bubble {id: bubbleId})
+         WITH bubbleId, b
+         WHERE b IS NULL
+         RETURN collect(bubbleId) AS missing`,
+        { memberIds },
+      );
+      if (existing.records.length > 0) {
+        const missing = existing.records[0].get('missing') as string[] | undefined;
+        if (missing && missing.length > 0) {
+          throw new Error(`Cluster source disappeared: ${missing.join(', ')}`);
+        }
+      }
+      lifetime.assertActive();
+      await guardedTx.run('MATCH (c:Cluster) DETACH DELETE c');
+      for (let index = 0; index < groups.length; index += 1) {
+        const clusterId = generateId();
+        await guardedTx.run(
+          `CREATE (c:Cluster {id: $id, label: $label, description: $description, createdAt: $now, updatedAt: $now})`,
+          { id: clusterId, ...labels[index], now },
+        );
+        await guardedTx.run(
+          `UNWIND $memberIds AS bubbleId
+           MATCH (b:Bubble {id: bubbleId}), (c:Cluster {id: $clusterId})
+           CREATE (b)-[:IN_CLUSTER]->(c)`,
+          { memberIds: groups[index].memberIds, clusterId },
+        );
+        lifetime.assertActive();
+      }
+      lifetime.assertActive();
+    });
+    lifetime.assertActive();
+  }
 
   async function runClustering(): Promise<{
     clusterCount: number;
     clusteredBubbles: number;
   }> {
-    const allEmbeddings = await embeddingEngine.getAllEmbeddings();
-    if (allEmbeddings.length === 0) return { clusterCount: 0, clusteredBubbles: 0 };
-
-    const groups = agglomerativeCluster(
-      allEmbeddings.map((e) => ({ id: e.bubbleId, embedding: e.embedding })),
-      CLUSTER_SIMILARITY_THRESHOLD,
-    );
-
-    // Clear existing clusters (idempotent)
-    await neo4j.run('MATCH (c:Cluster) DETACH DELETE c');
-
-    let clusteredBubbles = 0;
-    const now = new Date().toISOString();
-
-    for (const group of groups) {
-      if (group.length < 2) continue;
-
-      const clusterId = generateId();
-      const label = `Cluster (${group.length} items)`;
-
-      await neo4j.run(
-        `CREATE (c:Cluster {id: $id, label: $label, description: null, createdAt: $now, updatedAt: $now})`,
-        { id: clusterId, label, now },
+    if (busy) throw new Error('Clustering is already running');
+    busy = true;
+    try {
+      const groups = await prepareClusters();
+      const labels: ClusterLabel[] = [];
+      for (const group of groups) labels.push(await labelCluster(group));
+      const expected = new Map(
+        groups.flatMap((group) =>
+          group.snapshots.map((snapshot) => [snapshot.bubble.id, snapshot.revision]),
+        ),
       );
-
-      for (const bubbleId of group) {
-        lifetime.assertActive();
-        await neo4j.run(
-          `MATCH (b:Bubble {id: $bubbleId}), (c:Cluster {id: $clusterId})
-           CREATE (b)-[:IN_CLUSTER]->(c)`,
-          { bubbleId, clusterId },
-        );
+      if (expected.size > 0) {
+        const current = await readKnowledgeSnapshots(knowledgeStore, [...expected.keys()]);
+        if (current.some((snapshot) => expected.get(snapshot.bubble.id) !== snapshot.revision)) {
+          throw new Error('Cluster sources changed while labels were generated');
+        }
       }
-      clusteredBubbles += group.length;
-
-      // Request LLM for cluster label
-      const taskId = generateId();
-      pendingLabelTasks.set(taskId, clusterId);
-      lifetime.emit({
-        id: generateId(),
-        timestamp: Date.now(),
-        source: 'clustering',
-        type: 'agent:task:request',
-        payload: {
-          taskId,
-          prompt: `Generate a concise label for a knowledge cluster containing ${group.length} items. Bubble IDs: ${group.join(', ')}. Return JSON: {"label": "...", "description": "..."}`,
-          skillName: 'knowledge-clustering',
-          mcpServers: {},
-          priority: 'low',
-        },
-      } as RavenEvent);
+      lifetime.assertActive();
+      await replaceClusters(groups, labels);
+      const clusteredBubbles = groups.reduce((total, group) => total + group.memberIds.length, 0);
+      log.info(`Clustering complete: ${groups.length} clusters, ${clusteredBubbles} bubbles`);
+      return { clusterCount: groups.length, clusteredBubbles };
+    } finally {
+      busy = false;
     }
-
-    const clusterCount = groups.filter((g) => g.length >= 2).length;
-    log.info(`Clustering complete: ${clusterCount} clusters, ${clusteredBubbles} bubbles`);
-    return { clusterCount, clusteredBubbles };
   }
 
   async function getClusters(): Promise<KnowledgeCluster[]> {
-    const rows = await neo4j.query<{
-      id: string;
-      label: string;
-      description: string | null;
-      memberCount: number;
-      createdAt: string;
-      updatedAt: string;
-    }>(
+    return neo4j.query(
       `MATCH (c:Cluster)
        OPTIONAL MATCH (b:Bubble)-[:IN_CLUSTER]->(c)
        RETURN c.id AS id, c.label AS label, c.description AS description,
-              count(b) AS memberCount, c.createdAt AS createdAt, c.updatedAt AS updatedAt
+              count(DISTINCT b) AS memberCount, c.createdAt AS createdAt, c.updatedAt AS updatedAt
        ORDER BY c.createdAt DESC`,
     );
-    return rows;
   }
 
   async function getClusterMembers(clusterId: string): Promise<string[]> {
     const rows = await neo4j.query<{ bubbleId: string }>(
       `MATCH (b:Bubble)-[:IN_CLUSTER]->(c:Cluster {id: $clusterId})
-       RETURN b.id AS bubbleId`,
+       RETURN DISTINCT b.id AS bubbleId`,
       { clusterId },
     );
-    return rows.map((r) => r.bubbleId);
+    return rows.map((row) => row.bubbleId);
   }
 
   async function deleteCluster(clusterId: string): Promise<boolean> {
@@ -133,62 +213,10 @@ export function createClusteringOps(deps: ClusteringOpsDeps): ClusteringOps {
     return result.records.length > 0 && result.records[0].get('deleted').toNumber() > 0;
   }
 
-  async function handleLabelComplete(event: RavenEvent): Promise<void> {
-    if (event.type !== 'agent:task:complete') return;
-    const payload = event.payload as {
-      taskId: string;
-      result: string;
-      success: boolean;
-    };
-    const clusterId = pendingLabelTasks.get(payload.taskId);
-    if (!clusterId) return;
-    pendingLabelTasks.delete(payload.taskId);
-
-    if (!payload.success) {
-      log.warn(`Cluster label LLM task ${payload.taskId} failed — keeping placeholder`);
-      return;
-    }
-
-    const LabelResultSchema = z.object({
-      label: z.string().optional(),
-      description: z.string().optional(),
-    });
-    const labelParseResult = LabelResultSchema.safeParse(JSON.parse(payload.result));
-    if (!labelParseResult.success) {
-      log.warn(`Invalid cluster label response: ${labelParseResult.error.message}`);
-      return;
-    }
-    const parsed = labelParseResult.data;
-    if (parsed.label) {
-      await neo4j
-        .run(
-          `MATCH (c:Cluster {id: $clusterId})
-           SET c.label = $label, c.description = $description, c.updatedAt = $now`,
-          {
-            clusterId,
-            label: parsed.label,
-            description: parsed.description ?? null,
-            now: new Date().toISOString(),
-          },
-        )
-        .then(() => log.info(`Cluster ${clusterId} label updated from LLM`))
-        .catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : String(err);
-          log.error(`Failed to update cluster ${clusterId} label: ${msg}`);
-        });
-    }
-  }
-
   function start(): void {
     lifetime.assertActive();
     if (started) return;
     started = true;
-    lifetime.listen('agent:task:complete', handleLabelComplete);
-  }
-
-  function stop(): Promise<void> {
-    pendingLabelTasks.clear();
-    return lifetime.stop();
   }
 
   return {
@@ -197,6 +225,6 @@ export function createClusteringOps(deps: ClusteringOpsDeps): ClusteringOps {
     getClusterMembers,
     deleteCluster,
     start,
-    stop,
+    stop: lifetime.stop,
   };
 }

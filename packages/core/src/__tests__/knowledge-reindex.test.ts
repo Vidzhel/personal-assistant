@@ -215,7 +215,7 @@ describe('knowledge file reindex preflight and identity', () => {
     const result = await reindexKnowledgeFiles(deps);
 
     expect(result).toMatchObject({ indexed: 0, changedIds: [] });
-    expect(result.errors).toEqual([expect.stringContaining('Pending deletion protects')]);
+    expect(result.errors).toEqual([expect.stringContaining('Pending deletion or merge protects')]);
     expect(deps.neo4j.query).not.toHaveBeenCalled();
     expect(deps.withTransaction).not.toHaveBeenCalled();
   });

@@ -1,7 +1,6 @@
 import { createLogger } from '@raven/shared';
 import type { AppConfig } from '../config.ts';
 import type { EventBus } from '../event-bus/event-bus.ts';
-import type { ExecutionLogger } from '../agent-manager/execution-logger.ts';
 import { createProcessorLifecycle, type ProcessorLifecycle } from './processor-lifecycle.ts';
 import { createNeo4jClient, type Neo4jClient } from './neo4j-client.ts';
 import { createKnowledgeStore } from './knowledge-store.ts';
@@ -40,7 +39,6 @@ const factories = {
 interface KnowledgeStartupDeps {
   config: AppConfig;
   eventBus: EventBus;
-  executionLogger: ExecutionLogger;
   knowledgeDir: string;
   mediaDir: string;
   configDir: string;
@@ -81,19 +79,9 @@ type StartedProcessors = Pick<
 >;
 
 async function startProcessors(deps: BuildDeps): Promise<StartedProcessors> {
-  const {
-    make,
-    own,
-    neo4j,
-    eventBus,
-    knowledgeStore,
-    executionLogger,
-    mediaDir,
-    configDir,
-    knowledgeDir,
-  } = deps;
+  const { make, own, neo4j, eventBus, knowledgeStore, mediaDir, configDir, knowledgeDir } = deps;
   const ingestionProcessor = own(
-    make.createIngestionProcessor({ knowledgeStore, eventBus, executionLogger, mediaDir }),
+    make.createIngestionProcessor({ knowledgeStore, eventBus, mediaDir }),
   );
   ingestionProcessor.start();
   const embeddingEngine = own(make.createEmbeddingEngine({ neo4j, eventBus, knowledgeStore }));
@@ -119,7 +107,7 @@ async function buildKnowledge(
   deps: BuildDeps,
   stop: () => Promise<void>,
 ): Promise<Omit<KnowledgeRuntime, 'reindex'>> {
-  const { make, own, neo4j, knowledgeStore, eventBus, knowledgeDir, config } = deps;
+  const { make, own, neo4j, knowledgeStore, eventBus, knowledgeDir } = deps;
   const processors = await startProcessors(deps);
   const { embeddingEngine, chunkingEngine } = processors;
   const retrievalEngine = make.createRetrievalEngine({ neo4j, knowledgeStore, knowledgeDir });
@@ -137,7 +125,13 @@ async function buildKnowledge(
     make.createRetrospective({ neo4j, eventBus, lifecycle: knowledgeLifecycle }),
   );
   const knowledgeConsolidation = own(
-    make.createKnowledgeConsolidation({ neo4j, eventBus, config }),
+    make.createKnowledgeConsolidation({
+      neo4j,
+      eventBus,
+      knowledgeStore,
+      embeddingEngine,
+      chunkingEngine,
+    }),
   );
   return {
     ...processors,

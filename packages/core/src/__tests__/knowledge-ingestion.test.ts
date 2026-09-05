@@ -225,6 +225,10 @@ function createMockKnowledgeStore(): KnowledgeStore & { bubbles: KnowledgeBubble
     },
     update: async () => undefined,
     remove: async () => false,
+    mergeOwned: async () => {
+      throw new Error('mergeOwned is not available in ingestion fixture');
+    },
+    recoverMerge: async () => ({ status: 'rolled-back' as const, targetId: 'fixture' }),
     getById: async (id) => bubbles.find((b) => b.id === id),
     getContentPreview: async (id) => {
       const b = bubbles.find((bb) => bb.id === id);
@@ -253,14 +257,6 @@ describe('IngestionProcessor', () => {
   let mockStore: ReturnType<typeof createMockKnowledgeStore>;
   let eventBus: EventBus;
   let processor: IngestionProcessor;
-
-  function mockExecutionLogger(): any {
-    return {
-      logTaskStart: vi.fn(),
-      logTaskEnd: vi.fn(),
-      getTaskStatus: vi.fn(),
-    };
-  }
 
   function simulateAgentCompletion(bus: EventBus, taskId: string, result: object): void {
     bus.emit({
@@ -302,12 +298,12 @@ describe('IngestionProcessor', () => {
     processor = createIngestionProcessor({
       knowledgeStore: mockStore,
       eventBus,
-      executionLogger: mockExecutionLogger(),
       mediaDir,
     });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await processor.stop();
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -325,13 +321,16 @@ describe('IngestionProcessor', () => {
         }, 10);
       });
 
-      const { taskId } = await processor.ingest({
-        type: 'text',
-        content: 'This is my personal note about something important.',
-        title: 'My Note Title',
-      });
+      const { taskId } = await processor.ingest(
+        {
+          type: 'text',
+          content: 'This is my personal note about something important.',
+          title: 'My Note Title',
+        },
+        { taskId: 'manual-ingestion-task' },
+      );
 
-      expect(taskId).toBeDefined();
+      expect(taskId).toBe('manual-ingestion-task');
       await new Promise((r) => setTimeout(r, 100));
 
       expect(mockStore.bubbles).toHaveLength(1);
@@ -405,13 +404,12 @@ describe('IngestionProcessor', () => {
         }, 10);
       });
 
-      await processor.ingest({
+      const result = await processor.ingest({
         type: 'file',
         filePath: testFile,
       });
 
-      await new Promise((r) => setTimeout(r, 100));
-
+      expect(result.title).toBe('Notes File');
       expect(mockStore.bubbles).toHaveLength(1);
       expect(mockStore.bubbles[0].source).toBe('file:txt');
       expect(mockStore.bubbles[0].sourceFile).toBeTruthy();
@@ -426,12 +424,12 @@ describe('IngestionProcessor', () => {
         failedEvents.push(event);
       });
 
-      await processor.ingest({
-        type: 'file',
-        filePath: testFile,
-      });
-
-      await new Promise((r) => setTimeout(r, 100));
+      await expect(
+        processor.ingest({
+          type: 'file',
+          filePath: testFile,
+        }),
+      ).rejects.toThrow('Unsupported file type');
 
       expect(failedEvents).toHaveLength(1);
       expect(failedEvents[0].payload.error).toContain('Unsupported file type');
@@ -526,6 +524,120 @@ describe('IngestionProcessor', () => {
       expect(mockStore.bubbles).toHaveLength(1);
       expect(mockStore.bubbles[0].title).toBe('Fenced JSON');
     });
+
+    it('rejects malformed model output before inserting a bubble', async () => {
+      const failedEvents: RavenEvent[] = [];
+      eventBus.on('knowledge:ingest:failed', (event: RavenEvent) => failedEvents.push(event));
+      eventBus.on('agent:task:request', (event: RavenEvent) => {
+        const taskId = (event as AgentTaskRequestEvent).payload.taskId;
+        eventBus.emit({
+          id: 'malformed-result',
+          timestamp: Date.now(),
+          source: 'test',
+          type: 'agent:task:complete',
+          payload: { taskId, result: 'not-json', durationMs: 1, success: true },
+        } as RavenEvent);
+      });
+
+      await expect(processor.ingest({ type: 'text', content: 'test' })).rejects.toThrow(
+        'Failed to parse agent output as JSON',
+      );
+      expect(mockStore.bubbles).toHaveLength(0);
+      expect(failedEvents).toHaveLength(1);
+    });
+  });
+
+  it('waits for durable insertion before returning or emitting completion', async () => {
+    let releaseInsert!: () => void;
+    const insertGate = new Promise<void>((resolve) => {
+      releaseInsert = resolve;
+    });
+    const originalInsert = mockStore.insert;
+    const insert = vi.fn(async (input: Parameters<KnowledgeStore['insert']>[0]) => {
+      await insertGate;
+      return originalInsert(input);
+    });
+    mockStore.insert = insert;
+    const completeEvents: RavenEvent[] = [];
+    eventBus.on('knowledge:ingest:complete', (event: RavenEvent) => completeEvents.push(event));
+    eventBus.on('agent:task:request', (event: RavenEvent) => {
+      const taskId = (event as AgentTaskRequestEvent).payload.taskId;
+      simulateAgentCompletion(eventBus, taskId, {
+        title: 'Durable result',
+        tags: ['test'],
+        summary: 'Stored after the model succeeds.',
+      });
+    });
+
+    let settled = false;
+    const resultPromise = processor.ingest({ type: 'text', content: 'test' }).then((result) => {
+      settled = true;
+      return result;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(insert).toHaveBeenCalledOnce();
+    expect(settled).toBe(false);
+    expect(completeEvents).toHaveLength(0);
+
+    releaseInsert();
+    const result = await resultPromise;
+    expect(result.title).toBe('Durable result');
+    expect(completeEvents).toHaveLength(1);
+  });
+
+  it('passes cancellation into a pending insert and emits no success after stop', async () => {
+    let releaseInsert!: () => void;
+    const insertGate = new Promise<void>((resolve) => {
+      releaseInsert = resolve;
+    });
+    const originalInsert = mockStore.insert;
+    const insert = vi.fn(
+      async (
+        input: Parameters<KnowledgeStore['insert']>[0],
+        options?: Parameters<KnowledgeStore['insert']>[1],
+      ) => {
+        await insertGate;
+        if (options?.signal?.aborted) throw new Error('insert cancelled');
+        return originalInsert(input, options);
+      },
+    );
+    mockStore.insert = insert;
+    const completeEvents: RavenEvent[] = [];
+    eventBus.on('knowledge:ingest:complete', (event: RavenEvent) => completeEvents.push(event));
+    eventBus.on('agent:task:request', (event: RavenEvent) => {
+      const taskId = (event as AgentTaskRequestEvent).payload.taskId;
+      simulateAgentCompletion(eventBus, taskId, {
+        title: 'Cancelled insert',
+        tags: ['test'],
+        summary: 'Should never complete.',
+      });
+    });
+
+    const resultPromise = processor.ingest({ type: 'text', content: 'cancel during insert' });
+    await vi.waitFor(() => expect(insert).toHaveBeenCalledOnce());
+    const stopping = processor.stop();
+    releaseInsert();
+    await stopping;
+    await expect(resultPromise).rejects.toThrow('insert cancelled');
+    expect(completeEvents).toHaveLength(0);
+    expect(mockStore.bubbles).toHaveLength(0);
+  });
+
+  it('rejects an in-flight ingestion on stop without late insertion', async () => {
+    let requested!: () => void;
+    const requestSeen = new Promise<void>((resolve) => {
+      requested = resolve;
+    });
+    const completeEvents: RavenEvent[] = [];
+    eventBus.on('knowledge:ingest:complete', (event: RavenEvent) => completeEvents.push(event));
+    eventBus.on('agent:task:request', () => requested());
+
+    const resultPromise = processor.ingest({ type: 'text', content: 'cancel me' });
+    await requestSeen;
+    await processor.stop();
+    await expect(resultPromise).rejects.toThrow('stopped while awaiting agent completion');
+    expect(mockStore.bubbles).toHaveLength(0);
+    expect(completeEvents).toHaveLength(0);
   });
 
   describe('agent failure handling', () => {
@@ -540,8 +652,9 @@ describe('IngestionProcessor', () => {
         failedEvents.push(event);
       });
 
-      await processor.ingest({ type: 'text', content: 'test' });
-      await new Promise((r) => setTimeout(r, 100));
+      await expect(processor.ingest({ type: 'text', content: 'test' })).rejects.toThrow(
+        'Agent failed',
+      );
 
       expect(failedEvents).toHaveLength(1);
       expect(failedEvents[0].payload.error).toContain('Agent failed');
@@ -608,6 +721,10 @@ describe('IngestionProcessor', () => {
     it('processes knowledge:ingest:request events', async () => {
       processor.start();
 
+      const completeEvent = new Promise<RavenEvent>((resolve) => {
+        eventBus.on('knowledge:ingest:complete', resolve);
+      });
+
       eventBus.on('agent:task:request', (event: RavenEvent) => {
         const taskId = (event as AgentTaskRequestEvent).payload.taskId;
         setTimeout(() => {
@@ -631,10 +748,12 @@ describe('IngestionProcessor', () => {
         },
       } as RavenEvent);
 
-      await new Promise((r) => setTimeout(r, 200));
+      const result = await completeEvent;
 
       expect(mockStore.bubbles).toHaveLength(1);
       expect(mockStore.bubbles[0].title).toBe('Event Driven');
+      if (result.type !== 'knowledge:ingest:complete') throw new Error('Unexpected event');
+      expect(result.payload.taskId).toBe('test-task-id');
     });
   });
 
@@ -700,12 +819,35 @@ describe('Knowledge Ingestion API', () => {
   let processor: IngestionProcessor;
   let app: any;
 
-  function mockExecutionLogger(): any {
-    return {
-      logTaskStart: vi.fn(),
-      logTaskEnd: vi.fn(),
-      getTaskStatus: vi.fn(),
-    };
+  function simulateAgentCompletion(bus: EventBus, taskId: string, result: object): void {
+    bus.emit({
+      id: 'api-test-completion',
+      timestamp: Date.now(),
+      source: 'test',
+      type: 'agent:task:complete',
+      payload: {
+        taskId,
+        result: JSON.stringify(result),
+        durationMs: 100,
+        success: true,
+      },
+    } as RavenEvent);
+  }
+
+  function simulateAgentFailure(bus: EventBus, taskId: string): void {
+    bus.emit({
+      id: 'api-test-failure',
+      timestamp: Date.now(),
+      source: 'test',
+      type: 'agent:task:complete',
+      payload: {
+        taskId,
+        result: '',
+        durationMs: 100,
+        success: false,
+        errors: ['Agent failed'],
+      },
+    } as RavenEvent);
   }
 
   beforeEach(async () => {
@@ -717,7 +859,6 @@ describe('Knowledge Ingestion API', () => {
     processor = createIngestionProcessor({
       knowledgeStore: mockStore,
       eventBus,
-      executionLogger: mockExecutionLogger(),
       mediaDir,
     });
 
@@ -728,49 +869,116 @@ describe('Knowledge Ingestion API', () => {
       eventBus,
       knowledgeStore: mockStore,
       ingestionProcessor: processor,
-      executionLogger: mockExecutionLogger(),
     });
     await app.ready();
   });
 
   afterEach(async () => {
+    await processor.stop();
     await app.close();
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('returns 202 with taskId for valid text ingestion', async () => {
+  it('returns the completed bubble for valid text ingestion', async () => {
+    eventBus.on('agent:task:request', (event: RavenEvent) => {
+      const taskId = (event as AgentTaskRequestEvent).payload.taskId;
+      simulateAgentCompletion(eventBus, taskId, {
+        title: 'API note',
+        tags: ['api'],
+        summary: 'Completed API ingestion.',
+      });
+    });
     const response = await app.inject({
       method: 'POST',
       url: '/api/knowledge/ingest',
       payload: { type: 'text', content: 'Test content' },
     });
-    expect(response.statusCode).toBe(202);
+    expect(response.statusCode).toBe(201);
     const body = JSON.parse(response.payload);
     expect(body.taskId).toBeDefined();
+    expect(body.bubbleId).toBeDefined();
+    expect(body.title).toBe('API note');
+    expect(body.filePath).toBeDefined();
   });
 
-  it('returns 202 for valid file path ingestion', async () => {
+  it('returns the completed bubble for valid file path ingestion', async () => {
     const testFile = join(tmpDir, 'test.txt');
     writeFileSync(testFile, 'file content');
+    eventBus.on('agent:task:request', (event: RavenEvent) => {
+      const taskId = (event as AgentTaskRequestEvent).payload.taskId;
+      simulateAgentCompletion(eventBus, taskId, {
+        title: 'API file',
+        tags: ['file'],
+        summary: 'Completed file ingestion.',
+      });
+    });
     const response = await app.inject({
       method: 'POST',
       url: '/api/knowledge/ingest',
       payload: { type: 'file', filePath: testFile },
     });
-    expect(response.statusCode).toBe(202);
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      title: 'API file',
+      sourceFilePath: expect.any(String),
+    });
   });
 
-  it('returns 202 for valid URL ingestion', async () => {
+  it('returns the completed bubble for valid URL ingestion', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response('url content', { headers: { 'content-type': 'text/plain' } }),
     );
+    eventBus.on('agent:task:request', (event: RavenEvent) => {
+      const taskId = (event as AgentTaskRequestEvent).payload.taskId;
+      simulateAgentCompletion(eventBus, taskId, {
+        title: 'API URL',
+        tags: ['url'],
+        summary: 'Completed URL ingestion.',
+      });
+    });
     const response = await app.inject({
       method: 'POST',
       url: '/api/knowledge/ingest',
       payload: { type: 'url', url: 'https://example.com' },
     });
-    expect(response.statusCode).toBe(202);
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({ title: 'API URL', sourceUrl: 'https://example.com' });
     vi.restoreAllMocks();
+  });
+
+  it('propagates model failure instead of returning an untracked task', async () => {
+    eventBus.on('agent:task:request', (event: RavenEvent) => {
+      simulateAgentFailure(eventBus, (event as AgentTaskRequestEvent).payload.taskId);
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/knowledge/ingest',
+      payload: { type: 'text', content: 'model failure' },
+    });
+    expect(response.statusCode).toBe(500);
+    expect(mockStore.bubbles).toHaveLength(0);
+  });
+
+  it('does not expose the removed ingestion status polling route', async () => {
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/knowledge/ingest/old-task-id',
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('awaits merge recovery and returns its durable outcome', async () => {
+    mockStore.recoverMerge = vi.fn(async (targetId: string) => ({
+      status: 'completed' as const,
+      targetId,
+    }));
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/knowledge/merges/merge-target/recover',
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ status: 'completed', targetId: 'merge-target' });
+    expect(mockStore.recoverMerge).toHaveBeenCalledWith('merge-target');
   });
 
   it('returns 400 for missing content on text type', async () => {

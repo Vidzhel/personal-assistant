@@ -251,11 +251,17 @@ function pendingCandidates(
   errors: string[],
 ): ReindexFile[] {
   const pending = readPendingKnowledgeDeletions(knowledgeDir);
-  const pendingIds = new Set(pending.map((record) => record.id));
+  const pendingIds = new Set(
+    pending.flatMap((record) => [
+      record.id,
+      ...(record.mergeSourceIds ?? []),
+      ...(record.mergeTargetId ? [record.mergeTargetId] : []),
+    ]),
+  );
   for (const file of files) {
     if (file.metadata.id && pendingIds.has(file.metadata.id)) {
       errors.push(
-        `Pending deletion protects knowledge identity ${file.metadata.id}; skipped ${file.name}`,
+        `Pending deletion or merge protects knowledge identity ${file.metadata.id}; skipped ${file.name}`,
       );
     }
   }

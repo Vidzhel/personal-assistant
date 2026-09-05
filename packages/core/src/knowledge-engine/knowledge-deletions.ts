@@ -1,8 +1,12 @@
-import { lstatSync, readdirSync, readFileSync, unlinkSync, type Dirent } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync, type Dirent } from 'node:fs';
 import { join } from 'node:path';
 import { parse, stringify } from 'yaml';
 import { z } from 'zod';
-import { atomicWriteKnowledgeText, resolveKnowledgePath } from './knowledge-file.ts';
+import {
+  atomicWriteKnowledgeText,
+  deleteBubbleFile,
+  resolveKnowledgePath,
+} from './knowledge-file.ts';
 
 const PENDING_DIRECTORY = '.raven-pending-deletions';
 const PendingKnowledgeDeletionSchema = z
@@ -10,8 +14,30 @@ const PendingKnowledgeDeletionSchema = z
     id: z.string().min(1),
     filePath: z.string().min(1),
     fileHash: z.string().regex(/^[0-9a-f]{64}$/),
+    mergeTargetId: z.string().min(1).optional(),
+    mergeTargetFilePath: z.string().min(1).optional(),
+    mergeTargetFileHash: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
+    mergeSourceIds: z.array(z.string().min(1)).min(1).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((record, context) => {
+    const mergeFields = [
+      record.mergeTargetId,
+      record.mergeTargetFilePath,
+      record.mergeTargetFileHash,
+      record.mergeSourceIds,
+    ];
+    const hasMerge = mergeFields.some((field) => field !== undefined);
+    if (hasMerge && mergeFields.some((field) => field === undefined)) {
+      context.addIssue({ code: 'custom', message: 'Merge deletion metadata must be complete' });
+    }
+    if (record.mergeSourceIds && !record.mergeSourceIds.includes(record.id)) {
+      context.addIssue({ code: 'custom', message: 'Merge source IDs must include the record ID' });
+    }
+  });
 
 export type PendingKnowledgeDeletion = z.infer<typeof PendingKnowledgeDeletionSchema>;
 
@@ -30,6 +56,7 @@ function parsePending(knowledgeDir: string, path: string, bytes: string): Pendin
     throw new Error(`Pending deletion filename does not match identity: ${path}`);
   }
   resolveKnowledgePath(knowledgeDir, record.filePath);
+  if (record.mergeTargetFilePath) resolveKnowledgePath(knowledgeDir, record.mergeTargetFilePath);
   return record;
 }
 
@@ -46,11 +73,7 @@ export function writePendingKnowledgeDeletion(
       throw new Error(`Pending deletion must be a regular file: ${path}`);
     }
     const existing = parsePending(knowledgeDir, path, readFileSync(path, 'utf8'));
-    if (
-      existing.id === validated.id &&
-      existing.filePath === validated.filePath &&
-      existing.fileHash === validated.fileHash
-    ) {
+    if (JSON.stringify(existing) === JSON.stringify(validated)) {
       return;
     }
     throw new Error(`Pending deletion already exists with different content: ${validated.id}`);
@@ -91,7 +114,7 @@ export function removePendingKnowledgeDeletion(knowledgeDir: string, id: string)
     if (stat.isSymbolicLink() || !stat.isFile()) {
       throw new Error(`Pending deletion must be a regular file: ${path}`);
     }
-    unlinkSync(path);
+    deleteBubbleFile(path);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }

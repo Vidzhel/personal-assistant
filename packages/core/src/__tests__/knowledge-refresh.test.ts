@@ -6,7 +6,7 @@ import { reindexKnowledge } from '../knowledge-engine/knowledge-refresh.ts';
 import type { EmbeddingEngine } from '../knowledge-engine/embeddings.ts';
 import type { ChunkingEngine } from '../knowledge-engine/chunking.ts';
 import type { IngestionProcessor } from '../knowledge-engine/ingestion.ts';
-import { deferred, fakeExecutionLogger, fakeKnowledgeStore } from './fixtures/knowledge-fixture.ts';
+import { deferred, fakeKnowledgeStore } from './fixtures/knowledge-fixture.ts';
 
 const apps: ReturnType<typeof Fastify>[] = [];
 afterEach(async () => {
@@ -75,7 +75,6 @@ describe('knowledge refresh and maintenance API', () => {
       ...f.deps,
       eventBus: new EventBus(),
       ingestionProcessor: {} as IngestionProcessor,
-      executionLogger: fakeExecutionLogger(),
     });
     const reconciliation = await app.inject({
       method: 'GET',

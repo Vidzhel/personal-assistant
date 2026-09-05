@@ -1,8 +1,9 @@
 import { createProcessorLifecycle } from './processor-lifecycle.ts';
+import { readKnowledgeSnapshots, mergeSources } from './knowledge-snapshots.ts';
 import { waitForAgentTask } from './task-completion.ts';
 import { unlink } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { createLogger, generateId, type Permanence, type RavenEvent } from '@raven/shared';
+import { createLogger, generateId, type Permanence } from '@raven/shared';
 import type { Neo4jClient } from './neo4j-client.ts';
 import type { KnowledgeStore } from './knowledge-store.ts';
 import type { EventBus } from '../event-bus/event-bus.ts';
@@ -37,7 +38,7 @@ export interface KnowledgeLifecycle {
   detectStaleBubbles: (overrideDays?: number) => Promise<StaleBubble[]>;
   snoozeBubble: (id: string, days: number) => Promise<string | null>;
   removeBubbleWithMedia: (id: string) => Promise<boolean>;
-  mergeBubbles: (bubbleIds: string[]) => Promise<string | undefined>;
+  mergeBubbles: (bubbleIds: string[]) => Promise<string>;
   upgradePermanence: (id: string, newLevel: Permanence) => Promise<boolean>;
   stop: () => Promise<void>;
 }
@@ -157,143 +158,74 @@ export function createKnowledgeLifecycle(deps: LifecycleDeps): KnowledgeLifecycl
     return removed;
   }
 
-  // eslint-disable-next-line max-lines-per-function -- merge flow with LLM synthesis, link re-pointing, cleanup
-  async function mergeBubbles(bubbleIds: string[]): Promise<string | undefined> {
-    // Load all bubbles to merge
-    const bubbles = [];
-    for (const bid of bubbleIds) {
-      const bubble = await knowledgeStore.getById(bid);
-      if (bubble) bubbles.push(bubble);
-    }
-
-    if (bubbles.length < 2) {
-      log.warn(`Merge requires at least 2 valid bubbles, got ${bubbles.length}`);
-      return undefined;
-    }
-
-    // Synthesize merged content via agent task event
-    const combinedContent = bubbles.map((b) => `## ${b.title}\n\n${b.content}`).join('\n\n---\n\n');
-
-    const mergedTitle = `Merged: ${bubbles.map((b) => b.title).join(' + ')}`;
-
-    // Collect all tags and domains from source bubbles
-    const allTags = [...new Set(bubbles.flatMap((b) => b.tags))];
-
-    // Synthesize merged content via LLM agent task
-    let synthesizedContent = combinedContent;
-    try {
-      const synthesisTaskId = generateId();
-      lifetime.assertActive();
-      const synthesisPromise = waitForAgentTask({
-        eventBus,
-        taskId: synthesisTaskId,
-        timeoutMs: MERGE_SYNTHESIS_TIMEOUT_MS,
-        signal: lifetime.signal,
-        dispatch: () => {
-          lifetime.emit({
-            id: generateId(),
-            timestamp: Date.now(),
-            source: 'knowledge-lifecycle',
-            type: 'agent:task:request',
-            payload: {
-              taskId: synthesisTaskId,
-              prompt: [
-                'Synthesize the following knowledge bubbles into a single coherent summary.',
-                'Preserve all key facts, deduplicate overlapping content, and organize logically.',
-                'Return ONLY the synthesized text, no preamble.',
-                '',
-                combinedContent,
-              ].join('\n'),
-              skillName: 'knowledge',
-              mcpServers: {},
-              priority: 'normal',
-            },
-          } as RavenEvent);
-        },
-      });
-
-      const completion = await synthesisPromise;
-      synthesizedContent = completion.result ?? combinedContent;
-    } catch (err) {
-      log.warn(`LLM synthesis failed, using concatenated content: ${err}`);
-    }
-
-    lifetime.assertActive();
-    // Create the merged bubble
-    const merged = await knowledgeStore.insert({
-      title: mergedTitle,
-      content: synthesizedContent,
-      tags: allTags,
-      permanence: 'normal',
+  async function synthesizeMerge(content: string): Promise<string> {
+    const taskId = generateId();
+    const completion = await waitForAgentTask({
+      eventBus,
+      taskId,
+      timeoutMs: MERGE_SYNTHESIS_TIMEOUT_MS,
+      signal: lifetime.signal,
+      dispatch: () =>
+        lifetime.emit({
+          id: generateId(),
+          timestamp: Date.now(),
+          source: 'knowledge-lifecycle',
+          type: 'agent:task:request',
+          payload: {
+            taskId,
+            prompt: [
+              'Synthesize these knowledge sources into a coherent summary.',
+              'Preserve key facts, deduplicate overlapping content, and organize logically.',
+              'Return only the synthesized text.',
+              '',
+              content,
+            ].join('\n'),
+            skillName: 'knowledge',
+            mcpServers: {},
+            priority: 'normal',
+          },
+        }),
     });
-
-    // Re-point incoming links from old bubbles to the merged bubble
-    await neo4j.run(
-      `UNWIND $oldIds AS oldId
-       MATCH (source:Bubble)-[r:LINKS_TO]->(old:Bubble {id: oldId})
-       WHERE NOT source.id IN $oldIds AND source.id <> $mergedId
-       MATCH (merged:Bubble {id: $mergedId})
-       CREATE (source)-[:LINKS_TO {
-         id: r.id + '-repointed',
-         relationshipType: r.relationshipType,
-         confidence: r.confidence,
-         autoSuggested: r.autoSuggested,
-         status: r.status,
-         createdAt: r.createdAt
-       }]->(merged)
-       DELETE r`,
-      { oldIds: bubbleIds, mergedId: merged.id },
-    );
-
-    // Re-point outgoing links from old bubbles to originate from the merged bubble
-    await neo4j.run(
-      `UNWIND $oldIds AS oldId
-       MATCH (old:Bubble {id: oldId})-[r:LINKS_TO]->(target:Bubble)
-       WHERE NOT target.id IN $oldIds AND target.id <> $mergedId
-       MATCH (merged:Bubble {id: $mergedId})
-       CREATE (merged)-[:LINKS_TO {
-         id: r.id + '-repointed',
-         relationshipType: r.relationshipType,
-         confidence: r.confidence,
-         autoSuggested: r.autoSuggested,
-         status: r.status,
-         createdAt: r.createdAt
-       }]->(target)
-       DELETE r`,
-      { oldIds: bubbleIds, mergedId: merged.id },
-    );
-
-    // Remove old bubbles (DETACH DELETE cleans up any remaining relationships)
-    for (const bubble of bubbles) {
-      await knowledgeStore.remove(bubble.id);
+    lifetime.assertActive();
+    if (completion.error || !completion.result?.trim()) {
+      throw new Error(`Knowledge merge synthesis failed: ${completion.error ?? 'empty result'}`);
     }
+    return completion.result;
+  }
 
-    // Generate embedding and chunks for the merged bubble
+  async function refreshMergedBubble(id: string): Promise<void> {
     try {
-      await embeddingEngine.refreshBubble(merged.id);
-    } catch (err) {
-      log.warn(`Failed to generate embedding for merged bubble ${merged.id}: ${err}`);
+      await embeddingEngine.refreshBubble(id);
+      await chunkingEngine.indexBubble(id);
+    } catch (error) {
+      throw new Error(
+        `Knowledge merge committed as ${id}, but derived refresh failed; retry reindex: ${String(error)}`,
+        { cause: error },
+      );
     }
-    try {
-      await chunkingEngine.indexBubble(merged.id);
-    } catch (err) {
-      log.warn(`Failed to index chunks for merged bubble ${merged.id}: ${err}`);
-    }
+  }
 
-    log.info(`Merged ${bubbles.length} bubbles into ${merged.id}: ${mergedTitle}`);
-
+  async function mergeBubbles(bubbleIds: string[]): Promise<string> {
+    if (bubbleIds.length < 2) throw new Error('Merge requires at least two distinct sources');
+    const snapshots = await readKnowledgeSnapshots(knowledgeStore, bubbleIds);
+    const content = snapshots
+      .map(({ bubble }) => `## ${bubble.title}\n\n${bubble.content}`)
+      .join('\n\n---\n\n');
+    const synthesized = await synthesizeMerge(content);
+    const merged = await knowledgeStore.mergeOwned({
+      sources: mergeSources(snapshots),
+      title: `Merged: ${snapshots.map(({ bubble }) => bubble.title).join(' + ')}`,
+      content: synthesized,
+      signal: lifetime.signal,
+    });
+    await refreshMergedBubble(merged.id);
     lifetime.emit({
       id: generateId(),
       timestamp: Date.now(),
       source: 'knowledge-lifecycle',
       type: 'knowledge:bubble:created',
-      payload: {
-        bubbleId: merged.id,
-        title: mergedTitle,
-        filePath: merged.filePath,
-      },
-    } as RavenEvent);
-
+      payload: { bubbleId: merged.id, title: merged.title, filePath: merged.filePath },
+    });
     return merged.id;
   }
 

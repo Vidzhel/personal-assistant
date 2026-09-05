@@ -587,15 +587,6 @@ export interface KnowledgeLinksSuggestedEvent extends BaseEvent {
   };
 }
 
-export interface KnowledgeClusteringCompleteEvent extends BaseEvent {
-  type: 'knowledge:clustering:complete';
-  payload: {
-    clusterCount: number;
-    clusteredBubbles: number;
-    taskId: string;
-  };
-}
-
 export interface KnowledgeMergeDetectedEvent extends BaseEvent {
   type: 'knowledge:merge:detected';
   payload: {
@@ -925,7 +916,6 @@ export type RavenEvent =
   | KnowledgeEmbeddingGeneratedEvent
   | KnowledgeTagsSuggestedEvent
   | KnowledgeLinksSuggestedEvent
-  | KnowledgeClusteringCompleteEvent
   | KnowledgeMergeDetectedEvent
   | KnowledgeHubDetectedEvent
   | KnowledgeChunkIndexedEvent

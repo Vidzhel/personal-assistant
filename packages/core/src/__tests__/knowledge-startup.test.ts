@@ -11,11 +11,7 @@ import { createEmbeddingEngine } from '../knowledge-engine/embeddings.ts';
 import { createClusteringEngine } from '../knowledge-engine/clustering.ts';
 import { createChunkingEngine } from '../knowledge-engine/chunking.ts';
 import { buildTestConfig } from './fixtures/raven-fixture.ts';
-import {
-  fakeGraph,
-  fakeKnowledgeStore,
-  fakeExecutionLogger,
-} from './fixtures/knowledge-fixture.ts';
+import { fakeGraph, fakeKnowledgeStore } from './fixtures/knowledge-fixture.ts';
 
 describe('transactional knowledge startup', () => {
   let root: string;
@@ -40,7 +36,6 @@ describe('transactional knowledge startup', () => {
         knowledgeDir: root,
         mediaDir: root,
         configDir: root,
-        executionLogger: fakeExecutionLogger(),
       },
       factories: {
         createNeo4jClient: vi.fn(() => client),
@@ -226,7 +221,7 @@ describe('transactional knowledge startup', () => {
       },
     });
     expect(initialized).toBeDefined();
-    expect(f.eventBus.listenerCount()).toBe(8);
+    expect(f.eventBus.listenerCount()).toBe(6);
     await initialized?.stop();
     await initialized?.stop();
     expect(f.eventBus.listenerCount()).toBe(0);

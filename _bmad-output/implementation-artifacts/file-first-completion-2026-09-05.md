@@ -23,7 +23,7 @@ external repositories.
 | F6 | Enforced global daily budget through existing execution paths | Complete; 2,176 tests, 14 browser journeys and packaged restart |
 | F7 | Ordinary schedule absence/staleness detection | Complete; 2,200 tests, 14 browser journeys and packaged restart |
 | F8 | Durable provider upload cleanup/retry after cancellation and restart | Complete; 2,223 tests, 14 browser journeys and packaged restart |
-| F9 | Remove obsolete storage compatibility/schema paths, reconcile docs, full/browser/compiled/container verification | In progress; F9a–F9b verified; F9c canonical knowledge next |
+| F9 | Remove obsolete storage compatibility/schema paths, reconcile docs, full/browser/compiled/container verification | In progress; F9a–F9c verified; F9d definition diagnostics and project recovery next |
 | W1 | Review dissertation/teaching and implement flexible repository workspaces with browser artifact access | Authorized after F1–F9 |
 
 Legacy metadata migration and prior Neo4j restoration are closed by the owner's
@@ -125,3 +125,9 @@ project-specific requirements scoped. Provide browser/mobile access to generated
 files and previewable artifacts through Raven UI/services. Include the complete
 direct-repository task journey in acceptance tests, including commands, files,
 Git and viewing results; do not claim this from a file-list endpoint alone.
+
+F9c completes shared file-owned knowledge merges, validated consolidation and
+truthful ingestion/cluster/hub outcomes. Parent-reviewed interruption recovery,
+2,296 default tests, 148 graph checks across full/focused runs, 15 browser journeys,
+required checks, core build and packaged restart pass. See the F9 spec for evidence
+and the corrected test-fixture failures. F9d is next; W1 remains after F9.

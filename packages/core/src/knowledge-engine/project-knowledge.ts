@@ -87,10 +87,14 @@ export async function getProjectKnowledgeLinks(
   projectId: string,
 ): Promise<LinkedBubbleRow[]> {
   return neo4j.query<LinkedBubbleRow>(
-    `MATCH (b:Bubble)-[r:BELONGS_TO_PROJECT]->(p:Project {id: $projectId})
+    `MATCH (b:Bubble)-[r:BELONGS_TO_PROJECT]->(:Project {id: $projectId})
+     WITH b, r ORDER BY r.createdAt ASC
+     WITH b, head(collect(r)) AS membership
+     OPTIONAL MATCH (b)-[:HAS_TAG]->(tag:Tag)
      RETURN b.id AS bubbleId, b.title AS title, b.contentPreview AS contentPreview,
-            b.tags AS tags, b.source AS source, r.linkedBy AS linkedBy, r.createdAt AS createdAt
-     ORDER BY r.createdAt DESC`,
+            collect(DISTINCT tag.name) AS tags, b.source AS source,
+            membership.linkedBy AS linkedBy, membership.createdAt AS createdAt
+     ORDER BY createdAt DESC`,
     { projectId },
   );
 }
@@ -101,7 +105,7 @@ export async function getProjectsForBubble(
 ): Promise<string[]> {
   const rows = await neo4j.query<{ projectId: string }>(
     `MATCH (b:Bubble {id: $bubbleId})-[:BELONGS_TO_PROJECT]->(p:Project)
-     RETURN p.id AS projectId`,
+     RETURN DISTINCT p.id AS projectId`,
     { bubbleId },
   );
   return rows.map((r) => r.projectId);

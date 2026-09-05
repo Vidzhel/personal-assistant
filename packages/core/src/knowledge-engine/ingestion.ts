@@ -10,7 +10,6 @@ import {
 } from '@raven/shared';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { KnowledgeStore } from './knowledge-store.ts';
-import type { ExecutionLogger } from '../agent-manager/execution-logger.ts';
 import { extractFromFile, extractFromUrl, copyToMediaDir } from './content-extractor.ts';
 
 const log = createLogger('ingestion');
@@ -21,12 +20,24 @@ const INGESTION_TIMEOUT_MS = 120_000;
 export interface IngestionDeps {
   knowledgeStore: KnowledgeStore;
   eventBus: EventBus;
-  executionLogger: ExecutionLogger;
   mediaDir: string;
 }
 
+export interface IngestionResult {
+  taskId: string;
+  bubbleId: string;
+  title: string;
+  filePath: string;
+  sourceFilePath?: string;
+  sourceUrl?: string;
+}
+
+export interface IngestionOptions {
+  taskId?: string;
+}
+
 export interface IngestionProcessor {
-  ingest: (input: IngestKnowledge) => Promise<{ taskId: string }>;
+  ingest: (input: IngestKnowledge, options?: IngestionOptions) => Promise<IngestionResult>;
   start: () => void;
   stop: () => Promise<void>;
 }
@@ -147,6 +158,92 @@ interface ExtractedContent {
   sourceUrl: string | null;
 }
 
+interface IngestionRunDeps {
+  input: IngestKnowledge;
+  taskId: string;
+  mediaDir: string;
+  signal: AbortSignal;
+  assertActive: () => void;
+  emit: (event: RavenEvent) => void;
+  eventBus: EventBus;
+  knowledgeStore: KnowledgeStore;
+}
+
+function dispatchIngestionTask(params: {
+  emit: (event: RavenEvent) => void;
+  taskId: string;
+  prompt: string;
+}): void {
+  params.emit({
+    id: generateId(),
+    timestamp: Date.now(),
+    source: 'ingestion',
+    type: 'agent:task:request',
+    payload: {
+      taskId: params.taskId,
+      prompt: params.prompt,
+      skillName: 'knowledge-ingestion',
+      mcpServers: {},
+      priority: 'normal',
+    },
+  } as RavenEvent);
+}
+
+function buildIngestionResult(params: {
+  taskId: string;
+  bubble: Awaited<ReturnType<KnowledgeStore['insert']>>;
+  extracted: ExtractedContent;
+}): IngestionResult {
+  const { taskId, bubble, extracted } = params;
+  return {
+    taskId,
+    bubbleId: bubble.id,
+    title: bubble.title,
+    filePath: bubble.filePath,
+    ...(extracted.sourceFile ? { sourceFilePath: extracted.sourceFile } : {}),
+    ...(extracted.sourceUrl ? { sourceUrl: extracted.sourceUrl } : {}),
+  };
+}
+
+async function executeIngestion(params: IngestionRunDeps): Promise<IngestionResult> {
+  const { input, taskId, mediaDir, signal, assertActive, emit, eventBus, knowledgeStore } = params;
+  const source = deriveSource(input);
+  const extracted = await extractContent(input, mediaDir, signal);
+  assertActive();
+  const prompt = buildIngestionPrompt({
+    content: extracted.content,
+    title: input.title,
+    tags: input.tags,
+    source,
+    sourceFile: extracted.sourceFile ?? undefined,
+    sourceUrl: extracted.sourceUrl ?? undefined,
+  });
+  const completion = await waitForAgentTask({
+    eventBus,
+    taskId,
+    timeoutMs: INGESTION_TIMEOUT_MS,
+    signal,
+    dispatch: () => dispatchIngestionTask({ emit, taskId, prompt }),
+  });
+  assertActive();
+  if (completion.error) throw new Error(completion.error);
+  const parsed = parseIngestionResult(completion.result ?? '');
+  const bubble = await knowledgeStore.insert(
+    {
+      title: parsed.title,
+      content: extracted.content,
+      source,
+      tags: parsed.tags,
+      sourceFile: extracted.sourceFile,
+      sourceUrl: extracted.sourceUrl,
+      permanence: input.type === 'voice-memo' ? 'temporary' : undefined,
+    },
+    { signal },
+  );
+  assertActive();
+  return buildIngestionResult({ taskId, bubble, extracted });
+}
+
 // Zod refine guarantees: text/voice-memo have content, file has filePath, url has url
 function extractContent(
   input: IngestKnowledge,
@@ -183,52 +280,42 @@ export function createIngestionProcessor(deps: IngestionDeps): IngestionProcesso
   const { eventBus, mediaDir } = deps;
   const lifetime = createProcessorLifecycle(eventBus, 'ingestion');
   const knowledgeStore = lifetime.guard(deps.knowledgeStore);
+  const activeTaskIds = new Set<string>();
   let started = false;
 
-  async function handleIngestionComplete(params: {
-    taskId: string;
-    input: IngestKnowledge;
-    extracted: ExtractedContent;
-    source: string;
-    completion: Promise<{ result?: string; error?: string }>;
-  }): Promise<void> {
-    const { taskId, input, extracted, source } = params;
+  async function ingest(
+    input: IngestKnowledge,
+    options?: IngestionOptions,
+  ): Promise<IngestionResult> {
+    const taskId = options?.taskId ?? generateId();
+    if (activeTaskIds.has(taskId)) {
+      throw new Error(`Knowledge ingestion task is already active: ${taskId}`);
+    }
+    activeTaskIds.add(taskId);
     try {
-      const completion = await params.completion;
-      lifetime.assertActive();
-
-      if (completion.error) {
-        emitFailedEvent({ taskId, error: completion.error, type: input.type });
-        return;
-      }
-
-      const parsed = parseIngestionResult(completion.result ?? '');
-      const permanence = input.type === 'voice-memo' ? ('temporary' as const) : undefined;
-      const bubble = await knowledgeStore.insert({
-        title: parsed.title,
-        content: extracted.content,
-        source,
-        tags: parsed.tags,
-        sourceFile: extracted.sourceFile,
-        sourceUrl: extracted.sourceUrl,
-        permanence,
-      });
-
-      lifetime.assertActive();
-      emitCompleteEvent({
+      log.info(`Starting ingestion: type=${input.type}, taskId=${taskId}`);
+      const result = await executeIngestion({
+        input,
         taskId,
-        bubbleId: bubble.id,
-        title: bubble.title,
-        filePath: bubble.filePath,
-        sourceFilePath: extracted.sourceFile ?? undefined,
-        sourceUrl: extracted.sourceUrl ?? undefined,
+        mediaDir,
+        signal: lifetime.signal,
+        assertActive: lifetime.assertActive,
+        emit: lifetime.emit,
+        eventBus,
+        knowledgeStore,
       });
-      log.info(`Ingestion complete: ${bubble.id} (${bubble.title})`);
+      emitCompleteEvent(result);
+      log.info(`Ingestion complete: ${result.bubbleId} (${result.title})`);
+      return result;
     } catch (err) {
-      if (lifetime.signal.aborted) return;
-      const msg = err instanceof Error ? err.message : String(err);
-      emitFailedEvent({ taskId, error: msg, type: input.type });
-      log.error(`Ingestion failed for task ${taskId}: ${msg}`);
+      if (!lifetime.signal.aborted) {
+        const msg = err instanceof Error ? err.message : String(err);
+        emitFailedEvent({ taskId, error: msg, type: input.type });
+        log.error(`Ingestion failed for task ${taskId}: ${msg}`);
+      }
+      throw err;
+    } finally {
+      activeTaskIds.delete(taskId);
     }
   }
 
@@ -263,77 +350,31 @@ export function createIngestionProcessor(deps: IngestionDeps): IngestionProcesso
     } as RavenEvent);
   }
 
-  async function ingest(input: IngestKnowledge): Promise<{ taskId: string }> {
-    const taskId = generateId();
-    const source = deriveSource(input);
-    log.info(`Starting ingestion: type=${input.type}, taskId=${taskId}`);
-
-    let extracted: ExtractedContent;
-    try {
-      extracted = await extractContent(input, mediaDir, lifetime.signal);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      emitFailedEvent({ taskId, error: msg, type: input.type });
-      return { taskId };
-    }
-
-    lifetime.assertActive();
-    const prompt = buildIngestionPrompt({
-      content: extracted.content,
-      title: input.title,
-      tags: input.tags,
-      source,
-      sourceFile: extracted.sourceFile ?? undefined,
-      sourceUrl: extracted.sourceUrl ?? undefined,
-    });
-
-    const completion = waitForAgentTask({
-      eventBus,
-      taskId,
-      timeoutMs: INGESTION_TIMEOUT_MS,
-      signal: lifetime.signal,
-      dispatch: () => {
-        lifetime.emit({
-          id: generateId(),
-          timestamp: Date.now(),
-          source: 'ingestion',
-          type: 'agent:task:request',
-          payload: {
-            taskId,
-            prompt,
-            skillName: 'knowledge-ingestion',
-            mcpServers: {},
-            priority: 'normal',
-          },
-        } as RavenEvent);
-      },
-    });
-    // Completion was registered before dispatch, including synchronous backends.
-    void lifetime
-      .track(handleIngestionComplete({ taskId, input, extracted, source, completion }))
-      .catch((err: unknown) => log.error(`Ingestion completion handler failed: ${err}`));
-
-    return { taskId };
-  }
-
   function start(): void {
     lifetime.assertActive();
     if (started) return;
     started = true;
     lifetime.listen('knowledge:ingest:request', async (event: RavenEvent) => {
       const payload = (event as KnowledgeIngestRequestEvent).payload;
-      await ingest({
-        type: payload.type,
-        content: payload.content,
-        filePath: payload.filePath,
-        url: payload.url,
-        title: payload.title,
-        source: payload.source,
-        tags: payload.tags,
-      });
+      await ingest(
+        {
+          type: payload.type,
+          content: payload.content,
+          filePath: payload.filePath,
+          url: payload.url,
+          title: payload.title,
+          source: payload.source,
+          tags: payload.tags,
+        },
+        { taskId: payload.taskId },
+      );
     });
     log.info('Ingestion processor started — listening for knowledge:ingest:request events');
   }
 
-  return { ingest: (input) => lifetime.run(() => ingest(input)), start, stop: lifetime.stop };
+  return {
+    ingest: (input, options) => lifetime.run(() => ingest(input, options)),
+    start,
+    stop: lifetime.stop,
+  };
 }

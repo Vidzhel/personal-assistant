@@ -12,6 +12,9 @@ export const KNOWLEDGE_NEO4J_TEST_FILES = [
   'src/__tests__/knowledge-embeddings.test.ts',
   'src/__tests__/knowledge-retrieval.test.ts',
   'src/__tests__/knowledge-store.test.ts',
+  'src/__tests__/knowledge-merge.test.ts',
+  'src/__tests__/knowledge-merge-recovery.test.ts',
+  'src/__tests__/knowledge-consolidation-files.test.ts',
 ];
 
 export default defineConfig({

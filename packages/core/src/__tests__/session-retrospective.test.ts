@@ -1,3 +1,4 @@
+import { fakeConsolidationStorage } from './fixtures/knowledge-fixture.ts';
 import { describe, it, expect, beforeAll, afterAll, vi, beforeEach } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -389,10 +390,11 @@ describe('Session Auto-Compaction & Background Retrospective (10.10)', () => {
         success: true,
       });
 
+      const storage = fakeConsolidationStorage();
       const consolidation = createKnowledgeConsolidation({
         neo4j: mockNeo4j,
         eventBus,
-        config: {} as any,
+        ...storage,
       });
 
       const result = await consolidation.runConsolidation('proj-1');
@@ -401,15 +403,15 @@ describe('Session Auto-Compaction & Background Retrospective (10.10)', () => {
       expect(result.prunedCount).toBe(0);
       expect(result.digestCreated).toBe(true);
 
-      // Verify Neo4j operations
-      expect(mockNeo4j.run).toHaveBeenCalledWith(
-        expect.stringContaining('SET b.content'),
-        expect.objectContaining({ id: 'b1', content: 'Combined content 1+2' }),
+      expect(storage.knowledgeStore.mergeOwned).toHaveBeenCalledWith(
+        expect.objectContaining({ content: 'Combined content 1+2' }),
       );
-      expect(mockNeo4j.run).toHaveBeenCalledWith(
-        expect.stringContaining('DETACH DELETE'),
-        expect.objectContaining({ id: 'b2' }),
+      expect(storage.knowledgeStore.insert).toHaveBeenCalledWith(
+        expect.objectContaining({ content: 'Project digest summary' }),
+        expect.objectContaining({ projectIds: ['proj-1'] }),
       );
+      expect(mockNeo4j.run).not.toHaveBeenCalled();
+      await consolidation.stop();
     });
 
     it('handles empty bubble set gracefully', async () => {
@@ -424,7 +426,7 @@ describe('Session Auto-Compaction & Background Retrospective (10.10)', () => {
       const consolidation = createKnowledgeConsolidation({
         neo4j: mockNeo4j,
         eventBus,
-        config: {} as any,
+        ...fakeConsolidationStorage(),
       });
 
       const result = await consolidation.runConsolidation();

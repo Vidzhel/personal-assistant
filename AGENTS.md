@@ -121,6 +121,15 @@ versions; do not copy versions from historical planning documents.
   Pending knowledge deletion YAML blocks reindex resurrection and requires explicit
   delete retry or conflict resolution; never infer permission to prune graph-only
   records from missing Markdown. File/graph writes are not one atomic transaction.
+- Knowledge merge/consolidation must use the shared `KnowledgeStore.mergeOwned`
+  path and canonical source revisions. Never redispatch an invalid, failed or
+  overlapping consolidation plan into direct graph deletion. Merges create a new
+  identity and preserve originals until known graph success; pending merge records
+  block ordinary update/delete/reindex. Explicit merge recovery verifies source
+  and target state and file hashes before completing or rolling back preparation.
+  Digests are actual project-linked Markdown. Ingestion, clustering and hub HTTP
+  routes await completed operations; do not invent untracked task IDs or report
+  an agent completion as proof that subsequent storage work completed.
 - Agent memory currently lives at `projects/agents/<name>/memory/`, globally by
   name. Project memory and attached repositories are **proposed**, not available
   simply by putting paths in a data-source row or `context.md`.

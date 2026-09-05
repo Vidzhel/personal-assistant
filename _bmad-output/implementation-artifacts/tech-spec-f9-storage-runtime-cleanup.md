@@ -150,7 +150,67 @@ explicit summary-only maintenance template; the other 86 original hashes match.
 Logs: `/tmp/raven-f9b-check-final.log`, `/tmp/raven-f9b-full-final.log`,
 `/tmp/raven-f9b-build-core.log`, `/tmp/raven-f9b-build-web.log`,
 `/tmp/raven-f9b-browser.log`, `/tmp/raven-f9b-compiled.log`.
-F9c canonical knowledge mutations and truthful operation outcomes are next.
+F9c completion is recorded below.
+
+## F9c implementation and review scope
+
+F9b is pushed as `4fe3e02`. F9c is complete. Preserve canonical source files,
+typed links and project memberships across manual and automatic merging. Shared
+merges create a new identity for both callers; `keepId` in a model plan selects the
+title, and all source IDs are replaced. Internal links between inputs collapse
+with their endpoints. Distinct annotations on parallel membership edges remain
+in the graph; logical project readers deduplicate bubble identities.
+
+Validate the entire consolidation plan before mutations, including later project
+plans, unknown/out-of-scope IDs, overlaps and changed Markdown revisions. Persist
+digests and their project membership, and report actual saved IDs. Do not swallow
+partial merge/prune/refresh failure. A failed graph transaction is not proof of
+rollback: extended deletion records retain the target, source IDs and byte hashes.
+Explicit recovery inspects actual graph state; partial intent installation/cleanup
+and external file edits must remain safe. Pending source and target identities
+cannot be updated/deleted/reindexed through ordinary paths.
+
+Ingestion returns only after storage completes, propagates errors and preserves
+voice-event task IDs. Remove its misleading model-run polling contract. Cluster
+and hub endpoints await real outcomes; all required model outputs precede writes,
+cluster replacement and each hub rewiring are graph transactions, and failed
+rewiring retains new files and identifies them rather than deleting evidence.
+
+Parent review caught a real Neo4j unique-ID violation when copying an anchor node:
+the replacement must receive its new ID in one property-map assignment. It also
+removed hub compensation that could delete surviving links after an uncertain
+commit, added source-edit checks and per-operation cancellation, and retained
+full relationship properties. Required/default/real-graph/browser/compiled checks
+must finish before this checkpoint is marked complete or pushed.
+
+## F9c completion evidence
+
+Parent review closed unknown graph outcomes, source edits during synthesis,
+partial intent installation, cancellation during recovery and loss of relationship
+annotations. The merge transaction now creates its new identity atomically, checks
+all input nodes, and preserves canonical file tags and strongest permanence.
+Pending records protect every declared source and target, even when an individual
+record is missing. Explicit recovery checks graph state and file hashes; stopping
+while its graph read is held leaves every source, target and intent unchanged.
+Intent removal flushes the containing directory. Consolidation reports completed
+operations separately from an uncertain merge identified in its error.
+
+Validation: required `npm run check`; 218 default files / 2,296 passing tests
+(six explicit live skips); all nine real-Neo4j files verified (148 current tests
+across the full run and corrected focused rerun); fresh core build; 15 isolated
+browser journeys; compiled HTTP/chat, persisted state and two clean process exits.
+The first graph run passed 145 tests and exposed two new fixture/assertion errors;
+both were corrected, and the final merge/consolidation/recovery selection passed
+all 15 tests, including the added shutdown regression. No provider account or
+owner graph was used. The 86 original definitions outside the prior explicit
+maintenance-template change retain their original hashes; owner work is preserved.
+
+Logs: `/tmp/raven-f9c-check-final.log`, `/tmp/raven-f9c-full-final.log`,
+`/tmp/raven-f9c-graph-final.log`, `/tmp/raven-f9c-graph-recovery-final.log`,
+`/tmp/raven-f9c-final-focused.log`, `/tmp/raven-f9c-build-core.log`,
+`/tmp/raven-f9c-browser.log`, `/tmp/raven-f9c-compiled.log`.
+F9d definition diagnostics and interruption recovery are next; production web
+and deployment/container verification remain scheduled for F9e.
 
 ## Remaining constraints
 

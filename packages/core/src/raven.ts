@@ -502,7 +502,6 @@ export async function createRaven(
   knowledge = await initializeKnowledge({
     config,
     eventBus,
-    executionLogger,
     knowledgeDir,
     mediaDir,
     configDir,

@@ -1,3 +1,4 @@
+import { fakeConsolidationStorage } from './fixtures/knowledge-fixture.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -59,7 +60,7 @@ vi.mock('../knowledge-engine/initialize-knowledge.ts', async (importOriginal) =>
       const consolidation = createKnowledgeConsolidation({
         neo4j: graph,
         eventBus: deps.eventBus,
-        config: deps.config,
+        ...fakeConsolidationStorage(),
       });
       knowledgeHarness.consolidationStop.mockImplementation(async () => {
         knowledgeHarness.order.push('knowledge-consolidation.stop');

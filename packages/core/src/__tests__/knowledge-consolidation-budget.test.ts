@@ -1,3 +1,4 @@
+import { fakeConsolidationStorage } from './fixtures/knowledge-fixture.ts';
 import Database from 'better-sqlite3';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -60,7 +61,7 @@ describe('knowledge consolidation budget boundary', () => {
     const consolidation = createKnowledgeConsolidation({
       neo4j,
       eventBus: new EventBus(),
-      config: buildTestConfig(),
+      ...fakeConsolidationStorage(),
     });
 
     await expect(consolidation.runConsolidation()).rejects.toThrow(/budget exhausted/i);
@@ -91,7 +92,7 @@ describe('knowledge consolidation budget boundary', () => {
     const consolidation = createKnowledgeConsolidation({
       neo4j,
       eventBus: new EventBus(),
-      config: buildTestConfig(),
+      ...fakeConsolidationStorage(),
     });
 
     const operation = consolidation.runConsolidation();

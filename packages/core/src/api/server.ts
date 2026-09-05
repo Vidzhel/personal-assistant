@@ -181,7 +181,6 @@ export async function createApiServer(
       knowledgeStore: deps.knowledgeStore,
       reindexKnowledge: deps.reindexKnowledge,
       ingestionProcessor: deps.ingestionProcessor,
-      executionLogger: deps.executionLogger,
       neo4j: deps.neo4jClient,
       embeddingEngine: deps.embeddingEngine,
       clusteringEngine: deps.clusteringEngine,

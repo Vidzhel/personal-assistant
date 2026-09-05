@@ -433,16 +433,30 @@ function graphIssues(files: FileRecord[], graph: GraphRecord[]): KnowledgeReconc
 
 function pendingIssues(knowledgeDir: string): KnowledgeReconciliationIssue[] {
   try {
-    return readPendingKnowledgeDeletions(knowledgeDir).map((record) =>
-      issue({
-        code: 'pending-deletion',
-        message: `Knowledge identity ${record.id} has a pending deletion for ${record.filePath}.`,
-        repair:
-          'Finish or cancel the recorded deletion before reconciling this identity; do not reindex it while the intent exists.',
-        id: record.id,
-        filePath: record.filePath,
-      }),
-    );
+    const issues = readPendingKnowledgeDeletions(knowledgeDir).flatMap((record) => {
+      const ids = record.mergeTargetId
+        ? [...new Set([...(record.mergeSourceIds ?? [record.id]), record.mergeTargetId])]
+        : [record.id];
+      return ids.map((id) =>
+        issue({
+          code: 'pending-deletion',
+          message: record.mergeTargetId
+            ? `Knowledge identity ${id} is protected by pending merge deletion for ${record.filePath} (target ${record.mergeTargetId}).`
+            : `Knowledge identity ${record.id} has a pending deletion for ${record.filePath}.`,
+          repair: record.mergeTargetId
+            ? `Recover merge target ${record.mergeTargetId} before clearing this intent; do not reindex any declared merge source while it exists.`
+            : 'Finish or cancel the recorded deletion before reconciling this identity; do not reindex it while the intent exists.',
+          id,
+          filePath:
+            id === record.mergeTargetId
+              ? record.mergeTargetFilePath
+              : id === record.id
+                ? record.filePath
+                : undefined,
+        }),
+      );
+    });
+    return [...new Map(issues.map((item) => [item.id, item])).values()];
   } catch (error) {
     return [
       issue({
