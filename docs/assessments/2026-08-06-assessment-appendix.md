@@ -1,4 +1,11 @@
 # Architecture Assessment — Evidence Appendix (2026-08-06)
+
+> **Historical assessment — status superseded September 5, 2026.** The findings
+> below describe the August codebase and are preserved as evidence. Current
+> remediation status, verification limits and follow-up work are recorded in the
+> [canonical reliability completion record](../../_bmad-output/implementation-artifacts/reliability-completion-2026-09-05.md).
+> The September workspace assessment also predates this reliability pass; neither
+> assessment is a current defect inventory or authorization to restore deleted systems.
 Condensed per-agent findings from the multi-agent assessment workflow. Full report: `2026-08-06-architecture-assessment.md`.
 
 ## Codebase maps

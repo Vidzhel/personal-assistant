@@ -1,5 +1,12 @@
 # Story 10.7: Project Hub & Landing Page Redesign
 
+> **Historical story — review status superseded September 5, 2026.** The original
+> status, acceptance criteria and checkboxes below are retained as history. Current
+> project and chat behavior was reconciled and verified in R2/R5; see the
+> [canonical reliability completion record](reliability-completion-2026-09-05.md).
+> This does not certify every March UI detail literally as written, or reopen
+> suite-based design. Outstanding work follows the current record, not this old review label.
+
 Status: review
 
 ## Story

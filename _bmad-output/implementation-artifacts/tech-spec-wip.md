@@ -21,6 +21,13 @@ test_patterns: ['email-watcher tests unchanged', 'gws-exec tests removed']
 
 # Tech-Spec: Replace GWS MCP Wrapper with Direct CLI Execution
 
+> **Historical completed spec — status reconciled September 5, 2026.** The filename
+> does not indicate active work. The March status and implementation details below
+> are preserved; suite-era paths and execution guidance are superseded by the
+> current capability/runtime architecture. Do not recreate the removed wrapper
+> or suites. See the [canonical reliability completion record](reliability-completion-2026-09-05.md)
+> for current status and limits; isolated verification does not certify live GWS access.
+
 **Created:** 2026-03-19
 
 ## Overview

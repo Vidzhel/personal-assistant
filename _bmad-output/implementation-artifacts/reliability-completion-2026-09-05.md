@@ -14,7 +14,7 @@ plans are reconciled against code, not blindly reimplemented.
 | R3 | Correct capability failure behavior and knowledge availability | Complete | 171 files, 1907 passed / 6 skipped; check passed; 30 disposable Neo4j tests; independent review fixes verified. |
 | R4 | Repair current build/deployment paths and runtime persistence | Complete | 174 files, 1913 passed / 6 skipped; check/builds; compiled two-process and offline Docker restart proof; 9 real Git tests. |
 | R5 | Review current learning/schedule/approval loops and run isolated journeys | Complete | 184 files, 1971 passed / 6 skipped; 11 browser journeys; check/builds/compiled restart passed; reviewed lifecycle and memory-retention fixes. |
-| R6 | Reconcile Claude/Codex/docs and old plan status with final behavior | Pending | One truthful current status entry; specific remaining tasks, not stale phase checklists. |
+| R6 | Reconcile Claude/Codex/docs and old plan status with final behavior | Complete | Shared guides and historical notices; 66 skill manifests/TOML; check and 70 focused tests; real online/offline embeddings; zero npm audit advisories. |
 | R7 | Final regression/review and resolution ledger | Pending | check, tests, definition validators, builds; evidence and limits documented. |
 
 ## Deferred work and resolution plans
@@ -190,3 +190,24 @@ The detailed R5 spec records findings and evidence. Admitted MCP mutation drain,
 remote provider cleanup and global graph/project ownership have explicit plans
 in deferred-work.md; no real provider/account delivery or workspace implementation
 is claimed.
+
+## R6 completion
+
+Claude and Codex now share AGENTS.md; CLAUDE.md retains the Claude entry/workflow
+and BMAD reads the same current rules. Historical plans and workspace drafts point
+to this queue without erasing their original evidence. The current assessment
+explains file, SQLite and graph ownership and the concrete remaining fixes.
+All 66 Codex skills, browser-agent TOML and helper syntax validate; six fake-command
+readiness cases pass. R5's actual CLI/browser evidence is distinguished from
+static custom-role validation.
+
+Compatible dependency fixes and a scoped Transformers→Sharp 0.35.4 override
+leave zero npm audit advisories. Real compiled BGE embeddings and native adapter
+checks pass online and from a separate offline process in disposable storage.
+The Node/npm prerequisites now match the tested deployment toolchain; the required
+check catches ignored security overrides. Check, shared/core build and 70 focused
+API/ownership/config tests pass. Reviews fixed misleading graph-delete, schedule,
+budget and WebSocket claims plus two verification-helper defects. Ordinary schedule
+staleness and global daily-budget enforcement have explicit resolution plans.
+All 87 original owner definitions are unchanged. Details and evidence are in
+tech-spec-reliability-r6-guidance.md and the dependency assessment.

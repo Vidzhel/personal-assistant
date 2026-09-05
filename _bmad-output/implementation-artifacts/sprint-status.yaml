@@ -1,3 +1,12 @@
+# Historical tracker — status superseded September 5, 2026.
+# Canonical current status: _bmad-output/implementation-artifacts/reliability-completion-2026-09-05.md
+# Original dates, statuses and story keys below are preserved as March evidence,
+# not a current execution queue; deleted pipelines/suites must not be recreated.
+# Story 10.7's review status is reconciled by R2/R5, not an unresolved gate here.
+# Story 10.11 has no matching story file in this checkout. Its ready-for-dev label
+# is superseded backlog, not newly approved workspace or execution-mode work.
+# Repository attachments and project-memory redesign remain deferred proposals.
+
 # generated: 2026-03-12
 # project: personal-assistant
 # project_key: NOKEY

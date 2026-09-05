@@ -1,5 +1,15 @@
 # Phase 4 — No-Code Extension, Intents, Heartbeat
 
+> **Historical plan — reconciled September 5, 2026.** The original instructions
+> and checkboxes below are retained as history, not the current execution queue.
+> See the [canonical reliability completion record](../../../_bmad-output/implementation-artifacts/reliability-completion-2026-09-05.md)
+> for verified outcomes and remaining work. Reconciliation does not mean every
+> implementation detail proposed here was adopted; do not recreate retired systems.
+>
+> Heartbeat intentionally runs in a fresh session, rather than resuming an
+> interactive conversation as proposed below. Its silence contract and capability
+> boundaries are tested in isolation; live outbound delivery is not claimed.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** The owner extends Raven from chat, never from an editor: "learn to do X" produces a live, git-committed artifact without a restart. "Remind me when Y" becomes a deterministic intent row with budget/cooldown/expiry — never LLM inference. A heartbeat keeps ambient awareness with silence as the default.

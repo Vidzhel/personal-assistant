@@ -1,5 +1,11 @@
 # Phase 2 — One Capability System, Real Enforcement
 
+> **Historical plan — reconciled September 5, 2026.** The original instructions
+> and checkboxes below are retained as history, not the current execution queue.
+> See the [canonical reliability completion record](../../../_bmad-output/implementation-artifacts/reliability-completion-2026-09-05.md)
+> for verified outcomes and remaining work. Reconciliation does not mean every
+> implementation detail proposed here was adopted; do not recreate retired systems.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** One capability concept (library skills), permissions enforced BEFORE tool execution via the SDK's `canUseTool`, background services compiled and type-checked inside core, `suites/` deleted, approvals visible and resolvable from the dashboard.

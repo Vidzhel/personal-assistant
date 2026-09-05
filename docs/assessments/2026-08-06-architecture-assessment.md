@@ -1,5 +1,16 @@
 # Raven — Final Architecture Assessment
 
+> **Historical assessment — status superseded September 5, 2026.** The findings
+> below describe the August codebase and are preserved as evidence. Current
+> remediation status, verification limits and follow-up work are recorded in the
+> [canonical reliability completion record](../../_bmad-output/implementation-artifacts/reliability-completion-2026-09-05.md).
+> The September workspace assessment also predates this reliability pass; neither
+> assessment is a current defect inventory or authorization to restore deleted systems.
+
+> Historical snapshot: substantial remediation landed after this assessment.
+> See the [September 5 progress and workspace assessment](2026-09-05-project-workspaces-assessment.md)
+> for current implementation status, remaining gaps, and the revised linked-memory direction.
+
 *Prepared for the owner. Based on six codebase maps, four independent judge assessments, external research on the 2025–2026 agent ecosystem, and spot-checks against the repo at `/home/user/projects/personal-assistant` (verified: `ravenMcpDeps` appears only in `agent-manager.ts`/`agent-session.ts`, never `index.ts`; no `resume` in any backend; `linkSdkSession` has zero callers).*
 
 ---

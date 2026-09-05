@@ -1,5 +1,11 @@
 # Phase 1 — Memory and One Runtime Implementation Plan
 
+> **Historical plan — reconciled September 5, 2026.** The original instructions
+> and checkboxes below are retained as history, not the current execution queue.
+> See the [canonical reliability completion record](../../../_bmad-output/implementation-artifacts/reliability-completion-2026-09-05.md)
+> for verified outcomes and remaining work. Reconciliation does not mean every
+> implementation detail proposed here was adopted; do not recreate retired systems.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Every chat turn remembers the conversation (SDK session `resume`), one agent backend (SDK) drives the `claude` binary under CLI/MAX auth, the process boots and serves without Neo4j, and a composition root makes all of it E2E-testable.

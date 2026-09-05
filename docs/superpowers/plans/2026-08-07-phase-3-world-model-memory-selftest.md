@@ -1,5 +1,16 @@
 # Phase 3 — One World Model, Closed Memory Loop, Self-Verification
 
+> **Historical plan — reconciled September 5, 2026.** The original instructions
+> and checkboxes below are retained as history, not the current execution queue.
+> See the [canonical reliability completion record](../../../_bmad-output/implementation-artifacts/reliability-completion-2026-09-05.md)
+> for verified outcomes and remaining work. Reconciliation does not mean every
+> implementation detail proposed here was adopted; do not recreate retired systems.
+>
+> The implemented weekly canary uses a dedicated canary template, not the
+> morning-digest template proposed below. Verification establishes isolated
+> scheduling, execution and delivery behavior only; live owner-account delivery
+> has not been established by this reliability pass. Graph storage remains in use.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** One project store (filesystem), a memory loop that actually writes (file-first, owner-reviewable, provenance-gated), and a system that detects its own failures (nightly self-test + weekly canary) instead of staying silently broken for months.

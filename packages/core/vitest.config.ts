@@ -20,7 +20,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@raven/shared': resolve(__dirname, '../shared/src/index.ts'),
+      '@raven/shared': resolve(import.meta.dirname, '../shared/src/index.ts'),
     },
   },
 });

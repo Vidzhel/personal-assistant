@@ -1,0 +1,22 @@
+Codex migration completion — 2026-09-05
+
+Added: AGENTS.md, the shared current development guide for Claude and Codex.
+Reconciled: CLAUDE.md and BMAD project-context.md point to the shared guide.
+Preserved: 64 existing BMAD skills and all .claude skills/settings.
+Added: .agents/skills/browser-testing with the isolated R5 harness as default.
+Added: .agents/skills/playwright-cli and its CLI references.
+Added: .codex/agents/browser-tester.toml with explicit skill reads and inherited
+ permissions; no forced model or sandbox override.
+Not needed: project MCP configuration/hooks; no source definitions existed.
+Runtime library/mcps definitions are not development-agent connections.
+
+Claude tool lists are workflow guidance, not Codex permission boundaries.
+Cleanup is scoped to the task's named browser and isolated harness process.
+No global Codex settings, runtime provider, or attached repositories changed.
+
+Validation: skill frontmatter, custom-agent TOML and helper bash syntax checked.
+R5: actual headless playwright-cli inspection and 11 durable browser journeys
+ passed. The optional browser-tester custom role was not invoked; its validation
+ is static. Codex CLI 0.153.4 and current official artifact schema were checked.
+See docs/assessments/2026-09-05-codex-verification.md for the historical baseline
+ and docs/assessments/2026-09-05-reliability-completion.md for current evidence.

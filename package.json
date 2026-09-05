@@ -2,6 +2,7 @@
   "name": "raven",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "npm@10.9.8",
   "type": "module",
   "workspaces": [
     "packages/shared",
@@ -20,7 +21,7 @@
     "format": "prettier --write 'packages/*/src/**/*.{ts,tsx}'",
     "format:check": "prettier --check 'packages/*/src/**/*.{ts,tsx}'",
     "check:strip-types": "bash scripts/check-strip-types.sh",
-    "check": "npm run format:check && npm run lint && npm run check:strip-types",
+    "check": "npm run format:check && npm run lint && npm run check:strip-types && npm run check:dependencies",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -38,10 +39,18 @@
     "test:deployment": "node --experimental-strip-types --test deployment/runtime-init.test.mjs",
     "test:docker-context": "node scripts/check-docker-context.mjs",
     "test:e2e": "npm run build:core && playwright test",
-    "test:mcp:live": "RAVEN_TEST_TICKTICK=1 vitest run --project mcp-ticktick"
+    "test:mcp:live": "RAVEN_TEST_TICKTICK=1 vitest run --project mcp-ticktick",
+    "test:embeddings:download": "npm run build:core && node scripts/smoke-embeddings.mjs",
+    "check:dependencies": "node scripts/check-dependencies.mjs"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.22.0",
+    "npm": "^10.9.8"
+  },
+  "overrides": {
+    "@huggingface/transformers": {
+      "sharp": "0.35.4"
+    }
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
