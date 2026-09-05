@@ -5,6 +5,11 @@ import { BashAccessSchema } from '../project/schemas.ts';
 
 const MAX_AGENT_TURNS = 100;
 
+/** The model tiers accepted in an agent definition.  Runtime dispatch maps
+ * these stable tiers to SDK model identifiers before reserving budget. */
+export const NAMED_AGENT_MODEL_TIERS = ['haiku', 'sonnet', 'opus'] as const;
+export type NamedAgentModelTier = (typeof NAMED_AGENT_MODEL_TIERS)[number];
+
 export interface NamedAgent {
   id: string;
   name: string;
@@ -27,7 +32,7 @@ export const NamedAgentCreateInputSchema = z.object({
   description: z.string().optional(),
   instructions: z.string().optional(),
   skills: z.array(z.string()).default([]),
-  model: z.enum(['haiku', 'sonnet', 'opus']).optional(),
+  model: z.enum(NAMED_AGENT_MODEL_TIERS).optional(),
   maxTurns: z.number().int().min(1).max(MAX_AGENT_TURNS).optional(),
   bash: BashAccessSchema.optional(),
 });
@@ -43,7 +48,7 @@ export const NamedAgentUpdateInputSchema = z.object({
   description: z.string().nullable().optional(),
   instructions: z.string().nullable().optional(),
   skills: z.array(z.string()).optional(),
-  model: z.enum(['haiku', 'sonnet', 'opus']).nullable().optional(),
+  model: z.enum(NAMED_AGENT_MODEL_TIERS).nullable().optional(),
   maxTurns: z.number().int().min(1).max(MAX_AGENT_TURNS).nullable().optional(),
   bash: BashAccessSchema.optional(),
 });
@@ -118,6 +123,10 @@ export interface AgentTask {
    * by prompt-builder.ts for the same reason as namedAgentInstructions. */
   systemAccessInstructions?: string;
   namedAgentId?: string;
+  /** Effective SDK model identifier selected from the named-agent tier. */
+  model?: string;
+  /** Validated per-dispatch turn cap from the named-agent definition. */
+  maxTurns?: number;
   treeId?: string;
   executionTaskId?: string;
   plugins?: Array<{ type: 'local'; path: string }>;

@@ -6,6 +6,7 @@ const MAX_QUALITY_THRESHOLD = 5;
 const DEFAULT_QUALITY_THRESHOLD = 3;
 const DEFAULT_MAX_RETRIES = 2;
 const DEFAULT_MAX_TURNS = 15;
+const MAX_AGENT_TURNS = 100;
 const DEFAULT_MEMORY_MAX_FILES = 30;
 const DEFAULT_MEMORY_MAX_TOTAL_KB = 64;
 
@@ -53,7 +54,7 @@ export const AgentYamlSchema = z.object({
   skills: z.array(z.string()).default([]),
   instructions: z.string().optional(),
   model: z.enum(['haiku', 'sonnet', 'opus']).default('sonnet'),
-  maxTurns: z.number().int().positive().default(DEFAULT_MAX_TURNS),
+  maxTurns: z.number().int().min(1).max(MAX_AGENT_TURNS).default(DEFAULT_MAX_TURNS),
   bash: BashAccessSchema.optional(),
   memory: MemoryBudgetSchema.default({
     maxFiles: DEFAULT_MEMORY_MAX_FILES,

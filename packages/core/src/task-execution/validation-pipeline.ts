@@ -77,11 +77,8 @@ interface ResolvedValidationOptions {
 
 function resolveValidationOptions(
   task: ExecutionTask,
-  args: [ValidationDeps, ValidationContext?] | [ValidateTaskResultOptions],
+  options: ValidateTaskResultOptions,
 ): ResolvedValidationOptions {
-  const first = args[0];
-  const options: ValidateTaskResultOptions =
-    'deps' in first ? first : { deps: first, ...(args[1] ?? {}) };
   const context = {
     treeId: options.treeId ?? task.parentTaskId,
     taskId: options.taskId ?? task.id,
@@ -155,8 +152,7 @@ function runGate1(task: ExecutionTask, config: TaskValidationConfig): boolean {
     return true;
   }
   const hasArtifacts = task.artifacts.length > 0;
-  const hasSummary = !!task.summary && task.summary.trim().length > 0;
-  return hasArtifacts || hasSummary;
+  return hasArtifacts;
 }
 
 // ── Main pipeline ──────────────────────────────────────────────────────
@@ -165,19 +161,19 @@ function runGate1(task: ExecutionTask, config: TaskValidationConfig): boolean {
 export async function validateTaskResult(
   task: ExecutionTask,
   config: Partial<TaskValidationConfig> | undefined,
-  ...args: [ValidationDeps, ValidationContext?] | [ValidateTaskResultOptions]
+  options: ValidateTaskResultOptions,
 ): Promise<ValidationResult> {
   const resolvedConfig = TaskValidationConfigSchema.parse(config ?? {});
   const taskPrompt = getTaskPrompt(task);
   const resultSummary = getResultSummary(task);
-  const { deps, signal, context: validationContext } = resolveValidationOptions(task, args);
+  const { deps, signal, context: validationContext } = resolveValidationOptions(task, options);
 
   throwIfAborted(signal);
 
   // Gate 1: Programmatic
   const gate1Passed = runGate1(task, resolvedConfig);
   if (!gate1Passed) {
-    log.info('Gate 1 failed: no artifacts or summary', task.id);
+    log.info('Gate 1 failed: no artifacts', task.id);
     return { passed: false, gate1Passed: false };
   }
 

@@ -13,5 +13,7 @@ tasks:
     prompt: "Perform a full system health inspection: check service status, review error logs from the past week, audit dependencies for updates or vulnerabilities, and produce a report with improvement recommendations."
     blockedBy: []
     validation:
+      # This task returns its report in the completion summary.
+      requireArtifacts: false
       maxRetries: 2
       onMaxRetriesFailed: escalate

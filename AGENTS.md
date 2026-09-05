@@ -65,6 +65,14 @@ versions; do not copy versions from historical planning documents.
   its skills explicitly. Preserve per-agent MCP scope and role-filtered Raven
   MCP tools. Missing skill, MCP or vendor definition references fail dispatch
   before turn mutations; they must never grant the full library as a fallback.
+- Default-chat and execution-tree dispatch resolve named-agent model tiers and
+  turn limits before admission. Queue those settings with the task; budget and
+  backend options must use the same effective model. YAML/API turn limits are
+  integers from 1 through 100; null API patches reset to YAML defaults. Invalid
+  internal dispatch settings emit a correlated blocked result without model work.
+  Approved actions derive project ownership from their stored session, validate
+  capability bindings and use global model/turn defaults. A saved approval can
+  still have a failed execution; expose that failure in HTTP, UI and audit logs.
 - Raven MCP tools are filtered by role and available dependencies. Nested SDK
   agents receive scoped capabilities and the same permission boundaries.
   Knowledge tools and instructions must reflect actual graph availability.
@@ -122,6 +130,9 @@ versions; do not copy versions from historical planning documents.
   stop/restart. Use abort signals and post-await checks around side effects.
   Keep the release callback returned by `JobRegistry.register()` and invoke it
   on service stop so restart can register the same job in the same registry.
+  Start services only after their dependencies and event listeners exist, and
+  register service jobs before starting cron. Capture dependencies from service
+  context; never revive the removed task-store/AgentManager global lookups.
   Each model task closes local MCP admission on abort/completion and drains
   admitted Raven/memory handlers before returning. Keep stores alive during that
   drain. Cancellation does not roll back committed mutations or prove remote work

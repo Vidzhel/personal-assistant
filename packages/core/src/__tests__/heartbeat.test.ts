@@ -324,7 +324,7 @@ describe('createHeartbeat', () => {
       .mockImplementationOnce(() => {
         throw new Error('broken agent');
       })
-      .mockReturnValue({ id: 'raven', name: 'raven' });
+      .mockReturnValue({ id: 'raven', name: 'raven', model: null, maxTurns: null });
     const resolveAgentCapabilities = vi
       .fn()
       .mockReturnValue({ mcpServers: {}, agentDefinitions: {}, plugins: [] });

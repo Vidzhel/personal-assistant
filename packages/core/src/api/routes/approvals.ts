@@ -80,6 +80,7 @@ async function resolveApproval(
   deps: ApprovalRouteDeps,
 ): Promise<ResolveResult> {
   try {
+    let executionError: string | undefined;
     const approval = deps.pendingApprovals.resolve(id, resolution);
 
     deps.auditLog.insert({
@@ -125,7 +126,8 @@ async function resolveApproval(
           sessionId: approval.sessionId,
         });
       } else {
-        log.error(`Post-approval execution failed for ${id}: ${execResult.error}`);
+        executionError = execResult.error ?? 'Action did not complete successfully';
+        log.error(`Post-approval execution failed for ${id}: ${executionError}`);
 
         deps.auditLog.insert({
           skillName: approval.skillName,
@@ -133,12 +135,12 @@ async function resolveApproval(
           permissionTier: 'red',
           outcome: 'failed',
           sessionId: approval.sessionId,
-          details: execResult.error,
+          details: executionError,
         });
       }
     }
 
-    return { id, resolution, status: 'resolved' };
+    return { id, resolution, status: 'resolved', error: executionError };
   } catch (err) {
     if (err instanceof Error && (err as Error & { code?: string }).code === 'APPROVAL_NOT_FOUND') {
       return { id, resolution, status: 'not_found', error: 'not found' };

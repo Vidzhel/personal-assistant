@@ -1,10 +1,5 @@
 import { createLogger, generateId } from '@raven/shared';
-import type {
-  AgentTask,
-  AgentTaskRequestEvent,
-  McpServerConfig,
-  SubAgentDefinition,
-} from '@raven/shared';
+import type { AgentTask, AgentTaskRequestEvent } from '@raven/shared';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { PermissionEngine } from '../permission-engine/permission-engine.ts';
 import type { AuditLog } from '../permission-engine/audit-log.ts';
@@ -18,6 +13,11 @@ import type { RavenMcpDeps } from '../mcp-server/index.ts';
 import type { MemoryStore } from '../agent-memory/memory-store.ts';
 import type { CapabilityLibrary } from '../capability-library/capability-library.ts';
 import { getConfig } from '../config.ts';
+import {
+  resolveSkillCapabilities,
+  validateResolvedAgentExecutionSettings,
+} from '../agent-registry/agent-resolver.ts';
+import { validateChatTarget } from '../session-manager/chat-validation.ts';
 
 const log = createLogger('agent-manager');
 
@@ -126,8 +126,37 @@ export class AgentManager {
     this.eventBus.on('agent:task:request', this.requestHandler);
   }
 
+  private rejectTaskRequest(payload: AgentTaskRequestEvent['payload'], error: unknown): void {
+    const reason = error instanceof Error ? error.message : String(error);
+    // Report rejected admission without mutating sessions/history or retrying.
+    this.eventBus.emit({
+      id: generateId(),
+      timestamp: Date.now(),
+      source: 'agent-manager',
+      projectId: payload.projectId,
+      type: 'agent:task:complete',
+      payload: {
+        taskId: payload.taskId,
+        sessionId: payload.sessionId,
+        skillName: payload.skillName,
+        result: '',
+        durationMs: 0,
+        success: false,
+        blocked: true,
+        errors: [reason],
+      },
+    });
+  }
+
   private enqueue(payload: AgentTaskRequestEvent['payload']): void {
     if (!this.accepting) return;
+    this.assertNewTaskId(payload.taskId);
+    try {
+      validateResolvedAgentExecutionSettings({ model: payload.model, maxTurns: payload.maxTurns });
+    } catch (error) {
+      this.rejectTaskRequest(payload, error);
+      return;
+    }
     const task: AgentTask = {
       id: payload.taskId,
       sessionId: payload.sessionId,
@@ -146,6 +175,8 @@ export class AgentManager {
       namedAgentInstructions: payload.namedAgentInstructions,
       systemAccessInstructions: payload.systemAccessInstructions,
       namedAgentId: payload.namedAgentId,
+      model: payload.model,
+      maxTurns: payload.maxTurns,
       bashAccess: payload.bashAccess,
       treeId: payload.treeId,
       executionTaskId: payload.executionTaskId,
@@ -156,14 +187,18 @@ export class AgentManager {
     this.queueTask(task);
   }
 
-  private queueTask(task: AgentTask): void {
+  private assertNewTaskId(taskId: string): void {
     if (
-      this.running.has(task.id) ||
-      this.queuedFinalizers.has(task.id) ||
-      this.queue.some((queued) => queued.id === task.id)
+      this.running.has(taskId) ||
+      this.queuedFinalizers.has(taskId) ||
+      this.queue.some((queued) => queued.id === taskId)
     ) {
-      throw new Error(`Agent task is already admitted: ${task.id}`);
+      throw new Error(`Agent task is already admitted: ${taskId}`);
     }
+  }
+
+  private queueTask(task: AgentTask): void {
+    this.assertNewTaskId(task.id);
     // Insert by priority
     const priorityOrder = { urgent: 0, high: 1, normal: 2, low: 3 };
     const idx = this.queue.findIndex(
@@ -314,6 +349,8 @@ export class AgentManager {
       ravenMcpDeps: this.ravenMcpDeps,
       memoryStore: this.memoryStore,
       sessionManager: this.sessionManager,
+      model: task.model,
+      maxTurns: task.maxTurns,
     });
 
     this.abortControllers.delete(task.id);
@@ -517,36 +554,34 @@ export class AgentManager {
     }
   }
 
-  async executeAction(
-    params: ApprovedActionParams,
-  ): Promise<{ success: boolean; result?: string; error?: string }> {
-    if (!this.accepting) return { success: false, error: 'Agent manager is stopping' };
-    // Resolve capabilities for this skill from the library. An unknown
-    // skillName (e.g. a legacy suite name that predates the library) resolves
-    // to empty collections rather than throwing — same for a library that
-    // failed to load (collectMcpServers/collectAgentDefinitions throw when
-    // unloaded) — the task still runs, just without skill-specific MCP
-    // tools/sub-agents.
-    let mcpServers: Record<string, McpServerConfig> = {};
-    let agentDefinitions: Record<string, SubAgentDefinition> = {};
-    try {
-      if (this.capabilityLibrary) {
-        mcpServers = this.capabilityLibrary.collectMcpServers([params.skillName]);
-        agentDefinitions = this.capabilityLibrary.collectAgentDefinitions([params.skillName]);
-      }
-    } catch (err) {
-      log.warn(`Capability resolution failed for skill "${params.skillName}": ${err}`);
-    }
+  private resolveActionProject(sessionId?: string): string | undefined {
+    if (sessionId === undefined) return undefined;
+    if (!this.sessionManager) throw new Error('Session manager is unavailable');
+    const session = this.sessionManager.getSession(sessionId);
+    if (!session) throw new Error('Session not found');
+    const target = validateChatTarget(this.sessionManager, session.projectId, {
+      sessionId,
+      projectRegistry: this.ravenMcpDeps?.projectRegistry,
+    });
+    if (!target.ok) throw new Error(target.error);
+    return session.projectId;
+  }
 
-    const task: AgentTask = {
+  private buildActionTask(params: ApprovedActionParams): AgentTask {
+    const projectId = this.resolveActionProject(params.sessionId);
+    if (!this.capabilityLibrary) {
+      throw new Error(`Skill "${params.skillName}" requires a capability library`);
+    }
+    const capabilities = resolveSkillCapabilities(this.capabilityLibrary, [params.skillName]);
+    return {
       id: generateId(),
       sessionId: params.sessionId,
+      projectId,
       skillName: params.skillName,
-      prompt: `Execute approved action: ${params.actionName}. Context: ${params.details ?? 'none'}`,
+      prompt: `Execute ${params.preApproved ? 'approved ' : ''}action: ${params.actionName}. Context: ${params.details ?? 'none'}`,
       status: 'queued',
       priority: 'high',
-      mcpServers,
-      agentDefinitions,
+      ...capabilities,
       createdAt: Date.now(),
       actionName: params.actionName,
       // Only set when a human already approved exactly this action via the
@@ -562,6 +597,20 @@ export class AgentManager {
       // actionName-bearing task.
       approvedActionName: params.preApproved === true ? params.actionName : undefined,
     };
+  }
+
+  async executeAction(
+    params: ApprovedActionParams,
+  ): Promise<{ success: boolean; result?: string; error?: string }> {
+    if (!this.accepting) return { success: false, error: 'Agent manager is stopping' };
+    let task: AgentTask;
+    try {
+      task = this.buildActionTask(params);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.warn(`Action admission failed for "${params.actionName}": ${message}`);
+      return { success: false, error: message };
+    }
 
     const completion = new Promise<void>((resolve) => this.completions.set(task.id, resolve));
     this.queueTask(task);

@@ -25,6 +25,7 @@ if (!process.env.VITEST && process.env.NODE_ENV !== 'test') {
 const DEFAULT_PORT = 4001;
 const DEFAULT_MAX_CONCURRENT = 3;
 const DEFAULT_MAX_TURNS = 25;
+const MAX_AGENT_TURNS = 100;
 const DEFAULT_BUDGET_USD = 5.0;
 const DEFAULT_IDLE_TIMEOUT_MS = 1800000; // 30 minutes
 const DEFAULT_CONSOLIDATION_CRON = '0 3 * * 0'; // Sunday 3am
@@ -40,12 +41,21 @@ function validTimeZone(timeZone: string): boolean {
 
 const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().default(''), // Empty = use `claude` CLI auth (MAX plan)
-  CLAUDE_MODEL: z.string().default('claude-sonnet-5'),
+  CLAUDE_MODEL: z
+    .string()
+    .trim()
+    .min(1, 'CLAUDE_MODEL must be non-blank')
+    .default('claude-sonnet-5'),
   RAVEN_PORT: z.coerce.number().default(DEFAULT_PORT),
   RAVEN_TIMEZONE: z.string().min(1).refine(validTimeZone, 'Invalid timezone').default('UTC'),
   RAVEN_DIGEST_TIME: z.string().default('08:00'),
   RAVEN_MAX_CONCURRENT_AGENTS: z.coerce.number().int().positive().default(DEFAULT_MAX_CONCURRENT),
-  RAVEN_AGENT_MAX_TURNS: z.coerce.number().default(DEFAULT_MAX_TURNS),
+  RAVEN_AGENT_MAX_TURNS: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_AGENT_TURNS)
+    .default(DEFAULT_MAX_TURNS),
   RAVEN_MAX_BUDGET_USD_PER_DAY: z.coerce.number().nonnegative().default(DEFAULT_BUDGET_USD),
   DATABASE_PATH: z.string().default('./data/raven.db'),
   SESSION_PATH: z.string().default('./data/sessions'),

@@ -176,13 +176,11 @@ describe('e2e: email triage round-trip over the real composition root', () => {
     expect(orchestratorCall?.prompt).toContain('noreply@updates.example.com');
 
     const archiveCall = calls.find((c) =>
-      c.prompt.startsWith('Execute approved action: gmail:archive-email'),
+      c.prompt.startsWith('Execute action: gmail:archive-email'),
     );
     expect(archiveCall?.prompt).toContain('e2e-triage-msg-1');
 
-    const markReadCall = calls.find((c) =>
-      c.prompt.startsWith('Execute approved action: gmail:mark-read'),
-    );
+    const markReadCall = calls.find((c) => c.prompt.startsWith('Execute action: gmail:mark-read'));
     expect(markReadCall?.prompt).toContain('e2e-triage-msg-1');
 
     // Clean stop — no dangling handles (real services this time: interval

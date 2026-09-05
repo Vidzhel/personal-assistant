@@ -103,6 +103,14 @@ describe('YamlNamedAgentStore', () => {
     expect(store.getAgent('temp-agent')?.model).toBe('haiku');
   });
 
+  it('clears nullable model and maxTurns overrides back to YAML defaults', async () => {
+    await store.createAgent({ name: 'reset-agent', skills: [], model: 'opus', maxTurns: 9 });
+    const updated = await store.updateAgent('reset-agent', { model: null, maxTurns: null });
+    expect(updated.model).toBe('sonnet');
+    expect(updated.maxTurns).toBe(15);
+    expect(store.getAgent('reset-agent')).toMatchObject({ model: 'sonnet', maxTurns: 15 });
+  });
+
   it('renames an agent (new file created, old removed, id follows name)', async () => {
     await store.createAgent({ name: 'old-name', skills: [] });
     const renamed = await store.updateAgent('old-name', { name: 'new-name' });

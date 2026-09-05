@@ -8,6 +8,7 @@ import { EventBus } from '../event-bus/event-bus.ts';
 import { SessionManager } from '../session-manager/session-manager.ts';
 import { createMessageStore } from '../session-manager/message-store.ts';
 import { closeDatabase, getDb, initDatabase } from '../db/database.ts';
+import { loadConfig } from '../config.ts';
 import type { NamedAgentStore } from '../agent-registry/yaml-named-agent-store.ts';
 import type { CapabilityLibrary } from '../capability-library/capability-library.ts';
 
@@ -34,6 +35,7 @@ describe('chat capability preflight', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    loadConfig();
     root = mkdtempSync(join(tmpdir(), 'raven-chat-capabilities-'));
     initDatabase(join(root, 'test.db'));
     getDb()
@@ -165,6 +167,24 @@ describe('chat capability preflight', () => {
       plugins: [],
     });
     expect(collectMcpServers).not.toHaveBeenCalled();
+  });
+
+  it('propagates the default named agent model tier and turn limit', async () => {
+    new Orchestrator({
+      ...deps,
+      namedAgentStore: {
+        getDefaultAgent: () => ({ ...agent, model: 'opus', maxTurns: 7 }),
+      } as unknown as NamedAgentStore,
+      agentResolver: {
+        resolveAgentCapabilities: () => ({ mcpServers: {}, agentDefinitions: {}, plugins: [] }),
+      },
+    });
+    send();
+    await vi.waitFor(() => expect(requests).toHaveBeenCalledOnce());
+    expect(requests.mock.calls[0][0].payload).toMatchObject({
+      model: 'claude-opus-5',
+      maxTurns: 7,
+    });
   });
 
   it('rejects a failed transcript write without claiming acceptance or dispatching work', async () => {

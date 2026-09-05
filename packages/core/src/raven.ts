@@ -284,7 +284,6 @@ export async function createRaven(
     await closeFileLogging();
     throw error;
   }
-  (globalThis as unknown as Record<string, unknown>).__raven_task_store__ = taskStore;
 
   // L16: count only services whose requiresEnv is fully satisfied — NOT
   // every declared ServiceDefinition. Most deployments only configure a few
@@ -307,8 +306,7 @@ export async function createRaven(
   // separate views of the same table.
   const intentStore = createIntentStore(getDb());
 
-  // 6. Start background services (IMAP watcher, Telegram bot, etc.) — now
-  // compiled ServiceDefinitions rather than suite-declared dynamic imports.
+  // 6. Prepare compiled services; start after dispatch dependencies and listeners.
   const serviceRunner = createServiceRunner();
   const jobRegistry = createJobRegistry();
   let boundPort = config.RAVEN_PORT;
@@ -327,6 +325,7 @@ export async function createRaven(
     logger: log,
     config: {
       intentStore,
+      taskStore,
       RAVEN_PORT: config.RAVEN_PORT,
       neo4j: {
         enabled: config.NEO4J_ENABLED,
@@ -348,10 +347,6 @@ export async function createRaven(
     integrationsConfig,
     jobRegistry,
   };
-
-  if (!overrides.skipSuites) {
-    await serviceRunner.startServices(SERVICE_DEFINITIONS, baseContext);
-  }
 
   // 7. Init permission engine
   const permissionEngine = createPermissionEngine({ capabilityLibrary, eventBus });
@@ -482,9 +477,6 @@ export async function createRaven(
 
   // 10b. Inject agentManager into service context for callback handler
   Object.assign(baseContext.config, { agentManager });
-
-  // Expose agent manager globally for suite services (ticktick-sync)
-  (globalThis as unknown as Record<string, unknown>).__raven_agent_manager__ = agentManager;
 
   // Execution bridge: runtime observes agent:task:complete and drives
   // onTaskCompleted/onTaskBlocked/onTaskFailed on the engine, honoring the
@@ -624,7 +616,6 @@ export async function createRaven(
     schedulePrefs,
     scheduleFireLog,
   });
-  scheduleEngine.start();
   // Lazy-extend selfTestDeps now that scheduleEngine exists (same pattern
   // as ravenMcpDeps above) — checkCanary uses it to distinguish an enabled
   // canary schedule that's gone quiet from one that's simply turned off.
@@ -679,6 +670,13 @@ export async function createRaven(
     projectsDir,
     port: config.RAVEN_PORT,
   });
+
+  // Services can emit work immediately from start(). Install all shared
+  // dependencies/listeners first, and register service jobs before cron starts.
+  if (!overrides.skipSuites) {
+    await serviceRunner.startServices(SERVICE_DEFINITIONS, baseContext);
+  }
+  scheduleEngine.start();
 
   // 12n. Backfill chunk embeddings for any un-chunked bubbles (non-blocking).
   // Undefined when the knowledge engine failed to initialize.

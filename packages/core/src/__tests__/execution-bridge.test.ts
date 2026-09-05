@@ -71,6 +71,8 @@ function makeDeps() {
     id: 'agent-gmail',
     name: 'gmail',
     instructions: 'Read receipts only, never delete.',
+    model: 'haiku',
+    maxTurns: 6,
     bash: {
       access: 'scoped',
       allowedCommands: [],
@@ -238,6 +240,8 @@ describe('createExecutionBridge', () => {
     expect(req.payload.namedAgentId).toBe('agent-gmail');
     expect(req.payload.mcpServers).toHaveProperty('gmail');
     expect(req.payload.executionTaskId).toBe('task-1');
+    expect(req.payload.model).toBe('claude-haiku-4-5');
+    expect(req.payload.maxTurns).toBe(6);
   });
 
   it('falls back to the default agent when no agent is named', async () => {

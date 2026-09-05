@@ -11,6 +11,8 @@ import type { EventBus } from '../event-bus/event-bus.ts';
 import type { TaskExecutionEngine } from './task-execution-engine.ts';
 import type { NamedAgentStore } from '../agent-registry/yaml-named-agent-store.ts';
 import type { AgentResolver } from '../agent-registry/agent-resolver.ts';
+import { resolveAgentExecutionSettings } from '../agent-registry/agent-resolver.ts';
+import { getConfig } from '../config.ts';
 import { buildRetryPrompt } from './validation-pipeline.ts';
 import { buildTaskBoardInstructions } from './task-board-protocol.ts';
 
@@ -58,6 +60,14 @@ function buildAgentTaskRequest(
 ): AgentTaskRequestEvent {
   const agent = resolveAgent(deps, payload.agent);
   const capabilities = deps.agentResolver.resolveAgentCapabilities(agent);
+  const executionSettings = resolveAgentExecutionSettings({
+    model: agent.model,
+    maxTurns: agent.maxTurns,
+    defaults: {
+      model: getConfig().CLAUDE_MODEL,
+      maxTurns: getConfig().RAVEN_AGENT_MAX_TURNS,
+    },
+  });
   const basePrompt = payload.retryFeedback
     ? buildRetryPrompt(
         payload.prompt,
@@ -84,6 +94,8 @@ function buildAgentTaskRequest(
       agentDefinitions: capabilities.agentDefinitions,
       plugins: capabilities.plugins,
       namedAgentId: agent.id,
+      model: executionSettings.model,
+      maxTurns: executionSettings.maxTurns,
       bashAccess: agent.bash,
       priority: 'normal',
       projectId: payload.projectId,

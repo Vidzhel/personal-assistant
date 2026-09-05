@@ -85,16 +85,16 @@ function inputToYaml(input: NamedAgentCreateInput): AgentYaml {
   } as AgentYaml;
 }
 
-// Only patch a nullable field when the caller supplied a concrete (non-null) value;
-// `undefined` means "leave unchanged" and `null` means "no explicit value to set".
+// `undefined` means "leave unchanged". A nullable API value of `null` clears
+// the override; AgentYamlStore's schema then materializes its documented
+// default (sonnet/15) rather than silently retaining the previous setting.
 function patchNullableField<K extends 'model' | 'maxTurns'>(
   patch: Partial<AgentYaml>,
   key: K,
   value: AgentYaml[K] | null | undefined,
 ): void {
-  if (value !== undefined && value !== null) {
-    patch[key] = value;
-  }
+  if (value === undefined) return;
+  patch[key] = value === null ? undefined : value;
 }
 
 function updateInputToYamlPatch(input: NamedAgentUpdateInput): Partial<AgentYaml> {

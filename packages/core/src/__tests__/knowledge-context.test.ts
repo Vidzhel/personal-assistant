@@ -11,6 +11,7 @@ import { initDatabase, getDb } from '../db/database.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { loadConfig } from '../config.ts';
 
 function makeRetrievalResult(overrides: Partial<RetrievalResult> = {}): RetrievalResult {
   return {
@@ -43,6 +44,7 @@ describe('createContextInjector', () => {
   let searchMock: any;
 
   beforeEach(() => {
+    loadConfig();
     searchMock = vi.fn();
     mockRetrievalEngine = {
       search: searchMock,

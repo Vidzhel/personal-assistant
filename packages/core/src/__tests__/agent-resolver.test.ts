@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createAgentResolver } from '../agent-registry/agent-resolver.ts';
+import {
+  createAgentResolver,
+  resolveAgentExecutionSettings,
+  resolveDefaultAgentCapabilities,
+} from '../agent-registry/agent-resolver.ts';
 import type { NamedAgent } from '@raven/shared';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
@@ -59,6 +63,57 @@ function makeMockCapabilityLibrary() {
 }
 
 describe('AgentResolver', () => {
+  it('maps named-agent tiers to SDK identifiers and uses null as fallback', () => {
+    expect(
+      resolveAgentExecutionSettings({
+        model: 'opus',
+        maxTurns: 7,
+        defaults: { model: 'configured-model', maxTurns: 25 },
+      }),
+    ).toEqual({ model: 'claude-opus-5', maxTurns: 7 });
+    expect(
+      resolveAgentExecutionSettings({
+        model: null,
+        maxTurns: null,
+        defaults: { model: 'configured-model', maxTurns: 25 },
+      }),
+    ).toEqual({ model: 'configured-model', maxTurns: 25 });
+    expect(
+      resolveAgentExecutionSettings({
+        model: 'sonnet',
+        defaults: { model: 'claude-opus-5', maxTurns: 25 },
+      }),
+    ).toEqual({ model: 'claude-sonnet-5', maxTurns: 25 });
+  });
+
+  it('rejects unsupported configured model and turn values before dispatch', () => {
+    expect(() =>
+      resolveAgentExecutionSettings({
+        model: 'unknown',
+        defaults: { model: 'configured-model', maxTurns: 25 },
+      }),
+    ).toThrow(/Unsupported named-agent model/);
+    expect(() =>
+      resolveAgentExecutionSettings({
+        maxTurns: 101,
+        defaults: { model: 'configured-model', maxTurns: 25 },
+      }),
+    ).toThrow(/maxTurns/);
+  });
+
+  it('returns named-agent settings with default capabilities', () => {
+    const namedAgentStore = {
+      getDefaultAgent: () => makeAgent({ model: 'sonnet', maxTurns: 11 }),
+    } as any;
+    const agentResolver = {
+      resolveAgentCapabilities: () => ({ mcpServers: {}, agentDefinitions: {}, plugins: [] }),
+    };
+    expect(resolveDefaultAgentCapabilities({ namedAgentStore, agentResolver })).toMatchObject({
+      namedAgentModel: 'sonnet',
+      namedAgentMaxTurns: 11,
+    });
+  });
+
   function vendorFixture(reference: string) {
     const root = mkdtempSync(join(tmpdir(), 'raven-vendor-reference-'));
     const skillDir = join(root, 'library', 'skills', 'testing', 'notes');

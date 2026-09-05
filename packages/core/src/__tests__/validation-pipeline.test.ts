@@ -17,7 +17,7 @@ function makeTask(overrides: Partial<ExecutionTask> = {}): ExecutionTask {
       blockedBy: [],
     },
     status: 'completed',
-    artifacts: [],
+    artifacts: [{ type: 'data', label: 'result', data: { ok: true } }],
     retryCount: 0,
     ...overrides,
   };
@@ -44,21 +44,24 @@ describe('validateTaskResult', () => {
       const result = await validateTaskResult(
         task,
         { requireArtifacts: true, evaluator: false, qualityReview: false },
-        makeDeps(),
+        { deps: makeDeps() },
       );
       expect(result.gate1Passed).toBe(true);
       expect(result.passed).toBe(true);
     });
 
-    it('passes when summary exists (even without artifacts)', async () => {
-      const task = makeTask({ summary: 'Task completed successfully' });
+    it('fails when summary exists without artifacts and artifacts are required', async () => {
+      const task = makeTask({ artifacts: [], summary: 'Task completed successfully' });
+      const deps = makeDeps();
       const result = await validateTaskResult(
         task,
-        { requireArtifacts: true, evaluator: false, qualityReview: false },
-        makeDeps(),
+        { requireArtifacts: true, evaluator: true, qualityReview: true },
+        { deps },
       );
-      expect(result.gate1Passed).toBe(true);
-      expect(result.passed).toBe(true);
+      expect(result.gate1Passed).toBe(false);
+      expect(result.passed).toBe(false);
+      expect(deps.runEvaluator).not.toHaveBeenCalled();
+      expect(deps.runQualityReviewer).not.toHaveBeenCalled();
     });
 
     it('fails when no artifacts AND no summary (requireArtifacts=true)', async () => {
@@ -67,19 +70,19 @@ describe('validateTaskResult', () => {
       const result = await validateTaskResult(
         task,
         { requireArtifacts: true, evaluator: false, qualityReview: false },
-        deps,
+        { deps },
       );
       expect(result.gate1Passed).toBe(false);
       expect(result.passed).toBe(false);
       expect(deps.runEvaluator).not.toHaveBeenCalled();
     });
 
-    it('passes when requireArtifacts=false even with no artifacts', async () => {
-      const task = makeTask({ artifacts: [], summary: undefined });
+    it('passes summary-only completion when requireArtifacts=false', async () => {
+      const task = makeTask({ artifacts: [], summary: 'Summary-only completion' });
       const result = await validateTaskResult(
         task,
         { requireArtifacts: false, evaluator: false, qualityReview: false },
-        makeDeps(),
+        { deps: makeDeps() },
       );
       expect(result.gate1Passed).toBe(true);
       expect(result.passed).toBe(true);
@@ -97,7 +100,7 @@ describe('validateTaskResult', () => {
       const result = await validateTaskResult(
         task,
         { requireArtifacts: true, evaluator: true, qualityReview: false },
-        deps,
+        { deps },
       );
       expect(result.gate2Passed).toBe(true);
       expect(result.passed).toBe(true);
@@ -111,7 +114,7 @@ describe('validateTaskResult', () => {
       const result = await validateTaskResult(
         task,
         { requireArtifacts: true, evaluator: true, qualityReview: false },
-        deps,
+        { deps },
       );
       expect(result.gate2Passed).toBe(false);
       expect(result.gate2Reason).toBe('Missing requirements');
@@ -124,7 +127,7 @@ describe('validateTaskResult', () => {
       const result = await validateTaskResult(
         task,
         { requireArtifacts: true, evaluator: false, qualityReview: false },
-        deps,
+        { deps },
       );
       expect(result.gate2Passed).toBeUndefined();
       expect(deps.runEvaluator).not.toHaveBeenCalled();
@@ -146,7 +149,7 @@ describe('validateTaskResult', () => {
       await validateTaskResult(
         task,
         { requireArtifacts: true, evaluator: true, qualityReview: false },
-        makeDeps({ runEvaluator: evalFn }),
+        { deps: makeDeps({ runEvaluator: evalFn }) },
       );
       expect(evalFn).toHaveBeenCalledWith('Build a widget', 'Result text', {
         criteria: undefined,
@@ -162,8 +165,11 @@ describe('validateTaskResult', () => {
       await validateTaskResult(
         task,
         { requireArtifacts: true, evaluator: true, qualityReview: false },
-        makeDeps({ runEvaluator: evalFn }),
-        { signal: controller.signal, projectId: 'project-1' },
+        {
+          deps: makeDeps({ runEvaluator: evalFn }),
+          signal: controller.signal,
+          projectId: 'project-1',
+        },
       );
       expect(evalFn).toHaveBeenCalledWith('Do the thing', 'Result text', {
         criteria: undefined,
@@ -179,7 +185,11 @@ describe('validateTaskResult', () => {
       const result = await validateTaskResult(
         task,
         { requireArtifacts: true, evaluator: true, qualityReview: false },
-        makeDeps({ runEvaluator: vi.fn().mockRejectedValue(new Error('validator failed')) }),
+        {
+          deps: makeDeps({
+            runEvaluator: vi.fn().mockRejectedValue(new Error('validator failed')),
+          }),
+        },
       );
       expect(result).toMatchObject({
         passed: false,
@@ -203,7 +213,7 @@ describe('validateTaskResult', () => {
       const result = await validateTaskResult(
         task,
         { requireArtifacts: true, evaluator: true, qualityReview: true, qualityThreshold: 3 },
-        deps,
+        { deps },
       );
       expect(result.gate3Passed).toBe(true);
       expect(result.gate3Score).toBe(4);
@@ -220,7 +230,7 @@ describe('validateTaskResult', () => {
       const result = await validateTaskResult(
         task,
         { requireArtifacts: true, evaluator: true, qualityReview: true, qualityThreshold: 3 },
-        deps,
+        { deps },
       );
       expect(result.gate3Passed).toBe(false);
       expect(result.gate3Score).toBe(2);
@@ -238,7 +248,7 @@ describe('validateTaskResult', () => {
       const result = await validateTaskResult(
         task,
         { requireArtifacts: true, evaluator: true, qualityReview: true, qualityThreshold: 3 },
-        deps,
+        { deps },
       );
       expect(result).toMatchObject({ passed: false, gate3Passed: false, gate3Score: 2 });
     });
@@ -249,7 +259,7 @@ describe('validateTaskResult', () => {
       const result = await validateTaskResult(
         task,
         { requireArtifacts: true, evaluator: true, qualityReview: false },
-        deps,
+        { deps },
       );
       expect(result.gate3Passed).toBeUndefined();
       expect(deps.runQualityReviewer).not.toHaveBeenCalled();
@@ -261,7 +271,7 @@ describe('validateTaskResult', () => {
       const result = await validateTaskResult(
         task,
         { requireArtifacts: true, evaluator: false, qualityReview: true, qualityThreshold: 3 },
-        deps,
+        { deps },
       );
 
       expect(deps.runEvaluator).not.toHaveBeenCalled();
@@ -278,7 +288,7 @@ describe('validateTaskResult', () => {
       const result = await validateTaskResult(
         task,
         { requireArtifacts: true, evaluator: true, qualityReview: true },
-        deps,
+        { deps },
       );
       expect(result.gate2Passed).toBe(false);
       expect(result.gate3Passed).toBeUndefined();
@@ -299,8 +309,7 @@ describe('validateTaskResult', () => {
         validateTaskResult(
           task,
           { requireArtifacts: true, evaluator: true, qualityReview: true },
-          deps,
-          { signal: controller.signal },
+          { deps, signal: controller.signal },
         ),
       ).rejects.toBe(reason);
       expect(deps.runQualityReviewer).not.toHaveBeenCalled();
@@ -317,8 +326,7 @@ describe('validateTaskResult', () => {
         validateTaskResult(
           task,
           { requireArtifacts: true, evaluator: true, qualityReview: true },
-          deps,
-          { signal: controller.signal },
+          { deps, signal: controller.signal },
         ),
       ).rejects.toBe(reason);
       expect(deps.runEvaluator).not.toHaveBeenCalled();
@@ -334,7 +342,7 @@ describe('validateTaskResult', () => {
       const result = await validateTaskResult(
         task,
         { requireArtifacts: true, evaluator: true, qualityReview: true, qualityThreshold: 3 },
-        makeDeps(),
+        { deps: makeDeps() },
       );
       expect(result.passed).toBe(true);
       expect(result.gate1Passed).toBe(true);
@@ -348,7 +356,7 @@ describe('validateTaskResult', () => {
       const result = await validateTaskResult(
         task,
         { requireArtifacts: true, evaluator: true, qualityReview: true },
-        deps,
+        { deps },
       );
       expect(result.passed).toBe(false);
       expect(result.gate1Passed).toBe(false);
@@ -364,7 +372,7 @@ describe('validateTaskResult', () => {
       const result = await validateTaskResult(
         task,
         { requireArtifacts: true, evaluator: true, qualityReview: true },
-        deps,
+        { deps },
       );
       expect(result.passed).toBe(false);
       expect(result.gate2Passed).toBe(false);

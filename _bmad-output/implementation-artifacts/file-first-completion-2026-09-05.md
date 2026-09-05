@@ -23,7 +23,7 @@ external repositories.
 | F6 | Enforced global daily budget through existing execution paths | Complete; 2,176 tests, 14 browser journeys and packaged restart |
 | F7 | Ordinary schedule absence/staleness detection | Complete; 2,200 tests, 14 browser journeys and packaged restart |
 | F8 | Durable provider upload cleanup/retry after cancellation and restart | Complete; 2,223 tests, 14 browser journeys and packaged restart |
-| F9 | Remove obsolete storage compatibility/schema paths, reconcile docs, full/browser/compiled/container verification | In progress; F9a verified, F9b dispatch/service contracts next |
+| F9 | Remove obsolete storage compatibility/schema paths, reconcile docs, full/browser/compiled/container verification | In progress; F9a–F9b verified; F9c canonical knowledge next |
 | W1 | Review dissertation/teaching and implement flexible repository workspaces with browser artifact access | Authorized after F1–F9 |
 
 Legacy metadata migration and prior Neo4j restoration are closed by the owner's
@@ -90,7 +90,10 @@ maintenance/HTTP reports are complete. Required checks, 213 files / 2,223 tests
 (six live skips), fresh core build, fourteen browser journeys and two clean
 packaged process exits passed. F9a consolidated the current operational schema,
 removed retired SQL consumers, and passed 2,225 tests, fourteen browser journeys,
-required checks and packaged restart. F9 storage/runtime cleanup continues in the ordered subcheckpoints from
+required checks and packaged restart. F9b completes dispatch ownership/settings,
+artifact validation and per-start service contracts; 2,259 tests, 15 browser
+journeys, required checks, production builds and packaged restart pass. F9
+storage/runtime cleanup continues in the ordered subcheckpoints from
 [tech-spec-f9-storage-runtime-cleanup.md](tech-spec-f9-storage-runtime-cleanup.md).
 
 Implementation remains ordered, with parent review and a tested commit/push for

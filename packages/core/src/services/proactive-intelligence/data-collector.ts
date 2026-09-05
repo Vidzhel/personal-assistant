@@ -33,7 +33,16 @@ interface SessionSummary {
   last_active: number;
 }
 
-let eventBus: EventBusInterface;
+interface ServiceState {
+  eventBus: EventBusInterface;
+  database: DatabaseInterface;
+  logger: ExecutionLogger;
+  controller: AbortController;
+  activeRuns: Set<Promise<unknown>>;
+  releaseJob?: () => void;
+}
+
+let currentState: ServiceState | undefined;
 let db: DatabaseInterface;
 let executionLogger: ExecutionLogger;
 
@@ -199,46 +208,81 @@ export function buildSnapshot(database: DatabaseInterface, logger: ExecutionLogg
 const service: RavenService = {
   async start(context: ServiceContext): Promise<void> {
     if (!context.executionLogger) throw new Error('Data collector requires execution logger');
-    eventBus = context.eventBus;
-    db = context.db;
-    executionLogger = context.executionLogger;
+    if (currentState) await service.stop();
+    const state: ServiceState = {
+      eventBus: context.eventBus,
+      database: context.db,
+      logger: context.executionLogger,
+      controller: new AbortController(),
+      activeRuns: new Set(),
+    };
 
-    context.jobRegistry.register('pattern-analysis', async () => {
-      const snapshot = buildSnapshot(db, executionLogger);
-      log.info(`Data snapshot collected (${snapshot.length} chars)`);
-      eventBus.emit({
-        id: generateId(),
-        timestamp: Date.now(),
-        source: SUITE_PROACTIVE_INTELLIGENCE,
-        type: 'agent:task:request',
-        payload: {
-          taskId: generateId(),
-          prompt: `Analyze the following data snapshot and identify actionable patterns:\n\n${snapshot}`,
-          // H3: must be the library skill name (library/skills/system/
-          // pattern-analysis/config.json) with its own matching actionName —
-          // 'proactive-intelligence'/'intelligence:generate-insight' aren't
-          // library-known, so resolveTier fell back to 'red' and the task
-          // was queued for an unactionable approval every run (4x/day nag).
-          // The library declares no agentDefinitions for this skill (mcps:
-          // [], vendorSkills: [], tools: []), so that key is dropped rather
-          // than handing the SDK an undefined definition for a deleted
-          // 'pattern-analyzer' agent.
-          skillName: 'pattern-analysis',
-          actionName: 'pattern-analysis:generate-insight',
-          mcpServers: {},
-          agentDefinitions: {},
-          priority: 'low' as const,
-        },
-      });
-      return { summary: `Pattern analysis dispatched (${snapshot.length} char snapshot)` };
+    state.releaseJob = context.jobRegistry.register('pattern-analysis', async () => {
+      if (state.controller.signal.aborted || currentState !== state) {
+        throw new Error('Pattern analysis stopped');
+      }
+      const snapshotLength = await startRun(state);
+      return { summary: `Pattern analysis dispatched (${snapshotLength} char snapshot)` };
     });
+    currentState = state;
 
     log.info('Data collector service started');
   },
 
   async stop(): Promise<void> {
+    const state = currentState;
+    if (!state) return;
+    currentState = undefined;
+    state.releaseJob?.();
+    state.releaseJob = undefined;
+    state.controller.abort(new Error('Data collector stopped'));
+    await Promise.allSettled([...state.activeRuns]);
     log.info('Data collector service stopped');
   },
 };
+
+async function runPatternAnalysis(state: ServiceState): Promise<number> {
+  if (state.controller.signal.aborted || currentState !== state) return 0;
+  const snapshot = buildSnapshot(state.database, state.logger);
+  state.controller.signal.throwIfAborted();
+  if (currentState !== state) return 0;
+  log.info(`Data snapshot collected (${snapshot.length} chars)`);
+  state.eventBus.emit({
+    id: generateId(),
+    timestamp: Date.now(),
+    source: SUITE_PROACTIVE_INTELLIGENCE,
+    type: 'agent:task:request',
+    payload: {
+      taskId: generateId(),
+      prompt: `Analyze the following data snapshot and identify actionable patterns:\n\n${snapshot}`,
+      // H3: must be the library skill name (library/skills/system/
+      // pattern-analysis/config.json) with its own matching actionName —
+      // 'proactive-intelligence'/'intelligence:generate-insight' aren't
+      // library-known, so resolveTier fell back to 'red' and the task
+      // was queued for an unactionable approval every run (4x/day nag).
+      // The library declares no agentDefinitions for this skill (mcps:
+      // [], vendorSkills: [], tools: []), so that key is dropped rather
+      // than handing the SDK an undefined definition for a deleted
+      // 'pattern-analyzer' agent.
+      skillName: 'pattern-analysis',
+      actionName: 'pattern-analysis:generate-insight',
+      mcpServers: {},
+      agentDefinitions: {},
+      priority: 'low' as const,
+    },
+  });
+  return snapshot.length;
+}
+
+function startRun(state: ServiceState): Promise<number> {
+  if (state.controller.signal.aborted || currentState !== state) return Promise.resolve(0);
+  const run = runPatternAnalysis(state);
+  state.activeRuns.add(run);
+  void run.then(
+    () => state.activeRuns.delete(run),
+    () => state.activeRuns.delete(run),
+  );
+  return run;
+}
 
 export default service;

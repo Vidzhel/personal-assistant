@@ -29,6 +29,7 @@ export function buildTaskBoardInstructions(parentTaskId?: string, retryFeedback?
     '',
     '- **Artifacts**: Save any output files to the `data/artifacts/` directory.',
     '- **Summary**: When done, provide a concise summary of what was accomplished.',
+    '- **Completion recording**: Call the `complete_task` tool with your summary when the task is complete. If output files, data, or references should be registered as task artifacts, include them in that tool call using the `artifacts` array with a `type`, `label`, and relevant `filePath`, `data`, or `referenceId`. Paths listed only in the final `ARTIFACTS:` text are informational and are not registered.',
     '- **Blocking**: If you are blocked, explain clearly what is preventing progress.',
     '',
     'When you finish, respond with your status in this format:',

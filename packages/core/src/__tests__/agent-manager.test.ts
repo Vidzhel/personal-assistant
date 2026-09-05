@@ -27,7 +27,7 @@ vi.mock('../config.ts', () => {
   };
 });
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { query } from '@anthropic-ai/claude-agent-sdk';
@@ -42,6 +42,8 @@ import { createPendingApprovals } from '../permission-engine/pending-approvals.t
 import type { PendingApprovals } from '../permission-engine/pending-approvals.ts';
 import type { PermissionEngine } from '../permission-engine/permission-engine.ts';
 import type { RavenEvent, AgentTaskRequestEvent, PermissionTier } from '@raven/shared';
+import { CapabilityLibrary } from '../capability-library/capability-library.ts';
+import { createRavenTestFixture } from './fixtures/raven-fixture.ts';
 
 const mockQuery = vi.mocked(query);
 
@@ -107,6 +109,79 @@ describe('AgentManager', () => {
     };
     expect(payload.success).toBe(true);
     expect(payload.result).toBe('Task completed!');
+  });
+
+  it('passes resolved model and maxTurns through to the SDK backend', async () => {
+    mockQuery.mockImplementation(async function* () {
+      yield { type: 'result', subtype: 'success', result: 'configured' };
+    } as unknown as typeof query);
+
+    const completionPromise = new Promise<void>((resolve) => {
+      eventBus.once('agent:task:complete', () => resolve());
+    });
+    emitTaskRequest({ model: 'claude-opus-5', maxTurns: 7 });
+    await completionPromise;
+
+    const options = mockQuery.mock.calls[0][0].options as { model?: string; maxTurns?: number };
+    expect(options.model).toBe('claude-opus-5');
+    expect(options.maxTurns).toBe(7);
+  });
+
+  it('correlates invalid dispatch settings as a failed request before admission', async () => {
+    const completion = new Promise<RavenEvent>((resolve) => {
+      eventBus.once('agent:task:complete', resolve);
+    });
+    emitTaskRequest({
+      model: '',
+      maxTurns: 7,
+      sessionId: 'invalid-session',
+      projectId: 'project-a',
+    });
+    const event = await completion;
+    expect(event).toMatchObject({
+      source: 'agent-manager',
+      projectId: 'project-a',
+      payload: {
+        taskId: 'task-1',
+        sessionId: 'invalid-session',
+        skillName: 'orchestrator',
+        success: false,
+        blocked: true,
+        durationMs: 0,
+        errors: [expect.stringContaining('model')],
+      },
+    });
+    expect(agentManager.getQueueLength()).toBe(0);
+    expect(agentManager.getRunningCount()).toBe(0);
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it('does not reject an admitted task when a malformed duplicate request reuses its ID', async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockQuery.mockImplementation(async function* () {
+      await held;
+      yield { type: 'result', subtype: 'success', result: 'Original completed' };
+    } as unknown as typeof query);
+    const completed: RavenEvent[] = [];
+    eventBus.on('agent:task:complete', (event) => completed.push(event));
+    try {
+      emitTaskRequest();
+      await vi.waitFor(() => expect(mockQuery).toHaveBeenCalledTimes(1));
+      expect(() => emitTaskRequest({ model: '' })).toThrow('Agent task is already admitted');
+      expect(completed).toEqual([]);
+      expect(agentManager.getRunningCount()).toBe(1);
+      release();
+      await vi.waitFor(() => expect(completed).toHaveLength(1));
+      expect(completed[0]).toMatchObject({
+        payload: { success: true, result: 'Original completed' },
+      });
+    } finally {
+      release();
+      await agentManager.stop();
+    }
   });
 
   it('failed task emits agent:task:complete with success false', async () => {
@@ -565,6 +640,8 @@ describe('AgentManager', () => {
     let auditLog: AuditLog;
     let pendingApprovals: PendingApprovals;
     let amWithPermissions: AgentManager;
+    let actionSessionId: string;
+    let capabilityLibrary: CapabilityLibrary;
 
     function makeFakePermissionEngine(tierMap: Record<string, PermissionTier>): PermissionEngine {
       return {
@@ -576,9 +653,15 @@ describe('AgentManager', () => {
       };
     }
 
-    beforeEach(() => {
+    beforeEach(async () => {
       tmpDir = mkdtempSync(join(tmpdir(), 'raven-am-approved-'));
       initDatabase(join(tmpDir, 'test.db'));
+      const fixture = createRavenTestFixture(tmpDir, { gmailActions: true });
+      capabilityLibrary = new CapabilityLibrary();
+      await capabilityLibrary.load(fixture.libraryDir);
+      getDb().prepare("UPDATE projects SET fs_path = 'system' WHERE id = 'meta'").run();
+      const sessionManager = new SessionManager();
+      actionSessionId = sessionManager.createSession('meta').id;
       auditLog = createAuditLog(getDb());
       auditLog.initialize();
       pendingApprovals = createPendingApprovals(getDb());
@@ -590,10 +673,13 @@ describe('AgentManager', () => {
         permissionEngine: makeFakePermissionEngine({ 'gmail:send-email': 'red' }),
         auditLog,
         pendingApprovals,
+        capabilityLibrary,
+        sessionManager,
       });
     });
 
-    afterEach(() => {
+    afterEach(async () => {
+      await amWithPermissions.stop();
       localEventBus.removeAllListeners();
       try {
         getDb().close();
@@ -642,7 +728,7 @@ describe('AgentManager', () => {
         actionName: 'gmail:send-email',
         skillName: 'gmail',
         details: 'Send to user@test.com',
-        sessionId: 'sess-no-preapproval',
+        sessionId: actionSessionId,
       });
 
       expect(result.success).toBe(false);
@@ -651,7 +737,7 @@ describe('AgentManager', () => {
 
       const approvals = pendingApprovals.query();
       expect(approvals.length).toBe(before + 1);
-      const approval = approvals.find((a) => a.sessionId === 'sess-no-preapproval');
+      const approval = approvals.find((a) => a.sessionId === actionSessionId);
       expect(approval).toBeDefined();
       expect(approval?.actionName).toBe('gmail:send-email');
     });
@@ -671,5 +757,72 @@ describe('AgentManager', () => {
       expect(result.success).toBe(false);
       expect(mockQuery).not.toHaveBeenCalled();
     });
+
+    it.each(['missing-session', 'inactive-project', 'missing-skill'])(
+      'rejects %s before turn mutations or approval requeue',
+      async (failure) => {
+        if (failure === 'inactive-project') {
+          getDb().prepare("UPDATE projects SET fs_path = NULL WHERE id = 'meta'").run();
+        }
+        const before = getDb().prepare('SELECT * FROM sessions ORDER BY id').all();
+        const completion = vi.fn();
+        localEventBus.on('agent:task:complete', completion);
+
+        const result = await amWithPermissions.executeAction({
+          actionName: 'gmail:send-email',
+          skillName: failure === 'missing-skill' ? 'missing-skill' : 'gmail',
+          sessionId: failure === 'missing-session' ? 'missing' : actionSessionId,
+          preApproved: true,
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.error).toBeTruthy();
+        expect(mockQuery).not.toHaveBeenCalled();
+        expect(completion).not.toHaveBeenCalled();
+        expect(amWithPermissions.getActiveTasks()).toEqual({ running: [], queued: [] });
+        expect(getDb().prepare('SELECT * FROM sessions ORDER BY id').all()).toEqual(before);
+        expect(pendingApprovals.query()).toEqual([]);
+      },
+    );
+
+    it.each(['mcps', 'vendorSkills'])(
+      'rejects missing %s definitions before approving any model execution',
+      async (field) => {
+        const configPath = join(tmpDir, 'library', 'skills', 'email', 'gmail', 'config.json');
+        const config = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>;
+        config[field] = [field === 'mcps' ? 'missing-mcp' : 'missing-vendor/skill'];
+        writeFileSync(configPath, JSON.stringify(config));
+        await capabilityLibrary.load(join(tmpDir, 'library'));
+        const result = await amWithPermissions.executeAction({
+          actionName: 'gmail:send-email',
+          skillName: 'gmail',
+          sessionId: actionSessionId,
+          preApproved: true,
+        });
+        expect(result.success).toBe(false);
+        expect(result.error).toMatch(field === 'mcps' ? /unknown MCP/ : /Unknown vendor/);
+        expect(mockQuery).not.toHaveBeenCalled();
+        expect(pendingApprovals.query()).toEqual([]);
+      },
+    );
+
+    it.each([undefined, new CapabilityLibrary()])(
+      'rejects unavailable capability libraries before dispatch',
+      async (library) => {
+        const manager = new AgentManager({ eventBus: localEventBus, capabilityLibrary: library });
+        try {
+          const result = await manager.executeAction({
+            actionName: 'gmail:send-email',
+            skillName: 'gmail',
+            preApproved: true,
+          });
+          expect(result.success).toBe(false);
+          expect(result.error).toMatch(/capability library|not loaded/);
+          expect(mockQuery).not.toHaveBeenCalled();
+        } finally {
+          await manager.stop();
+        }
+      },
+    );
   });
 });

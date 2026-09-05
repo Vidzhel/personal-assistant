@@ -11,6 +11,7 @@ import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { RavenEvent, McpServerConfig } from '@raven/shared';
+import { loadConfig } from '../config.ts';
 
 async function waitFor(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
   const start = Date.now();
@@ -34,6 +35,7 @@ describe('Orchestrator', () => {
   let _orchestrator: Orchestrator;
 
   beforeEach(async () => {
+    loadConfig();
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-orch-'));
     initDatabase(join(tmpDir, 'test.db'));
     getDb()

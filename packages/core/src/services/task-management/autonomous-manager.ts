@@ -19,7 +19,23 @@ interface AgentManagerLike {
     skillName: string;
     details?: string;
     sessionId?: string;
-  }): Promise<{ success: boolean; result?: string; error?: string }>;
+  }): Promise<AgentActionResult>;
+}
+
+interface AgentActionResult {
+  success: boolean;
+  result?: string;
+  error?: string;
+}
+
+interface ServiceState {
+  eventBus: EventBusInterface;
+  agentManager?: AgentManagerLike;
+  controller: AbortController;
+  activeRuns: Set<Promise<unknown>>;
+  running: boolean;
+  releaseJob?: () => void;
+  requestHandler: (event: unknown) => Promise<void>;
 }
 
 const RecommendedActionSchema = z.object({
@@ -53,26 +69,45 @@ const ACTION_NAME_MAP: Record<string, string> = {
   'delete-task': 'ticktick:delete-task',
 };
 
-let eventBus: EventBusInterface | null = null;
-let serviceConfig: Record<string, unknown> | null = null;
-let isRunning = false;
+let currentState: ServiceState | undefined;
 
-function getAgentManager(): AgentManagerLike | null {
-  const mgr = serviceConfig?.agentManager as AgentManagerLike | undefined;
-  if (!mgr) {
-    log.error('Agent manager not available in service config');
-    return null;
-  }
-  return mgr;
+function awaitWithAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const cleanup = (): void => signal.removeEventListener('abort', onAbort);
+    const onAbort = (): void => {
+      cleanup();
+      reject(signal.reason ?? new Error('Service stopped'));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    operation.then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error: unknown) => {
+        cleanup();
+        reject(error);
+      },
+    );
+    if (signal.aborted) onAbort();
+  });
+}
+
+async function requestAction(
+  state: ServiceState,
+  params: { actionName: string; skillName: string; details: string },
+): Promise<AgentActionResult | undefined> {
+  if (!state.agentManager || state.controller.signal.aborted) return undefined;
+  return await awaitWithAbort(state.agentManager.executeAction(params), state.controller.signal);
 }
 
 function emitNotification(
-  title: string,
-  body: string,
-  actions?: Array<{ label: string; action: string }>,
+  state: ServiceState,
+  notification: { title: string; body: string; actions?: Array<{ label: string; action: string }> },
 ): void {
-  if (!eventBus) return;
-  eventBus.emit({
+  if (state.controller.signal.aborted || currentState !== state) return;
+  const { title, body, actions } = notification;
+  state.eventBus.emit({
     id: generateId(),
     timestamp: Date.now(),
     source: SUITE_TASK_MANAGEMENT,
@@ -179,26 +214,30 @@ function buildActionPrompt(rec: RecommendedAction): string {
   return parts.join('\n');
 }
 
-async function fetchOpenTasksJson(agentManager: AgentManagerLike): Promise<string | null> {
+function actionResult(rec: RecommendedAction, outcome: ActionResult['outcome']): ActionResult {
+  return { action: rec.action, taskTitle: rec.taskTitle, reason: rec.reason, outcome };
+}
+
+async function fetchOpenTasksJson(state: ServiceState): Promise<string | null> {
   try {
-    const fetchResult = await agentManager.executeAction({
+    const fetchResult = await requestAction(state, {
       actionName: 'ticktick:get-tasks',
-      // Library skill name — see callback-handler.ts's comment on the same fix.
       skillName: 'ticktick',
       details:
         'Get all open tasks across all projects. Return JSON array with fields: id, projectId, title, content, priority (0=none,1=low,3=medium,5=high), dueDate, startDate, tags, status. Use the get_all_tasks or filter_tasks MCP tool.',
     });
+    if (!fetchResult) return null;
 
     if (!fetchResult.success || !fetchResult.result) {
       log.error(`Failed to fetch tasks: ${fetchResult.error ?? 'no result'}`);
-      emitFailureEvent(fetchResult.error ?? 'Task fetch failed');
+      emitFailureEvent(state, fetchResult.error ?? 'Task fetch failed');
       return null;
     }
     return fetchResult.result;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log.error(`Error fetching tasks: ${msg}`);
-    emitFailureEvent(msg);
+    if (!state.controller.signal.aborted) emitFailureEvent(state, msg);
     return null;
   }
 }
@@ -218,83 +257,78 @@ function hasNoOpenTasks(tasksJson: string): boolean {
 }
 
 async function analyzeTasksForRecommendations(
-  agentManager: AgentManagerLike,
+  state: ServiceState,
   tasksJson: string,
 ): Promise<RecommendedAction[] | null> {
   try {
-    const analysisResult = await agentManager.executeAction({
+    const analysisResult = await requestAction(state, {
       actionName: 'ticktick:get-tasks',
-      // Library skill name — see callback-handler.ts's comment on the same fix.
       skillName: 'ticktick',
       details: buildAnalysisPrompt(tasksJson),
     });
+    if (!analysisResult) return null;
 
     if (!analysisResult.success || !analysisResult.result) {
       log.warn(`Task analysis failed: ${analysisResult.error ?? 'no result'}`);
-      emitFailureEvent(analysisResult.error ?? 'Task analysis failed');
+      emitFailureEvent(state, analysisResult.error ?? 'Task analysis failed');
       return null;
     }
 
     const parsed = parseRecommendations(analysisResult.result);
     if (parsed === null) {
       log.warn('Failed to parse AI analysis response as JSON');
-      emitFailureEvent('Failed to parse task analysis response');
+      emitFailureEvent(state, 'Failed to parse task analysis response');
       return null;
     }
     return parsed;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log.error(`Error analyzing tasks: ${msg}`);
-    emitFailureEvent(msg);
+    if (!state.controller.signal.aborted) emitFailureEvent(state, msg);
     return null;
   }
 }
 
 async function executeRecommendation(
-  agentManager: AgentManagerLike,
+  state: ServiceState,
   rec: RecommendedAction,
 ): Promise<ActionResult> {
   const actionName = ACTION_NAME_MAP[rec.action];
   if (!actionName) {
     log.warn(`Unknown action type: ${rec.action}`);
-    return { action: rec.action, taskTitle: rec.taskTitle, reason: rec.reason, outcome: 'failed' };
+    return actionResult(rec, 'failed');
   }
 
   try {
-    const result = await agentManager.executeAction({
+    const result = await requestAction(state, {
       actionName,
-      // Library skill name — see callback-handler.ts's comment on the same fix.
       skillName: 'ticktick',
       details: buildActionPrompt(rec),
     });
+    if (!result) {
+      return actionResult(rec, 'failed');
+    }
 
     if (result.success) {
-      return {
-        action: rec.action,
-        taskTitle: rec.taskTitle,
-        reason: rec.reason,
-        outcome: 'executed',
-      };
+      return actionResult(rec, 'executed');
     }
     if (result.error?.includes('queued')) {
-      return {
-        action: rec.action,
-        taskTitle: rec.taskTitle,
-        reason: rec.reason,
-        outcome: 'queued',
-      };
+      return actionResult(rec, 'queued');
     }
-    return { action: rec.action, taskTitle: rec.taskTitle, reason: rec.reason, outcome: 'failed' };
+    return actionResult(rec, 'failed');
   } catch (err) {
+    if (state.controller.signal.aborted) {
+      return actionResult(rec, 'failed');
+    }
     log.error(
       `Error executing ${rec.action} for "${rec.taskTitle}": ${err instanceof Error ? err.message : err}`,
     );
-    return { action: rec.action, taskTitle: rec.taskTitle, reason: rec.reason, outcome: 'failed' };
+    return actionResult(rec, 'failed');
   }
 }
 
 async function executeRecommendations(
-  agentManager: AgentManagerLike,
+  state: ServiceState,
   actionable: RecommendedAction[],
 ): Promise<{ executed: ActionResult[]; queued: ActionResult[]; failed: ActionResult[] }> {
   const executed: ActionResult[] = [];
@@ -302,7 +336,8 @@ async function executeRecommendations(
   const failed: ActionResult[] = [];
 
   for (const rec of actionable) {
-    const result = await executeRecommendation(agentManager, rec);
+    if (state.controller.signal.aborted) break;
+    const result = await executeRecommendation(state, rec);
     if (result.outcome === 'executed') {
       executed.push(result);
     } else if (result.outcome === 'queued') {
@@ -315,7 +350,11 @@ async function executeRecommendations(
   return { executed, queued, failed };
 }
 
-function emitActionSummaryNotification(executed: ActionResult[], queued: ActionResult[]): void {
+function emitActionSummaryNotification(
+  state: ServiceState,
+  summary: { executed: ActionResult[]; queued: ActionResult[] },
+): void {
+  const { executed, queued } = summary;
   const parts: string[] = [];
   if (executed.length > 0) {
     const updates = executed.filter((a) => a.action === 'update-task').length;
@@ -328,54 +367,65 @@ function emitActionSummaryNotification(executed: ActionResult[], queued: ActionR
     parts.push(`${queued.length} actions queued for approval.`);
   }
 
-  emitNotification('Autonomous Task Management', parts.join(' '), [
-    { label: 'View Tasks', action: 't:l:' },
-  ]);
+  emitNotification(state, {
+    title: 'Autonomous Task Management',
+    body: parts.join(' '),
+    actions: [{ label: 'View Tasks', action: 't:l:' }],
+  });
 }
 
-async function runAutonomousManagement(): Promise<void> {
-  const agentManager = getAgentManager();
-  if (!agentManager) return;
+async function runAutonomousManagement(state: ServiceState): Promise<boolean> {
+  if (!state.agentManager || state.controller.signal.aborted) return false;
 
   // Step 1: Fetch all open tasks
-  const tasksJson = await fetchOpenTasksJson(agentManager);
-  if (tasksJson === null) return;
+  const tasksJson = await fetchOpenTasksJson(state);
+  if (tasksJson === null) {
+    state.controller.signal.throwIfAborted();
+    return false;
+  }
+  state.controller.signal.throwIfAborted();
 
   // Step 2: Check for empty task list
   if (hasNoOpenTasks(tasksJson)) {
     log.info('No open tasks found');
-    emitCompletionEvent([], [], []);
-    return;
+    emitCompletionEvent(state, { executed: [], queued: [], failed: [] });
+    return true;
   }
 
   // Step 3: AI analysis of tasks
-  const recommendations = await analyzeTasksForRecommendations(agentManager, tasksJson);
-  if (recommendations === null) return;
+  const recommendations = await analyzeTasksForRecommendations(state, tasksJson);
+  if (recommendations === null) {
+    state.controller.signal.throwIfAborted();
+    return false;
+  }
+  state.controller.signal.throwIfAborted();
 
   // Step 4: Filter low-confidence recommendations
   const actionable = recommendations.filter((r) => r.confidence !== 'low');
 
   if (actionable.length === 0) {
     log.info('No actionable recommendations after confidence filtering');
-    emitCompletionEvent([], [], []);
-    return;
+    emitCompletionEvent(state, { executed: [], queued: [], failed: [] });
+    return true;
   }
 
   // Step 5: Execute each recommendation through permission gates
-  const { executed, queued, failed } = await executeRecommendations(agentManager, actionable);
+  const summary = await executeRecommendations(state, actionable);
+  state.controller.signal.throwIfAborted();
 
   // Step 6: Summary notification (only if at least 1 action executed or queued)
-  if (executed.length > 0 || queued.length > 0) {
-    emitActionSummaryNotification(executed, queued);
+  if (summary.executed.length > 0 || summary.queued.length > 0) {
+    emitActionSummaryNotification(state, summary);
   }
 
   // Step 7: Emit completion event
-  emitCompletionEvent(executed, queued, failed);
+  emitCompletionEvent(state, summary);
+  return summary.failed.length === 0;
 }
 
-function emitFailureEvent(error: string): void {
-  if (!eventBus) return;
-  eventBus.emit({
+function emitFailureEvent(state: ServiceState, error: string): void {
+  if (state.controller.signal.aborted || currentState !== state) return;
+  state.eventBus.emit({
     id: generateId(),
     timestamp: Date.now(),
     source: SUITE_TASK_MANAGEMENT,
@@ -385,26 +435,25 @@ function emitFailureEvent(error: string): void {
 }
 
 function emitCompletionEvent(
-  executed: ActionResult[],
-  queued: ActionResult[],
-  failed: ActionResult[],
+  state: ServiceState,
+  summary: { executed: ActionResult[]; queued: ActionResult[]; failed: ActionResult[] },
 ): void {
-  if (!eventBus) return;
-  eventBus.emit({
+  if (state.controller.signal.aborted || currentState !== state) return;
+  state.eventBus.emit({
     id: generateId(),
     timestamp: Date.now(),
     source: SUITE_TASK_MANAGEMENT,
     type: EVENT_TASK_MGMT_AUTONOMOUS_COMPLETED,
     payload: {
-      executedCount: executed.length,
-      queuedCount: queued.length,
-      failedCount: failed.length,
-      actions: [...executed, ...queued, ...failed],
+      executedCount: summary.executed.length,
+      queuedCount: summary.queued.length,
+      failedCount: summary.failed.length,
+      actions: [...summary.executed, ...summary.queued, ...summary.failed],
     },
   });
 }
 
-async function handleManageRequest(event: unknown): Promise<void> {
+async function handleManageRequest(state: ServiceState, event: unknown): Promise<void> {
   const e = event as { payload: unknown };
   const parsed = TaskManagementManageRequestPayloadSchema.safeParse(e.payload);
   if (!parsed.success) {
@@ -412,46 +461,80 @@ async function handleManageRequest(event: unknown): Promise<void> {
     return;
   }
 
-  if (isRunning) {
+  if (state.controller.signal.aborted || currentState !== state) return;
+  if (state.running) {
     log.warn('Autonomous management already running — skipping manual trigger');
     return;
   }
 
-  isRunning = true;
   try {
-    await runAutonomousManagement();
-  } finally {
-    isRunning = false;
+    await startRun(state);
+  } catch (err) {
+    if (!state.controller.signal.aborted) log.error(`Autonomous management failed: ${String(err)}`);
   }
+}
+
+function startRun(state: ServiceState): Promise<boolean> {
+  if (state.controller.signal.aborted || currentState !== state || state.running) {
+    return Promise.resolve(false);
+  }
+  state.running = true;
+  const run = (async () => {
+    try {
+      return await runAutonomousManagement(state);
+    } finally {
+      state.running = false;
+    }
+  })();
+  state.activeRuns.add(run);
+  void run.then(
+    () => state.activeRuns.delete(run),
+    () => state.activeRuns.delete(run),
+  );
+  return run;
 }
 
 const service: RavenService = {
   async start(context: ServiceContext): Promise<void> {
-    eventBus = context.eventBus;
-    serviceConfig = context.config;
-
-    context.jobRegistry.register('autonomous-task-management', async () => {
-      if (isRunning) return { summary: 'Already running — skipped' };
-      isRunning = true;
-      try {
-        await runAutonomousManagement();
-        return { summary: 'Autonomous task management complete' };
-      } finally {
-        isRunning = false;
+    if (currentState) await service.stop();
+    const state = {
+      eventBus: context.eventBus,
+      agentManager: context.config.agentManager as AgentManagerLike | undefined,
+      controller: new AbortController(),
+      activeRuns: new Set<Promise<unknown>>(),
+      running: false,
+    } as ServiceState;
+    state.requestHandler = (event: unknown) => handleManageRequest(state, event);
+    state.releaseJob = context.jobRegistry.register('autonomous-task-management', async () => {
+      if (state.controller.signal.aborted || currentState !== state) {
+        throw new Error('Autonomous task management stopped');
       }
+      if (state.running) throw new Error('Autonomous task management already running');
+      const completed = await startRun(state);
+      if (!completed) throw new Error('Autonomous task management failed');
+      return { summary: 'Autonomous task management complete' };
     });
-    eventBus.on(EVENT_TASK_MGMT_MANAGE_REQUEST, handleManageRequest as (event: unknown) => void);
+    currentState = state;
+    state.eventBus.on(
+      EVENT_TASK_MGMT_MANAGE_REQUEST,
+      state.requestHandler as (event: unknown) => void,
+    );
 
     log.info('Autonomous manager service started');
   },
 
   async stop(): Promise<void> {
-    if (eventBus) {
-      eventBus.off(EVENT_TASK_MGMT_MANAGE_REQUEST, handleManageRequest as (event: unknown) => void);
-    }
-    eventBus = null;
-    serviceConfig = null;
-    isRunning = false;
+    const state = currentState;
+    if (!state) return;
+    currentState = undefined;
+    state.releaseJob?.();
+    state.releaseJob = undefined;
+    state.controller.abort(new Error('Autonomous manager stopped'));
+    state.eventBus.off(
+      EVENT_TASK_MGMT_MANAGE_REQUEST,
+      state.requestHandler as (event: unknown) => void,
+    );
+    await Promise.allSettled([...state.activeRuns]);
     log.info('Autonomous manager service stopped');
   },
 };

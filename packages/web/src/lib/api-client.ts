@@ -335,10 +335,13 @@ export const api = {
   // second, unused path to the same endpoint here would just be a second
   // source of truth that could drift from it.
   resolveApproval: (id: string, resolution: 'approved' | 'denied') =>
-    request<{ id: string; resolution: string; status: string }>(`/approvals/${id}/resolve`, {
-      method: 'POST',
-      body: JSON.stringify({ resolution }),
-    }),
+    request<{ id: string; resolution: string; status: string; error?: string }>(
+      `/approvals/${id}/resolve`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ resolution }),
+      },
+    ),
 };
 
 export interface Project {

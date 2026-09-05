@@ -303,6 +303,28 @@ test('approval confirmation, approval execution, and denial persist their outcom
   await expect(inbox.getByText('browser-fixture:confirm', { exact: true })).toHaveCount(0);
 });
 
+test('approved action admission failure is visible without offering a second approval', async ({
+  page,
+  request,
+}) => {
+  const approval = await (await request.post(`${CONTROL}/invalid-approval`)).json();
+  const previous = (await state(request)).calls.length;
+  await page.goto('/');
+  const inbox = page.locator('#approvals');
+  await expect(inbox.getByText('unavailable-skill:confirm', { exact: true })).toBeVisible();
+  page.once('dialog', (dialog) => dialog.accept());
+  await inbox.getByRole('button', { name: 'Approve', exact: true }).click();
+  await expect(inbox.getByText(/Approval saved, but the action could not complete:/)).toBeVisible();
+  await expect(inbox.getByText(/Unknown agent skill: unavailable-skill/)).toBeVisible();
+  expect((await state(request)).approvals.find((item) => item.id === approval.id).resolution).toBe(
+    'approved',
+  );
+  expect((await state(request)).calls).toHaveLength(previous);
+  await expect(inbox.getByRole('button', { name: 'Approve', exact: true })).toHaveCount(0);
+  await page.reload();
+  await expect(inbox.getByText('unavailable-skill:confirm', { exact: true })).toHaveCount(0);
+});
+
 test('project deletion explains existing references and removes an empty project', async ({
   page,
   request,

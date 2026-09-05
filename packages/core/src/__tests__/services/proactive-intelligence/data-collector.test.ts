@@ -1,5 +1,5 @@
 import type * as RavenShared from '@raven/shared';
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 
 vi.mock('@raven/shared', async (importOriginal) => {
   const actual = await importOriginal<typeof RavenShared>();
@@ -16,6 +16,8 @@ vi.mock('@raven/shared', async (importOriginal) => {
 });
 
 import { buildSnapshot } from '../../../services/proactive-intelligence/data-collector.ts';
+import service from '../../../services/proactive-intelligence/data-collector.ts';
+import { createJobRegistry } from '../../../scheduler/job-registry.ts';
 import type { DatabaseInterface } from '@raven/shared';
 import type { ExecutionLogger } from '../../../agent-manager/execution-logger.ts';
 
@@ -176,5 +178,49 @@ describe('data-collector buildSnapshot', () => {
     const snapshot = buildSnapshot(db, createMockExecutionLogger());
 
     expect(snapshot).toContain('[...truncated]');
+  });
+});
+
+describe('data-collector service lifetime', () => {
+  let oldBus: { emit: ReturnType<typeof vi.fn> };
+  let newBus: { emit: ReturnType<typeof vi.fn> };
+  let registry: ReturnType<typeof createJobRegistry>;
+
+  beforeEach(() => {
+    oldBus = { emit: vi.fn() };
+    newBus = { emit: vi.fn() };
+    registry = createJobRegistry();
+  });
+
+  afterEach(async () => {
+    await service.stop();
+  });
+
+  async function start(eventBus: { emit: ReturnType<typeof vi.fn> }): Promise<void> {
+    await service.start({
+      eventBus,
+      db: createMockDb({}),
+      executionLogger: createMockExecutionLogger(),
+      jobRegistry: registry,
+    } as never);
+  }
+
+  it('releases the job and blocks a retained old handler after restart', async () => {
+    await start(oldBus);
+    const oldJob = registry.get('pattern-analysis')!;
+
+    await service.stop();
+    expect(registry.has('pattern-analysis')).toBe(false);
+    await start(newBus);
+
+    await expect(oldJob({ scheduleName: 'pattern-analysis', params: {} })).rejects.toThrow(
+      'Pattern analysis stopped',
+    );
+    expect(oldBus.emit).not.toHaveBeenCalled();
+
+    await registry.get('pattern-analysis')!({ scheduleName: 'pattern-analysis', params: {} });
+    expect(newBus.emit).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'agent:task:request' }),
+    );
   });
 });

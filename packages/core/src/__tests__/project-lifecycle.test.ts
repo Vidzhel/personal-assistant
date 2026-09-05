@@ -11,6 +11,7 @@ import {
   symlinkSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { loadConfig } from '../config.ts';
 import { join } from 'node:path';
 import { createRavenTestFixture } from './fixtures/raven-fixture.ts';
 import { initDatabase } from '../db/database.ts';
@@ -54,6 +55,7 @@ describe('managed project lifecycle failures and legacy data', () => {
   let root: string;
   let deps: ProjectLifecycleDeps;
   beforeEach(async () => {
+    loadConfig();
     const actual = await vi.importActual<typeof fs>('node:fs/promises');
     vi.mocked(fs.readdir).mockReset().mockImplementation(actual.readdir);
     vi.mocked(fs.writeFile).mockReset().mockImplementation(actual.writeFile);

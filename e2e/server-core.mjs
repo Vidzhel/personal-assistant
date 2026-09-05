@@ -144,6 +144,12 @@ const control = createServer(async (req, res) => {
         skillName: 'browser-fixture',
         details: 'Only the fake browser backend will run.',
       });
+    } else if (req.method === 'POST' && req.url === '/invalid-approval') {
+      result = pending.insert({
+        actionName: 'unavailable-skill:confirm',
+        skillName: 'unavailable-skill',
+        details: 'Missing bindings must prevent dispatch.',
+      });
     } else {
       res.writeHead(404).end();
       return;

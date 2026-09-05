@@ -4,6 +4,7 @@ import websocket from '@fastify/websocket';
 import type { WebSocket, RawData } from 'ws';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { loadConfig } from '../config.ts';
 import { join } from 'node:path';
 import type { AgentSession, AgentTaskRequestEvent, UserChatRejectedEvent } from '@raven/shared';
 import { initDatabase, getDb } from '../db/database.ts';
@@ -32,6 +33,7 @@ describe('Project ownership across APIs and chat dispatch', () => {
   let sockets: WebSocket[];
 
   beforeEach(async () => {
+    loadConfig();
     dir = mkdtempSync(join(tmpdir(), 'raven-project-ownership-'));
     initDatabase(join(dir, 'test.db'));
     for (const id of ['project-a', 'project-b', 'project-c']) {

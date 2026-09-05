@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { parse } from 'yaml';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createRaven, type RavenInstance } from '../raven.ts';
@@ -118,6 +119,18 @@ describe('e2e: approval flow round-trip over the real composition root', () => {
     await raven.start();
 
     const baseUrl = `http://localhost:${String(raven.port)}`;
+    const projectResponse = await fetch(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Approval ownership' }),
+    });
+    expect(projectResponse.status).toBe(200);
+    const project = (await projectResponse.json()) as { id: string; fsPath: string };
+    const sessionResponse = await fetch(`${baseUrl}/api/projects/${project.id}/sessions`, {
+      method: 'POST',
+    });
+    expect(sessionResponse.status).toBe(200);
+    const session = (await sessionResponse.json()) as { id: string };
 
     const blocked: PermissionBlockedEvent[] = [];
     raven.eventBus.on<PermissionBlockedEvent>('permission:blocked', (e) => {
@@ -151,6 +164,8 @@ describe('e2e: approval flow round-trip over the real composition root', () => {
         prompt: 'Email the board with the quarterly numbers.',
         skillName: 'gmail',
         actionName: 'gmail:send-email', // red tier in the isolated fixture
+        projectId: project.id,
+        sessionId: session.id,
         mcpServers: {},
         priority: 'normal',
       },
@@ -198,6 +213,28 @@ describe('e2e: approval flow round-trip over the real composition root', () => {
     // executeAction's re-dispatch genuinely reached the fake backend.
     expect(calls.length).toBe(1);
     expect(calls[0].prompt).toContain('Execute approved action: gmail:send-email');
+    const actionCompletion = completions.find(
+      (event) => event.payload.taskId !== taskId1 && event.payload.success,
+    );
+    expect(actionCompletion).toMatchObject({
+      projectId: project.id,
+      payload: { sessionId: session.id },
+    });
+    const actionId = actionCompletion!.payload.taskId;
+    const runResponse = await fetch(`${baseUrl}/api/agent-tasks/${actionId}`);
+    expect(runResponse.status).toBe(200);
+    expect(await runResponse.json()).toMatchObject({
+      projectId: project.id,
+      sessionId: session.id,
+      status: 'completed',
+    });
+    const runPath = join(tmpDir, 'projects', project.fsPath, 'tasks', 'runs', `${actionId}.yaml`);
+    expect(parse(readFileSync(runPath, 'utf8'))).toMatchObject({
+      id: actionId,
+      projectId: project.id,
+      sessionId: session.id,
+      status: 'completed',
+    });
 
     // Approval queue is empty again.
     const pendingRes2 = await fetch(`${baseUrl}/api/approvals/pending`);

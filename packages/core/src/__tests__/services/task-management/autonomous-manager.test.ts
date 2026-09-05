@@ -188,7 +188,7 @@ describe('autonomous-manager service', () => {
       });
 
       await startService();
-      await runAutonomousJob();
+      await expect(runAutonomousJob()).rejects.toThrow('Autonomous task management failed');
 
       const failedEvents = getEmittedEvents('task-management:autonomous:failed');
       expect(failedEvents).toHaveLength(1);
@@ -232,7 +232,7 @@ describe('autonomous-manager service', () => {
         .mockResolvedValueOnce({ success: true, result: 'I cannot produce valid JSON' });
 
       await startService();
-      await runAutonomousJob();
+      await expect(runAutonomousJob()).rejects.toThrow('Autonomous task management failed');
 
       // Invalid JSON → failure event emitted
       const failedEvents = getEmittedEvents('task-management:autonomous:failed');
@@ -248,7 +248,7 @@ describe('autonomous-manager service', () => {
       mockAgentManager.executeAction.mockRejectedValueOnce(new Error('Network timeout'));
 
       await startService();
-      await runAutonomousJob();
+      await expect(runAutonomousJob()).rejects.toThrow('Autonomous task management failed');
 
       const failedEvents = getEmittedEvents('task-management:autonomous:failed');
       expect(failedEvents).toHaveLength(1);
@@ -390,7 +390,7 @@ describe('autonomous-manager service', () => {
         .mockResolvedValueOnce({ success: true }); // task-3 succeeds
 
       await startService();
-      await runAutonomousJob();
+      await expect(runAutonomousJob()).rejects.toThrow('failed');
 
       const completedEvents = getEmittedEvents('task-management:autonomous:completed');
       expect(completedEvents).toHaveLength(1);
@@ -528,7 +528,9 @@ describe('autonomous-manager service', () => {
       const firstRun = handler({ scheduleName: 'autonomous-task-management', params: {} });
 
       // Immediately trigger second run
-      await handler({ scheduleName: 'autonomous-task-management', params: {} });
+      await expect(
+        handler({ scheduleName: 'autonomous-task-management', params: {} }),
+      ).rejects.toThrow('already running');
 
       // Complete first run
       resolveFirst!({ success: true, result: '[]' });
@@ -536,6 +538,84 @@ describe('autonomous-manager service', () => {
 
       // Only 1 call to executeAction (the first run)
       expect(mockAgentManager.executeAction).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('service lifetime', () => {
+    it('releases the job and suppresses a late fetch after stop and restart', async () => {
+      let resolveFetch!: (value: unknown) => void;
+      const fetchPromise = new Promise((resolve) => {
+        resolveFetch = resolve;
+      });
+      mockAgentManager.executeAction.mockReturnValueOnce(fetchPromise);
+
+      await startService();
+      const oldHandler = jobRegistry.get('autonomous-task-management')!;
+      const oldRun = oldHandler({ scheduleName: 'autonomous-task-management', params: {} });
+
+      await service.stop();
+      expect(jobRegistry.has('autonomous-task-management')).toBe(false);
+      await startService();
+
+      resolveFetch({ success: true, result: TASK_LIST_JSON });
+      await expect(oldRun).rejects.toThrow('Autonomous manager stopped');
+      expect(mockAgentManager.executeAction).toHaveBeenCalledTimes(1);
+      expect(getEmittedEvents('task-management:autonomous:completed')).toHaveLength(0);
+    });
+
+    it('suppresses a late action result after stop', async () => {
+      const recs = JSON.stringify([
+        {
+          action: 'update-task',
+          taskId: 'task-1',
+          projectId: 'proj-1',
+          taskTitle: 'Buy groceries',
+          reason: 'Overdue',
+          confidence: 'high',
+          changes: { priority: 5 },
+        },
+      ]);
+      let resolveAction!: (value: unknown) => void;
+      const actionPromise = new Promise((resolve) => {
+        resolveAction = resolve;
+      });
+      mockAgentManager.executeAction
+        .mockResolvedValueOnce({ success: true, result: TASK_LIST_JSON })
+        .mockResolvedValueOnce({ success: true, result: recs })
+        .mockReturnValueOnce(actionPromise);
+
+      await startService();
+      const run = jobRegistry.get('autonomous-task-management')!({
+        scheduleName: 'autonomous-task-management',
+        params: {},
+      });
+      await vi.waitFor(() => expect(mockAgentManager.executeAction).toHaveBeenCalledTimes(3));
+
+      await service.stop();
+      resolveAction({ success: true });
+      await expect(run).rejects.toThrow('Autonomous manager stopped');
+      expect(getEmittedEvents('notification')).toHaveLength(0);
+      expect(getEmittedEvents('task-management:autonomous:completed')).toHaveLength(0);
+    });
+
+    it('observes a late action rejection after cancellation', async () => {
+      let rejectAction!: (error: unknown) => void;
+      const actionPromise = new Promise((_, reject) => {
+        rejectAction = reject;
+      });
+      mockAgentManager.executeAction.mockReturnValueOnce(actionPromise);
+
+      await startService();
+      const run = jobRegistry.get('autonomous-task-management')!({
+        scheduleName: 'autonomous-task-management',
+        params: {},
+      });
+      await vi.waitFor(() => expect(mockAgentManager.executeAction).toHaveBeenCalledTimes(1));
+
+      await service.stop();
+      rejectAction(new Error('late provider failure'));
+      await expect(run).rejects.toThrow('Autonomous manager stopped');
+      expect(getEmittedEvents('task-management:autonomous:failed')).toHaveLength(0);
     });
   });
 
@@ -699,7 +779,7 @@ describe('autonomous-manager service', () => {
         jobRegistry,
       } as any);
 
-      await runAutonomousJob();
+      await expect(runAutonomousJob()).rejects.toThrow('Autonomous task management failed');
 
       expect(mockEventBus.emit).not.toHaveBeenCalled();
     });

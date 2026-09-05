@@ -68,6 +68,12 @@ describe('config', () => {
   });
 
   it.each([
+    ['CLAUDE_MODEL', ''],
+    ['CLAUDE_MODEL', '   '],
+    ['RAVEN_AGENT_MAX_TURNS', '0'],
+    ['RAVEN_AGENT_MAX_TURNS', '1.5'],
+    ['RAVEN_AGENT_MAX_TURNS', '101'],
+    ['RAVEN_AGENT_MAX_TURNS', 'NaN'],
     ['RAVEN_MAX_BUDGET_USD_PER_DAY', '-1'],
     ['RAVEN_MAX_BUDGET_USD_PER_DAY', 'Infinity'],
     ['RAVEN_MAX_BUDGET_USD_PER_DAY', 'NaN'],

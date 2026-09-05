@@ -83,6 +83,20 @@ turns that list into concrete `mcpServers` + sub-agent definitions via `Capabili
 An empty `skills: []` list resolves to no capability bindings. The default agent
 enumerates its capabilities explicitly. SuiteRegistry and its legacy path were deleted.
 
+Default chat and execution trees resolve each named agent's `model` tier and
+`maxTurns` before queueing. The queued settings survive subsequent definition
+edits, and budget admission sees the same effective model as the backend. YAML
+and API turn limits are integers from 1 through 100; null API patches reset to
+the YAML defaults (`sonnet`, 15 turns). Global configuration supplies dispatches
+without named overrides. Heartbeat and memory consolidation retain their explicit
+internal overrides. Missing configuration is an error.
+
+Approved actions validate the stored session's current project and the requested
+skill's MCP/vendor bindings before admission. Their run YAML and completion events
+retain that project ownership. Approval records have no originating named-agent
+identity, so these actions use global model/turn defaults. HTTP, audit logs and the
+approval inbox expose execution failure even when the owner's approval was saved.
+
 When the corresponding runtime dependencies are supplied, sessions also get
 the in-process **Raven MCP**
 (`packages/core/src/mcp-server/`), which bundles task-lifecycle, session, knowledge,
@@ -251,6 +265,13 @@ Services live in `packages/core/src/services/`, registered by `registry.ts` and
 started by `runner.ts` with environment eligibility checks. The suite layer,
 SuiteRegistry, and `config/suites.json` were removed. Extend capabilities through
 the library and existing scaffold-and-activate tools; do not recreate suites.
+Service startup follows dependency construction and event listener registration;
+cron starts after service jobs are registered. Autonomous management, TickTick
+sync and pattern analysis retain per-start dependencies and cancellation, release
+their jobs on stop, and suppress post-stop work through stale callbacks. TickTick
+imports validate the fetched list before writes and deduplicate against complete
+local history. Remote TickTick project IDs do not select Raven project ownership;
+imports use system storage until an explicit mapping exists.
 
 ## Data Layer
 
@@ -277,6 +298,10 @@ shows errors and retained outputs, and offers approval, resume and cancellation.
 Runtime completion uses the exact tree/node/attempt; unrelated work by the same
 agent cannot complete a board task. `save_artifact` was removed because it never
 wrote a file. Browser file delivery is part of the authorized workspace work.
+When task validation sets `requireArtifacts: true`, completion must include
+registered artifact metadata through `complete_task`; a summary or paths in final
+text do not satisfy that gate. System maintenance explicitly accepts a summary.
+Metadata registration alone does not verify a physical file's contents.
 
 AgentManager attempts use `tasks/runs/<agentTaskId>.yaml`. Current files supply
 history, dashboard counts, heartbeat activity and retrospective summaries. Model

@@ -62,8 +62,11 @@ export function ApprovalsInbox() {
     });
 
     try {
-      await api.resolveApproval(id, resolution);
+      const result = await api.resolveApproval(id, resolution);
       resolvedIdsRef.current.add(id);
+      if (result.error) {
+        setResolveError(`Approval saved, but the action could not complete: ${result.error}`);
+      }
     } catch {
       setApprovals((prev) =>
         removed && !prev.some((a) => a.id === id) ? [...prev, removed] : prev,

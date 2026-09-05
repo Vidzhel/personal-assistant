@@ -325,17 +325,24 @@ describe('Approval Queue API', () => {
       expect(matching.length).toBeGreaterThan(0);
     });
 
-    it('writes failed audit entry on execution failure', async () => {
+    it('returns execution failure after saving approval and writes a failed audit entry', async () => {
       const approval = insertTestApproval({ actionName: 'exec-fail-test' });
       mockAgentManager.executeAction.mockResolvedValueOnce({
         success: false,
         error: 'Agent crash',
       });
 
-      await app.inject({
+      const response = await app.inject({
         method: 'POST',
         url: `/api/approvals/${approval.id}/resolve`,
         payload: { resolution: 'approved' },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({
+        id: approval.id,
+        resolution: 'approved',
+        status: 'resolved',
+        error: 'Agent crash',
       });
 
       const logs = auditLog.query({ outcome: 'failed' });

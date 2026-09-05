@@ -40,6 +40,20 @@ describe('template integration', () => {
     }
   });
 
+  it('marks system maintenance as an explicit summary-only workflow', async () => {
+    const reg = new TemplateRegistry();
+    await reg.load(PROJECTS_DIR);
+    const tmpl = reg.getTemplate('system-maintenance');
+    expect(tmpl).toBeDefined();
+
+    const { instantiateTemplate } = await import('../template-engine/template-instantiator.ts');
+    const result = instantiateTemplate(tmpl!, {});
+    expect(result.errors).toEqual([]);
+    const node = result.nodes.find((candidate) => candidate.id === 'run-maintenance');
+    expect(node?.type).toBe('agent');
+    if (node?.type === 'agent') expect(node.validation?.requireArtifacts).toBe(false);
+  });
+
   it('validates all templates pass project validation', async () => {
     const { validateProjects } = await import('../project-registry/project-validator.ts');
     const result = await validateProjects(PROJECTS_DIR);

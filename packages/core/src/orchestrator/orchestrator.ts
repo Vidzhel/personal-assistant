@@ -17,6 +17,7 @@ import type { SessionRetrospective } from '../session-manager/session-retrospect
 import type { NamedAgentStore } from '../agent-registry/yaml-named-agent-store.ts';
 import {
   resolveDefaultAgentCapabilities,
+  resolveAgentExecutionSettings,
   type AgentResolver,
   type ResolvedDefaultAgent,
 } from '../agent-registry/agent-resolver.ts';
@@ -24,6 +25,7 @@ import type { CapabilityLibrary } from '../capability-library/capability-library
 import type { ProjectRegistry } from '../project-registry/project-registry.ts';
 import type { ScaffoldingApi } from '../scaffolding/scaffolding-api.ts';
 import { getDb } from '../db/database.ts';
+import { getConfig } from '../config.ts';
 import { resolveSystemAccessInstructions } from '../project-manager/system-access-gate.ts';
 import { createAuditLog } from '../permission-engine/audit-log.ts';
 import { validateChatTarget } from '../session-manager/chat-validation.ts';
@@ -206,10 +208,19 @@ export class Orchestrator {
     log.info(`User chat in project ${projectId}: ${message.slice(0, LOG_MESSAGE_PREVIEW_LENGTH)}`);
 
     let capabilities: ResolvedDefaultAgent;
+    let executionSettings: { model: string; maxTurns: number };
     try {
       capabilities = resolveDefaultAgentCapabilities({
         namedAgentStore: this.namedAgentStore,
         agentResolver: this.agentResolver,
+      });
+      executionSettings = resolveAgentExecutionSettings({
+        model: capabilities.namedAgentModel,
+        maxTurns: capabilities.namedAgentMaxTurns,
+        defaults: {
+          model: getConfig().CLAUDE_MODEL,
+          maxTurns: getConfig().RAVEN_AGENT_MAX_TURNS,
+        },
       });
     } catch (error) {
       this.rejectChat(event, `Agent capability resolution failed: ${String(error)}`);
@@ -433,6 +444,8 @@ export class Orchestrator {
         sessionId: session.id,
         projectId,
         namedAgentId,
+        model: executionSettings.model,
+        maxTurns: executionSettings.maxTurns,
         bashAccess,
       },
     });
