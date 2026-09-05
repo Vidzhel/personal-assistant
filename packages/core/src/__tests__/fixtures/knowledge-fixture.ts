@@ -19,7 +19,7 @@ export function fakeGraph(): Neo4jClient {
 
 export function fakeKnowledgeStore(): KnowledgeStore {
   return {
-    reindexAll: vi.fn(async () => ({ indexed: 0, errors: [] })),
+    reindexAll: vi.fn(async () => ({ indexed: 0, errors: [], changedIds: [] })),
     getById: vi.fn(async (id: string) => ({
       id,
       title: id,

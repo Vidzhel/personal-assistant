@@ -14,6 +14,7 @@ import {
 import { EventBus } from '../event-bus/event-bus.ts';
 import type { RavenEvent } from '@raven/shared';
 import type { Neo4jClient } from '../knowledge-engine/neo4j-client.ts';
+import { knowledgeRevision } from '../knowledge-engine/knowledge-revision.ts';
 
 // Mock the HuggingFace transformers pipeline
 vi.mock('@huggingface/transformers', () => ({
@@ -130,6 +131,38 @@ describe('Embedding Engine', () => {
       const emb = await engine.getEmbedding(bubble.id);
       expect(emb).toBeInstanceOf(Float32Array);
       expect(emb!.length).toBe(384);
+
+      const revision = await neo4j.queryOne<{ embeddingRevision: string | null }>(
+        'MATCH (b:Bubble {id: $id}) RETURN b.embeddingRevision AS embeddingRevision',
+        { id: bubble.id },
+      );
+      expect(revision?.embeddingRevision).toBeNull();
+    });
+
+    it('refreshes a bubble and records the canonical source revision', async () => {
+      const store = createKnowledgeStore({ neo4j, knowledgeDir });
+      const bubble = await store.insert({
+        title: 'Revisioned',
+        content: 'Current body',
+        tags: ['test'],
+      });
+
+      const engine = createEmbeddingEngine({ neo4j, eventBus, knowledgeStore: store });
+      await engine.refreshBubble(bubble.id);
+
+      const state = await neo4j.queryOne<{
+        sourceRevision: string;
+        embeddingRevision: string;
+      }>(
+        `MATCH (b:Bubble {id: $id})
+         RETURN b.sourceRevision AS sourceRevision,
+                b.embeddingRevision AS embeddingRevision`,
+        { id: bubble.id },
+      );
+      expect(state?.embeddingRevision).toBe(
+        knowledgeRevision({ title: bubble.title, content: bubble.content, tags: bubble.tags }),
+      );
+      expect(state?.embeddingRevision).toBe(state?.sourceRevision);
     });
 
     it('returns undefined for missing embedding', async () => {

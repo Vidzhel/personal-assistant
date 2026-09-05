@@ -270,7 +270,7 @@ export function createKnowledgeLifecycle(deps: LifecycleDeps): KnowledgeLifecycl
 
     // Generate embedding and chunks for the merged bubble
     try {
-      await embeddingEngine.generateAndStore(merged.id, combinedContent);
+      await embeddingEngine.refreshBubble(merged.id);
     } catch (err) {
       log.warn(`Failed to generate embedding for merged bubble ${merged.id}: ${err}`);
     }

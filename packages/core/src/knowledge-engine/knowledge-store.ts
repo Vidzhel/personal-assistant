@@ -1,4 +1,3 @@
-import { join } from 'node:path';
 import { Integer as neo4jInteger } from 'neo4j-driver';
 import {
   generateId,
@@ -13,13 +12,23 @@ import {
 import {
   slugify,
   resolveFilename,
-  writeBubbleFile,
-  readBubbleFile,
-  deleteBubbleFile,
+  deleteOwnedBubbleFile,
+  readOwnedBubbleFile,
+  writeOwnedBubbleFile,
   type BubbleFrontmatter,
 } from './knowledge-file.ts';
+import { knowledgeRevision } from './knowledge-revision.ts';
+import {
+  readPendingKnowledgeDeletions,
+  removePendingKnowledgeDeletion,
+  writePendingKnowledgeDeletion,
+} from './knowledge-deletions.ts';
 import type { Neo4jClient } from './neo4j-client.ts';
 import { reindexKnowledgeFiles } from './knowledge-reindex.ts';
+import {
+  reconcileKnowledgeFiles,
+  type KnowledgeReconciliationReport,
+} from './knowledge-reconciliation.ts';
 
 const log = createLogger('knowledge-store');
 
@@ -30,12 +39,16 @@ export interface KnowledgeStore {
   insert: (input: CreateKnowledgeBubble) => Promise<KnowledgeBubble>;
   update: (id: string, input: UpdateKnowledgeBubble) => Promise<KnowledgeBubble | undefined>;
   remove: (id: string) => Promise<boolean>;
-  getById: (id: string) => Promise<KnowledgeBubble | undefined>;
+  getById: (
+    id: string,
+    options?: { trackAccess?: boolean },
+  ) => Promise<KnowledgeBubble | undefined>;
   getContentPreview: (bubbleId: string) => Promise<string | undefined>;
   list: (query: KnowledgeQuery) => Promise<KnowledgeBubbleSummary[]>;
   search: (query: string, limit: number, offset: number) => Promise<KnowledgeBubbleSummary[]>;
   getAllTags: () => Promise<Array<{ tag: string; count: number }>>;
-  reindexAll: () => Promise<{ indexed: number; errors: string[] }>;
+  reindexAll: () => Promise<{ indexed: number; errors: string[]; changedIds: string[] }>;
+  reconcile: () => Promise<KnowledgeReconciliationReport>;
 }
 
 function contentPreview(content: string): string {
@@ -85,6 +98,64 @@ interface TagResult {
   count: number;
 }
 
+function findPendingDeletion(
+  knowledgeDir: string,
+  id: string,
+): ReturnType<typeof readPendingKnowledgeDeletions>[number] | undefined {
+  return readPendingKnowledgeDeletions(knowledgeDir).find((item) => item.id === id);
+}
+
+function prepareDeletion(options: {
+  knowledgeDir: string;
+  id: string;
+  existing: { filePath: string } | undefined;
+  pending: ReturnType<typeof findPendingDeletion>;
+}): ReturnType<typeof findPendingDeletion> {
+  if (options.pending !== undefined) {
+    if (options.existing !== undefined && options.pending.filePath !== options.existing.filePath) {
+      throw new Error(`Pending deletion path conflicts with graph for ${options.id}`);
+    }
+    return options.pending;
+  }
+  if (options.existing === undefined) return undefined;
+  const file = readOwnedBubbleFile(options.knowledgeDir, options.existing.filePath, options.id);
+  const intent = {
+    id: options.id,
+    filePath: options.existing.filePath,
+    fileHash: file.hash,
+  };
+  writePendingKnowledgeDeletion(options.knowledgeDir, intent);
+  return intent;
+}
+
+function assertPendingFileUnchanged(options: {
+  knowledgeDir: string;
+  existing: { filePath: string } | undefined;
+  pending: ReturnType<typeof findPendingDeletion>;
+  id: string;
+}): void {
+  if (options.pending === undefined || options.existing === undefined) return;
+  const current = readOwnedBubbleFile(options.knowledgeDir, options.existing.filePath, options.id);
+  if (current.hash !== options.pending.fileHash) {
+    throw new Error(`Knowledge file changed before deletion: ${options.existing.filePath}`);
+  }
+}
+
+async function resolveAccessTimestamp(options: {
+  neo4j: Neo4jClient;
+  id: string;
+  node: BubbleNode;
+  trackAccess: boolean;
+}): Promise<string | null> {
+  if (!options.trackAccess) return options.node.lastAccessedAt ?? null;
+  const now = new Date().toISOString();
+  await options.neo4j.run(`MATCH (b:Bubble {id: $id}) SET b.lastAccessedAt = $now`, {
+    id: options.id,
+    now,
+  });
+  return now;
+}
+
 function nodeToBubbleSummary(
   node: BubbleNode,
   tags: string[],
@@ -113,13 +184,21 @@ export function createKnowledgeStore(deps: {
   signal?: AbortSignal;
 }): KnowledgeStore {
   const { neo4j, knowledgeDir } = deps;
+  let mutationTail = Promise.resolve();
+  function queueMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const run = mutationTail.then(() => {
+      assertActive();
+      return operation();
+    });
+    mutationTail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
   const assertActive = (): void => deps.signal?.throwIfAborted();
-  function readOwnedFile(fileName: string, id: string): ReturnType<typeof readBubbleFile> {
-    const file = readBubbleFile(join(knowledgeDir, fileName));
-    if (file.meta.id !== id) {
-      throw new Error(`Knowledge file identity mismatch for ${id}: ${fileName}`);
-    }
-    return file;
+  function readOwnedFile(fileName: string, id: string): ReturnType<typeof readOwnedBubbleFile> {
+    return readOwnedBubbleFile(knowledgeDir, fileName, id);
   }
 
   // eslint-disable-next-line max-lines-per-function -- CRUD with source file/URL field mapping
@@ -127,7 +206,7 @@ export function createKnowledgeStore(deps: {
     assertActive();
     const id = generateId();
     const now = new Date().toISOString();
-    const slug = slugify(input.title);
+    const slug = slugify(input.title) || id;
     const fileName = resolveFilename(knowledgeDir, slug);
     const source = input.source ?? null;
     const sourceFile = input.sourceFile ?? null;
@@ -145,53 +224,52 @@ export function createKnowledgeStore(deps: {
       updatedAt: now,
     });
 
-    writeBubbleFile(join(knowledgeDir, fileName), meta, input.content);
+    writeOwnedBubbleFile({
+      knowledgeDir,
+      fileName,
+      meta,
+      content: input.content,
+      expectedHash: null,
+    });
 
-    try {
-      await neo4j.withTransaction(async (tx) => {
-        // Create Bubble node
-        await tx.run(
-          `CREATE (b:Bubble {
+    await neo4j.withTransaction(async (tx) => {
+      // Create Bubble node
+      await tx.run(
+        `CREATE (b:Bubble {
             id: $id, title: $title, filePath: $filePath,
             contentPreview: $contentPreview, source: $source,
             sourceFile: $sourceFile, sourceUrl: $sourceUrl,
             permanence: $permanence, createdAt: $createdAt, updatedAt: $updatedAt,
+            sourceRevision: $sourceRevision,
             lastAccessedAt: $lastAccessedAt
           })`,
-          {
-            id,
-            title: input.title,
-            filePath: fileName,
-            contentPreview: contentPreview(input.content),
-            source,
-            sourceFile,
-            sourceUrl,
-            permanence,
-            createdAt: now,
-            updatedAt: now,
-            lastAccessedAt: now,
-          },
-        );
+        {
+          id,
+          title: input.title,
+          filePath: fileName,
+          contentPreview: contentPreview(input.content),
+          source,
+          sourceFile,
+          sourceUrl,
+          permanence,
+          createdAt: now,
+          updatedAt: now,
+          sourceRevision: knowledgeRevision({ title: input.title, content: input.content, tags }),
+          lastAccessedAt: now,
+        },
+      );
 
-        // Create tags and link
-        for (const tag of tags) {
-          await tx.run(
-            `MERGE (t:Tag {name: $tag})
+      // Create tags and link
+      for (const tag of tags) {
+        await tx.run(
+          `MERGE (t:Tag {name: $tag})
              WITH t
              MATCH (b:Bubble {id: $bubbleId})
              CREATE (b)-[:HAS_TAG]->(t)`,
-            { tag, bubbleId: id },
-          );
-        }
-      });
-    } catch (err) {
-      // Disposal retains the durable file for recovery instead of deleting it late.
-      if (!deps.signal?.aborted) {
-        readOwnedFile(fileName, id);
-        deleteBubbleFile(join(knowledgeDir, fileName));
+          { tag, bubbleId: id },
+        );
       }
-      throw err;
-    }
+    });
 
     log.info(`Knowledge bubble created: ${id} (${fileName})`);
     return {
@@ -217,6 +295,9 @@ export function createKnowledgeStore(deps: {
     input: UpdateKnowledgeBubble,
   ): Promise<KnowledgeBubble | undefined> {
     assertActive();
+    if (findPendingDeletion(knowledgeDir, id) !== undefined) {
+      throw new Error(`Knowledge bubble ${id} has a pending deletion`);
+    }
     const existing = await neo4j.queryOne<BubbleNode>(
       `MATCH (b:Bubble {id: $id}) RETURN b {.*} AS node`,
       { id },
@@ -226,42 +307,45 @@ export function createKnowledgeStore(deps: {
     const node = (existing as unknown as { node: BubbleNode }).node;
 
     const file = readOwnedFile(node.filePath, id);
-    const title = input.title ?? node.title;
-    const content = input.content ?? file.content;
-    const source = input.source !== undefined ? input.source : (node.source ?? null);
+    const title = input.title ?? file.parsed.meta.title ?? node.title;
+    const content = input.content ?? file.parsed.content;
+    const source = input.source !== undefined ? input.source : (file.parsed.meta.source ?? null);
     const sourceFile =
-      input.sourceFile !== undefined ? input.sourceFile : (node.sourceFile ?? null);
-    const sourceUrl = input.sourceUrl !== undefined ? input.sourceUrl : (node.sourceUrl ?? null);
+      input.sourceFile !== undefined ? input.sourceFile : (file.parsed.meta.source_file ?? null);
+    const sourceUrl =
+      input.sourceUrl !== undefined ? input.sourceUrl : (file.parsed.meta.source_url ?? null);
     const now = new Date().toISOString();
 
-    // Get current tags from Neo4j
-    const tagRows = await neo4j.query<{ name: string }>(
-      `MATCH (b:Bubble {id: $id})-[:HAS_TAG]->(t:Tag) RETURN t.name AS name`,
-      { id },
-    );
-    assertActive();
-    readOwnedFile(node.filePath, id);
-    const currentTags = tagRows.map((r) => r.name);
+    const currentTags = file.parsed.meta.tags ?? [];
     const tags = input.tags ?? currentTags;
 
     let fileName = node.filePath;
-    if (input.title && input.title !== node.title) {
-      deleteBubbleFile(join(knowledgeDir, node.filePath));
-      const slug = slugify(input.title);
+    if (input.title && input.title !== (file.parsed.meta.title ?? node.title)) {
+      const slug = slugify(input.title) || id;
       fileName = resolveFilename(knowledgeDir, slug, id);
     }
 
-    const meta = buildFrontmatter({
-      id,
-      title,
-      tags,
-      source,
-      sourceFile,
-      sourceUrl,
-      createdAt: node.createdAt,
-      updatedAt: now,
+    const meta = {
+      ...file.parsed.meta,
+      ...buildFrontmatter({
+        id,
+        title,
+        tags,
+        source,
+        sourceFile,
+        sourceUrl,
+        createdAt: file.parsed.meta.created_at ?? node.createdAt,
+        updatedAt: now,
+      }),
+    };
+    const sourceRevision = knowledgeRevision({ title, content, tags });
+    writeOwnedBubbleFile({
+      knowledgeDir,
+      fileName,
+      meta,
+      content,
+      expectedHash: fileName === node.filePath ? file.hash : null,
     });
-    writeBubbleFile(join(knowledgeDir, fileName), meta, content);
 
     await neo4j.withTransaction(async (tx) => {
       // Update Bubble node
@@ -270,7 +354,7 @@ export function createKnowledgeStore(deps: {
          SET b.title = $title, b.filePath = $filePath,
              b.contentPreview = $contentPreview, b.source = $source,
              b.sourceFile = $sourceFile, b.sourceUrl = $sourceUrl,
-             b.updatedAt = $updatedAt`,
+             b.updatedAt = $updatedAt, b.sourceRevision = $sourceRevision`,
         {
           id,
           title,
@@ -280,21 +364,31 @@ export function createKnowledgeStore(deps: {
           sourceFile,
           sourceUrl,
           updatedAt: now,
+          sourceRevision,
         },
       );
 
-      // Replace tags
-      await tx.run(`MATCH (b:Bubble {id: $id})-[r:HAS_TAG]->() DELETE r`, { id });
+      // Remove only relationships to tags no longer owned by the file.
+      await tx.run(
+        `MATCH (b:Bubble {id: $id})-[r:HAS_TAG]->(t:Tag)
+         WHERE NOT t.name IN $tags DELETE r`,
+        { id, tags },
+      );
       for (const tag of tags) {
         await tx.run(
           `MERGE (t:Tag {name: $tag})
            WITH t
            MATCH (b:Bubble {id: $bubbleId})
-           CREATE (b)-[:HAS_TAG]->(t)`,
+           MERGE (b)-[:HAS_TAG]->(t)`,
           { tag, bubbleId: id },
         );
       }
     });
+
+    assertActive();
+    if (fileName !== node.filePath) {
+      deleteOwnedBubbleFile(knowledgeDir, node.filePath, file.hash);
+    }
 
     // Get domains
     const domainRows = await neo4j.query<{ name: string }>(
@@ -314,7 +408,7 @@ export function createKnowledgeStore(deps: {
       tags,
       domains: domainRows.map((r) => r.name),
       permanence: (node.permanence ?? 'normal') as Permanence,
-      createdAt: node.createdAt,
+      createdAt: meta.created_at ?? node.createdAt,
       updatedAt: now,
       lastAccessedAt: node.lastAccessedAt ?? now,
     };
@@ -327,19 +421,32 @@ export function createKnowledgeStore(deps: {
       { id },
     );
     assertActive();
-    if (!existing) return false;
-    readOwnedFile(existing.filePath, id);
+    const pending = findPendingDeletion(knowledgeDir, id);
+    if (!existing && !pending) return false;
+    const deletion = prepareDeletion({ knowledgeDir, id, existing, pending });
+    if (deletion === undefined) return false;
+    // Re-read immediately before the graph transaction so an editor change
+    // cannot turn this intent into an unsafe deletion.
+    assertPendingFileUnchanged({ knowledgeDir, existing, pending: deletion, id });
 
-    await neo4j.run(`MATCH (b:Bubble {id: $id}) DETACH DELETE b`, { id });
-    assertActive();
-    readOwnedFile(existing.filePath, id);
-    deleteBubbleFile(join(knowledgeDir, existing.filePath));
+    if (existing) {
+      await neo4j.withTransaction(async (tx) => {
+        await tx.run(`MATCH (b:Bubble {id: $id})-[:HAS_CHUNK]->(c:Chunk) DETACH DELETE c`, { id });
+        await tx.run(`MATCH (b:Bubble {id: $id}) DETACH DELETE b`, { id });
+      });
+      assertActive();
+    }
+    deleteOwnedBubbleFile(knowledgeDir, deletion.filePath, deletion.fileHash);
+    removePendingKnowledgeDeletion(knowledgeDir, id);
 
-    log.info(`Knowledge bubble deleted: ${id} (${existing.filePath})`);
+    log.info(`Knowledge bubble deleted: ${id} (${deletion.filePath})`);
     return true;
   }
 
-  async function getById(id: string): Promise<KnowledgeBubble | undefined> {
+  async function getById(
+    id: string,
+    options: { trackAccess?: boolean } = {},
+  ): Promise<KnowledgeBubble | undefined> {
     const row = await neo4j.queryOne<{ filePath: string; node: BubbleNode }>(
       `MATCH (b:Bubble {id: $id}) RETURN b {.*} AS node, b.filePath AS filePath`,
       { id },
@@ -349,13 +456,12 @@ export function createKnowledgeStore(deps: {
     const file = readOwnedFile(node.filePath, id);
 
     // Bump lastAccessedAt on read (access tracking for stale detection)
-    const now = new Date().toISOString();
-    await neo4j.run(`MATCH (b:Bubble {id: $id}) SET b.lastAccessedAt = $now`, { id, now });
-
-    const tagRows = await neo4j.query<{ name: string }>(
-      `MATCH (b:Bubble {id: $id})-[:HAS_TAG]->(t:Tag) RETURN t.name AS name`,
-      { id },
-    );
+    const now = await resolveAccessTimestamp({
+      neo4j,
+      id,
+      node,
+      trackAccess: options.trackAccess !== false,
+    });
     const domainRows = await neo4j.query<{ name: string }>(
       `MATCH (b:Bubble {id: $id})-[:IN_DOMAIN]->(d:Domain) RETURN d.name AS name`,
       { id },
@@ -363,17 +469,17 @@ export function createKnowledgeStore(deps: {
 
     return {
       id: node.id,
-      title: node.title,
-      content: file.content,
+      title: file.parsed.meta.title ?? node.title,
+      content: file.parsed.content,
       filePath: node.filePath,
-      source: node.source,
-      sourceFile: node.sourceFile ?? null,
-      sourceUrl: node.sourceUrl ?? null,
-      tags: tagRows.map((r) => r.name),
+      source: file.parsed.meta.source,
+      sourceFile: file.parsed.meta.source_file ?? null,
+      sourceUrl: file.parsed.meta.source_url ?? null,
+      tags: file.parsed.meta.tags ?? [],
       domains: domainRows.map((r) => r.name),
       permanence: (node.permanence ?? 'normal') as Permanence,
-      createdAt: node.createdAt,
-      updatedAt: node.updatedAt,
+      createdAt: file.parsed.meta.created_at ?? node.createdAt,
+      updatedAt: file.parsed.meta.updated_at ?? node.updatedAt,
       lastAccessedAt: now,
     };
   }
@@ -495,15 +601,17 @@ export function createKnowledgeStore(deps: {
   }
 
   return {
-    insert: insertBubble,
-    update: updateBubble,
-    remove: removeBubble,
+    insert: (input) => queueMutation(() => insertBubble(input)),
+    update: (id, input) => queueMutation(() => updateBubble(id, input)),
+    remove: (id) => queueMutation(() => removeBubble(id)),
     getById,
     getContentPreview,
     list: listBubbles,
     search: searchBubbles,
     getAllTags,
-    reindexAll: () => reindexKnowledgeFiles({ neo4j, knowledgeDir, signal: deps.signal }),
+    reindexAll: () =>
+      queueMutation(() => reindexKnowledgeFiles({ neo4j, knowledgeDir, signal: deps.signal })),
+    reconcile: () => queueMutation(() => reconcileKnowledgeFiles({ neo4j, knowledgeDir })),
   };
 }
 

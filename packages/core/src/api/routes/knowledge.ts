@@ -29,6 +29,10 @@ import type { ExecutionLogger } from '../../agent-manager/execution-logger.ts';
 import type { Neo4jClient } from '../../knowledge-engine/neo4j-client.ts';
 import type { KnowledgeLifecycle } from '../../knowledge-engine/knowledge-lifecycle.ts';
 import type { Retrospective } from '../../knowledge-engine/retrospective.ts';
+import {
+  reindexKnowledge,
+  type KnowledgeRefreshReport,
+} from '../../knowledge-engine/knowledge-refresh.ts';
 
 const log = createLogger('knowledge-api');
 
@@ -44,6 +48,7 @@ export interface KnowledgeRouteDeps {
   retrievalEngine?: RetrievalEngine;
   knowledgeLifecycle?: KnowledgeLifecycle;
   retrospective?: Retrospective;
+  reindexKnowledge?: () => Promise<KnowledgeRefreshReport>;
 }
 
 function emitKnowledgeEvent(
@@ -241,9 +246,9 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
     return knowledgeStore.getAllTags();
   });
 
-  app.post('/api/knowledge/reindex', async () => {
-    return knowledgeStore.reindexAll();
-  });
+  const refresh = deps.reindexKnowledge ?? (() => reindexKnowledge(deps));
+  app.get('/api/knowledge/reconciliation', async () => knowledgeStore.reconcile());
+  app.post('/api/knowledge/reindex', async () => refresh());
 
   app.post('/api/knowledge/ingest', async (req, reply) => {
     const result = IngestKnowledgeSchema.safeParse(req.body);
@@ -398,7 +403,7 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
   });
 
   // --- Story 6.4: Search & Retrieval routes ---
-  const { chunkingEngine, retrievalEngine } = deps;
+  const { retrievalEngine } = deps;
 
   app.post('/api/knowledge/search', async (req, reply) => {
     if (!retrievalEngine) {
@@ -428,31 +433,8 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
     return retrievalEngine.retrieveTimeline(result.data);
   });
 
-  app.post('/api/knowledge/reindex-embeddings', async (_req, reply) => {
-    if (!chunkingEngine) {
-      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Chunking not available' });
-    }
-    const taskId = generateId();
-    chunkingEngine
-      .reindexAllChunks()
-      .then((result) => {
-        log.info(`Chunk reindex complete (task ${taskId}): ${result.indexed}/${result.total}`);
-      })
-      .catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error(`Chunk reindex failed (task ${taskId}): ${msg}`);
-      });
-    return reply.status(HTTP_STATUS.ACCEPTED).send({ taskId, status: 'reindexing' });
-  });
-
-  app.get<{ Params: { taskId: string } }>(
-    '/api/knowledge/reindex-embeddings/:taskId',
-    async (req, reply) => {
-      const task = executionLogger.getTaskById(req.params.taskId);
-      if (!task) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Task not found' });
-      return { taskId: task.id, status: task.status, result: task.result };
-    },
-  );
+  // An awaited repair result is truthful; no synthetic agent task is created.
+  app.post('/api/knowledge/reindex-embeddings', async () => refresh());
 
   app.get('/api/knowledge/index-status', async (_req, reply) => {
     if (!retrievalEngine) {

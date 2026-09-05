@@ -1,11 +1,17 @@
 import { createProcessorLifecycle } from './processor-lifecycle.ts';
-import { join } from 'node:path';
-import { generateId, createLogger, type KnowledgeChunk, type RavenEvent } from '@raven/shared';
+import {
+  generateId,
+  createLogger,
+  type KnowledgeBubble,
+  type KnowledgeChunk,
+  type RavenEvent,
+} from '@raven/shared';
+import type { ManagedTransaction } from 'neo4j-driver';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { Neo4jClient } from './neo4j-client.ts';
 import type { KnowledgeStore } from './knowledge-store.ts';
-import { readBubbleFile } from './knowledge-file.ts';
 import { BGE_DOC_PREFIX, getPipeline } from './embeddings.ts';
+import { knowledgeRevision } from './knowledge-revision.ts';
 
 const log = createLogger('chunking');
 
@@ -14,6 +20,45 @@ const DEFAULT_OVERLAP = 50; // tokens (~200 chars)
 const MIN_CHUNK_TOKENS = 50;
 const CHARS_PER_TOKEN = 4;
 const BACKFILL_LOG_INTERVAL = 10;
+
+interface PreparedChunk extends KnowledgeChunk {
+  id: string;
+  embedding: number[];
+}
+
+interface DerivedState {
+  sourceRevision: string | null;
+  chunkRevision: string | null;
+  chunkCount: number;
+}
+
+async function replaceChunkRows(
+  tx: ManagedTransaction,
+  bubbleId: string,
+  chunks: PreparedChunk[],
+): Promise<void> {
+  await tx.run(`MATCH (c:Chunk {bubbleId: $bubbleId}) DETACH DELETE c`, { bubbleId });
+  for (const chunk of chunks) {
+    await tx.run(
+      `MATCH (b:Bubble {id: $bubbleId})
+       CREATE (c:Chunk {
+         id: $id, bubbleId: $bubbleId, index: $index,
+         text: $text, startOffset: $startOffset, endOffset: $endOffset,
+         embedding: $embedding
+       })
+       CREATE (b)-[:HAS_CHUNK]->(c)`,
+      {
+        bubbleId,
+        id: chunk.id,
+        index: chunk.index,
+        text: chunk.text,
+        startOffset: chunk.startOffset,
+        endOffset: chunk.endOffset,
+        embedding: chunk.embedding,
+      },
+    );
+  }
+}
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / CHARS_PER_TOKEN);
@@ -35,6 +80,7 @@ export function chunkContent(
   content: string,
   options?: { chunkSize?: number; overlap?: number },
 ): KnowledgeChunk[] {
+  if (!content.trim()) return [];
   const chunkSizeTokens = options?.chunkSize ?? DEFAULT_CHUNK_SIZE;
   const overlapTokens = options?.overlap ?? DEFAULT_OVERLAP;
   const totalTokens = estimateTokens(content);
@@ -128,11 +174,12 @@ interface ChunkingDeps {
 
 // eslint-disable-next-line max-lines-per-function -- factory function for chunking engine
 export function createChunkingEngine(deps: ChunkingDeps): ChunkingEngine {
-  const { eventBus, knowledgeDir } = deps;
+  const { eventBus } = deps;
   const lifetime = createProcessorLifecycle(eventBus, 'chunking');
   const neo4j = lifetime.guard(deps.neo4j);
   const knowledgeStore = lifetime.guard(deps.knowledgeStore);
   let started = false;
+  const indexes = new Map<string, Promise<void>>();
 
   async function embedChunkText(text: string, tags: string[]): Promise<number[]> {
     lifetime.assertActive();
@@ -143,68 +190,138 @@ export function createChunkingEngine(deps: ChunkingDeps): ChunkingEngine {
     return Array.from(new Float32Array(output.data));
   }
 
-  async function indexBubble(bubbleId: string): Promise<void> {
-    const bubble = await knowledgeStore.getById(bubbleId);
-    if (!bubble) {
-      log.warn(`Cannot index chunks: bubble ${bubbleId} not found`);
-      return;
-    }
+  async function derivedState(bubbleId: string): Promise<DerivedState> {
+    const row = await neo4j.queryOne<DerivedState>(
+      `MATCH (b:Bubble {id: $bubbleId})
+       OPTIONAL MATCH (c:Chunk {bubbleId: $bubbleId})
+       RETURN b.sourceRevision AS sourceRevision,
+              b.chunkRevision AS chunkRevision,
+              count(c) AS chunkCount`,
+      { bubbleId },
+    );
+    if (!row) throw new Error(`Knowledge bubble ${bubbleId} not found`);
+    return {
+      sourceRevision: row.sourceRevision ?? null,
+      chunkRevision: row.chunkRevision ?? null,
+      chunkCount: Number(row.chunkCount ?? 0),
+    };
+  }
 
-    // Read full content from disk
-    let content = bubble.content;
-    if (!content) {
-      try {
-        const file = readBubbleFile(join(knowledgeDir, bubble.filePath));
-        content = file.content;
-      } catch {
-        log.warn(`Cannot read file for bubble ${bubbleId}: ${bubble.filePath}`);
-        return;
-      }
-    }
-
-    if (!content.trim()) return;
-
-    // Remove existing chunks first
-    await removeChunks(bubbleId);
-
-    const rawChunks = chunkContent(content);
+  async function prepareChunks(
+    bubble: Pick<KnowledgeBubble, 'title' | 'content' | 'tags'>,
+  ): Promise<{ revision: string; chunks: PreparedChunk[] }> {
+    const revision = knowledgeRevision({
+      title: bubble.title,
+      content: bubble.content,
+      tags: bubble.tags,
+    });
+    const rawChunks = bubble.content.trim() ? chunkContent(bubble.content) : [];
+    const chunks: PreparedChunk[] = [];
     for (const chunk of rawChunks) {
-      const chunkId = generateId();
-      const embedding = await embedChunkText(chunk.text, bubble.tags);
-      await neo4j.run(
+      chunks.push({
+        ...chunk,
+        id: generateId(),
+        embedding: await embedChunkText(chunk.text, bubble.tags),
+      });
+    }
+    return { revision, chunks };
+  }
+
+  async function commitChunks(
+    bubbleId: string,
+    prepared: { revision: string; chunks: PreparedChunk[] },
+  ): Promise<void> {
+    const { revision, chunks } = prepared;
+    await neo4j.withTransaction(async (tx) => {
+      await tx.run(
         `MATCH (b:Bubble {id: $bubbleId})
-         CREATE (c:Chunk {
-           id: $id, bubbleId: $bubbleId, index: $index,
-           text: $text, startOffset: $startOffset, endOffset: $endOffset,
-           embedding: $embedding
-         })
-         CREATE (b)-[:HAS_CHUNK]->(c)`,
+         SET b.__ravenDerivedLock = $lock
+         REMOVE b.__ravenDerivedLock`,
+        { bubbleId, lock: generateId() },
+      );
+      const check = await tx.run(
+        `MATCH (b:Bubble {id: $bubbleId})
+         WHERE b.sourceRevision = $sourceRevision
+         RETURN b.id AS id`,
         {
           bubbleId,
-          id: chunkId,
-          index: chunk.index,
-          text: chunk.text,
-          startOffset: chunk.startOffset,
-          endOffset: chunk.endOffset,
-          embedding,
+          sourceRevision: revision,
         },
       );
+      if (check.records.length === 0) {
+        throw new Error(`Knowledge bubble ${bubbleId} changed before chunk commit`);
+      }
+      await replaceChunkRows(tx, bubbleId, chunks);
+      await tx.run(`MATCH (b:Bubble {id: $bubbleId}) SET b.chunkRevision = $chunkRevision`, {
+        bubbleId,
+        chunkRevision: revision,
+      });
+    });
+  }
+
+  async function indexBubbleOnce(bubbleId: string): Promise<void> {
+    const bubble = await knowledgeStore.getById(bubbleId, { trackAccess: false });
+    if (!bubble) {
+      throw new Error(`Knowledge bubble ${bubbleId} not found`);
     }
+
+    const initialState = await derivedState(bubbleId);
+    const revision = knowledgeRevision({
+      title: bubble.title,
+      content: bubble.content,
+      tags: bubble.tags,
+    });
+    if (initialState.sourceRevision !== revision) {
+      throw new Error(`Knowledge bubble ${bubbleId} source changed; reindex required`);
+    }
+    if (
+      initialState.chunkRevision === revision &&
+      initialState.chunkCount === chunkContent(bubble.content).length
+    )
+      return;
+    const prepared = await prepareChunks(bubble);
+    const current = await knowledgeStore.getById(bubbleId, { trackAccess: false });
+    if (
+      !current ||
+      knowledgeRevision({
+        title: current.title,
+        content: current.content,
+        tags: current.tags,
+      }) !== prepared.revision
+    ) {
+      throw new Error(`Knowledge bubble ${bubbleId} changed while chunks were generated`);
+    }
+
+    await commitChunks(bubbleId, prepared);
 
     lifetime.emit({
       id: generateId(),
       timestamp: Date.now(),
       source: 'chunking',
       type: 'knowledge:chunk:indexed',
-      payload: { bubbleId, chunkCount: rawChunks.length },
+      payload: { bubbleId, chunkCount: prepared.chunks.length },
     } as RavenEvent);
 
-    log.info(`Indexed ${rawChunks.length} chunks for bubble ${bubbleId}`);
+    log.info(`Indexed ${prepared.chunks.length} chunks for bubble ${bubbleId}`);
+  }
+
+  async function indexBubble(bubbleId: string): Promise<void> {
+    const existing = indexes.get(bubbleId);
+    if (existing) return existing;
+    const current = indexBubbleOnce(bubbleId);
+    indexes.set(bubbleId, current);
+    try {
+      await current;
+    } finally {
+      if (indexes.get(bubbleId) === current) indexes.delete(bubbleId);
+    }
   }
 
   async function removeChunks(bubbleId: string): Promise<void> {
-    await neo4j.run(`MATCH (b:Bubble {id: $bubbleId})-[:HAS_CHUNK]->(c:Chunk) DETACH DELETE c`, {
-      bubbleId,
+    await neo4j.withTransaction(async (tx) => {
+      // Match chunks independently so orphaned rows are removed even after the Bubble is gone.
+      await tx.run(`MATCH (c:Chunk {bubbleId: $bubbleId}) DETACH DELETE c`, { bubbleId });
+      await tx.run(`MATCH (b:Bubble {id: $bubbleId}) REMOVE b.chunkRevision`, { bubbleId });
     });
   }
 
@@ -235,9 +352,6 @@ export function createChunkingEngine(deps: ChunkingDeps): ChunkingEngine {
   }
 
   async function reindexAllChunks(): Promise<{ total: number; indexed: number; errors: string[] }> {
-    // Delete ALL chunk nodes
-    await neo4j.run('MATCH (c:Chunk) DETACH DELETE c');
-
     const rows = await neo4j.query<{ id: string }>('MATCH (b:Bubble) RETURN b.id AS id');
     const total = rows.length;
     const errors: string[] = [];

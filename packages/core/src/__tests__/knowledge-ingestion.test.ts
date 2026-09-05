@@ -237,7 +237,13 @@ function createMockKnowledgeStore(): KnowledgeStore & { bubbles: KnowledgeBubble
       })),
     search: async () => [],
     getAllTags: async () => [],
-    reindexAll: async () => ({ indexed: 0, errors: [] }),
+    reindexAll: async () => ({ indexed: 0, errors: [], changedIds: [] }),
+    reconcile: async () => ({
+      knowledgeDir: '',
+      filesScanned: 0,
+      graphNodesScanned: 0,
+      issues: [],
+    }),
   };
 }
 

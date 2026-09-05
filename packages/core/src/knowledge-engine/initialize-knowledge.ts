@@ -15,6 +15,11 @@ import { createRetrospective } from './retrospective.ts';
 import { createKnowledgeConsolidation } from './knowledge-consolidation.ts';
 import { loadKnowledgeDomainConfig } from './domain-config.ts';
 import { syncProjectNodes } from './project-knowledge.ts';
+import {
+  refreshKnowledgeIndexes,
+  reindexKnowledge,
+  type KnowledgeRefreshReport,
+} from './knowledge-refresh.ts';
 
 const log = createLogger('knowledge-startup');
 const factories = {
@@ -52,6 +57,7 @@ export interface KnowledgeRuntime {
   knowledgeLifecycle: ReturnType<typeof createKnowledgeLifecycle>;
   retrospective: ReturnType<typeof createRetrospective>;
   knowledgeConsolidation: ReturnType<typeof createKnowledgeConsolidation>;
+  reindex(): Promise<KnowledgeRefreshReport>;
   stop(): Promise<void>;
 }
 
@@ -112,7 +118,7 @@ async function startProcessors(deps: BuildDeps): Promise<StartedProcessors> {
 async function buildKnowledge(
   deps: BuildDeps,
   stop: () => Promise<void>,
-): Promise<KnowledgeRuntime> {
+): Promise<Omit<KnowledgeRuntime, 'reindex'>> {
   const { make, own, neo4j, knowledgeStore, eventBus, knowledgeDir, config } = deps;
   const processors = await startProcessors(deps);
   const { embeddingEngine, chunkingEngine } = processors;
@@ -169,6 +175,41 @@ function guardGraph(client: Neo4jClient, lifetime: ProcessorLifecycle): Neo4jCli
   });
 }
 
+function initializeRefresh(
+  runtime: Omit<KnowledgeRuntime, 'reindex'>,
+  initial: Awaited<ReturnType<KnowledgeRuntime['knowledgeStore']['reindexAll']>>,
+  lifetime: ProcessorLifecycle,
+): KnowledgeRuntime {
+  const refreshDeps = { ...runtime, signal: lifetime.signal };
+  let pending: Promise<KnowledgeRefreshReport> | undefined;
+  const refresh = (source?: typeof initial): Promise<KnowledgeRefreshReport> => {
+    lifetime.assertActive();
+    if (pending) return pending;
+    const work = lifetime.run(() =>
+      source ? refreshKnowledgeIndexes(refreshDeps, source) : reindexKnowledge(refreshDeps),
+    );
+    pending = work;
+    void work
+      .finally(() => {
+        if (pending === work) pending = undefined;
+      })
+      .catch(() => {});
+    return work;
+  };
+  // Derived generation may download/load a model. Keep diagnostics and the rest
+  // of Raven available while this owned work settles; manual repair shares it.
+  void refresh(initial).then(
+    (refreshed) => {
+      if (refreshed.refreshErrors.length > 0)
+        log.warn(`Knowledge refresh remains pending: ${JSON.stringify(refreshed.refreshErrors)}`);
+    },
+    (error: unknown) => {
+      if (!lifetime.signal.aborted) log.warn(`Knowledge refresh failed: ${String(error)}`);
+    },
+  );
+  return { ...runtime, reindex: () => refresh() };
+}
+
 /** Compose the existing engines privately; callers publish only a successful result. */
 export async function initializeKnowledge(
   deps: KnowledgeStartupDeps,
@@ -202,10 +243,11 @@ export async function initializeKnowledge(
     );
     const reindex = await knowledgeStore.reindexAll();
     if (reindex.errors.length > 0)
-      throw new Error(`Knowledge reindex failed: ${reindex.errors.join('; ')}`);
+      log.warn(`Knowledge files need repair: ${reindex.errors.join('; ')}`);
     const runtime = await buildKnowledge({ ...deps, neo4j, knowledgeStore, make, own }, stop);
+    const ready = initializeRefresh(runtime, reindex, lifetime);
     log.info('Knowledge graph and processors initialized');
-    return runtime;
+    return ready;
   } catch (err) {
     log.warn(`Knowledge initialization failed — continuing without graph: ${err}`);
     await stop();

@@ -19,7 +19,7 @@ external repositories.
 | F2 | Whole-tree YAML execution state, explicit board/run linkage, engine shutdown and restart interruption | Complete; reviewed, 2,079 tests and 14 browser journeys passed |
 | F3 | Project-local agent-run records and replacement of remaining task SQL readers | Complete; reviewed, 2,092 tests and 14 browser journeys passed |
 | F4 | Drain admitted MCP mutations before terminal task state and store shutdown | Complete; reviewed, 2,105 tests and 14 browser journeys passed |
-| F5 | File/graph reconciliation and changed-content derived-index refresh | Pending |
+| F5 | File/graph reconciliation and changed-content derived-index refresh | Complete; 2,138 default / 132 graph tests, 14 browser journeys |
 | F6 | Enforced global daily budget through existing execution paths | Pending |
 | F7 | Ordinary schedule absence/staleness detection | Pending |
 | F8 | Durable provider upload cleanup/retry after cancellation and restart | Pending |
@@ -64,7 +64,14 @@ production builds, fourteen browser journeys and packaged restart passed.
 F4 evidence and external-work limits are in
 [tech-spec-f4-mcp-drain.md](tech-spec-f4-mcp-drain.md). The default suite passed 199
 files / 2,105 tests (six deliberate live skips); required checks, core build,
-fourteen browser journeys and packaged restart passed. F5 is the next checkpoint.
+fourteen browser journeys and packaged restart passed.
+F5 evidence and repair limits are in
+[tech-spec-f5-knowledge-reconciliation.md](tech-spec-f5-knowledge-reconciliation.md).
+Read-only reconciliation, recoverable file writes and revisioned derived refresh
+are complete. The default suite passed 203 files / 2,138 tests (six deliberate
+live skips), 132 disposable Neo4j tests, required checks, core build, fourteen
+browser journeys and packaged restart. F6 is the next checkpoint.
+
 Implementation remains ordered, with parent review and a tested commit/push for
 each checkpoint.
 

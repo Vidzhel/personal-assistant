@@ -1,4 +1,7 @@
-import { initializeKnowledge } from './knowledge-engine/initialize-knowledge.ts';
+import {
+  initializeKnowledge,
+  type KnowledgeRuntime,
+} from './knowledge-engine/initialize-knowledge.ts';
 import { resolve, dirname } from 'node:path';
 import { mkdirSync, existsSync } from 'node:fs';
 import {
@@ -305,6 +308,7 @@ export async function createRaven(
   const serviceRunner = createServiceRunner();
   const jobRegistry = createJobRegistry();
   let boundPort = config.RAVEN_PORT;
+  let knowledge: KnowledgeRuntime | undefined = undefined;
   const baseContext = {
     eventBus: {
       emit: (event: unknown) => eventBus.emit(event as RavenEvent),
@@ -331,6 +335,11 @@ export async function createRaven(
     projectsDir,
     libraryDir,
     getApiPort: () => boundPort,
+    maintainKnowledge: async () => {
+      if (!knowledge) return undefined;
+      const refresh = await knowledge.reindex();
+      return { refresh, reconciliation: await knowledge.knowledgeStore.reconcile() };
+    },
     integrationsConfig,
     jobRegistry,
   };
@@ -493,7 +502,7 @@ export async function createRaven(
   const mediaDir = resolve(dataRoot, 'data/media');
   if (!existsSync(mediaDir)) mkdirSync(mediaDir, { recursive: true });
 
-  const knowledge = await initializeKnowledge({
+  knowledge = await initializeKnowledge({
     config,
     eventBus,
     executionLogger,
@@ -691,6 +700,7 @@ export async function createRaven(
         executionLogger,
         messageStore,
         knowledgeStore,
+        reindexKnowledge: knowledge?.reindex,
         ingestionProcessor,
         embeddingEngine,
         clusteringEngine,

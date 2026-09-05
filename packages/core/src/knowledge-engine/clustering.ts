@@ -119,18 +119,35 @@ export function createClusteringEngine(deps: ClusteringDeps): ClusteringEngine {
   }
 
   async function assignDomains(bubbleId: string, domains: string[]): Promise<void> {
-    // Remove existing domain relationships
-    await neo4j.run(`MATCH (b:Bubble {id: $bubbleId})-[r:IN_DOMAIN]->() DELETE r`, { bubbleId });
-    // Create new ones
-    for (const domain of domains) {
-      await neo4j.run(
-        `MERGE (d:Domain {name: $domain})
+    await neo4j.withTransaction(async (tx) => {
+      await tx.run(
+        `MATCH (b:Bubble {id: $bubbleId})-[r:IN_DOMAIN]->(d:Domain)
+         WHERE NOT d.name IN $domains DELETE r`,
+        { bubbleId, domains },
+      );
+      await tx.run(
+        `UNWIND $domains AS domain
+         MERGE (d:Domain {name: domain})
          WITH d
          MATCH (b:Bubble {id: $bubbleId})
-         CREATE (b)-[:IN_DOMAIN]->(d)`,
-        { domain, bubbleId },
+         MERGE (b)-[:IN_DOMAIN]->(d)`,
+        { bubbleId, domains },
       );
-    }
+    });
+  }
+
+  async function mergeInferredDomains(bubbleId: string, domains: string[]): Promise<void> {
+    if (domains.length === 0) return;
+    await neo4j.withTransaction(async (tx) => {
+      await tx.run(
+        `UNWIND $domains AS domain
+         MERGE (d:Domain {name: domain})
+         WITH d
+         MATCH (b:Bubble {id: $bubbleId})
+         MERGE (b)-[:IN_DOMAIN]->(d)`,
+        { bubbleId, domains },
+      );
+    });
   }
 
   async function getDomains(): Promise<Array<{ name: string; bubbleCount: number }>> {
@@ -205,7 +222,7 @@ export function createClusteringEngine(deps: ClusteringDeps): ClusteringEngine {
     bubble: { tags: string[]; title: string; content: string },
   ): Promise<void> {
     const domains = classifyDomains({ id: bubbleId, ...bubble });
-    await assignDomains(bubbleId, domains);
+    await mergeInferredDomains(bubbleId, domains);
   }
 
   async function chainPlaceTags(tags: string[], bubbleId: string): Promise<void> {

@@ -63,7 +63,6 @@ describe('transactional knowledge startup', () => {
     'schema',
     'project-sync',
     'reindex',
-    'reindex-errors',
     'ingestion',
     'embedding',
     'clustering',
@@ -81,11 +80,6 @@ describe('transactional knowledge startup', () => {
     if (stage === 'schema') vi.mocked(f.client.ensureSchema).mockImplementation(fail);
     if (stage === 'project-sync') overrides.syncProjectNodes = fail;
     if (stage === 'reindex') vi.mocked(f.store.reindexAll).mockImplementation(fail);
-    if (stage === 'reindex-errors')
-      vi.mocked(f.store.reindexAll).mockResolvedValue({
-        indexed: 0,
-        errors: ['invalid fixture definition'],
-      });
     if (stage === 'ingestion')
       overrides.createIngestionProcessor = (deps) => {
         const processor = createIngestionProcessor(deps);
@@ -135,6 +129,85 @@ describe('transactional knowledge startup', () => {
     expect(await initializeKnowledge(f.deps, overrides)).toBeUndefined();
     expect(f.eventBus.listenerCount()).toBe(0);
     expect(f.client.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps diagnostics available for invalid files and refreshes only after processors start', async () => {
+    const f = fixture();
+    vi.mocked(f.store.reindexAll).mockResolvedValue({
+      indexed: 1,
+      errors: ['duplicate file'],
+      changedIds: ['valid'],
+    });
+    const order: string[] = [];
+    const refreshBubble = vi.fn(async (): Promise<void> => {
+      expect(order).toEqual(['embedding', 'chunking']);
+      throw new Error('temporarily unavailable');
+    });
+    const indexBubble = vi.fn(async () => {});
+    const runtime = await initializeKnowledge(f.deps, {
+      ...f.factories,
+      createEmbeddingEngine: (deps) => ({
+        ...createEmbeddingEngine(deps),
+        start: () => {
+          order.push('embedding');
+        },
+        refreshBubble,
+      }),
+      createChunkingEngine: (deps) => ({
+        ...createChunkingEngine(deps),
+        start: () => {
+          order.push('chunking');
+        },
+        indexBubble,
+      }),
+    });
+    expect(runtime).toBeDefined();
+    expect(f.client.close).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(indexBubble).toHaveBeenCalledWith('valid'));
+    await runtime!.reindex();
+    refreshBubble.mockResolvedValue(undefined);
+    const repaired = await runtime!.reindex();
+    expect(repaired.refreshedIds).toEqual(['valid']);
+    await runtime!.stop();
+  });
+
+  it('shares an ongoing reindex between API and maintenance callers', async () => {
+    const f = fixture();
+    const runtime = await initializeKnowledge(f.deps, f.factories);
+    await runtime!.reindex();
+    vi.mocked(f.store.reindexAll).mockClear();
+    const held = deferred<{ indexed: number; errors: string[]; changedIds: string[] }>();
+    vi.mocked(f.store.reindexAll).mockReturnValueOnce(held.promise);
+    const first = runtime!.reindex();
+    const second = runtime!.reindex();
+    expect(first).toBe(second);
+    expect(f.store.reindexAll).toHaveBeenCalledTimes(1);
+    held.resolve({ indexed: 0, errors: [], changedIds: [] });
+    await first;
+    await runtime!.reindex();
+    expect(f.store.reindexAll).toHaveBeenCalledTimes(2);
+    await runtime!.stop();
+  });
+
+  it('publishes diagnostics while startup embedding generation is still pending', async () => {
+    const f = fixture();
+    const held = deferred<undefined>();
+    vi.mocked(f.store.reindexAll).mockResolvedValue({ indexed: 1, errors: [], changedIds: ['a'] });
+    const refreshBubble = vi.fn(() => held.promise);
+    const runtime = await initializeKnowledge(f.deps, {
+      ...f.factories,
+      createEmbeddingEngine: (deps) => ({ ...createEmbeddingEngine(deps), refreshBubble }),
+      createChunkingEngine: (deps) => ({
+        ...createChunkingEngine(deps),
+        indexBubble: vi.fn(async () => {}),
+      }),
+    });
+    expect(runtime).toBeDefined();
+    expect(refreshBubble).toHaveBeenCalledWith('a');
+    expect(f.client.close).not.toHaveBeenCalled();
+    held.resolve(undefined);
+    await runtime!.reindex();
+    await runtime!.stop();
   });
 
   it('continues cleanup after a processor stop rejects', async () => {

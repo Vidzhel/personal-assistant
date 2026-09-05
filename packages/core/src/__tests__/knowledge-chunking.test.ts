@@ -8,6 +8,7 @@ import { createKnowledgeStore } from '../knowledge-engine/knowledge-store.ts';
 import { chunkContent, createChunkingEngine } from '../knowledge-engine/chunking.ts';
 import { EventBus } from '../event-bus/event-bus.ts';
 import type { Neo4jClient } from '../knowledge-engine/neo4j-client.ts';
+import { knowledgeRevision } from '../knowledge-engine/knowledge-revision.ts';
 
 // Mock the HuggingFace transformers pipeline
 vi.mock('@huggingface/transformers', () => ({
@@ -172,6 +173,19 @@ describe('Content Chunking', () => {
         { id: bubble.id },
       );
       expect(withEmb?.count).toBe(chunks.length);
+
+      const revision = await neo4j.queryOne<{
+        sourceRevision: string;
+        chunkRevision: string;
+      }>(
+        `MATCH (b:Bubble {id: $id})
+         RETURN b.sourceRevision AS sourceRevision, b.chunkRevision AS chunkRevision`,
+        { id: bubble.id },
+      );
+      expect(revision?.chunkRevision).toBe(
+        knowledgeRevision({ title: bubble.title, content: bubble.content, tags: bubble.tags }),
+      );
+      expect(revision?.chunkRevision).toBe(revision?.sourceRevision);
     }, 60_000);
 
     it('removeChunks deletes all chunk nodes for a bubble', async () => {
@@ -197,6 +211,11 @@ describe('Content Chunking', () => {
         { id: bubble.id },
       );
       expect(after?.count).toBe(0);
+      const marker = await neo4j.queryOne<{ chunkRevision: string | null }>(
+        'MATCH (b:Bubble {id: $id}) RETURN b.chunkRevision AS chunkRevision',
+        { id: bubble.id },
+      );
+      expect(marker?.chunkRevision).toBeNull();
     }, 60_000);
 
     it('backfillChunks indexes all un-chunked bubbles', async () => {

@@ -1,8 +1,15 @@
 import { createProcessorLifecycle } from './processor-lifecycle.ts';
-import { generateId, createLogger, type RavenEvent, type SimilarBubble } from '@raven/shared';
+import {
+  generateId,
+  createLogger,
+  type KnowledgeBubble,
+  type RavenEvent,
+  type SimilarBubble,
+} from '@raven/shared';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { Neo4jClient } from './neo4j-client.ts';
 import type { KnowledgeStore } from './knowledge-store.ts';
+import { knowledgeRevision } from './knowledge-revision.ts';
 
 const log = createLogger('embeddings');
 
@@ -78,6 +85,7 @@ export function buildQueryEmbeddingInput(query: string): string {
 export interface EmbeddingEngine {
   generateEmbedding: (text: string) => Promise<Float32Array>;
   generateAndStore: (bubbleId: string, text: string) => Promise<void>;
+  refreshBubble: (bubbleId: string) => Promise<void>;
   getEmbedding: (bubbleId: string) => Promise<Float32Array | undefined>;
   getAllEmbeddings: () => Promise<Array<{ bubbleId: string; embedding: Float32Array }>>;
   findSimilar: (
@@ -98,6 +106,13 @@ interface EmbeddingDeps {
 const DEFAULT_SIMILAR_LIMIT = 10;
 const DEFAULT_SIMILAR_THRESHOLD = 0.5;
 const FLOAT32_BYTES = 4;
+const PREVIEW_LENGTH = 200;
+
+interface DerivedState {
+  sourceRevision: string | null;
+  embeddingRevision: string | null;
+  hasEmbedding: boolean;
+}
 
 // eslint-disable-next-line max-lines-per-function -- factory function for embedding engine
 export function createEmbeddingEngine(deps: EmbeddingDeps): EmbeddingEngine {
@@ -106,6 +121,7 @@ export function createEmbeddingEngine(deps: EmbeddingDeps): EmbeddingEngine {
   const neo4j = lifetime.guard(deps.neo4j);
   const knowledgeStore = lifetime.guard(deps.knowledgeStore);
   let started = false;
+  const refreshes = new Map<string, Promise<boolean>>();
 
   async function generateEmbedding(text: string): Promise<Float32Array> {
     lifetime.assertActive();
@@ -121,10 +137,98 @@ export function createEmbeddingEngine(deps: EmbeddingDeps): EmbeddingEngine {
     const embeddingArray = Array.from(embedding);
     await neo4j.run(
       `MATCH (b:Bubble {id: $bubbleId})
-       SET b.embedding = $embedding`,
+       SET b.embedding = $embedding
+       REMOVE b.embeddingRevision`,
       { bubbleId, embedding: embeddingArray },
     );
     log.info(`Embedding stored for bubble ${bubbleId}`);
+  }
+
+  function revisionOf(bubble: Pick<KnowledgeBubble, 'title' | 'content' | 'tags'>): string {
+    return knowledgeRevision({ title: bubble.title, content: bubble.content, tags: bubble.tags });
+  }
+
+  async function derivedState(bubbleId: string): Promise<DerivedState> {
+    const row = await neo4j.queryOne<DerivedState>(
+      `MATCH (b:Bubble {id: $bubbleId})
+       RETURN b.sourceRevision AS sourceRevision,
+              b.embeddingRevision AS embeddingRevision,
+              b.embedding IS NOT NULL AND size(b.embedding) > 0 AS hasEmbedding`,
+      { bubbleId },
+    );
+    if (!row) throw new Error(`Knowledge bubble ${bubbleId} not found`);
+    return {
+      sourceRevision: row.sourceRevision ?? null,
+      embeddingRevision: row.embeddingRevision ?? null,
+      hasEmbedding: row.hasEmbedding === true,
+    };
+  }
+
+  async function replaceRevisionedEmbedding(bubbleId: string): Promise<boolean> {
+    const snapshot = await knowledgeStore.getById(bubbleId, { trackAccess: false });
+    if (!snapshot) throw new Error(`Knowledge bubble ${bubbleId} not found`);
+    const revision = revisionOf(snapshot);
+    const initialState = await derivedState(bubbleId);
+    if (initialState.sourceRevision !== revision) {
+      throw new Error(`Knowledge bubble ${bubbleId} source changed; reindex required`);
+    }
+    if (initialState.embeddingRevision === revision && initialState.hasEmbedding) return false;
+    const input = buildBubbleEmbeddingInput({
+      title: snapshot.title,
+      contentPreview: snapshot.content.slice(0, PREVIEW_LENGTH),
+      tags: snapshot.tags,
+    });
+    const embedding = await generateEmbedding(input);
+    const current = await knowledgeStore.getById(bubbleId, { trackAccess: false });
+    if (!current || revisionOf(current) !== revision) {
+      throw new Error(`Knowledge bubble ${bubbleId} changed while embedding was generated`);
+    }
+
+    await neo4j.withTransaction(async (tx) => {
+      await tx.run(
+        `MATCH (b:Bubble {id: $bubbleId})
+         SET b.__ravenDerivedLock = $lock
+         REMOVE b.__ravenDerivedLock`,
+        { bubbleId, lock: generateId() },
+      );
+      const result = await tx.run(
+        `MATCH (b:Bubble {id: $bubbleId})
+         WHERE b.sourceRevision = $sourceRevision
+         SET b.embedding = $embedding, b.embeddingRevision = $sourceRevision
+         RETURN b.id AS id`,
+        {
+          bubbleId,
+          sourceRevision: revision,
+          embedding: Array.from(embedding),
+        },
+      );
+      if (result.records.length === 0) {
+        throw new Error(`Knowledge bubble ${bubbleId} changed before embedding commit`);
+      }
+    });
+    log.info(`Revisioned embedding stored for bubble ${bubbleId}`);
+    return true;
+  }
+
+  async function refreshBubble(bubbleId: string): Promise<void> {
+    const previous = refreshes.get(bubbleId) ?? Promise.resolve(false);
+    const current = previous.catch(() => false).then(() => replaceRevisionedEmbedding(bubbleId));
+    refreshes.set(bubbleId, current);
+    try {
+      const replaced = await current;
+      lifetime.assertActive();
+      if (replaced) {
+        lifetime.emit({
+          id: generateId(),
+          timestamp: Date.now(),
+          source: 'embeddings',
+          type: 'knowledge:embedding:generated',
+          payload: { bubbleId },
+        } as RavenEvent);
+      }
+    } finally {
+      if (refreshes.get(bubbleId) === current) refreshes.delete(bubbleId);
+    }
   }
 
   async function getEmbedding(bubbleId: string): Promise<Float32Array | undefined> {
@@ -178,27 +282,20 @@ export function createEmbeddingEngine(deps: EmbeddingDeps): EmbeddingEngine {
   }
 
   async function removeEmbedding(bubbleId: string): Promise<void> {
-    await neo4j.run(`MATCH (b:Bubble {id: $bubbleId}) REMOVE b.embedding`, { bubbleId });
+    await neo4j.run(
+      `MATCH (b:Bubble {id: $bubbleId})
+       REMOVE b.embedding, b.embeddingRevision`,
+      { bubbleId },
+    );
   }
 
   // H1 FIX: Use knowledgeStore.getContentPreview() instead of filePath for embedding input
   async function handleBubbleEvent(event: RavenEvent): Promise<void> {
     if (event.type !== 'knowledge:bubble:created' && event.type !== 'knowledge:bubble:updated')
       return;
-    const { bubbleId, title } = event.payload;
+    const { bubbleId } = event.payload;
     try {
-      const preview = await knowledgeStore.getContentPreview(bubbleId);
-      lifetime.assertActive();
-      const text = buildBubbleEmbeddingInput({ title, contentPreview: preview ?? '' });
-      await generateAndStore(bubbleId, text);
-      lifetime.assertActive();
-      lifetime.emit({
-        id: generateId(),
-        timestamp: Date.now(),
-        source: 'embeddings',
-        type: 'knowledge:embedding:generated',
-        payload: { bubbleId },
-      } as RavenEvent);
+      await refreshBubble(bubbleId);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       log.error(`Failed to generate embedding for bubble ${bubbleId}: ${msg}`);
@@ -216,6 +313,7 @@ export function createEmbeddingEngine(deps: EmbeddingDeps): EmbeddingEngine {
   return {
     generateEmbedding: (text) => lifetime.run(() => generateEmbedding(text)),
     generateAndStore: (id, text) => lifetime.run(() => generateAndStore(id, text)),
+    refreshBubble: (id) => lifetime.run(() => refreshBubble(id)),
     getEmbedding,
     getAllEmbeddings,
     findSimilar,

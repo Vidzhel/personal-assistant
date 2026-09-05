@@ -14,6 +14,7 @@ import {
   fakeExecutionLogger,
 } from './fixtures/knowledge-fixture.ts';
 import type { RavenEvent, AgentTaskRequestEvent } from '@raven/shared';
+import { knowledgeRevision } from '../knowledge-engine/knowledge-revision.ts';
 
 const model = vi.hoisted(() => {
   const embed = vi.fn(async () => ({ data: new Float32Array([1, 0]) }));
@@ -29,6 +30,16 @@ function fixture() {
   const eventBus = new EventBus();
   const neo4j = fakeGraph();
   const knowledgeStore = fakeKnowledgeStore();
+  vi.mocked(neo4j.queryOne).mockImplementation(async (cypher) => {
+    if (!cypher.includes('sourceRevision')) return undefined;
+    return {
+      sourceRevision: knowledgeRevision({ title: 'one', content: 'Test body', tags: [] }),
+      embeddingRevision: null,
+      chunkRevision: null,
+      hasEmbedding: false,
+      chunkCount: 0,
+    } as never;
+  });
   const embeddingEngine = createEmbeddingEngine({ eventBus, neo4j, knowledgeStore });
   const chunkingEngine = createChunkingEngine({
     eventBus,

@@ -7,7 +7,11 @@ import { createNeo4jClient } from '../knowledge-engine/neo4j-client.ts';
 import { createKnowledgeStore } from '../knowledge-engine/knowledge-store.ts';
 import type { KnowledgeStore } from '../knowledge-engine/knowledge-store.ts';
 import type { Neo4jClient } from '../knowledge-engine/neo4j-client.ts';
-import { readBubbleFile, writeBubbleFile } from '../knowledge-engine/knowledge-file.ts';
+import { readBubbleFile, sha256, writeBubbleFile } from '../knowledge-engine/knowledge-file.ts';
+import {
+  readPendingKnowledgeDeletions,
+  writePendingKnowledgeDeletion,
+} from '../knowledge-engine/knowledge-deletions.ts';
 
 describe('KnowledgeStore', () => {
   let container: StartedNeo4jContainer;
@@ -45,6 +49,40 @@ describe('KnowledgeStore', () => {
     knowledgeDir = join(tmpDir, 'knowledge');
     mkdirSync(knowledgeDir, { recursive: true });
     store = createKnowledgeStore({ neo4j, knowledgeDir });
+  });
+
+  it('reconciles actual Neo4j revisions, derived counts and file timestamps without writes', async () => {
+    const bubble = await store.insert({
+      title: 'Report fixture',
+      content: 'Current body',
+      tags: ['b', 'a'],
+    });
+    const before = readFileSync(join(knowledgeDir, bubble.filePath), 'utf8');
+    const pending = await store.reconcile();
+    expect(pending.issues).toEqual([
+      expect.objectContaining({ code: 'stale-derived-index', id: bubble.id }),
+    ]);
+    await neo4j.run(
+      `MATCH (b:Bubble {id: $id})
+      SET b.embedding = $embedding, b.embeddingRevision = b.sourceRevision, b.chunkRevision = b.sourceRevision
+      CREATE (b)-[:HAS_CHUNK]->(:Chunk {id: $chunkId, bubbleId: $id, text: 'Current body', embedding: $embedding})`,
+      {
+        id: bubble.id,
+        chunkId: `${bubble.id}-chunk`,
+        embedding: [1, ...Array<number>(383).fill(0)],
+      },
+    );
+    expect((await store.reconcile()).issues).toEqual([]);
+    await neo4j.run('MATCH (b:Bubble {id: $id}) SET b.updatedAt = $date', {
+      id: bubble.id,
+      date: '2000-01-01',
+    });
+    expect((await store.reconcile()).issues).toEqual([
+      expect.objectContaining({ code: 'metadata-mismatch', id: bubble.id }),
+    ]);
+    expect(readFileSync(join(knowledgeDir, bubble.filePath), 'utf8')).toBe(before);
+    await store.reindexAll();
+    expect((await store.reconcile()).issues).toEqual([]);
   });
 
   describe('insert', () => {
@@ -160,6 +198,27 @@ describe('KnowledgeStore', () => {
       const tags = await store.getAllTags();
       expect(tags.find((t) => t.tag === 'unique-tag')).toBeUndefined();
     });
+
+    it('finishes a pending deletion after the graph record is already absent', async () => {
+      const created = await store.insert({
+        title: 'Pending retry',
+        content: 'Retry this deletion',
+        tags: [],
+      });
+      const path = join(knowledgeDir, created.filePath);
+      const bytes = readFileSync(path, 'utf8');
+      writePendingKnowledgeDeletion(knowledgeDir, {
+        id: created.id,
+        filePath: created.filePath,
+        fileHash: sha256(bytes),
+      });
+      await neo4j.run('MATCH (b:Bubble {id: $id}) DETACH DELETE b', { id: created.id });
+
+      expect(readPendingKnowledgeDeletions(knowledgeDir)).toHaveLength(1);
+      expect(await store.remove(created.id)).toBe(true);
+      expect(existsSync(path)).toBe(false);
+      expect(readPendingKnowledgeDeletions(knowledgeDir)).toHaveLength(0);
+    });
   });
 
   describe('list', () => {
@@ -246,7 +305,11 @@ describe('KnowledgeStore', () => {
       const parsed = readBubbleFile(path);
       writeBubbleFile(path, { ...parsed.meta, id: 'replacement' }, 'Replacement content');
       const replacementBytes = readFileSync(path, 'utf8');
-      expect(await store.reindexAll()).toEqual({ indexed: 1, errors: [] });
+      expect(await store.reindexAll()).toEqual({
+        indexed: 1,
+        errors: [],
+        changedIds: ['replacement'],
+      });
       expect((await store.getById('replacement'))?.content).toBe('Replacement content');
       await expect(store.getById(original.id)).rejects.toThrow('identity mismatch');
       await expect(store.update(original.id, { content: 'Overwrite' })).rejects.toThrow(
@@ -276,6 +339,7 @@ describe('KnowledgeStore', () => {
       const result = await store.reindexAll();
       expect(result.indexed).toBe(1);
       expect(result.errors).toHaveLength(0);
+      expect(result.changedIds).toEqual([original.id]);
 
       const list = await store.list({ limit: 50, offset: 0 });
       expect(list).toHaveLength(1);
@@ -358,6 +422,11 @@ describe('KnowledgeStore', () => {
           createdAt: '2026-05-01T10:00:00Z',
         },
       );
+      await neo4j.run(
+        `MATCH (:Bubble {id: $id})-[r:HAS_TAG]->(:Tag {name: 'old'})
+         SET r.annotation = 'human-curated', r.weight = 7`,
+        { id: bubble.id },
+      );
       return { bubble, other, embedding };
     }
 
@@ -365,7 +434,11 @@ describe('KnowledgeStore', () => {
       const { bubble, other, embedding } = await seedLinkedBubbles();
       const before = await graphSnapshot();
       for (let pass = 0; pass < 2; pass++) {
-        expect(await store.reindexAll()).toEqual({ indexed: 2, errors: [] });
+        expect(await store.reindexAll()).toEqual({
+          indexed: 2,
+          errors: [],
+          changedIds: [bubble.id, other.id],
+        });
         expect(await graphSnapshot()).toEqual(before);
       }
       expect((await store.list({ limit: 50, offset: 0 })).map((item) => item.id).sort()).toEqual(
@@ -391,7 +464,7 @@ describe('KnowledgeStore', () => {
     });
 
     it('refreshes changed file fields and exact tags without duplicating tags or disturbing other edges', async () => {
-      const { bubble, embedding } = await seedLinkedBubbles();
+      const { bubble, other, embedding } = await seedLinkedBubbles();
       const before = await graphSnapshot();
       const path = join(knowledgeDir, bubble.filePath);
       const parsed = readBubbleFile(path);
@@ -400,14 +473,22 @@ describe('KnowledgeStore', () => {
         {
           ...parsed.meta,
           title: 'Edited on disk',
-          tags: ['new', 'shared', 'new'],
+          tags: ['old', 'new', 'shared', 'new'],
           source: 'manual-edit',
           updated_at: '2026-07-01T10:00:00Z',
         },
         'Changed file content',
       );
-      expect(await store.reindexAll()).toEqual({ indexed: 2, errors: [] });
-      expect(await store.reindexAll()).toEqual({ indexed: 2, errors: [] });
+      expect(await store.reindexAll()).toEqual({
+        indexed: 2,
+        errors: [],
+        changedIds: [bubble.id, other.id],
+      });
+      expect(await store.reindexAll()).toEqual({
+        indexed: 2,
+        errors: [],
+        changedIds: [bubble.id, other.id],
+      });
       expect((await graphSnapshot()).relationships).toEqual(before.relationships);
       expect(
         await neo4j.queryOne(
@@ -431,8 +512,16 @@ describe('KnowledgeStore', () => {
         ),
       ).toEqual([
         { tag: 'new', count: 1 },
+        { tag: 'old', count: 1 },
         { tag: 'shared', count: 1 },
       ]);
+      expect(
+        await neo4j.query(
+          `MATCH (:Bubble {id: $id})-[r:HAS_TAG]->(:Tag {name: 'old'})
+           RETURN r.annotation AS annotation, r.weight AS weight`,
+          { id: bubble.id },
+        ),
+      ).toEqual([{ annotation: 'human-curated', weight: 7 }]);
     });
 
     it.each(['empty', 'missing', 'malformed'])(

@@ -4,6 +4,8 @@ import type {
   LoggerInterface,
   IntegrationsConfig,
 } from '@raven/shared';
+import type { KnowledgeRefreshReport } from '../knowledge-engine/knowledge-refresh.ts';
+import type { KnowledgeReconciliationReport } from '../knowledge-engine/knowledge-reconciliation.ts';
 import type { JobRegistry } from '../scheduler/job-registry.ts';
 import type { ExecutionLogger } from '../agent-manager/execution-logger.ts';
 
@@ -26,6 +28,14 @@ export interface ServiceContext {
   libraryDir?: string;
   /** Resolve the actual bound port, including ephemeral ports after HTTP startup. */
   getApiPort?: () => number;
+  /** Reuses the knowledge processors to retry stale derived indexes. */
+  maintainKnowledge?: () => Promise<
+    | {
+        refresh: KnowledgeRefreshReport;
+        reconciliation: KnowledgeReconciliationReport;
+      }
+    | undefined
+  >;
   integrationsConfig: IntegrationsConfig;
   jobRegistry: JobRegistry;
 }

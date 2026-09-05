@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createLogger, generateId, SOURCE_MAINTENANCE } from '@raven/shared';
 import type { EventBusInterface } from '@raven/shared';
+import type { ServiceContext } from '../types.ts';
 import type { LogAnalysisResult } from './log-analyzer.ts';
 import type { DependencyReport } from './dependency-checker.ts';
 import type { ResourceReport } from './resource-monitor.ts';
@@ -15,6 +16,8 @@ export interface MaintenanceReportData {
   resourceReport: ResourceReport;
   conventionAuditReport?: ConventionAuditReport;
   agentAnalysis?: string;
+  knowledgeMaintenance?: Awaited<ReturnType<NonNullable<ServiceContext['maintainKnowledge']>>>;
+  knowledgeMaintenanceError?: string;
 }
 
 export interface CompiledReport {
@@ -31,7 +34,7 @@ export async function compileReport(
   log.info('Compiling maintenance report');
 
   const date = new Date().toISOString().split('T')[0];
-  const markdown = data.agentAnalysis ?? buildFallbackReport(data, date);
+  const markdown = (data.agentAnalysis ?? buildFallbackReport(data, date)) + knowledgeSection(data);
   const filePath = join(reportsDir, `${date}.md`);
 
   signal?.throwIfAborted();
@@ -177,5 +180,25 @@ function buildFallbackReport(data: MaintenanceReportData, date: string): string 
     ...buildResourceStatusSection(data.resourceReport),
   ];
 
+  return lines.join('\n');
+}
+
+function knowledgeSection(data: MaintenanceReportData): string {
+  if (data.knowledgeMaintenanceError)
+    return `\n\n## Knowledge files and indexes\n\nRefresh failed: ${data.knowledgeMaintenanceError}. Retry maintenance after repairing the reported problem.`;
+  const result = data.knowledgeMaintenance;
+  if (!result) return '';
+  const { refresh, reconciliation } = result;
+  const lines = [
+    '\n\n## Knowledge files and indexes',
+    '',
+    `Indexed ${refresh.indexed} files; refreshed ${refresh.refreshedIds.length} bubbles.`,
+    ...refresh.errors.map((error) => `- File repair needed: ${error}`),
+    ...refresh.refreshErrors.map(
+      (error) => `- ${error.id}: ${error.stage} refresh failed: ${error.error}. Retry maintenance.`,
+    ),
+    ...reconciliation.issues.map((issue) => `- ${issue.message} Repair: ${issue.repair}`),
+  ];
+  if (reconciliation.issues.length === 0) lines.push('No file/graph disagreements found.');
   return lines.join('\n');
 }

@@ -621,6 +621,82 @@ describe('Clustering Engine', () => {
       expect(domains.some((d) => d.name === 'health')).toBe(true);
     });
 
+    it('automatic domain classification preserves durable memberships and annotations', async () => {
+      const engine = createClusteringEngine({
+        neo4j,
+        eventBus,
+        embeddingEngine,
+        knowledgeStore: store,
+        domainConfig: testDomains,
+      });
+      await engine.start();
+
+      const bubble = await store.insert({
+        title: 'New Health',
+        content: 'Fitness tips',
+        tags: ['fitness'],
+      });
+      await neo4j.run(
+        `MERGE (b:Bubble {id: $id})
+         MERGE (d:Domain {name: 'work'})
+         CREATE (b)-[:IN_DOMAIN {annotation: 'human-curated'}]->(d)`,
+        { id: bubble.id },
+      );
+
+      eventBus.emit({
+        id: 'test-preserve-domain',
+        timestamp: Date.now(),
+        source: 'test',
+        type: 'knowledge:embedding:generated',
+        payload: { bubbleId: bubble.id },
+      } as RavenEvent);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      const domains = await neo4j.query<{ name: string; annotation: string | null }>(
+        `MATCH (b:Bubble {id: $id})-[r:IN_DOMAIN]->(d:Domain)
+         RETURN d.name AS name, r.annotation AS annotation`,
+        { id: bubble.id },
+      );
+      expect(domains.map((domain) => domain.name)).toEqual(
+        expect.arrayContaining(['health', 'work']),
+      );
+      expect(domains.find((domain) => domain.name === 'work')?.annotation).toBe('human-curated');
+    });
+
+    it('explicit domain replacement is atomic when a requested domain is invalid', async () => {
+      const engine = createClusteringEngine({
+        neo4j,
+        eventBus,
+        embeddingEngine,
+        knowledgeStore: store,
+        domainConfig: testDomains,
+      });
+      await engine.start();
+
+      const bubble = await store.insert({
+        title: 'Curated',
+        content: 'Existing assignment',
+        tags: [],
+      });
+      await neo4j.run(
+        `MERGE (b:Bubble {id: $id})
+         MERGE (d:Domain {name: 'work'})
+         CREATE (b)-[:IN_DOMAIN {annotation: 'human-curated'}]->(d)`,
+        { id: bubble.id },
+      );
+
+      await expect(
+        engine.assignDomains(bubble.id, ['health', null as unknown as string]),
+      ).rejects.toThrow();
+
+      const domains = await neo4j.query<{ name: string; annotation: string | null }>(
+        `MATCH (b:Bubble {id: $id})-[r:IN_DOMAIN]->(d:Domain)
+         RETURN d.name AS name, r.annotation AS annotation`,
+        { id: bubble.id },
+      );
+      expect(domains).toEqual([{ name: 'work', annotation: 'human-curated' }]);
+    });
+
     it('full chain: bubble → embedding → domains → tags → links → hub check', async () => {
       const engine = createClusteringEngine({
         neo4j,

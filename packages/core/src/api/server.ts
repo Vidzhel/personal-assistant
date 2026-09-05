@@ -37,6 +37,7 @@ import { registerApprovalRoutes } from './routes/approvals.ts';
 import { registerPermissionRoutes } from './routes/permissions.ts';
 import { registerAgentTaskRoutes } from './routes/agent-tasks.ts';
 import { registerMetricsRoute } from './routes/metrics.ts';
+import type { KnowledgeRefreshReport } from '../knowledge-engine/knowledge-refresh.ts';
 import { registerKnowledgeRoutes } from './routes/knowledge.ts';
 import { registerNotificationPreferencesRoutes } from './routes/notification-preferences.ts';
 import { registerLogRoutes } from './routes/logs.ts';
@@ -78,6 +79,7 @@ export interface ApiDeps {
   executionLogger: ExecutionLogger;
   messageStore: MessageStore;
   knowledgeStore?: KnowledgeStore;
+  reindexKnowledge?: () => Promise<KnowledgeRefreshReport>;
   ingestionProcessor?: IngestionProcessor;
   embeddingEngine?: EmbeddingEngine;
   clusteringEngine?: ClusteringEngine;
@@ -157,6 +159,7 @@ export async function createApiServer(
     registerKnowledgeRoutes(app, {
       eventBus: deps.eventBus,
       knowledgeStore: deps.knowledgeStore,
+      reindexKnowledge: deps.reindexKnowledge,
       ingestionProcessor: deps.ingestionProcessor,
       executionLogger: deps.executionLogger,
       neo4j: deps.neo4jClient,

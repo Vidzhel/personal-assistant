@@ -98,6 +98,11 @@ versions; do not copy versions from historical planning documents.
   enforce budgets at their shared execution boundary.
   Knowledge bodies are Markdown; durable links and project membership still live
   in Neo4j. Routine reindexing must preserve those relationships and graph metadata.
+  Reconciliation is read-only; explicit reindex and system maintenance retry stale
+  source/embedding/chunk revisions. Keep old derived data until replacement commits.
+  Pending knowledge deletion YAML blocks reindex resurrection and requires explicit
+  delete retry or conflict resolution; never infer permission to prune graph-only
+  records from missing Markdown. File/graph writes are not one atomic transaction.
 - Agent memory currently lives at `projects/agents/<name>/memory/`, globally by
   name. Project memory and attached repositories are **proposed**, not available
   simply by putting paths in a data-source row or `context.md`.

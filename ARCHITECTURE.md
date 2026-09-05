@@ -320,11 +320,26 @@ flat note paths, not separate project memory.
 
 Knowledge bodies are Markdown under the configured `data/knowledge` root.
 Neo4j owns durable relationships, project membership and additional graph metadata.
-Routine file reindex preserves those records; it is not a destructive graph
-rebuild. Missing-file reconciliation and changed-content embedding/chunk refresh
-remain explicit follow-ups. The owner waived legacy migration/restoration because
-Raven has not been used. Future task and knowledge writes still require reliable
-storage; graph replacement remains part of the deferred workspace design.
+Direct reads take current file metadata and bodies; retained tags and domain
+memberships keep their relationship annotations. Routine reindex never prunes
+unmatched Bubble nodes. `/api/knowledge/reconciliation` reports file/graph conflicts,
+malformed or duplicate identities, pending deletions and stale derived records.
+Explicit reindex and existing system maintenance refresh source fields and retry
+embeddings/chunks; the returned report distinguishes source and derived failures.
+
+Source revisions cover title, body and tags. Each derived replacement checks the
+source revision under a graph write lock and commits its revision marker with
+its data. Chunk generation finishes before replacing one bubble's rows. Startup
+hands stale IDs to the started processors as owned background work; slow model
+loading leaves the API available. A failed refresh remains stale across restart.
+
+Knowledge writes use flushed temporary files and rename; a renamed original stays
+until the replacement and graph update succeed. A durable pending deletion YAML
+record precedes graph deletion, prevents reindex resurrection and supports an
+explicit retry of that delete. Source changes or duplicate files require review.
+There is no atomic transaction across Markdown and Neo4j or automatic restoration
+of deleted relationships. The owner waived legacy migration/restoration because
+Raven has not been used. Graph replacement remains part of the workspace design.
 
 Graph initialization publishes dependencies only after success and disposes
 partially started processors on failure. Shutdown stops admission, aborts local

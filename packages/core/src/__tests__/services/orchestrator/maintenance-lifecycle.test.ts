@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   audit: vi.fn(),
   report: vi.fn(),
   notify: vi.fn(),
+  knowledge: vi.fn(),
 }));
 vi.mock('../../../services/orchestrator/log-analyzer.ts', () => ({ analyzeLogs: mocks.logs }));
 vi.mock('../../../services/orchestrator/dependency-checker.ts', () => ({
@@ -41,6 +42,7 @@ beforeEach(async () => {
   root = mkdtempSync(join(tmpdir(), 'raven-maintenance-lifetime-'));
   bus = new EventBus();
   jobs = createJobRegistry();
+  mocks.knowledge.mockResolvedValue(undefined);
   mocks.logs.mockResolvedValue({});
   mocks.resources.mockResolvedValue({});
   mocks.audit.mockResolvedValue({});
@@ -58,6 +60,7 @@ beforeEach(async () => {
     projectsDir: join(root, 'definitions'),
     libraryDir: join(root, 'capabilities'),
     getApiPort: () => 4567,
+    maintainKnowledge: mocks.knowledge,
     integrationsConfig: { ynab: { planId: '' }, accounts: [] },
     jobRegistry: jobs,
   });
@@ -100,8 +103,34 @@ describe('maintenance lifetime', () => {
       projectsDir: join(root, 'definitions'),
       libraryDir: join(root, 'capabilities'),
     });
+    expect(mocks.knowledge).toHaveBeenCalledOnce();
     expect(mocks.report).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('includes failed knowledge repair in the maintenance report', async () => {
+    mocks.knowledge.mockRejectedValue(new Error('graph disconnected'));
+    bus.on<AgentTaskRequestEvent>('agent:task:request', (event) => {
+      bus.emit({
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        source: 'fixture',
+        type: 'agent:task:complete',
+        payload: {
+          taskId: event.payload.taskId,
+          durationMs: 0,
+          success: false,
+          errors: ['analysis unavailable'],
+          result: '',
+        },
+      });
+    });
+    await run();
+    expect(mocks.report).toHaveBeenCalledWith(
+      expect.objectContaining({ knowledgeMaintenanceError: 'Error: graph disconnected' }),
+      expect.any(String),
+      expect.any(AbortSignal),
+    );
   });
 
   it('removes completion waits on stop and does not write a fallback report', async () => {

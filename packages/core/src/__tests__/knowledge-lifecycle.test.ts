@@ -44,13 +44,15 @@ function createMockKnowledgeStore(): KnowledgeStore {
     list: vi.fn().mockResolvedValue([]),
     search: vi.fn().mockResolvedValue([]),
     getAllTags: vi.fn().mockResolvedValue([]),
-    reindexAll: vi.fn().mockResolvedValue({ indexed: 0, errors: [] }),
+    reconcile: vi.fn(),
+    reindexAll: vi.fn().mockResolvedValue({ indexed: 0, errors: [], changedIds: [] }),
   };
 }
 
 function createMockEmbeddingEngine(): EmbeddingEngine {
   return {
     generateEmbedding: vi.fn().mockResolvedValue(new Float32Array(384)),
+    refreshBubble: vi.fn().mockResolvedValue(undefined),
     generateAndStore: vi.fn().mockResolvedValue(undefined),
     getEmbedding: vi.fn().mockResolvedValue(undefined),
     getAllEmbeddings: vi.fn().mockResolvedValue([]),
@@ -66,7 +68,9 @@ function createMockChunkingEngine(): ChunkingEngine {
     indexBubble: vi.fn().mockResolvedValue(undefined),
     removeChunks: vi.fn().mockResolvedValue(undefined),
     backfillChunks: vi.fn().mockResolvedValue({ indexed: 0, skipped: 0 }),
-    reindexAllChunks: vi.fn().mockResolvedValue({ total: 0, indexed: 0, errors: [] }),
+    reindexAllChunks: vi
+      .fn()
+      .mockResolvedValue({ total: 0, indexed: 0, errors: [], changedIds: [] }),
     start: vi.fn(),
     stop: vi.fn(async () => {}),
   };
@@ -333,10 +337,7 @@ describe('Knowledge Lifecycle', () => {
       const lifecycle = createLifecycle();
       await lifecycle.mergeBubbles(['b1', 'b2']);
 
-      expect(embeddingEngine.generateAndStore).toHaveBeenCalledWith(
-        'merged-id',
-        expect.any(String),
-      );
+      expect(embeddingEngine.refreshBubble).toHaveBeenCalledWith('merged-id');
       expect(chunkingEngine.indexBubble).toHaveBeenCalledWith('merged-id');
     });
   });

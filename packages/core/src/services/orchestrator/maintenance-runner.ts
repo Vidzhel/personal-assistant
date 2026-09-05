@@ -23,6 +23,7 @@ let projectRoot: string;
 let projectsDir: string;
 let libraryDir: string;
 let getPort: () => number;
+let maintainKnowledge: ServiceContext['maintainKnowledge'];
 let lifetime: AbortController | undefined;
 let requestHandler: ((event: unknown) => void) | undefined;
 let activeRun: Promise<void> | undefined;
@@ -38,6 +39,7 @@ const service: RavenService = {
     libraryDir = context.libraryDir ?? resolve(context.projectRoot, 'library');
     port = (context.config.RAVEN_PORT as number) ?? DEFAULT_PORT;
     getPort = context.getApiPort ?? (() => port);
+    maintainKnowledge = context.maintainKnowledge;
     lifetime = new AbortController();
     const current = lifetime;
     running = false;
@@ -104,9 +106,11 @@ interface GatheredMaintenanceData {
   dependencyReport: Awaited<ReturnType<typeof checkDependencies>>;
   resourceReport: Awaited<ReturnType<typeof checkResources>>;
   conventionAuditReport: Awaited<ReturnType<typeof auditConventions>>;
+  knowledgeMaintenance?: Awaited<ReturnType<NonNullable<ServiceContext['maintainKnowledge']>>>;
+  knowledgeMaintenanceError?: string;
 }
 
-async function gatherMaintenanceData(): Promise<GatheredMaintenanceData> {
+async function gatherMaintenanceData(signal: AbortSignal): Promise<GatheredMaintenanceData> {
   const logDir = getLogDir() ?? resolve(projectRoot, 'data/logs');
   const dataDir = resolve(projectRoot, 'data');
   const healthUrl = `http://localhost:${String(getPort())}/api/health`;
@@ -118,7 +122,18 @@ async function gatherMaintenanceData(): Promise<GatheredMaintenanceData> {
     auditConventions({ projectsDir, libraryDir }),
   ]);
 
+  signal.throwIfAborted();
+  let knowledgeMaintenance;
+  let knowledgeMaintenanceError;
+  try {
+    knowledgeMaintenance = await maintainKnowledge?.();
+  } catch (error) {
+    signal.throwIfAborted();
+    knowledgeMaintenanceError = String(error);
+  }
   return {
+    knowledgeMaintenance,
+    knowledgeMaintenanceError,
     logAnalysis,
     dependencyReport,
     resourceReport,
@@ -180,7 +195,7 @@ async function runMaintenance(taskId: string, signal: AbortSignal): Promise<void
 
   try {
     // Phase 1: Gather data from all modules in parallel
-    const data = await gatherMaintenanceData();
+    const data = await gatherMaintenanceData(signal);
     signal.throwIfAborted();
     log.info('Data gathering complete, building agent prompt');
 
