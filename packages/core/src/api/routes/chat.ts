@@ -1,14 +1,24 @@
 import type { FastifyInstance } from 'fastify';
-import { generateId } from '@raven/shared';
+import { generateId, HTTP_STATUS } from '@raven/shared';
 import type { ApiDeps } from '../server.ts';
+import { ChatRequestSchema, validateChatTarget } from '../../session-manager/chat-validation.ts';
 
-export function registerChatRoute(app: FastifyInstance, deps: ApiDeps): void {
+export function registerChatRoute(
+  app: FastifyInstance,
+  deps: Pick<ApiDeps, 'eventBus' | 'sessionManager'>,
+): void {
   app.post<{
     Params: { id: string };
     Body: { message: string; sessionId?: string };
-  }>('/api/projects/:id/chat', async (req) => {
+  }>('/api/projects/:id/chat', async (req, reply) => {
     const { id: projectId } = req.params;
-    const { message, sessionId } = req.body;
+    const parsed = ChatRequestSchema.safeParse({ ...req.body, projectId });
+    if (!parsed.success) {
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Invalid chat message' });
+    }
+    const { message, sessionId } = parsed.data;
+    const target = validateChatTarget(deps.sessionManager, projectId, sessionId);
+    if (!target.ok) return reply.status(target.statusCode).send({ error: target.error });
 
     deps.eventBus.emit({
       id: generateId(),

@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { HTTP_STATUS } from '@raven/shared';
 import type { ApiDeps } from '../server.ts';
 import type { StoredMessage } from '../../session-manager/message-store.ts';
+import { getDb } from '../../db/database.ts';
 import {
   createReference,
   getAllReferences,
@@ -139,17 +140,26 @@ async function enrichReferences(
 
 // eslint-disable-next-line max-lines-per-function -- multiple session route handlers with auth/validation logic
 export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void {
-  app.get<{ Params: { id: string } }>('/api/projects/:id/sessions', async (req) => {
+  app.get<{ Params: { id: string } }>('/api/projects/:id/sessions', async (req, reply) => {
+    if (!getDb().prepare('SELECT 1 FROM projects WHERE id = ?').get(req.params.id)) {
+      return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
+    }
     return deps.sessionManager.getProjectSessions(req.params.id);
   });
 
   // Get or create the active session for a project
-  app.post<{ Params: { id: string } }>('/api/projects/:id/sessions', async (req) => {
+  app.post<{ Params: { id: string } }>('/api/projects/:id/sessions', async (req, reply) => {
+    if (!getDb().prepare('SELECT 1 FROM projects WHERE id = ?').get(req.params.id)) {
+      return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
+    }
     return deps.sessionManager.getOrCreateSession(req.params.id);
   });
 
   // Force-create a new session (archives existing active sessions)
-  app.post<{ Params: { id: string } }>('/api/projects/:id/sessions/new', async (req) => {
+  app.post<{ Params: { id: string } }>('/api/projects/:id/sessions/new', async (req, reply) => {
+    if (!getDb().prepare('SELECT 1 FROM projects WHERE id = ?').get(req.params.id)) {
+      return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
+    }
     return deps.sessionManager.createSession(req.params.id);
   });
 
@@ -256,7 +266,10 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
   app.delete<{ Params: { id: string; refId: string } }>(
     '/api/sessions/:id/cross-references/:refId',
     async (req, reply) => {
-      const deleted = deleteReference(req.params.refId);
+      if (!deps.sessionManager.getSession(req.params.id)) {
+        return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Session not found' });
+      }
+      const deleted = deleteReference(req.params.refId, req.params.id);
       if (!deleted)
         return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Reference not found' });
       return reply.status(HTTP_STATUS.NO_CONTENT).send();

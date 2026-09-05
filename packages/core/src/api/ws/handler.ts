@@ -3,10 +3,44 @@ import type { WebSocket } from 'ws';
 import { createLogger } from '@raven/shared';
 import type { RavenEvent, WsMessageFromClient } from '@raven/shared';
 import type { EventBus } from '../../event-bus/event-bus.ts';
+import type { SessionManager } from '../../session-manager/session-manager.ts';
+import { ChatRequestSchema, validateChatTarget } from '../../session-manager/chat-validation.ts';
 
 const log = createLogger('ws');
 
-export function registerWebSocketHandler(app: FastifyInstance, eventBus: EventBus): void {
+interface ChatDeps {
+  eventBus: EventBus;
+  sessionManager: SessionManager;
+}
+
+function handleChatSend(socket: WebSocket, deps: ChatDeps, msg: WsMessageFromClient): void {
+  const parsed = ChatRequestSchema.safeParse(msg);
+  if (!parsed.success) {
+    socket.send(JSON.stringify({ type: 'chat:error', data: { error: 'Invalid chat message' } }));
+    return;
+  }
+  const { projectId, sessionId } = parsed.data;
+  const target = validateChatTarget(deps.sessionManager, projectId, sessionId);
+  if (!target.ok) {
+    socket.send(
+      JSON.stringify({
+        type: 'chat:error',
+        data: { projectId, sessionId, error: target.error },
+      }),
+    );
+    return;
+  }
+  deps.eventBus.emit({
+    id: crypto.randomUUID(),
+    timestamp: Date.now(),
+    source: 'web',
+    type: 'user:chat:message',
+    payload: parsed.data,
+  });
+}
+
+export function registerWebSocketHandler(app: FastifyInstance, deps: ChatDeps): void {
+  const { eventBus } = deps;
   app.get('/ws', { websocket: true }, (socket: WebSocket) => {
     const subscribedChannels = new Set<string>();
     log.info('WebSocket client connected');
@@ -26,17 +60,7 @@ export function registerWebSocketHandler(app: FastifyInstance, eventBus: EventBu
             break;
 
           case 'chat:send':
-            eventBus.emit({
-              id: crypto.randomUUID(),
-              timestamp: Date.now(),
-              source: 'web',
-              type: 'user:chat:message',
-              payload: {
-                projectId: msg.projectId,
-                sessionId: msg.sessionId,
-                message: msg.message,
-              },
-            });
+            handleChatSend(socket, deps, msg);
             break;
         }
       } catch (err) {

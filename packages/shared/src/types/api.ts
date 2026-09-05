@@ -1,6 +1,7 @@
 import type { AgentMessageEvent, RavenEvent, AgentSession } from './index.ts';
 
 export type WsMessageToClient =
+  | { type: 'chat:error'; data: { projectId?: string; sessionId?: string; error: string } }
   | { type: 'agent:message'; data: AgentMessageEvent['payload'] }
   | { type: 'agent:status'; data: { taskId: string; status: string } }
   | { type: 'event'; data: RavenEvent }

@@ -158,13 +158,13 @@ describe('Session Management (10.8)', () => {
 
     it('deletes a reference', () => {
       const ref = createReference(sessionA, sessionC, 'To delete');
-      expect(deleteReference(ref.id)).toBe(true);
+      expect(deleteReference(ref.id, sessionA)).toBe(true);
       const refs = getReferencesFrom(sessionA);
       expect(refs.some((r) => r.id === ref.id)).toBe(false);
     });
 
     it('returns false when deleting non-existent reference', () => {
-      expect(deleteReference('non-existent-id')).toBe(false);
+      expect(deleteReference('non-existent-id', 'non-existent-session')).toBe(false);
     });
   });
 });

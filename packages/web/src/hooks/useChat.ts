@@ -2,6 +2,8 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useWebSocket } from './useWebSocket';
+import type { WsMessage } from '@/lib/ws-client';
+import { consumeWsMessages } from '@/lib/ws-message-cursor';
 
 const API_URL = process.env.NEXT_PUBLIC_CORE_API_URL || 'http://localhost:4001/api';
 
@@ -37,7 +39,7 @@ export function useChat(opts: UseChatOptions): {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const [statusLine, setStatusLine] = useState<string | null>(null);
   const initializedRef = useRef(false);
-  const processedWsRef = useRef(0);
+  const processedWsRef = useRef<WsMessage | undefined>(undefined);
   const channels = useMemo(() => [`project:${projectId}`], [projectId]);
   const { messages: wsMessages, send } = useWebSocket(channels);
 
@@ -47,7 +49,7 @@ export function useChat(opts: UseChatOptions): {
       setSessionId(externalSessionId);
       setStatusLine(null);
       initializedRef.current = false;
-      processedWsRef.current = 0;
+      processedWsRef.current = undefined;
     }
   }, [externalSessionId, sessionId]);
 
@@ -93,9 +95,14 @@ export function useChat(opts: UseChatOptions): {
   // Handle incoming WebSocket messages
   // eslint-disable-next-line max-lines-per-function, complexity -- WebSocket message routing with multiple event types
   useEffect(() => {
-    const newMessages = wsMessages.slice(processedWsRef.current);
-    processedWsRef.current = wsMessages.length;
+    const newMessages = consumeWsMessages(wsMessages, processedWsRef);
     for (const msg of newMessages) {
+      if (msg.type === 'chat:error') {
+        const data = msg.data as { projectId?: string; sessionId?: string; error: string };
+        if (data.projectId && data.projectId !== projectId) continue;
+        if (data.sessionId && data.sessionId !== sessionId) continue;
+        setStatusLine(data.error);
+      }
       if (msg.type === 'event') {
         const event = msg.data as {
           type: string;
@@ -104,12 +111,21 @@ export function useChat(opts: UseChatOptions): {
             content?: string;
             taskId?: string;
             messageId?: string;
+            projectId?: string;
+            sessionId?: string;
+            error?: string;
           };
         };
         const content = event.payload?.content;
         const taskId = event.payload?.taskId;
         const messageType = event.payload?.messageType;
         const messageId = event.payload?.messageId;
+
+        if (event.type === 'user:chat:rejected' && event.payload?.projectId === projectId) {
+          if (!event.payload.sessionId || event.payload.sessionId === sessionId) {
+            setStatusLine(event.payload.error ?? 'Chat message rejected');
+          }
+        }
 
         if (event.type === 'agent:task:complete') {
           setActiveTaskId(null);
@@ -160,7 +176,7 @@ export function useChat(opts: UseChatOptions): {
         }
       }
     }
-  }, [wsMessages]);
+  }, [wsMessages, projectId, sessionId]);
 
   const sendMessage = useCallback(
     (message: string) => {

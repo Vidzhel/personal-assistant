@@ -49,9 +49,13 @@ export function getAllReferences(sessionId: string): {
   };
 }
 
-export function deleteReference(referenceId: string): boolean {
+export function deleteReference(referenceId: string, sessionId: string): boolean {
   const db = getDb();
-  const result = db.prepare('DELETE FROM session_references WHERE id = ?').run(referenceId);
+  const result = db
+    .prepare(
+      'DELETE FROM session_references WHERE id = ? AND (source_session_id = ? OR target_session_id = ?)',
+    )
+    .run(referenceId, sessionId, sessionId);
   return result.changes > 0;
 }
 

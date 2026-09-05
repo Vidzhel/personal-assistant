@@ -134,6 +134,16 @@ export interface UserChatMessageEvent extends BaseEvent {
   };
 }
 
+export interface UserChatRejectedEvent extends BaseEvent {
+  type: 'user:chat:rejected';
+  payload: {
+    requestId: string;
+    projectId: string;
+    sessionId?: string;
+    error: string;
+  };
+}
+
 export type DeliveryMode = 'tell-now' | 'tell-when-active' | 'save-for-later';
 
 export type UrgencyTier = 'red' | 'yellow' | 'green';
@@ -870,6 +880,7 @@ export type RavenEvent =
   | AgentTaskCompleteEvent
   | AgentMessageEvent
   | UserChatMessageEvent
+  | UserChatRejectedEvent
   | NotificationEvent
   | SkillDataEvent
   | ConfigReloadedEvent

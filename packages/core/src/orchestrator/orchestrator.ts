@@ -27,6 +27,7 @@ import { getDb } from '../db/database.ts';
 import { resolveSystemAccessInstructions } from '../project-manager/system-access-gate.ts';
 import { createAuditLog } from '../permission-engine/audit-log.ts';
 import { kebabCase, uniqueFsPath, upsertCacheRow } from '../project-manager/project-sync.ts';
+import { validateChatTarget } from '../session-manager/chat-validation.ts';
 
 const log = createLogger('orchestrator');
 
@@ -278,12 +279,23 @@ export class Orchestrator {
     // actual fix here (see resolveSafeFsPath) — a collision on the derived
     // fs_path no longer escapes to the caller and aborts the handler before
     // the user's message is stored.
-    await this.ensureProject(projectId, topicName);
+    // Only new conversations may auto-create a project (e.g. a Telegram topic).
+    // Explicit session IDs must never create or select a replacement conversation.
+    if (sessionId === undefined) await this.ensureProject(projectId, topicName);
 
-    // Use the specific session if provided, otherwise fall back to getOrCreateSession
-    const session =
-      (sessionId && this.sessionManager.getSession(sessionId)) ||
-      this.sessionManager.getOrCreateSession(projectId);
+    const target = validateChatTarget(this.sessionManager, projectId, sessionId);
+    if (!target.ok) {
+      this.eventBus.emit({
+        id: generateId(),
+        timestamp: Date.now(),
+        source: SOURCE_ORCHESTRATOR,
+        type: 'user:chat:rejected',
+        projectId,
+        payload: { requestId: event.id, projectId, sessionId, error: target.error },
+      });
+      return;
+    }
+    const session = target.session ?? this.sessionManager.getOrCreateSession(projectId);
     this.sessionManager.updateStatus(session.id, 'running');
 
     // Store the user message

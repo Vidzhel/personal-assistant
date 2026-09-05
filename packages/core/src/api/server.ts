@@ -254,7 +254,7 @@ export async function createApiServer(
   });
 
   // WebSocket
-  registerWebSocketHandler(app, deps.eventBus);
+  registerWebSocketHandler(app, deps);
 
   await app.listen({ port, host });
   log.info(`API server listening on port ${port}`);

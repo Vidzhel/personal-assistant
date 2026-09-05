@@ -20,6 +20,7 @@ import {
   getProjectKnowledgeLinks,
 } from '../../knowledge-engine/project-knowledge.ts';
 import { recordKnowledgeRejection } from '../../knowledge-engine/knowledge-rejections.ts';
+import { getDb } from '../../db/database.ts';
 
 export interface ProjectKnowledgeRouteDeps {
   neo4j?: Neo4jClient;
@@ -34,11 +35,17 @@ export function registerProjectKnowledgeRoutes(
   // --- Data Sources CRUD ---
 
   app.get<{ Params: { id: string } }>('/api/projects/:id/data-sources', async (req, reply) => {
+    if (!getDb().prepare('SELECT 1 FROM projects WHERE id = ?').get(req.params.id)) {
+      return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
+    }
     const sources = getDataSources(req.params.id);
     return reply.send(sources);
   });
 
   app.post<{ Params: { id: string } }>('/api/projects/:id/data-sources', async (req, reply) => {
+    if (!getDb().prepare('SELECT 1 FROM projects WHERE id = ?').get(req.params.id)) {
+      return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
+    }
     const parsed = CreateDataSourceSchema.safeParse(req.body);
     if (!parsed.success) {
       return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: parsed.error.message });
@@ -50,8 +57,11 @@ export function registerProjectKnowledgeRoutes(
   app.put<{ Params: { id: string; dsId: string } }>(
     '/api/projects/:id/data-sources/:dsId',
     async (req, reply) => {
+      if (!getDb().prepare('SELECT 1 FROM projects WHERE id = ?').get(req.params.id)) {
+        return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
+      }
       const existing = getDataSource(req.params.dsId);
-      if (!existing) {
+      if (!existing || existing.projectId !== req.params.id) {
         return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Data source not found' });
       }
       const parsed = CreateDataSourceSchema.partial().safeParse(req.body);
@@ -67,6 +77,13 @@ export function registerProjectKnowledgeRoutes(
   app.delete<{ Params: { id: string; dsId: string } }>(
     '/api/projects/:id/data-sources/:dsId',
     async (req, reply) => {
+      if (!getDb().prepare('SELECT 1 FROM projects WHERE id = ?').get(req.params.id)) {
+        return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
+      }
+      const existing = getDataSource(req.params.dsId);
+      if (!existing || existing.projectId !== req.params.id) {
+        return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Data source not found' });
+      }
       deleteDataSource(req.params.dsId);
       return reply.status(HTTP_STATUS.NO_CONTENT).send();
     },
