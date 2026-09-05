@@ -66,6 +66,7 @@ export function createSdkBackend(): AgentBackend {
     const env = { ...process.env } as Record<string, string>;
     delete env.CLAUDECODE;
     delete env.CLAUDE_CODE_ENTRYPOINT;
+    env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = '1';
 
     // Bridge the caller's AbortSignal (agent-manager.ts's cancelTask, via
     // agent-session.ts) into an SDK-native AbortController. Previously
@@ -83,26 +84,22 @@ export function createSdkBackend(): AgentBackend {
     const queryOptions: Record<string, unknown> = {
       systemPrompt: opts.systemPrompt,
       allowedTools: opts.allowedTools,
-      // 'default' (not 'bypassPermissions'): the SDK calls canUseTool for
-      // any tool it decides needs asking (its own risk heuristic for
-      // built-in tools; unconditionally for MCP tools not in allowedTools —
-      // see tool-policy.ts's module docstring for the evidence). Verified
-      // live against the real SDK that 'default' + an always-resolving
-      // canUseTool never blocks on an interactive prompt in this headless
-      // context — the callback IS the "user" being asked. 'dontAsk' was
-      // rejected: verified it auto-denies at the exact same decision point
-      // WITHOUT ever invoking canUseTool, which would make the policy below
-      // dead code. 'bypassPermissions' is gone entirely, along with the
-      // `allowDangerouslySkipPermissions` flag that mode requires (and
-      // which the code never set — see Phase 2 plan's Verified facts).
-      permissionMode: 'default' as const,
+      permissionMode: opts.permissionMode ?? 'default',
       model: opts.model,
       maxTurns: opts.maxTurns,
       stderr: opts.onStderr,
       cwd: opts.cwd,
       env,
       abortController,
+      additionalDirectories: opts.additionalDirectories,
+      settingSources: opts.settingSources ?? [],
+      hooks: opts.hooks,
+      strictMcpConfig: true,
     };
+
+    if (opts.permissionMode === 'bypassPermissions') {
+      queryOptions.allowDangerouslySkipPermissions = true;
+    }
 
     if (opts.maxBudgetUsd !== undefined) {
       queryOptions.maxBudgetUsd = opts.maxBudgetUsd;
@@ -122,7 +119,6 @@ export function createSdkBackend(): AgentBackend {
 
     if (Object.keys(opts.mcpServers).length > 0) {
       queryOptions.mcpServers = opts.mcpServers;
-      queryOptions.strictMcpConfig = true;
     }
 
     if (Object.keys(opts.agents).length > 0) {

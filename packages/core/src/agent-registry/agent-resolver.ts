@@ -28,6 +28,7 @@ function emptyCapabilities(): ResolvedCapabilities {
 
 export interface ResolvedDefaultAgent extends ResolvedCapabilities {
   namedAgentId?: string;
+  namedAgentRevision?: string;
   agentName?: string;
   namedAgentInstructions?: string;
   namedAgentModel?: string | null;
@@ -121,6 +122,7 @@ export function resolveDefaultAgentCapabilities(deps: {
     ...agentResolver.resolveAgentCapabilities(agent),
     bashAccess: agent.bash,
     namedAgentId: agent.id,
+    namedAgentRevision: agent.definitionRevision,
     agentName: agent.name,
     namedAgentInstructions: agent.instructions ?? undefined,
     namedAgentModel: agent.model,

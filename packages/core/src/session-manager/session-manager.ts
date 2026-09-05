@@ -43,19 +43,42 @@ export class SessionManager {
     return session;
   }
 
-  linkSdkSession(sessionId: string, sdkSessionId: string): void {
+  linkSdkSession(sessionId: string, sdkSessionId: string, revision?: string): void {
     const db = getDb();
-    db.prepare('UPDATE sessions SET sdk_session_id = ? WHERE id = ?').run(sdkSessionId, sessionId);
+    db.prepare('UPDATE sessions SET sdk_session_id = ?, sdk_resume_revision = ? WHERE id = ?').run(
+      sdkSessionId,
+      revision ?? null,
+      sessionId,
+    );
   }
 
   /** Direct lookup used to decide whether a chat turn resumes an existing
    * SDK session or starts cold (see agent-session.ts runAgentTask). Returns
    * undefined for a session that has never completed a turn yet. */
-  getSdkSessionId(sessionId: string): string | undefined {
+  getSdkSessionId(sessionId: string, revision?: string): string | undefined {
     const db = getDb();
-    const row = db.prepare('SELECT sdk_session_id FROM sessions WHERE id = ?').get(sessionId) as
-      { sdk_session_id: string | null } | undefined;
-    return row?.sdk_session_id ?? undefined;
+    const row = db
+      .prepare('SELECT sdk_session_id, sdk_resume_revision FROM sessions WHERE id = ?')
+      .get(sessionId) as
+      { sdk_session_id: string | null; sdk_resume_revision: string | null } | undefined;
+    if (!row) return undefined;
+    const expectedRevision = revision ?? null;
+    if (row.sdk_resume_revision !== expectedRevision) {
+      db.prepare(
+        `UPDATE sessions
+         SET sdk_session_id = NULL, sdk_resume_revision = NULL
+         WHERE id = ? AND sdk_resume_revision IS ? AND sdk_session_id IS ?`,
+      ).run(sessionId, row.sdk_resume_revision, row.sdk_session_id);
+      return undefined;
+    }
+    return row.sdk_session_id ?? undefined;
+  }
+
+  clearSdkSession(sessionId: string): void {
+    const db = getDb();
+    db.prepare(
+      'UPDATE sessions SET sdk_session_id = NULL, sdk_resume_revision = NULL WHERE id = ?',
+    ).run(sessionId);
   }
 
   incrementTurnCount(sessionId: string): void {
@@ -182,6 +205,7 @@ export class SessionManager {
 interface SessionRow {
   id: string;
   sdk_session_id: string | null;
+  sdk_resume_revision: string | null;
   project_id: string;
   status: string;
   created_at: number;

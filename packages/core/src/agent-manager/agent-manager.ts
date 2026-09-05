@@ -17,6 +17,8 @@ import {
   resolveSkillCapabilities,
   validateResolvedAgentExecutionSettings,
 } from '../agent-registry/agent-resolver.ts';
+import type { WorkspaceExecutionResolver } from '../project-manager/workspace-execution.ts';
+import { resolveTaskWorkspace } from './workspace-task.ts';
 import { validateChatTarget } from '../session-manager/chat-validation.ts';
 
 const log = createLogger('agent-manager');
@@ -42,6 +44,7 @@ export interface AgentManagerDeps {
   sessionManager?: SessionManager;
   ravenMcpDeps?: RavenMcpDeps;
   memoryStore?: MemoryStore;
+  workspaceExecution?: WorkspaceExecutionResolver;
 }
 
 export interface ApprovedActionParams {
@@ -98,6 +101,7 @@ export class AgentManager {
   private sessionManager?: SessionManager;
   private ravenMcpDeps?: RavenMcpDeps;
   private memoryStore?: MemoryStore;
+  private workspaceExecution?: WorkspaceExecutionResolver;
   private accepting = true;
   private stopping?: Promise<void>;
   private completions = new Map<string, () => void>();
@@ -113,6 +117,7 @@ export class AgentManager {
     this.sessionManager = deps.sessionManager;
     this.ravenMcpDeps = deps.ravenMcpDeps;
     this.memoryStore = deps.memoryStore;
+    this.workspaceExecution = deps.workspaceExecution;
     if (deps.permissionEngine && deps.auditLog && deps.pendingApprovals) {
       this.permissionDeps = {
         permissionEngine: deps.permissionEngine,
@@ -175,6 +180,7 @@ export class AgentManager {
       namedAgentInstructions: payload.namedAgentInstructions,
       systemAccessInstructions: payload.systemAccessInstructions,
       namedAgentId: payload.namedAgentId,
+      namedAgentRevision: payload.namedAgentRevision,
       model: payload.model,
       maxTurns: payload.maxTurns,
       bashAccess: payload.bashAccess,
@@ -184,7 +190,17 @@ export class AgentManager {
       internal: payload.internal,
     };
 
-    this.queueTask(task);
+    try {
+      this.prepareWorkspace(task);
+      this.queueTask(task);
+    } catch (error) {
+      this.rejectTaskRequest(payload, error);
+    }
+  }
+
+  private prepareWorkspace(task: AgentTask): void {
+    if (task.internal === 'validator' || !this.workspaceExecution) return;
+    task.workspaceRevision = resolveTaskWorkspace(task, this.workspaceExecution).revision;
   }
 
   private assertNewTaskId(taskId: string): void {
@@ -348,6 +364,7 @@ export class AgentManager {
       signal: abortController.signal,
       ravenMcpDeps: this.ravenMcpDeps,
       memoryStore: this.memoryStore,
+      workspaceExecution: this.workspaceExecution,
       sessionManager: this.sessionManager,
       model: task.model,
       maxTurns: task.maxTurns,
@@ -606,6 +623,7 @@ export class AgentManager {
     let task: AgentTask;
     try {
       task = this.buildActionTask(params);
+      this.prepareWorkspace(task);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log.warn(`Action admission failed for "${params.actionName}": ${message}`);

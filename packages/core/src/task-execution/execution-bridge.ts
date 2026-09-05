@@ -95,6 +95,7 @@ function buildAgentTaskRequest(
       agentDefinitions: capabilities.agentDefinitions,
       plugins: capabilities.plugins,
       namedAgentId: agent.id,
+      namedAgentRevision: agent.definitionRevision,
       model: executionSettings.model,
       maxTurns: executionSettings.maxTurns,
       bashAccess: agent.bash,

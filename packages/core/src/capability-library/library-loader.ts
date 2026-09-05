@@ -276,6 +276,8 @@ function errorMessage(error: unknown): string {
 }
 
 export async function loadLibrary(libraryDir: string): Promise<LoadedLibraryWithDiagnostics> {
+  if (!(await stat(libraryDir)).isDirectory()) throw new Error('Library root is not a directory');
+  await readdir(libraryDir); // An unavailable root must not become an empty successful reload.
   const diagnostics: DefinitionDiagnostic[] = [];
   const mcps = await loadMcps(join(libraryDir, 'mcps'), diagnostics);
   const skills = await loadSkills(join(libraryDir, 'skills'), diagnostics);

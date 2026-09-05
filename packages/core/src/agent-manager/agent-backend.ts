@@ -1,5 +1,5 @@
 import type { SubAgentDefinition } from '@raven/shared';
-import type { CanUseTool } from '@anthropic-ai/claude-agent-sdk';
+import type { CanUseTool, Options as SdkOptions } from '@anthropic-ai/claude-agent-sdk';
 
 export type AgentBackend = (opts: BackendOptions) => Promise<BackendResult>;
 
@@ -68,14 +68,19 @@ export interface BackendOptions {
   /** SDK session id to resume — continues that session's history instead of
    * starting cold. Only set for chat turns (see agent-session.ts runAgentTask). */
   resume?: string;
+  /** Permission policy selected by the caller. */
+  permissionMode?: 'default' | 'auto' | 'bypassPermissions';
+  /** Filesystem roots and settings sources explicitly available to the SDK. */
+  additionalDirectories?: string[];
+  settingSources?: Array<'project' | 'local'>;
+  /** SDK lifecycle/tool hooks supplied by the permission policy. */
+  hooks?: SdkOptions['hooks'];
   /** Test-only seam: overrides the SDK's `pathToClaudeCodeExecutable`, letting
    * tests point the backend at a fake executable instead of the real `claude`
    * CLI. Never set in production. */
   executablePathOverride?: string;
   /** Per-tool-call permission callback — see permission-engine/tool-policy.ts.
-   * Threaded through with `permissionMode: 'default'` (sdk-backend.ts) in
-   * place of the old `bypassPermissions` mode. Undefined when the task has
-   * no permissionDeps (agent-session.ts), matching today's opt-in gating. */
+   * Undefined when the task has no permissionDeps (agent-session.ts). */
   canUseTool?: CanUseTool;
 }
 

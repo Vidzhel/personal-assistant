@@ -127,6 +127,10 @@ export interface AgentTask {
    * by prompt-builder.ts for the same reason as namedAgentInstructions. */
   systemAccessInstructions?: string;
   namedAgentId?: string;
+  /** Current named definition at dispatch; changes reject stale queued work. */
+  namedAgentRevision?: string;
+  /** Internal admission revision; never accepted from external dispatch events. */
+  workspaceRevision?: string;
   /** Effective SDK model identifier selected from the named-agent tier. */
   model?: string;
   /** Validated per-dispatch turn cap from the named-agent definition. */

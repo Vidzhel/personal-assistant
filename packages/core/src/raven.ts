@@ -22,6 +22,7 @@ import { initDatabase, createDbInterface, getDb, closeDatabase } from './db/data
 import { EventBus } from './event-bus/event-bus.ts';
 import { createServiceRunner } from './services/runner.ts';
 import { SERVICE_DEFINITIONS } from './services/registry.ts';
+import { createWorkspaceExecutionResolver } from './project-manager/workspace-execution.ts';
 import { AgentManager } from './agent-manager/agent-manager.ts';
 import { SessionManager } from './session-manager/session-manager.ts';
 import { Orchestrator } from './orchestrator/orchestrator.ts';
@@ -458,6 +459,20 @@ export async function createRaven(
   const messageStore = createMessageStore({ basePath: sessionPath });
   const workspaceStore = createProjectWorkspaceStore({ projectsDir, projectRegistry, projectRoot });
   const memoryStore = createMemoryStore({ projectsDir, workspaceStore });
+  const workspaceExecution = createWorkspaceExecutionResolver({
+    workspaceStore,
+    projectRegistry,
+    namedAgentStore,
+    runtimeRevision: (task) => {
+      const agent = task.namedAgentId ? namedAgentStore.getAgent(task.namedAgentId) : undefined;
+      const actionSkills =
+        task.skillName && capabilityLibrary.getSkill(task.skillName) ? [task.skillName] : [];
+      return JSON.stringify([
+        capabilityLibrary.getRevision(agent?.skills ?? actionSkills),
+        permissionEngine.getConfig(),
+      ]);
+    },
+  });
 
   // 10. Init agent manager. INVARIANT: AgentManager subscribes before any
   // agent:task:request emitter starts — it is the sole subscriber for that
@@ -492,6 +507,7 @@ export async function createRaven(
     messageStore,
     sessionManager,
     memoryStore,
+    workspaceExecution,
     ravenMcpDeps,
   });
 

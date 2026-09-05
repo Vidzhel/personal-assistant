@@ -6,7 +6,7 @@ export interface ToolCallLifetime {
   drain(): Promise<void>;
 }
 
-export function createToolCallLifetime(): ToolCallLifetime {
+export function createToolCallLifetime(assertCurrent?: () => void): ToolCallLifetime {
   let open = true;
   let admitted = 0;
   let drained: Promise<void> | undefined;
@@ -24,6 +24,12 @@ export function createToolCallLifetime(): ToolCallLifetime {
 
     tryEnter(): (() => void) | undefined {
       if (!open) return undefined;
+      try {
+        assertCurrent?.();
+      } catch {
+        open = false;
+        return undefined;
+      }
       admitted += 1;
       let released = false;
       return () => {

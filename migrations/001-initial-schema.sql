@@ -22,6 +22,7 @@ CREATE INDEX idx_projects_is_meta ON projects(is_meta);
 CREATE TABLE sessions (
   id TEXT PRIMARY KEY,
   sdk_session_id TEXT,
+  sdk_resume_revision TEXT,
   project_id TEXT NOT NULL REFERENCES projects(id),
   status TEXT NOT NULL DEFAULT 'idle',
   created_at INTEGER NOT NULL,

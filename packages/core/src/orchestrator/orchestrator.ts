@@ -428,6 +428,7 @@ export class Orchestrator {
         sessionId: session.id,
         projectId,
         namedAgentId,
+        namedAgentRevision: capabilities.namedAgentRevision,
         model: executionSettings.model,
         maxTurns: executionSettings.maxTurns,
         bashAccess,

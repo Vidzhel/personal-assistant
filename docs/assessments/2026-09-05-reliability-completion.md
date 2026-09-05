@@ -123,3 +123,13 @@ summary-only maintenance template change in F9b. Unrelated owner work is preserv
 The owner decision waiving legacy migration/restoration is retained here as a
 scope decision, while new task, project, knowledge and provider records remain
 subject to the current persistence and recovery contracts.
+
+The September 6 W1b execution checkpoint extends the existing SDK runtime with
+project cwd, default/auto/full modes and revision-checked grants/session resume.
+Parent review narrowed capability invalidation to actual bindings so creating and
+reloading unrelated skills remains useful. Actual temporary command/file/Git push
+and restart tests complement the SDK subprocess option contract; 2,431 default
+tests pass. Full native access is trusted host execution, while Raven integration
+permissions remain enforced through pre-tool hooks. Repository overview links,
+shared file skills, mobile artifacts and project-scoped graph views remain in
+ordered W1c/d work; final deployment verification is W1e.

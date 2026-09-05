@@ -473,3 +473,21 @@ describe('CapabilityLibrary', () => {
     });
   });
 });
+
+describe('capability revision', () => {
+  it('stays stable on an unchanged reload and changes with skill instructions', async () => {
+    const dir = setupTestLibrary({ skills: [{ name: 'notes', skillMd: 'Original instructions' }] });
+    await lib.load(dir);
+    const revision = lib.getRevision(['notes']);
+    await lib.load(dir);
+    expect(lib.getRevision(['notes'])).toBe(revision);
+    const unbound = lib.getRevision([]);
+    writeFileSync(join(dir, 'skills/default/notes/skill.md'), 'Updated instructions');
+    await lib.load(dir);
+    expect(lib.getRevision(['notes'])).not.toBe(revision);
+    expect(lib.getRevision([])).toBe(unbound);
+    rmSync(dir, { recursive: true });
+    await expect(lib.load(dir)).rejects.toThrow();
+    expect(() => lib.getRevision()).toThrow('unavailable');
+  });
+});

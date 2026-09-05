@@ -30,7 +30,7 @@ describe('named-agent settings through chat, queue and budget', () => {
     });
   }
 
-  it('keeps queued settings stable and reserves the same model that actually runs', async () => {
+  it('rejects stale agent settings before dispatch and budgets only models that run', async () => {
     root = mkdtempSync(join(tmpdir(), 'raven-agent-settings-'));
     const paths = createRavenTestFixture(root);
     writeFileSync(
@@ -73,18 +73,19 @@ describe('named-agent settings through chat, queue and budget', () => {
     await vi.waitFor(() => expect(completed).toHaveLength(2));
     expect(calls.map(({ model, maxTurns }) => ({ model, maxTurns }))).toEqual([
       { model: 'claude-haiku-4-5', maxTurns: 4 },
-      { model: 'claude-haiku-4-5', maxTurns: 4 },
     ]);
 
     expect((await request(chatPath, 'POST', { message: 'Use changed settings' })).ok).toBe(true);
     await vi.waitFor(() => expect(completed).toHaveLength(3));
-    expect(calls[2]).toMatchObject({ model: 'claude-opus-5', maxTurns: 9 });
-    expect(completed.every((event) => event.payload.success)).toBe(true);
+    expect(calls[1]).toMatchObject({ model: 'claude-opus-5', maxTurns: 9 });
+    expect(completed.map((event) => event.payload.success)).toEqual([false, false, true]);
+    expect(completed[1].payload.errors?.join(' ')).toContain('Agent definition changed');
     const leases = raven.db.all<{ task_id: string; model: string; status: string }>(
       'SELECT task_id, model, status FROM model_budget_leases',
     );
-    expect(leases).toHaveLength(3);
-    for (const [index, event] of completed.entries()) {
+    expect(leases).toHaveLength(2);
+    expect(leases.some((lease) => lease.task_id === completed[1].payload.taskId)).toBe(false);
+    for (const [index, event] of [completed[0], completed[2]].entries()) {
       expect(leases.find((lease) => lease.task_id === event.payload.taskId)).toMatchObject({
         model: calls[index].model,
         status: 'known',

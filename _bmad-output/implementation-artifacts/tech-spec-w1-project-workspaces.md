@@ -52,49 +52,49 @@ link to these entrypoints and use the existing SDK and orchestration paths.
 
 ## Scenarios
 
-| State/action | Required behavior |
-| --- | --- |
-| No attachment | Execute in managed home; agent may organize its own working files |
-| Multiple folders | Explicit selected cwd; stable source IDs and linked context files |
-| Malformed manifest or unavailable folder | Current diagnostic and actionable failure; no broad fallback |
-| Source/config changes while queued or running | Reject stale execution; cancel/deny subsequent work; preserve transcript |
-| SDK resume after cwd, policy or local agent changes | Start a fresh SDK lineage |
-| Duplicate agent names in different projects | Nearest project definition wins without sharing private memory |
-| Generated HTML | Sandboxed preview without Raven origin/API privileges |
-| Traversal, symlink escape or detached source in file request | Refuse access and retain owner files |
+| State/action                                                 | Required behavior                                                        |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------ |
+| No attachment                                                | Execute in managed home; agent may organize its own working files        |
+| Multiple folders                                             | Explicit selected cwd; stable source IDs and linked context files        |
+| Malformed manifest or unavailable folder                     | Current diagnostic and actionable failure; no broad fallback             |
+| Source/config changes while queued or running                | Reject stale execution; cancel/deny subsequent work; preserve transcript |
+| SDK resume after cwd, policy or local agent changes          | Start a fresh SDK lineage                                                |
+| Duplicate agent names in different projects                  | Nearest project definition wins without sharing private memory           |
+| Generated HTML                                               | Sandboxed preview without Raven origin/API privileges                    |
+| Traversal, symlink escape or detached source in file request | Refuse access and retain owner files                                     |
 
 ## Ordered implementation checkpoints
 
 - [x] **W1a — file-owned workspace configuration.** Replace
-  `project-manager/project-data-sources.ts` SQL CRUD with a registry-resolved YAML
-  store; add shared schemas, `project.yaml` diagnostics, and workspace API settings.
-  Remove `project_data_sources` from the sole initial schema and all consumers.
-  Preserve source CRUD URLs with project-scoped IDs. Extend new-project staging
-  and create/archive recovery to verify both anchors together. Test restart, concurrent
-  changes, malformed files, invalid references and ownership isolation.
-- [ ] **W1b — project execution.** The first runtime checkpoint groups project-aware
-  agent selection and project-owned memory to prevent namesake leaks; see
-  [its specification](tech-spec-w1b-project-context.md). Then extend dispatch events,
-  Manager/session/backend options and permission hooks. Resolve a workspace snapshot
-  before admission and revalidate before execution/tool calls. Persist SDK resume
-  revision with sessions. Test native SDK
-  option forwarding, local defaults, stale queued/running tasks and interruption.
+      `project-manager/project-data-sources.ts` SQL CRUD with a registry-resolved YAML
+      store; add shared schemas, `project.yaml` diagnostics, and workspace API settings.
+      Remove `project_data_sources` from the sole initial schema and all consumers.
+      Preserve source CRUD URLs with project-scoped IDs. Extend new-project staging
+      and create/archive recovery to verify both anchors together. Test restart, concurrent
+      changes, malformed files, invalid references and ownership isolation.
+- [x] **W1b — project execution.** The first runtime checkpoint groups project-aware
+      agent selection and project-owned memory to prevent namesake leaks; see
+      [its specification](tech-spec-w1b-project-context.md). Then extend dispatch events,
+      Manager/session/backend options and permission hooks. Resolve a workspace snapshot
+      before admission and revalidate before execution/tool calls. Persist SDK resume
+      revision with sessions. Test native SDK
+      option forwarding, local defaults, stale queued/running tasks and interruption.
 - [ ] **W1c — repository context and skills.** Project memory moved to the first W1b
-  checkpoint alongside agent selection. Provide bounded overview/index links and
-  source locations in project prompts.
-  Update existing document runtime skills and add reusable repository/rendering
-  instructions with project-owned output paths. Test same-name agent isolation,
-  cross-agent sharing within a project, and unsuccessful consolidation retention.
+      checkpoint alongside agent selection. Provide bounded overview/index links and
+      source locations in project prompts.
+      Update existing document runtime skills and add reusable repository/rendering
+      instructions with project-owned output paths. Test same-name agent isolation,
+      cross-agent sharing within a project, and unsuccessful consolidation retention.
 - [ ] **W1d — browser workspace and artifacts.** Extend project API/client/components
-  with attachment/settings controls, file navigation, download and safe previews
-  for text/Markdown, images, PDF and HTML. Add explicit project selection and
-  server-side project filtering for knowledge graph views. Discover generated files directly; reuse
-  repository render pipelines for other document previews. Test mobile attachment
-  management and command→file→commit/push→browser using a real temporary repository.
+      with attachment/settings controls, file navigation, download and safe previews
+      for text/Markdown, images, PDF and HTML. Add explicit project selection and
+      server-side project filtering for knowledge graph views. Discover generated files directly; reuse
+      repository render pipelines for other document previews. Test mobile attachment
+      management and command→file→commit/push→browser using a real temporary repository.
 - [ ] **W1e — complete review and deployment verification.** Update architecture,
-  guides and deployment mounts/tools. Run required checks, default suite, relevant
-  graph tests, production builds, browser journeys, compiled restart and offline
-  container checks. Record concrete remaining limits and resolution plans.
+      guides and deployment mounts/tools. Run required checks, default suite, relevant
+      graph tests, production builds, browser journeys, compiled restart and offline
+      container checks. Record concrete remaining limits and resolution plans.
 
 ## Acceptance
 
@@ -160,7 +160,6 @@ so the owner can repair or remove its configuration. W1b adds current availabili
 execution rejection and revision checks; storing execution settings in W1a does
 not yet change SDK cwd or permissions. Existing graph links remain unchanged.
 
-
 ### W1b project context checkpoint — September 6, 2026
 
 Project-local agent defaults/identity and project-owned memory are complete;
@@ -171,3 +170,16 @@ restart pass. This moves the memory portion of W1c alongside local agent selecti
 The next W1b checkpoint wires workspace cwd, SDK autonomy modes, invocation
 revalidation and revision-bound session resume. Workspace execution settings still
 do not change backend cwd or permission mode until that checkpoint lands.
+
+### W1b direct execution checkpoint — September 6, 2026
+
+Direct repository execution is complete; the
+[execution checkpoint](tech-spec-w1b-workspace-execution.md) records the contract,
+parent review fixes and validation. Project tasks now use their managed home or
+selected repository, SDK default/auto/full modes, current grants, scoped
+integration policy, and persisted resume revisions. Verification includes 2,431
+default tests, real SDK subprocess flags, actual temporary shell/file/commit/push,
+production core build and compiled restart. This supersedes the earlier W1a and
+first-W1b notes above that configuration does not yet affect execution.
+Repository context links/shared skills are next, followed by mobile artifacts and
+explicit graph project scope.

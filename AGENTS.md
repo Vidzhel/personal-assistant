@@ -146,7 +146,12 @@ versions; do not copy versions from historical planning documents.
   current file identity, serializes mutations with the lifecycle and uses bounded,
   flushed atomic replacement. Folder input resolves against the configured Raven
   root and stores a canonical absolute path. There is no SQL source table/import.
-  Configuration alone does not provide direct execution; W1 tracks that wiring.
+  Ordinary project tasks execute in the selected repository or managed home.
+  Default mode retains native-tool policy; auto/full enable SDK autonomous native
+  execution. Full is trusted host access, not filesystem isolation. Admission,
+  PreToolUse and completion revalidate current grants and definition revisions.
+  Integration permission tiers and scoped Raven MCP checks still apply in all
+  modes. Existing commands may finish after revocation; no rollback is promised.
 - Named agents resolve through the current project's ancestor chain. Global IDs
   remain names; local IDs are `<projectId>::<name>`. Local definitions override
   ancestor names; unrelated projects never provide implicit fallbacks. Re-read
@@ -158,7 +163,11 @@ versions; do not copy versions from historical planning documents.
   symlinks. Serial writes enforce budgets and compare prior bytes. Learning uses
   explicit snapshots across model calls and retains rejected/changed candidates.
   The browser's memory access selects a project explicitly. Internal validators
-  have no memory tools. Direct repository execution remains a later W1 checkpoint.
+  have no memory tools or autonomous workspace grant. SDK automatic memory is
+  disabled. Exact workspace/agent/capability revisions govern chat session resume.
+  Attached cwd loads project/local SDK settings; managed homes use explicit empty
+  setting sources. MCP configuration is always strict. W1c/d finish repository
+  overview links, shared runtime skills and browser artifacts.
 - Preserve knowledge links and project membership before changing graph storage.
   Permission checks must be enforced in tools/runtime, not only prompt text.
 - Stop admission and own listeners, timers and in-flight local work across

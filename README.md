@@ -23,7 +23,7 @@ dashboard. Claude and Codex can both develop the project using the same guide.
 Integrations require their definitions, executables and credentials to be configured
 and explicitly bound where used. A fresh Docker install starts with no external
 capability bindings or schedules. Projects support local agents, shared project
-memory and attachment configuration. Direct repository execution and mobile
+memory and direct repository execution. Repository context links and mobile
 artifact previews remain in progress.
 
 ## Quick Start
@@ -160,8 +160,11 @@ authentication, model quality and account delivery remain separate canaries.
 The [W1 implementation](./_bmad-output/implementation-artifacts/tech-spec-w1-project-workspaces.md)
 is in progress after completed F1–F9. Workspace settings and sources now live in
 project YAML. Agents share their project’s nested memory notes; local definitions
-override inherited agents. Direct repository execution and mobile artifact
-viewing follow in that plan. Project layouts may evolve around the small Raven
+override inherited agents. Project tasks run in the selected folder (or managed
+home), with default, SDK auto, or full native execution modes. Full mode grants
+trusted host access, including shell and Git operations. Current-grant checks
+and revision-bound resumes prevent stale configuration from continuing work.
+Repository context links and mobile artifact viewing follow in that plan. Project layouts may evolve around the small Raven
 anchors; repository indexes link to existing instructions without embeddings.
 
 Useful verification commands:

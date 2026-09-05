@@ -30,14 +30,14 @@ output and its static files. Images run as the unprivileged `node` user (UID 100
 
 Compose creates named volumes; it does not mount the checkout's working data.
 
-| Volume           | Container path       | Contents                                                                                                       |
-| ---------------- | -------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `raven_data`     | `/app/data`          | SQLite, Raven sessions, logs, knowledge Markdown, definition Git metadata                                      |
+| Volume           | Container path       | Contents                                                                                                         |
+| ---------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `raven_data`     | `/app/data`          | SQLite, Raven sessions, logs, knowledge Markdown, definition Git metadata                                        |
 | `raven_projects` | `/app/projects`      | Project context, named agents, templates, schedules, project memory, board tasks, execution trees and agent runs |
-| `raven_library`  | `/app/library`       | Capability definitions and deliberately installed vendor plugins                                               |
-| `raven_config`   | `/app/config`        | Runtime configuration files                                                                                    |
-| `raven_claude`   | `/home/node/.claude` | Claude authentication/configuration and SDK session transcripts                                                |
-| `neo4j_data`     | `/data` in Neo4j     | Optional knowledge relationships, membership and graph metadata                                                |
+| `raven_library`  | `/app/library`       | Capability definitions and deliberately installed vendor plugins                                                 |
+| `raven_config`   | `/app/config`        | Runtime configuration files                                                                                      |
+| `raven_claude`   | `/home/node/.claude` | Claude authentication/configuration and SDK session transcripts                                                  |
+| `neo4j_data`     | `/data` in Neo4j     | Optional knowledge relationships, membership and graph metadata                                                  |
 
 On first startup, the entrypoint copies only the explicit
 [`deployment/seeds`](../deployment/seeds) into each **empty** projects/library/config
@@ -205,3 +205,25 @@ the actual Git helper in disposable repositories with owner Git configuration
 disabled. Container smoke uses isolated temporary volumes and `--network none`;
 it checks core restart persistence and the actual standalone web page/static
 asset. None of these checks starts the owner's assistant or uses owner accounts.
+
+## Repository execution
+
+Project `project.yaml` selects a folder source as cwd; without a selection, work
+runs in the managed project home. Paths are server paths. In Docker, mount each
+repository and configure its path inside the container. Native shell, Git, build
+and rendering tools must be installed in that environment, with the repository's
+own dependencies and intended Git authentication.
+
+Workspace modes are `default`, `auto` and `full`. Auto delegates native permission
+decisions to the installed Claude SDK classifier (subject to SDK/account support);
+full enables SDK bypass with trusted host access. Integration permissions remain
+under Raven's pre-tool policy. This is the owner's trusted execution machine, not
+a filesystem sandbox. Grant changes reject subsequent local dispatch/tool work;
+already executing commands or remote operations can still finish.
+
+Attached repositories load their SDK project/local settings and instructions.
+Managed homes exclude filesystem settings to avoid Raven development settings.
+Ambient MCP servers and SDK automatic memory are disabled; project memory and
+explicitly bound capabilities remain Raven-owned. Revision mismatches start cold
+SDK sessions, including after restart. Browser attachment controls, repository
+context links and artifact previews remain later W1 checkpoints.

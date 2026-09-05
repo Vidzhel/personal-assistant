@@ -54,6 +54,7 @@ export interface AgentTaskRequestEvent extends BaseEvent {
     sessionId?: string;
     projectId?: string;
     namedAgentId?: string;
+    namedAgentRevision?: string;
     /** Effective SDK model identifier selected from the named-agent tier. */
     model?: string;
     /** Validated per-dispatch turn cap from the named-agent definition. */

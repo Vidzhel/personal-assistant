@@ -24,7 +24,7 @@ external repositories.
 | F7    | Ordinary schedule absence/staleness detection                                                                    | Complete; 2,200 tests, 14 browser journeys and packaged restart                                                          |
 | F8    | Durable provider upload cleanup/retry after cancellation and restart                                             | Complete; 2,223 tests, 14 browser journeys and packaged restart                                                          |
 | F9    | Remove obsolete storage compatibility/schema paths, reconcile docs, full/browser/compiled/container verification | Complete; 2,342 default / 148 graph tests, 16 browser journeys, builds, packaged restart and offline containers verified |
-| W1    | Review dissertation/teaching and implement flexible repository workspaces with browser artifact access           | In progress; W1a verified (2,384 tests, 16 browser journeys), W1b next                                                                                 |
+| W1    | Review dissertation/teaching and implement flexible repository workspaces with browser artifact access           | In progress; W1a and W1b complete; W1c repository context/skills next                                                    |
 
 Legacy metadata migration and prior Neo4j restoration are closed by the owner's
 explicit decision, not by a claim that data was restored. Future runtime writes
@@ -146,7 +146,6 @@ with reviewed create/archive recovery. The required check, 2,384 default tests,
 execution continues in W1b; this checkpoint does not claim that stored settings
 already change SDK cwd or permissions. See the W1 specification for evidence.
 
-
 W1b's first runtime checkpoint completes project-local agent identity/defaults and
 project-owned memory together. Parent review covered cross-project lookup, current
 file identity, atomic note/agent writes, candidate/index conflicts, partial learning
@@ -156,3 +155,13 @@ builds and compiled restart pass. See
 [project context checkpoint](tech-spec-w1b-project-context.md). Direct SDK cwd,
 permission modes and session revisions are the next W1b checkpoint; W1c then adds
 repository overviews/skills, followed by W1d mobile workspace/artifact access.
+
+W1b direct execution is complete. The
+[execution checkpoint](tech-spec-w1b-workspace-execution.md) verifies selected cwd,
+SDK default/auto/full modes, current workspace/agent/capability grants, scoped
+integration hooks and persisted resume revisions. Parent review preserved successful
+creation/reload of unrelated skills while rejecting stale bound definitions.
+The required check, 2,431 default tests, real SDK subprocess contracts, actual
+temporary shell/file/commit/push, core build and compiled restart pass. W1c adds
+repository context links/shared skills and flexible managed layouts; W1d adds
+mobile artifacts and explicit graph project selection/filtering.

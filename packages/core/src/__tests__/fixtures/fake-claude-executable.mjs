@@ -25,9 +25,11 @@ const logPath = process.env.FAKE_CLAUDE_ARGV_LOG;
 if (logPath) {
   const entry = {
     argv: process.argv.slice(2),
+    cwd: process.cwd(),
     env: {
       CLAUDECODE: process.env.CLAUDECODE ?? null,
       CLAUDE_CODE_ENTRYPOINT: process.env.CLAUDE_CODE_ENTRYPOINT ?? null,
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY ?? null,
     },
   };
   appendFileSync(logPath, `${JSON.stringify(entry)}\n`);

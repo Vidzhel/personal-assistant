@@ -358,11 +358,30 @@ without a manifest use defaults. New project staging and recovery include both
 anchors. Workspace CRUD uses the current registry identity and atomic YAML writes;
 the previous SQL source table is removed. Folder inputs store canonical server
 paths with optional links to repository instructions/indexes. HTTP configuration
-is available without Neo4j, but direct SDK execution and artifact access are still
-being wired in W1. Graph views currently remain global; W1d adds explicit project
+and direct execution are available without Neo4j; browser artifacts follow in W1d. Graph views currently remain global; W1d adds explicit project
 selection and server-side filtering. Chat and task dispatch use the nearest local
 agent/default. Local IDs include the stable project identity so namesakes remain
 separate; current YAML bytes and their source path provide a definition revision.
+
+AgentManager captures workspace and effective dispatch revisions before queuing.
+Agent sessions revalidate current project/agent identity, capability-library and
+permission settings, directory device/inode identities and repository settings
+before dispatch, tool admission and completion. The SDK receives the selected
+cwd, other attached directories and the managed home. Default mode retains native
+Bash/file access policy; auto/full enable native work through SDK `auto` or
+`bypassPermissions` (with its required dangerous-skip flag). PreToolUse applies
+Raven integration policy even when SDK permission callbacks are skipped, without
+duplicating callback audit/approval writes. Full mode is trusted host execution;
+these checks do not contain shell access or undo commands already running.
+
+Sessions store an SDK resume revision alongside the SDK ID. Changed grants or
+agent/capability configuration start cold; stale completions cannot relink old
+lineage. Attached cwd enables SDK project/local instructions, settings, skills and
+hooks; managed-home execution uses explicit empty settings sources. Strict MCP
+configuration excludes ambient servers, and native SDK automatic memory is
+disabled in favor of Raven project memory. Auxiliary learning and validators do
+not inherit autonomous project execution. Repository context indexes and shared
+file skills remain the next W1c checkpoint.
 
 Memory lives under each managed project's `memory/` directory. All its named
 agents share this store; internal validators have no memory tools. Project YAML

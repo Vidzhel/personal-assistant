@@ -1,4 +1,4 @@
-import { createLogger, generateId, META_PROJECT_ID } from '@raven/shared';
+import { createLogger, generateId, META_PROJECT_ID, BashAccessSchema } from '@raven/shared';
 import type { AgentTask, McpServerConfig, PermissionTier, SubAgentDefinition } from '@raven/shared';
 import type { MessageStore } from '../session-manager/message-store.ts';
 import type { SessionManager } from '../session-manager/session-manager.ts';
@@ -20,6 +20,12 @@ import type { MemoryStore } from '../agent-memory/memory-store.ts';
 import { createMemoryMcp } from '../mcp-server/memory-mcp.ts';
 import { getAvailableKnowledgeTools } from '../mcp-server/tools/knowledge.ts';
 import { formatMemoryBlock } from '../agent-memory/memory-store.ts';
+import type {
+  WorkspaceExecution,
+  WorkspaceExecutionResolver,
+} from '../project-manager/workspace-execution.ts';
+import { resolveTaskWorkspace } from './workspace-task.ts';
+import { createSessionToolGuard } from './session-tool-guard.ts';
 import { createToolCallLifetime } from '../mcp-server/tool-call-lifetime.ts';
 
 const log = createLogger('agent-session');
@@ -96,6 +102,7 @@ export interface RunOptions {
   signal?: AbortSignal;
   ravenMcpDeps?: RavenMcpDeps;
   memoryStore?: MemoryStore;
+  workspaceExecution?: WorkspaceExecutionResolver;
   /** Overrides `config.CLAUDE_MODEL` for this one dispatch — e.g.
    * memory-consolidation.ts resolving a named agent's own model tier
    * (haiku/opus) instead of the global default. Omitted by every other
@@ -300,12 +307,28 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
   let success = false;
   const errors: string[] = [];
   const stderrChunks: string[] = [];
-  const toolCalls = createToolCallLifetime();
+  let workspace: WorkspaceExecution | undefined;
+  const assertCurrent = (): void => {
+    if (!workspace || !opts.workspaceExecution) return;
+    const current = resolveTaskWorkspace(task, opts.workspaceExecution);
+    if (current.revision !== workspace.revision) throw new Error('Project execution grant changed');
+    if (task.sessionId && opts.sessionManager) {
+      const session = opts.sessionManager.getSession(task.sessionId);
+      if (!session || session.projectId !== (task.projectId ?? META_PROJECT_ID)) {
+        throw new Error('Project session ownership changed');
+      }
+    }
+  };
+  const toolCalls = createToolCallLifetime(assertCurrent);
   const closeToolAdmission = (): void => toolCalls.close();
   signal?.addEventListener('abort', closeToolAdmission, { once: true });
   if (signal?.aborted) closeToolAdmission();
 
   try {
+    if (opts.workspaceExecution && task.internal !== 'validator') {
+      workspace = resolveTaskWorkspace(task, opts.workspaceExecution);
+      assertCurrent();
+    }
     // Build MCP config - transform our config to backend format
     const sdkMcpServers: Record<string, unknown> = {};
     for (const [name, cfg] of Object.entries(mcpServers)) {
@@ -364,16 +387,9 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       }
     }
 
-    // Compute allowed tools: base tools + Agent delegation only. Bash and
-    // integration-MCP tool wildcards (buildMcpToolPattern for task.mcpServers)
-    // are deliberately NOT pre-authorized here: a tool name listed in
-    // allowedTools bypasses the canUseTool policy built below entirely —
-    // verified live against the real SDK (see tool-policy.ts's module
-    // docstring) — so Bash and mcp__<server>__* must fall through to the
-    // SDK's "ask" path where that policy actually gets to decide per call.
-    // Raven/memory MCP tools stay pre-authorized: the policy allows them
-    // unconditionally anyway (already role-scoped — mcp-server/index.ts's
-    // ScopeContext), so there's no enforcement value in round-tripping them.
+    // SDK allow rules keep ordinary reads and scoped Raven tools prompt-free.
+    // PreToolUse still checks current ownership and Raven policy for every call.
+    // Native mutations and integrations retain the SDK's mode/callback behavior.
     const allowedTools = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'];
 
     if (opts.ravenMcpDeps) {
@@ -387,10 +403,8 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       allowedTools.push('Agent');
     }
 
-    // canUseTool: built per task (it has task.bashAccess + task.skillName +
-    // task.approvedActionName already) and threaded into the backend below.
-    // Undefined when this task has no permissionDeps, matching today's
-    // opt-in gating (see runAgentTask's pre-check above for the same guard).
+    // Build the per-task policy once for PreToolUse and its deduplicated callback.
+    // Auxiliary model calls without permission dependencies retain SDK defaults.
     const canUseTool = permissionDeps
       ? createToolPolicy(
           {
@@ -403,12 +417,20 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
           {
             skillName: task.skillName,
             sessionId: task.sessionId,
-            bashAccess: task.bashAccess,
+            bashAccess:
+              workspace && workspace.mode !== 'default'
+                ? BashAccessSchema.parse({ access: 'full' })
+                : task.bashAccess,
             approvedActionName: task.approvedActionName,
           },
         )
       : undefined;
 
+    const toolGuard = createSessionToolGuard({
+      lifetime: toolCalls,
+      assertCurrent,
+      policy: canUseTool,
+    });
     const prompt = task.prompt;
 
     // Track Agent tool_use IDs → sub-agent type for attribution
@@ -426,9 +448,10 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
     // task/validation lineage would leak chat context across it.
     const resume =
       task.sessionId && opts.sessionManager
-        ? opts.sessionManager.getSdkSessionId(task.sessionId)
+        ? opts.sessionManager.getSdkSessionId(task.sessionId, workspace?.revision)
         : undefined;
 
+    assertCurrent();
     const backend = getActiveBackend();
     const backendResult = await backend({
       taskId: task.id,
@@ -441,19 +464,12 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       mcpServers: sdkMcpServers,
       agents: agentDefinitions,
       plugins: opts.plugins,
-      canUseTool: canUseTool
-        ? (...args) =>
-            !toolCalls.isOpen()
-              ? Promise.resolve({
-                  behavior: 'deny' as const,
-                  message: 'Task no longer accepts tool calls',
-                })
-              : canUseTool(...args).then((result) =>
-                  !toolCalls.isOpen()
-                    ? { behavior: 'deny' as const, message: 'Task no longer accepts tool calls' }
-                    : result,
-                )
-        : undefined,
+      canUseTool: canUseTool ? toolGuard.canUseTool : undefined,
+      hooks: { PreToolUse: [{ hooks: [toolGuard.preToolUse] }] },
+      permissionMode:
+        workspace?.mode === 'full' ? 'bypassPermissions' : (workspace?.mode ?? 'default'),
+      additionalDirectories: workspace?.additionalDirectories,
+      settingSources: workspace?.settingSources ?? [],
       onAssistantMessage: (text: string, meta?: ToolUseMeta) => {
         if (!toolCalls.isOpen()) return;
         const agentName = resolveAgentName(meta);
@@ -483,7 +499,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
         });
       },
       // Note: Bash commands are no longer audited here. Enforcement (and its
-      // audit trail) now happens PRE-execution in the canUseTool policy
+      // audit trail) happens before execution in the PreToolUse policy
       // (tool-policy.ts) built above and threaded into the backend call —
       // this callback only fires after the SDK already ran the tool, so it
       // would be purely observational and redundant with that policy's own
@@ -555,11 +571,12 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
         stderrChunks.push(data);
         log.debug(`Agent stderr: ${data.trim()}`);
       },
-      cwd: projectRoot,
+      cwd: workspace?.cwd ?? projectRoot,
     }).finally(closeToolAdmission);
 
     sdkSessionId = backendResult.sessionId ?? sdkSessionId;
     resultText = backendResult.result;
+    assertCurrent();
     success = backendResult.success;
     errors.push(...backendResult.errors);
   } catch (err) {
@@ -591,7 +608,14 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
     // persisted even when the query throws right after establishing it;
     // otherwise the next turn would have no sdk session to resume at all.
     if (task.sessionId && opts.sessionManager && sdkSessionId) {
-      opts.sessionManager.linkSdkSession(task.sessionId, sdkSessionId);
+      try {
+        assertCurrent();
+        opts.sessionManager.linkSdkSession(task.sessionId, sdkSessionId, workspace?.revision);
+      } catch (error) {
+        opts.sessionManager.clearSdkSession(task.sessionId);
+        success = false;
+        errors.push(error instanceof Error ? error.message : String(error));
+      }
     }
   }
 

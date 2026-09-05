@@ -32,7 +32,12 @@ const FAKE_EXECUTABLE = join(__dirname, 'fixtures', 'fake-claude-executable.mjs'
 
 interface ArgvLogEntry {
   argv: string[];
-  env: { CLAUDECODE: string | null; CLAUDE_CODE_ENTRYPOINT: string | null };
+  cwd: string;
+  env: {
+    CLAUDECODE: string | null;
+    CLAUDE_CODE_ENTRYPOINT: string | null;
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY: string | null;
+  };
 }
 
 function readLogEntries(logPath: string): ArgvLogEntry[] {
@@ -128,5 +133,46 @@ describe('SDK backend contract (real subprocess spawn via fake executable)', () 
 
     const [entry] = readLogEntries(argvLogPath);
     expect(entry.env.CLAUDECODE).toBeNull();
+  });
+
+  it('passes isolated defaults and the requested working directory', async () => {
+    const backend = createSdkBackend();
+    await backend(baseOpts({ cwd: tmpDir }));
+
+    const [entry] = readLogEntries(argvLogPath);
+    expect(entry.cwd).toBe(tmpDir);
+    expect(entry.argv).toContain('--setting-sources=');
+    expect(entry.argv).toContain('--strict-mcp-config');
+    expect(entry.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe('1');
+  });
+
+  it.each([
+    ['auto', false],
+    ['bypassPermissions', true],
+  ] as const)('passes %s permission mode and bypass guard', async (mode, bypass) => {
+    const backend = createSdkBackend();
+    await backend(baseOpts({ permissionMode: mode }));
+
+    const [entry] = readLogEntries(argvLogPath);
+    const modeIndex = entry.argv.indexOf('--permission-mode');
+    expect(entry.argv[modeIndex + 1]).toBe(mode);
+    expect(entry.argv.includes('--allow-dangerously-skip-permissions')).toBe(bypass);
+  });
+
+  it('passes additional directories and explicit project/local settings', async () => {
+    const backend = createSdkBackend();
+    await backend(
+      baseOpts({
+        cwd: tmpDir,
+        additionalDirectories: [tmpDir],
+        settingSources: ['project', 'local'],
+      }),
+    );
+
+    const [entry] = readLogEntries(argvLogPath);
+    const addDirIndex = entry.argv.indexOf('--add-dir');
+    expect(entry.argv[addDirIndex + 1]).toBe(tmpDir);
+    expect(entry.argv).toContain('--setting-sources=project,local');
+    expect(entry.argv).toContain('--strict-mcp-config');
   });
 });

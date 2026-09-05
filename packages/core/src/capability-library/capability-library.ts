@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createLogger, buildMcpToolPattern } from '@raven/shared';
 import type {
   McpDefinition,
@@ -57,6 +58,26 @@ export class CapabilityLibrary {
 
   getDefinitionDiagnostics(): readonly DefinitionDiagnostic[] {
     return [...this.diagnostics];
+  }
+
+  /** Only bound definitions affect task context; adding an unrelated skill is safe. */
+  getRevision(skillNames?: string[]): string {
+    const lib = this.ensureLoaded();
+    if (this.diagnostics.some((entry) => entry.code === 'library-root-unavailable')) {
+      throw new Error('Capability library is unavailable');
+    }
+    const skills = [...new Set(skillNames ?? [...lib.skills.keys()])].sort().map((name) => {
+      const skill = lib.skills.get(name);
+      if (!skill) throw new Error(`Skill is unavailable: ${name}`);
+      return skill;
+    });
+    const mcps = [...new Set(skills.flatMap((skill) => skill.config.mcps))]
+      .sort()
+      .map((name) => [name, lib.mcps.get(name)]);
+    const vendors = [...new Set(skills.flatMap((skill) => skill.config.vendorSkills))]
+      .sort()
+      .map((reference) => [reference, lib.vendorPaths.get(reference.split('/')[0])]);
+    return createHash('sha256').update(JSON.stringify({ skills, mcps, vendors })).digest('hex');
   }
 
   private ensureLoaded(): LoadedLibrary {

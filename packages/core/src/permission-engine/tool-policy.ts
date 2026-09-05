@@ -23,107 +23,18 @@ const DEFAULT_BASH_ACCESS: BashAccess = {
 const AUDIT_COMMAND_TRUNCATE_LENGTH = 200;
 
 /**
- * The SDK's per-tool-call permission callback (see sdk.d.ts's `CanUseTool` /
- * `PermissionResult`). Passed to `query()` as `canUseTool` with
- * `permissionMode: 'default'` (sdk-backend.ts) — this REPLACES the old
- * `bypassPermissions` mode. `enforcePermissionGate` (agent-session.ts)
- * remains as the coarse, pre-dispatch gate for tasks that carry an explicit
- * `actionName`; this policy is the fine-grained, per-tool-call gate that
- * fires *during* an agent's run, for every Bash command and every
- * integration-MCP tool call the model actually makes — including ones a
- * coarse actionName-based dispatch never anticipated.
+ * Raven's per-tool policy, evaluated by session-tool-guard in PreToolUse before
+ * the SDK applies allow rules or auto/bypass mode. The regular canUseTool callback
+ * reuses the matching hook decision; calls without a prior hook evaluate here.
  *
- * ## SDK invocation semantics (empirically verified against the real SDK —
- * `@anthropic-ai/claude-agent-sdk`, live `query()` probes, since sdk.d.ts's
- * comments alone don't specify this):
+ * Native Bash and file writes share the configured Bash access policy. Project
+ * auto/full execution supplies full native access; integration actions still
+ * resolve their current green/yellow/red tier. Raven and memory MCPs enforce
+ * role/project ownership in their own scoped handlers.
  *
- * - A tool name listed in `allowedTools` (BackendOptions/agent-session.ts)
- *   bypasses this callback ENTIRELY — the SDK auto-allows it without ever
- *   calling canUseTool, regardless of how "dangerous" the actual call looks
- *   (verified: `Bash` in allowedTools skips canUseTool even for `rm -rf`).
- *   This is why agent-session.ts's allowedTools construction must NOT
- *   include `Bash` or any integration-MCP wildcard (`mcp__<server>__*`) —
- *   doing so would silently disable this policy for exactly the calls it
- *   exists to gate.
- * - MCP tool calls not in `allowedTools` ALWAYS invoke this callback,
- *   unconditionally — verified for both a "boring" call (send_email with a
- *   valid recipient) and a call with no special framing. There is no
- *   built-in "this MCP tool looks safe" heuristic; every non-allowlisted MCP
- *   tool call reaches us.
- * - Built-in `Bash` calls only invoke this callback when the SDK's OWN
- *   internal risk heuristic flags the command as needing confirmation
- *   (verified: `echo hello` never reaches canUseTool, in OR out of
- *   allowedTools; `rm -rf` and `Write` always do, when not in allowedTools).
- *   This means the Bash branch below is a real, but PARTIAL, pre-execution
- *   gate: it reliably catches whatever the SDK itself already suspects, and
- *   correctly enforces `task.bashAccess` for those; it does not see every
- *   single Bash invocation the model makes. This is still strictly stronger
- *   than the observational post-execution audit it replaces (which saw
- *   every command, but only after the SDK had already run it).
- *
- * ## MCP tool name -> action name mapping
- *
- * Verified against library/skills/communication/email/gmail/config.json +
- * library/mcps/gmail.json, library/skills/productivity/task-management/
- * ticktick/config.json + library/mcps/ticktick.json, and the real tool
- * names registered by packages/mcp-ticktick/src/tools.ts (the in-repo
- * ticktick MCP server).
- *
- * The SDK calls this callback with `toolName = mcp__<server>__<tool>`,
- * where `<server>` is the MCP server key (== the library mcp's `name`,
- * e.g. "gmail", "ticktick") and `<tool>` is that server's own tool name
- * (snake_case for the in-repo ticktick server; vendor-defined for gmail-mcp).
- * Skill action names are `<skill>:<kebab-action>` (e.g. "ticktick:create-task").
- *
- * These do NOT map 1:1: ticktick's `create_task`/`update_task`/
- * `delete_task`/`complete_task` all match their `ticktick:*` action
- * counterparts exactly after snake_case -> kebab-case conversion, but
- * `get_task`/`get_all_tasks`/`filter_tasks`/`get_today_tasks`/
- * `get_completed_tasks` and every project-management tool
- * (`get_projects`, `create_project`, `delete_project`, `move_task`, ...)
- * have no declared action at all.
- *
- * Rule shipped (tier-by-tool-name with a conservative per-server fallback):
- *   1. `actionName = "${server}:${kebabCase(tool)}"`.
- *   2. If `actionName` is a KNOWN action (present in
- *      `permissionEngine.getActionCatalog()`) -> `resolveTier(actionName)`.
- *   3. Else -> the MAX (worst) tier among every action declared by any skill
- *      that references this MCP server (conservative: an unmapped tool on a
- *      skill that also has a red action is treated as red; an unmapped tool
- *      on an all-green/yellow skill is treated as yellow, not blindly
- *      trusted).
- *   4. Else (no skill references this server, or it declares zero actions)
- *      -> 'yellow'.
- *
- * ## Sub-agent MCP routing probe (2026-08-07, live `query()` probe, in-process
- * `createSdkMcpServer` echo tool + a sub-agent whose `tools` included the
- * `mcp__probe__*` pattern, delegated to via the `Agent` tool — no external
- * credentials/MCPs involved):
- *
- * - CONFIRMED: `canUseTool` DOES fire for a sub-agent's own MCP tool calls —
- *   it is NOT bypassed for delegated work. The callback fired with
- *   `options.agentID` populated to the sub-agent's id (undefined/absent for
- *   the top-level agent's own calls), which is the SDK's own way of telling
- *   the policy which agent triggered the request. This means AgentDefinition
- *   `tools` entries carrying `mcp__<server>__*` patterns (capability-library.ts's
- *   collectAgentDefinitions) are gated by this exact same policy when the
- *   sub-agent actually calls them — no separate mitigation (e.g. a
- *   PreToolUse hook) is needed for this concern.
- * - SURPRISE, unrelated to the routing question but discovered by the same
- *   probe and directly affecting THIS module: on the currently-installed
- *   `@anthropic-ai/claude-agent-sdk`, returning the bare
- *   `{ behavior: 'allow' }` this file's `allow()` helper used to return
- *   throws a runtime `ZodError` INSIDE the SDK for any MCP tool call (proven
- *   for both a top-level call and a sub-agent call) — the tool_result comes
- *   back as an error ("Tool permission request failed: ZodError... expected
- *   record, received undefined" at `updatedInput`), even though
- *   `sdk.d.ts` marks `updatedInput` as optional. `allow()` now takes the
- *   tool's `input` and echoes it back as `updatedInput` to satisfy the
- *   SDK's actual runtime schema. Every call site below was updated to pass
- *   its `input` through. This was silently broken in production for every
- *   gated MCP tool call (and would have broken this PR's own H2 file-tool
- *   gating) — the existing test suite never caught it because it mocks the
- *   SDK's `query()` entirely and never exercises this validation path.
+ * SDK permission allows require updatedInput at the subprocess protocol boundary.
+ * Always echo input, including for nested-agent MCP calls. Read-only tools are
+ * permitted here; this policy is not an OS filesystem sandbox.
  */
 
 export interface ToolPolicyTaskContext {
@@ -205,10 +116,7 @@ function resolveIntegrationAction(
   return { actionName, tier: fallbackTierForServer(deps.capabilityLibrary, server) };
 }
 
-// See this file's module docstring, "Sub-agent MCP routing probe" — the
-// SDK's runtime PermissionResult validator requires `updatedInput` to be a
-// record on the 'allow' branch even though sdk.d.ts marks it optional.
-// Echoing the tool's own input back unchanged is the correct no-op default.
+// Echo unchanged input to satisfy the SDK subprocess permission schema.
 function allow(input: Record<string, unknown> = {}): PermissionResult {
   return { behavior: 'allow', updatedInput: input };
 }
