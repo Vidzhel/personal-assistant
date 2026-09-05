@@ -13,7 +13,7 @@ plans are reconciled against code, not blindly reimplemented.
 | R2 | Finish current project metadata/update/delete persistence | Complete | 163 files; 1818 passed / 6 skipped; check passed; restart, archive, failure and graph-race coverage. |
 | R3 | Correct capability failure behavior and knowledge availability | Complete | 171 files, 1907 passed / 6 skipped; check passed; 30 disposable Neo4j tests; independent review fixes verified. |
 | R4 | Repair current build/deployment paths and runtime persistence | Complete | 174 files, 1913 passed / 6 skipped; check/builds; compiled two-process and offline Docker restart proof; 9 real Git tests. |
-| R5 | Review current learning/schedule/approval loops and run isolated journeys | Pending | Outcome-based E2E and browser verification; defects fixed or recorded below. |
+| R5 | Review current learning/schedule/approval loops and run isolated journeys | Complete | 184 files, 1971 passed / 6 skipped; 11 browser journeys; check/builds/compiled restart passed; reviewed lifecycle and memory-retention fixes. |
 | R6 | Reconcile Claude/Codex/docs and old plan status with final behavior | Pending | One truthful current status entry; specific remaining tasks, not stale phase checklists. |
 | R7 | Final regression/review and resolution ledger | Pending | check, tests, definition validators, builds; evidence and limits documented. |
 
@@ -167,3 +167,26 @@ The final compiled smoke passed 33 migrations, six real services, fake chat,
 persisted state and two natural exits (`/tmp/raven-r4-compiled-smoke-final.log`).
 Nine real Git tests passed. Two independent reused review perspectives and parent
 review cleared all reported findings; original 87 definition files are unchanged.
+
+
+## R5 completion
+
+Chat, graph chat, project/session controls and the API client now use correlated
+persistence/terminal outcomes. Session switching and reconnects reconcile history,
+active work and per-session drafts; nested IDs and refused mutations are usable
+in the dashboard. Voice, maintenance, queued/approved agents and direct learning
+loops stop admission and suppress late callbacks. Local learning writes drain;
+invalid or partially applied consolidation preserves its pending candidates.
+Current validators replace the retired maintenance definition checks.
+
+Full regression passed **184 files / 1971 tests**, with six explicitly skipped
+live TickTick cases. All **11 isolated headless browser journeys** passed. Check,
+shared/core and production dashboard builds, and the compiled 33-migration /
+six-service persistence-and-natural-exit smoke passed. The owner's next-env file
+was restored after build, and all 87 original definition files remain unchanged.
+
+Reviews used the three existing agents plus parent, not fresh blind contexts.
+The detailed R5 spec records findings and evidence. Admitted MCP mutation drain,
+remote provider cleanup and global graph/project ownership have explicit plans
+in deferred-work.md; no real provider/account delivery or workspace implementation
+is claimed.

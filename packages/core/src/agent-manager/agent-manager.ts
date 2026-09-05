@@ -97,6 +97,12 @@ export class AgentManager {
   private sessionManager?: SessionManager;
   private ravenMcpDeps?: RavenMcpDeps;
   private memoryStore?: MemoryStore;
+  private accepting = true;
+  private stopping?: Promise<void>;
+  private completions = new Map<string, () => void>();
+  private readonly requestHandler = (event: AgentTaskRequestEvent): void => {
+    this.enqueue(event.payload);
+  };
 
   constructor(deps: AgentManagerDeps) {
     this.eventBus = deps.eventBus;
@@ -116,12 +122,11 @@ export class AgentManager {
     }
     this.maxConcurrent = getConfig().RAVEN_MAX_CONCURRENT_AGENTS;
 
-    this.eventBus.on<AgentTaskRequestEvent>('agent:task:request', (event) => {
-      this.enqueue(event.payload);
-    });
+    this.eventBus.on('agent:task:request', this.requestHandler);
   }
 
   private enqueue(payload: AgentTaskRequestEvent['payload']): void {
+    if (!this.accepting) return;
     const task: AgentTask = {
       id: payload.taskId,
       sessionId: payload.sessionId,
@@ -147,6 +152,10 @@ export class AgentManager {
       internal: payload.internal,
     };
 
+    this.queueTask(task);
+  }
+
+  private queueTask(task: AgentTask): void {
     // Insert by priority
     const priorityOrder = { urgent: 0, high: 1, normal: 2, low: 3 };
     const idx = this.queue.findIndex(
@@ -173,10 +182,18 @@ export class AgentManager {
     // task's turn through the loop) already sees this session as taken.
     if (task.sessionId) this.runningSessionIds.add(task.sessionId);
     const promise = this.runTask(task).finally(() => {
+      this.abortControllers.delete(task.id);
+      this.taskMeta.delete(task.id);
       this.running.delete(task.id);
       if (task.sessionId) this.runningSessionIds.delete(task.sessionId);
+      this.completions.get(task.id)?.();
+      this.completions.delete(task.id);
       this.processQueue();
     });
+    // Keep unexpected persistence/listener errors observable without an unhandled rejection.
+    void promise.catch((err: unknown) =>
+      log.error(`Task ${task.id} failed during finalization: ${err}`),
+    );
     this.running.set(task.id, promise);
   }
 
@@ -221,6 +238,7 @@ export class AgentManager {
   }
 
   private processQueue(): void {
+    if (!this.accepting) return;
     this.admitValidatorTasks();
     this.admitFromQueue();
   }
@@ -233,6 +251,7 @@ export class AgentManager {
     const abortController = new AbortController();
     this.abortControllers.set(task.id, abortController);
     this.executionLogger?.logTaskStart(task);
+    if (task.sessionId) this.sessionManager?.updateStatus(task.sessionId, 'running');
 
     const thinkingContent = `Starting ${task.skillName} agent...`;
 
@@ -244,6 +263,7 @@ export class AgentManager {
       type: 'agent:message',
       payload: {
         taskId: task.id,
+        sessionId: task.sessionId,
         messageType: 'thinking',
         content: thinkingContent,
       },
@@ -304,7 +324,7 @@ export class AgentManager {
       this.sessionManager.updateStatus(task.sessionId, 'idle');
     }
 
-    if (!result.success && !result.blocked) {
+    if (!result.success && !result.blocked && !isCancelled) {
       this.eventBus.emit({
         id: generateId(),
         timestamp: Date.now(),
@@ -355,7 +375,13 @@ export class AgentManager {
       const task = this.queue.splice(queueIdx, 1)[0];
       task.status = 'cancelled';
       task.completedAt = Date.now();
+      task.errors = ['cancelled'];
+      task.result = '';
+      task.durationMs = 0;
       this.executionLogger?.logTaskComplete(task);
+      if (task.sessionId && !this.runningSessionIds.has(task.sessionId)) {
+        this.sessionManager?.updateStatus(task.sessionId, 'idle');
+      }
       log.info(`Cancelled queued task: ${taskId}`);
       // The running branch already emits agent:task:complete via the abort
       // path (runTask always emits on completion); a queued task never
@@ -378,6 +404,8 @@ export class AgentManager {
           cancelled: true,
         },
       });
+      this.completions.get(task.id)?.();
+      this.completions.delete(task.id);
       return true;
     }
 
@@ -434,9 +462,21 @@ export class AgentManager {
     return this.running.size;
   }
 
+  /** Stop admission synchronously, then settle every queued/running task while stores are open. */
+  stop(): Promise<void> {
+    if (this.stopping) return this.stopping;
+    this.accepting = false;
+    this.eventBus.off('agent:task:request', this.requestHandler);
+    for (const task of [...this.queue]) this.cancelTask(task.id);
+    for (const controller of this.abortControllers.values()) controller.abort();
+    this.stopping = Promise.allSettled([...this.running.values()]).then(() => undefined);
+    return this.stopping;
+  }
+
   async executeAction(
     params: ApprovedActionParams,
   ): Promise<{ success: boolean; result?: string; error?: string }> {
+    if (!this.accepting) return { success: false, error: 'Agent manager is stopping' };
     // Resolve capabilities for this skill from the library. An unknown
     // skillName (e.g. a legacy suite name that predates the library) resolves
     // to empty collections rather than throwing — same for a library that
@@ -479,7 +519,9 @@ export class AgentManager {
       approvedActionName: params.preApproved === true ? params.actionName : undefined,
     };
 
-    await this.runTask(task);
+    const completion = new Promise<void>((resolve) => this.completions.set(task.id, resolve));
+    this.queueTask(task);
+    await completion;
 
     return {
       success: task.status === 'completed',

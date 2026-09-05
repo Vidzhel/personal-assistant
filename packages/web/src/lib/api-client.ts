@@ -1,11 +1,9 @@
-import { CORE_API_URL as API_URL } from '@/lib/core-endpoints';
+import { apiRequest as request } from '@/lib/api-request';
+import { projectPath } from '@/lib/url-paths';
 
-async function request<T>(path: string, opts?: RequestInit): Promise<T> {
-  const headers: Record<string, string> = { ...(opts?.headers as Record<string, string>) };
-  if (opts?.body) headers['Content-Type'] = 'application/json';
-  const res = await fetch(`${API_URL}${path}`, { ...opts, headers });
-  if (!res.ok) throw new Error(`API error: ${res.status}`);
-  return res.json() as Promise<T>;
+async function updateProject(id: string, data: object): Promise<Project> {
+  await request(projectPath(id), { method: 'PUT', body: JSON.stringify(data) });
+  return request<Project>(projectPath(id));
 }
 
 export const api = {
@@ -27,14 +25,14 @@ export const api = {
     };
   },
   getProjects: () => request<Project[]>('/projects'),
-  getProject: (id: string) => request<Project>(`/projects/${id}`),
+  getProject: (id: string) => request<Project>(`${projectPath(id)}`),
   createProject: (data: {
     name: string;
     description?: string;
     skills?: string[];
     systemAccess?: 'none' | 'read' | 'read-write';
   }) => request<Project>('/projects', { method: 'POST', body: JSON.stringify(data) }),
-  deleteProject: (id: string) => request(`/projects/${id}`, { method: 'DELETE' }),
+  deleteProject: (id: string) => request(`${projectPath(id)}`, { method: 'DELETE' }),
   getSkills: () => request<Skill[]>('/skills'),
   getSchedules: () => request<Schedule[]>('/schedules'),
   setScheduleEnabled: (name: string, enabled: boolean) =>
@@ -62,26 +60,37 @@ export const api = {
   getEventSources: () => request<string[]>('/events/sources'),
   getEventTypes: () => request<string[]>('/events/types'),
   sendChat: (projectId: string, message: string) =>
-    request(`/projects/${projectId}/chat`, { method: 'POST', body: JSON.stringify({ message }) }),
-  getProjectSessions: (projectId: string) => request<Session[]>(`/projects/${projectId}/sessions`),
+    request(`${projectPath(projectId)}/chat`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    }),
+  getProjectSessions: (projectId: string) =>
+    request<Session[]>(`${projectPath(projectId)}/sessions`),
   createSession: (projectId: string) =>
-    request<Session>(`/projects/${projectId}/sessions/new`, { method: 'POST' }),
-  getSessionDebug: (sessionId: string) => request<SessionDebug>(`/sessions/${sessionId}/debug`),
+    request<Session>(`${projectPath(projectId)}/sessions/new`, { method: 'POST' }),
+  getSessionDebug: (sessionId: string) =>
+    request<SessionDebug>(`/sessions/${encodeURIComponent(sessionId)}/debug`),
   updateSession: (
     sessionId: string,
     data: { name?: string; description?: string; pinned?: boolean },
-  ) => request<Session>(`/sessions/${sessionId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  ) =>
+    request<Session>(`/sessions/${encodeURIComponent(sessionId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
   getCrossReferences: (sessionId: string) =>
     request<{ from: CrossSessionReference[]; to: CrossSessionReference[] }>(
-      `/sessions/${sessionId}/cross-references`,
+      `/sessions/${encodeURIComponent(sessionId)}/cross-references`,
     ),
   createCrossReference: (sessionId: string, data: { targetSessionId: string; context?: string }) =>
-    request<CrossSessionReference>(`/sessions/${sessionId}/cross-references`, {
+    request<CrossSessionReference>(`/sessions/${encodeURIComponent(sessionId)}/cross-references`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
   deleteCrossReference: (sessionId: string, refId: string) =>
-    request(`/sessions/${sessionId}/cross-references/${refId}`, { method: 'DELETE' }),
+    request(`/sessions/${encodeURIComponent(sessionId)}/cross-references/${refId}`, {
+      method: 'DELETE',
+    }),
   getAgentTasks: (params?: {
     status?: string;
     skillName?: string;
@@ -132,10 +141,10 @@ export const api = {
       body: JSON.stringify({ bubbleIds }),
     }),
   getSessionReferences: (sessionId: string) =>
-    request<SessionReferences>(`/sessions/${sessionId}/references`),
+    request<SessionReferences>(`/sessions/${encodeURIComponent(sessionId)}/references`),
   runSessionRetrospective: (sessionId: string) =>
     request<{ summary: string; bubblesCreated: number; bubblesDrafted: number }>(
-      `/sessions/${sessionId}/retrospective`,
+      `/sessions/${encodeURIComponent(sessionId)}/retrospective`,
       { method: 'POST' },
     ),
   getLogs: (params?: { lines?: number; level?: string; component?: string; search?: string }) => {
@@ -167,7 +176,7 @@ export const api = {
       systemPrompt?: string | null;
       systemAccess?: 'none' | 'read' | 'read-write';
     },
-  ) => request<Project>(`/projects/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  ) => updateProject(id, data),
 
   // Task management
   // eslint-disable-next-line complexity -- builds query string from many optional filter params
@@ -209,11 +218,11 @@ export const api = {
       body: JSON.stringify({ artifacts }),
     }),
   getTaskCounts: (projectId?: string) => {
-    const qs = projectId ? `?projectId=${projectId}` : '';
+    const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
     return request<Record<string, number>>(`/tasks/counts${qs}`);
   },
   enqueueMessage: (sessionId: string, message: string) =>
-    request(`/sessions/${sessionId}/enqueue`, {
+    request(`/sessions/${encodeURIComponent(sessionId)}/enqueue`, {
       method: 'POST',
       body: JSON.stringify({ message }),
     }),
@@ -253,12 +262,12 @@ export const api = {
   getAgentMemory: (id: string) => request<AgentMemoryFile[]>(`/agents/${id}/memory`),
   // Project data sources
   getProjectDataSources: (projectId: string) =>
-    request<ProjectDataSource[]>(`/projects/${projectId}/data-sources`),
+    request<ProjectDataSource[]>(`${projectPath(projectId)}/data-sources`),
   createProjectDataSource: (
     projectId: string,
     data: { uri: string; label: string; description?: string; sourceType: string },
   ) =>
-    request<ProjectDataSource>(`/projects/${projectId}/data-sources`, {
+    request<ProjectDataSource>(`${projectPath(projectId)}/data-sources`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
@@ -267,26 +276,31 @@ export const api = {
     dsId: string,
     data: Partial<{ uri: string; label: string; description: string; sourceType: string }>,
   ) =>
-    request<ProjectDataSource>(`/projects/${projectId}/data-sources/${dsId}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    }),
+    request<ProjectDataSource>(
+      `${projectPath(projectId)}/data-sources/${encodeURIComponent(dsId)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      },
+    ),
   deleteProjectDataSource: (projectId: string, dsId: string) =>
-    request(`/projects/${projectId}/data-sources/${dsId}`, { method: 'DELETE' }),
+    request(`${projectPath(projectId)}/data-sources/${encodeURIComponent(dsId)}`, {
+      method: 'DELETE',
+    }),
 
   // Project knowledge links
   getProjectKnowledgeLinks: (projectId: string) =>
-    request<LinkedBubbleSummary[]>(`/projects/${projectId}/knowledge-links`),
+    request<LinkedBubbleSummary[]>(`${projectPath(projectId)}/knowledge-links`),
   linkKnowledgeToProject: (projectId: string, bubbleId: string) =>
-    request(`/projects/${projectId}/knowledge-links`, {
+    request(`${projectPath(projectId)}/knowledge-links`, {
       method: 'POST',
       body: JSON.stringify({ bubbleId }),
     }),
   unlinkKnowledgeFromProject: (projectId: string, bubbleId: string) =>
-    request(`/projects/${projectId}/knowledge-links/${bubbleId}`, { method: 'DELETE' }),
+    request(`${projectPath(projectId)}/knowledge-links/${bubbleId}`, { method: 'DELETE' }),
 
   // Project children
-  getProjectChildren: (id: string) => request<ProjectChildRecord[]>(`/projects/${id}/children`),
+  getProjectChildren: (id: string) => request<ProjectChildRecord[]>(`${projectPath(id)}/children`),
 
   // Templates
   getTemplates: () => request<TemplateRecord[]>('/templates'),
@@ -664,6 +678,7 @@ export interface TemplateDetailRecord extends TemplateRecord {
 
 export interface TaskTreeRecord {
   id: string;
+  projectId?: string;
   status: string;
   plan?: string;
   taskCount: number;

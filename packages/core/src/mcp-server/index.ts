@@ -10,6 +10,7 @@ import { buildEscalationTools } from './tools/escalation.ts';
 import { buildScaffoldTools } from './tools/scaffold.ts';
 import { buildIntentTools } from './tools/intents.ts';
 import type { RavenMcpDeps } from './types.ts';
+import { guardTool } from './guard-tool.ts';
 
 export type { RavenMcpDeps } from './types.ts';
 export { type ScopeContext } from './scope.ts';
@@ -17,6 +18,7 @@ export { type ScopeContext } from './scope.ts';
 export function createRavenMcp(
   deps: RavenMcpDeps,
   scope: ScopeContext,
+  signal?: AbortSignal,
 ): McpSdkServerConfigWithInstance {
   const allTools = [
     ...buildTaskLifecycleTools(deps, scope),
@@ -29,7 +31,9 @@ export function createRavenMcp(
     ...buildIntentTools(deps, scope),
   ];
 
-  const scopedTools = allTools.filter((t) => isToolAllowed(scope, t.name));
+  const scopedTools = allTools
+    .filter((t) => isToolAllowed(scope, t.name))
+    .map((t) => guardTool(t, signal));
 
   return createSdkMcpServer({
     name: 'raven',

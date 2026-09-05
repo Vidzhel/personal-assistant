@@ -78,17 +78,25 @@ function TreeCancelAction({
   card: BoardCard;
   onCancelTree?: (treeId: string) => Promise<void>;
 }) {
+  const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   if (card.kind !== 'plan' || !canCancelTree(card.status)) return null;
 
   const handleCancelTree = (): void => {
     if (!confirm('Cancel this task tree? Running agent work will be aborted.')) return;
+    if (!onCancelTree || cancelling) return;
     setCancelling(true);
-    void onCancelTree?.(card.id).finally(() => setCancelling(false));
+    setError(null);
+    void onCancelTree(card.id)
+      .catch((cause: unknown) =>
+        setError(cause instanceof Error ? cause.message : 'Could not cancel this tree.'),
+      )
+      .finally(() => setCancelling(false));
   };
 
   return (
     <div className="mt-2 flex justify-end" onClick={(e) => e.stopPropagation()}>
+      {error && <p role="alert">{error}</p>}
       <Button variant="danger" size="sm" onClick={handleCancelTree} disabled={cancelling}>
         {cancelling ? 'Cancelling…' : 'Cancel'}
       </Button>

@@ -1,208 +1,207 @@
 'use client';
 
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { useWebSocket } from './useWebSocket';
+import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
+import { useWebSocket } from '@/hooks/useWebSocket';
 import type { WsMessage } from '@/lib/ws-client';
 import { consumeWsMessages } from '@/lib/ws-message-cursor';
-
-import { CORE_API_URL as API_URL } from '@/lib/core-endpoints';
-
-export interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant' | 'action' | 'thinking';
-  content: string;
-  timestamp: number;
-  taskId?: string;
-  toolName?: string;
-  toolSummary?: string;
-}
+import { api, type ActiveTasks } from '@/lib/api-client';
+import { apiRequest } from '@/lib/api-request';
+import { projectPath } from '@/lib/url-paths';
+import {
+  chatReducer,
+  createChatState,
+  type ChatMessage,
+  type ChatState,
+  type ChatAction,
+} from '@/lib/chat-state';
+export type { ChatMessage } from '@/lib/chat-state';
 
 interface UseChatOptions {
   projectId: string;
   sessionId?: string | null;
 }
+type Dispatch = (action: ChatAction) => void;
 
-// eslint-disable-next-line max-lines-per-function -- chat hook managing WebSocket state, history, and message routing
-export function useChat(opts: UseChatOptions): {
-  messages: ChatMessage[];
-  sendMessage: (message: string) => void;
-  sessionId: string | null;
-  loading: boolean;
-  activeTaskId: string | null;
-  stopTask: () => void;
-  statusLine: string | null;
-} {
-  const { projectId, sessionId: externalSessionId } = opts;
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-  const [sessionId, setSessionId] = useState<string | null>(externalSessionId ?? null);
-  const [loading, setLoading] = useState(true);
-  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
-  const [statusLine, setStatusLine] = useState<string | null>(null);
-  const initializedRef = useRef(false);
-  const processedWsRef = useRef<WsMessage | undefined>(undefined);
-  const channels = useMemo(() => [`project:${projectId}`], [projectId]);
-  const { messages: wsMessages, send } = useWebSocket(channels);
+async function loadConversation(
+  scope: ChatState,
+  signal: AbortSignal,
+  dispatch: Dispatch,
+): Promise<void> {
+  try {
+    const session = scope.sessionId
+      ? { id: scope.sessionId }
+      : await apiRequest<{ id: string }>(`${projectPath(scope.projectId)}/sessions`, {
+          method: 'POST',
+          signal,
+        });
+    if (signal.aborted) return;
+    dispatch({ type: 'patch', key: scope.key, patch: { sessionId: session.id } });
+    const [messages, active] = await Promise.all([
+      apiRequest<ChatMessage[]>(`/sessions/${encodeURIComponent(session.id)}/messages`, { signal }),
+      apiRequest<ActiveTasks>('/agent-tasks/active', { signal }),
+    ]);
+    if (signal.aborted) return;
+    const task = [...active.running, ...active.queued].find(
+      (item) => item.projectId === scope.projectId && item.sessionId === session.id,
+    );
+    dispatch({
+      type: 'history',
+      key: scope.key,
+      messages,
+      activeTaskId: task?.taskId ?? null,
+      revision: scope.taskRevision,
+    });
+  } catch (cause) {
+    if (!signal.aborted)
+      dispatch({
+        type: 'patch',
+        key: scope.key,
+        patch: {
+          loading: false,
+          error: cause instanceof Error ? cause.message : 'Could not load this conversation.',
+        },
+      });
+  }
+}
 
-  // Sync external sessionId changes (e.g. session switch)
+function useConversationSocket(scope: ChatState, messages: WsMessage[], dispatch: Dispatch): void {
+  const cursor = useRef<WsMessage | undefined>(undefined);
+  const previousKey = useRef(scope.key);
   useEffect(() => {
-    if (externalSessionId !== undefined && externalSessionId !== sessionId) {
-      setSessionId(externalSessionId);
-      setStatusLine(null);
-      initializedRef.current = false;
-      processedWsRef.current = undefined;
+    if (previousKey.current !== scope.key) {
+      previousKey.current = scope.key;
+      cursor.current = messages.at(-1);
+      return;
     }
-  }, [externalSessionId, sessionId]);
+    for (const message of consumeWsMessages(messages, cursor))
+      dispatch({ type: 'socket', key: scope.key, message });
+  }, [messages, scope.key, scope.sessionId, dispatch]);
+}
 
-  // On mount or session change: load history
-  useEffect(() => {
-    if (initializedRef.current) return;
-    initializedRef.current = true;
-
-    async function init(): Promise<void> {
-      try {
-        let sid = externalSessionId;
-        if (!sid) {
-          const res = await fetch(`${API_URL}/projects/${projectId}/sessions`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-          });
-          if (!res.ok) throw new Error('Failed to get session');
-          const session = (await res.json()) as { id: string };
-          sid = session.id;
-          setSessionId(sid);
-        }
-
-        const displayRoles = new Set(['user', 'assistant', 'thinking']);
-        const msgRes = await fetch(`${API_URL}/sessions/${sid}/messages`);
-        if (msgRes.ok) {
-          const history = (await msgRes.json()) as ChatMessage[];
-          setChatMessages(history.filter((m) => displayRoles.has(m.role)));
-        } else {
-          setChatMessages([]);
-        }
-      } catch {
-        // Fallback: work without session persistence
-        setChatMessages([]);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    setLoading(true);
-    init();
-  }, [projectId, externalSessionId]);
-
-  // Handle incoming WebSocket messages
-  // eslint-disable-next-line max-lines-per-function, complexity -- WebSocket message routing with multiple event types
-  useEffect(() => {
-    const newMessages = consumeWsMessages(wsMessages, processedWsRef);
-    for (const msg of newMessages) {
-      if (msg.type === 'chat:error') {
-        const data = msg.data as { projectId?: string; sessionId?: string; error: string };
-        if (data.projectId && data.projectId !== projectId) continue;
-        if (data.sessionId && data.sessionId !== sessionId) continue;
-        setStatusLine(data.error);
-      }
-      if (msg.type === 'event') {
-        const event = msg.data as {
-          type: string;
-          payload?: {
-            messageType?: string;
-            content?: string;
-            taskId?: string;
-            messageId?: string;
-            projectId?: string;
-            sessionId?: string;
-            error?: string;
-          };
-        };
-        const content = event.payload?.content;
-        const taskId = event.payload?.taskId;
-        const messageType = event.payload?.messageType;
-        const messageId = event.payload?.messageId;
-
-        if (event.type === 'user:chat:rejected' && event.payload?.projectId === projectId) {
-          if (!event.payload.sessionId || event.payload.sessionId === sessionId) {
-            setStatusLine(event.payload.error ?? 'Chat message rejected');
-          }
-        }
-
-        if (event.type === 'agent:task:complete') {
-          setActiveTaskId(null);
-          setStatusLine(null);
-        }
-
-        if (event.type === 'agent:message' && content) {
-          if (taskId) setActiveTaskId(taskId);
-          if (messageType === 'tool_use') {
-            const colonIdx = content.indexOf(':');
-            const toolName = colonIdx > 0 ? content.slice(0, colonIdx).trim() : 'Tool';
-            setStatusLine(`Using ${toolName}...`);
-          } else if (messageType === 'thinking') {
-            setChatMessages((prev) => {
-              if (messageId && prev.some((m) => m.id === messageId)) return prev;
-              return [
-                ...prev,
-                {
-                  id: messageId ?? crypto.randomUUID(),
-                  role: 'thinking' as const,
-                  content,
-                  timestamp: Date.now(),
-                  taskId,
-                },
-              ];
-            });
-          } else {
-            setChatMessages((prev) => {
-              if (messageId && prev.some((m) => m.id === messageId)) return prev;
-              const existing = prev.find((m) => m.role === 'assistant' && m.taskId === taskId);
-              if (existing) {
-                return prev.map((m) =>
-                  m === existing ? { ...m, content: m.content + content } : m,
-                );
-              }
-              return [
-                ...prev,
-                {
-                  id: messageId ?? crypto.randomUUID(),
-                  role: 'assistant' as const,
-                  content,
-                  timestamp: Date.now(),
-                  taskId,
-                },
-              ];
-            });
-          }
-        }
-      }
-    }
-  }, [wsMessages, projectId, sessionId]);
-
+function useSendChat(
+  state: ChatState,
+  dispatch: Dispatch,
+  send: (message: unknown) => boolean,
+): (message: string, prefix?: string) => boolean {
   const sendMessage = useCallback(
-    (message: string) => {
-      setChatMessages((prev) => [
-        ...prev,
-        { id: crypto.randomUUID(), role: 'user', content: message, timestamp: Date.now() },
-      ]);
-      send({ type: 'chat:send', projectId, message, sessionId });
+    (content: string, prefix = '') => {
+      if (
+        state.loading ||
+        !state.sessionId ||
+        state.activeTaskId ||
+        state.messages.some((message) => message.delivery === 'pending')
+      )
+        return false;
+      const requestId = crypto.randomUUID();
+      if (
+        !send({
+          type: 'chat:send',
+          projectId: state.projectId,
+          sessionId: state.sessionId,
+          message: prefix + content,
+          requestId,
+        })
+      ) {
+        dispatch({
+          type: 'patch',
+          key: state.key,
+          patch: { error: 'Disconnected. Your message was not sent; the draft is still here.' },
+        });
+        return false;
+      }
+      dispatch({
+        type: 'send',
+        key: state.key,
+        message: {
+          id: requestId,
+          requestId,
+          role: 'user',
+          content,
+          timestamp: Date.now(),
+          delivery: 'pending',
+        },
+      });
+      return true;
     },
-    [projectId, sessionId, send],
+    [state, dispatch, send],
   );
+  return sendMessage;
+}
 
-  const stopTask = useCallback(() => {
-    if (!activeTaskId) return;
-    fetch(`${API_URL}/agent-tasks/${activeTaskId}/cancel`, { method: 'POST' }).catch(() => {});
-    setActiveTaskId(null);
-    setStatusLine(null);
-  }, [activeTaskId]);
+function useStopChat(state: ChatState, dispatch: Dispatch): () => Promise<void> {
+  return useCallback(async () => {
+    if (!state.activeTaskId || state.stopPending) return;
+    dispatch({
+      type: 'patch',
+      key: state.key,
+      patch: { stopPending: true, statusLine: 'Stopping...', error: null },
+    });
+    try {
+      await api.cancelTask(state.activeTaskId);
+      // Acceptance is not the terminal event; retain the task until completion arrives.
+    } catch (cause) {
+      dispatch({
+        type: 'stop-error',
+        key: state.key,
+        taskId: state.activeTaskId,
+        error: cause instanceof Error ? cause.message : 'Could not stop this task.',
+      });
+    }
+  }, [state, dispatch]);
+}
 
-  return {
-    messages: chatMessages,
-    sendMessage,
-    sessionId,
-    loading,
-    activeTaskId,
-    stopTask,
-    statusLine,
-  };
+function useChatReconnection(state: ChatState, connection: string, dispatch: Dispatch): void {
+  const current = useRef({ state, reconnect: false });
+  if (current.current.state.key !== state.key) current.current.reconnect = false;
+  current.current.state = state;
+  useEffect(() => {
+    if (connection === 'disconnected') {
+      current.current.reconnect = true;
+      dispatch({ type: 'disconnect', key: state.key });
+    }
+    if (connection !== 'connected' || !current.current.reconnect) return;
+    current.current.reconnect = false;
+    const controller = new AbortController();
+    const snapshot = current.current.state;
+    dispatch({ type: 'patch', key: snapshot.key, patch: { loading: true } });
+    void loadConversation(snapshot, controller.signal, dispatch);
+    return () => controller.abort();
+  }, [connection, state.key, dispatch]);
+}
+
+export function useChat(opts: UseChatOptions): ChatState & {
+  sendMessage: (message: string, prefix?: string) => boolean;
+  stopTask: () => Promise<void>;
+  connection: string;
+} {
+  const key = JSON.stringify([opts.projectId, opts.sessionId ?? null]);
+  const scope = useMemo(
+    () => createChatState({ key, projectId: opts.projectId, sessionId: opts.sessionId ?? null }),
+    [key, opts.projectId, opts.sessionId],
+  );
+  const [stored, dispatch] = useReducer(chatReducer, scope);
+  const drafts = useRef(new Map<string, ChatMessage[]>());
+  useEffect(() => {
+    drafts.current.set(
+      stored.key,
+      stored.messages.filter((message) => message.delivery),
+    );
+  }, [stored]);
+  const state = stored.key === key ? stored : scope;
+  const channels = useMemo(() => [`project:${opts.projectId}`], [opts.projectId]);
+  const socket = useWebSocket(channels);
+  useEffect(() => {
+    const controller = new AbortController();
+    const messages = (drafts.current.get(scope.key) ?? []).map((message) =>
+      message.delivery === 'pending' ? { ...message, delivery: 'uncertain' as const } : message,
+    );
+    dispatch({ type: 'reset', state: { ...scope, messages } });
+    void loadConversation(scope, controller.signal, dispatch);
+    return () => controller.abort();
+  }, [scope]);
+  useConversationSocket(state, socket.messages, dispatch);
+  useChatReconnection(state, socket.connection, dispatch);
+  const sendMessage = useSendChat(state, dispatch, socket.send);
+  const stopTask = useStopChat(state, dispatch);
+  return { ...state, sendMessage, stopTask, connection: socket.connection };
 }

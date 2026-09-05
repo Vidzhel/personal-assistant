@@ -265,6 +265,7 @@ export async function createRaven(
   // compiled ServiceDefinitions rather than suite-declared dynamic imports.
   const serviceRunner = createServiceRunner();
   const jobRegistry = createJobRegistry();
+  let boundPort = config.RAVEN_PORT;
   const baseContext = {
     eventBus: {
       emit: (event: unknown) => eventBus.emit(event as RavenEvent),
@@ -277,6 +278,7 @@ export async function createRaven(
     logger: log,
     config: {
       intentStore,
+      RAVEN_PORT: config.RAVEN_PORT,
       neo4j: {
         enabled: config.NEO4J_ENABLED,
         uri: config.NEO4J_URI,
@@ -286,6 +288,9 @@ export async function createRaven(
     } as Record<string, unknown>,
     projectRoot: dataRoot,
     configDir,
+    projectsDir,
+    libraryDir,
+    getApiPort: () => boundPort,
     integrationsConfig,
     jobRegistry,
   };
@@ -652,7 +657,6 @@ export async function createRaven(
   // 13. API server — bind deferred to start() so the instance can be handed
   // back to callers (tests) before the port is actually listening.
   let server: Awaited<ReturnType<typeof createApiServer>> | undefined;
-  let boundPort = config.RAVEN_PORT;
 
   async function start(): Promise<void> {
     server = await createApiServer(
@@ -725,6 +729,19 @@ export async function createRaven(
     }
     // Stop HTTP acceptance immediately; let accepted requests drain before graph disposal.
     const serverClosed = cleanup(() => server?.close());
+    // Stop admission now; keep completion consumers/stores alive until local tasks settle.
+    const orchestratorStopped = cleanup(() => _orchestrator.stop());
+    const retrospectiveStopped = cleanup(() => sessionRetrospective.stop());
+    const agentsStopped = cleanup(() => agentManager.stop());
+    const heartbeatStopped = cleanup(() => heartbeat.stop());
+    const memoryStopped = cleanup(() => memoryConsolidation.stop());
+    await Promise.all([
+      orchestratorStopped,
+      retrospectiveStopped,
+      agentsStopped,
+      heartbeatStopped,
+      memoryStopped,
+    ]);
     await cleanup(() => idleDetector.stop());
     await cleanup(() => executionBridge.stop());
     await cleanup(() => templateScheduler.stop());
@@ -737,6 +754,7 @@ export async function createRaven(
     delete ravenMcpDeps.knowledgeStore;
     delete ravenMcpDeps.retrievalEngine;
     await cleanup(() => knowledge?.stop());
+    await cleanup(() => eventBus.removeAllListeners());
     await cleanup(closeDatabase);
     log.info('Goodbye!');
     // Flush the logging worker before callers remove temporary runtime directories.

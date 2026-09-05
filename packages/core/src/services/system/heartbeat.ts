@@ -146,7 +146,8 @@ function resolveTargetSystemAccessInstructions(db: Database.Database, projectId:
  * messageStore is deliberately NOT passed either, so this synthetic turn
  * never shows up in the owner's own chat transcript — only its (rare)
  * notification is owner-visible, per the silence contract. */
-async function dispatchHeartbeatTurn(deps: HeartbeatDeps): Promise<string> {
+async function dispatchHeartbeatTurn(deps: HeartbeatDeps, signal: AbortSignal): Promise<string> {
+  signal.throwIfAborted();
   const { db, eventBus, sessionManager, ravenMcpDeps, memoryStore, permissionDeps, config } = deps;
   const projectId = deps.targetProjectId ?? META_PROJECT_ID;
   const sessionId = generateId();
@@ -183,7 +184,9 @@ async function dispatchHeartbeatTurn(deps: HeartbeatDeps): Promise<string> {
     sessionManager,
     model: config.CLAUDE_MODEL,
     maxTurns: HEARTBEAT_MAX_TURNS,
+    signal,
   });
+  signal.throwIfAborted();
 
   if (!result.success) {
     throw new Error(
@@ -213,6 +216,13 @@ export interface Heartbeat {
   fireHeartbeat: FireHeartbeat;
   /** Test/introspection seam — whether a fire is currently in flight. */
   isRunning: () => boolean;
+  stop: () => Promise<void>;
+}
+
+interface HeartbeatState {
+  controller: AbortController;
+  running: boolean;
+  pending: Set<Promise<{ summary: string }>>;
 }
 
 /**
@@ -221,45 +231,64 @@ export interface Heartbeat {
  * fire hasn't finished; otherwise dispatch one synthetic turn and either
  * swallow an exact HEARTBEAT_OK reply (log only) or notify the owner.
  */
-export function createHeartbeat(deps: HeartbeatDeps): Heartbeat {
-  let running = false;
-
-  async function fireHeartbeat(): Promise<{ summary: string }> {
-    if (running) {
-      log.info('Skipping: previous heartbeat is still running');
-      return { summary: 'skipped: previous heartbeat still running' };
-    }
-
-    const now = Date.now();
-    if (
-      !isWithinActiveHours(
-        now,
-        deps.config.RAVEN_HEARTBEAT_ACTIVE_HOURS,
-        deps.config.RAVEN_TIMEZONE,
-      )
-    ) {
-      log.info('Skipping: outside active hours');
-      return { summary: 'skipped: outside active hours' };
-    }
-    if (hadRecentAgentActivity(deps.db, now - BUSY_DEFERRAL_WINDOW_MS)) {
-      log.info('Skipping: busy-deferral (recent agent activity)');
-      return { summary: 'skipped: busy-deferral (recent agent activity)' };
-    }
-
-    running = true;
-    try {
-      const response = await dispatchHeartbeatTurn(deps);
-      if (HEARTBEAT_OK_RE.test(response.trim())) {
-        log.info(`${HEARTBEAT_OK} — swallowed`);
-        return { summary: `${HEARTBEAT_OK} (swallowed)` };
-      }
-      notifyOwner(deps.eventBus, response);
-      log.info('Notified owner');
-      return { summary: 'notified owner' };
-    } finally {
-      running = false;
-    }
+async function fireHeartbeat(
+  deps: HeartbeatDeps,
+  state: HeartbeatState,
+): Promise<{ summary: string }> {
+  state.controller.signal.throwIfAborted();
+  if (state.running) {
+    log.info('Skipping: previous heartbeat is still running');
+    return { summary: 'skipped: previous heartbeat still running' };
   }
 
-  return { fireHeartbeat, isRunning: () => running };
+  const now = Date.now();
+  if (
+    !isWithinActiveHours(now, deps.config.RAVEN_HEARTBEAT_ACTIVE_HOURS, deps.config.RAVEN_TIMEZONE)
+  ) {
+    log.info('Skipping: outside active hours');
+    return { summary: 'skipped: outside active hours' };
+  }
+  if (hadRecentAgentActivity(deps.db, now - BUSY_DEFERRAL_WINDOW_MS)) {
+    log.info('Skipping: busy-deferral (recent agent activity)');
+    return { summary: 'skipped: busy-deferral (recent agent activity)' };
+  }
+
+  state.running = true;
+  try {
+    const response = await dispatchHeartbeatTurn(deps, state.controller.signal);
+    state.controller.signal.throwIfAborted();
+    if (HEARTBEAT_OK_RE.test(response.trim())) {
+      log.info(`${HEARTBEAT_OK} — swallowed`);
+      return { summary: `${HEARTBEAT_OK} (swallowed)` };
+    }
+    notifyOwner(deps.eventBus, response);
+    log.info('Notified owner');
+    return { summary: 'notified owner' };
+  } finally {
+    state.running = false;
+  }
+}
+
+export function createHeartbeat(deps: HeartbeatDeps): Heartbeat {
+  const state: HeartbeatState = {
+    controller: new AbortController(),
+    running: false,
+    pending: new Set(),
+  };
+  return {
+    fireHeartbeat: () => {
+      const work = fireHeartbeat(deps, state);
+      state.pending.add(work);
+      void work.then(
+        () => state.pending.delete(work),
+        () => state.pending.delete(work),
+      );
+      return work;
+    },
+    isRunning: () => state.running,
+    stop: async () => {
+      state.controller.abort();
+      await Promise.allSettled([...state.pending]);
+    },
+  };
 }

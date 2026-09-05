@@ -1,21 +1,23 @@
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { api, type Session } from '@/lib/api-client';
 import { ChatPanel } from '@/components/chat/ChatPanel';
 import { SessionDebugPanel } from '@/components/session/SessionDebugPanel';
 import { ReferencesPanel } from '@/components/session/ReferencesPanel';
 import { SessionReferencesPanel } from '@/components/session/SessionReferencesPanel';
-import { InlineEditField } from './InlineEditField';
+import { InlineEditField } from '@/components/project/InlineEditField';
 import { useReferences } from '@/hooks/useReferences';
-import type { ProjectTabProps } from './project-tab-registry';
+import type { ProjectTabProps } from '@/components/project/project-tab-registry';
 
 const ID_DISPLAY_LENGTH = 8;
 const COPY_FEEDBACK_DURATION_MS = 1500;
 const SUMMARY_PREVIEW_LENGTH = 100;
 
 // eslint-disable-next-line max-lines-per-function, complexity -- sessions tab with session list, chat panel, debug, references, cross-refs
-export function ProjectSessionsTab({ projectId }: ProjectTabProps) {
+export function ProjectSessionsTab({ projectId, requestedSessionId }: ProjectTabProps) {
+  const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -26,25 +28,64 @@ export function ProjectSessionsTab({ projectId }: ProjectTabProps) {
   const [retroLoading, setRetroLoading] = useState(false);
   const [retroResult, setRetroResult] = useState<{ summary: string } | null>(null);
   const { references, externalRefs } = useReferences(activeSessionId);
+  const currentSession = useRef(activeSessionId);
+  currentSession.current = activeSessionId;
+  useEffect(() => {
+    setRetroResult(null);
+    setRetroLoading(false);
+    setCopied(false);
+    setError(null);
+  }, [activeSessionId]);
 
   useEffect(() => {
-    api.getProjectSessions(projectId).then((s) => {
-      setSessions(s);
-      if (s.length > 0 && !activeSessionId) setActiveSessionId(s[0].id);
-    });
-  }, [projectId]); // intentionally omit activeSessionId — only set on first load
+    let active = true;
+    setError(null);
+    api
+      .getProjectSessions(projectId)
+      .then((sessions) => {
+        if (!active) return;
+        setSessions(sessions);
+        setActiveSessionId(
+          (previous) =>
+            requestedSessionId ??
+            (sessions.some((session) => session.id === previous)
+              ? previous
+              : (sessions[0]?.id ?? null)),
+        );
+      })
+      .catch((cause: unknown) => {
+        if (active) setError(cause instanceof Error ? cause.message : 'Could not load sessions.');
+      });
+    return () => {
+      active = false;
+    };
+  }, [projectId, requestedSessionId]);
 
   const handleNewSession = useCallback(async () => {
-    const session = await api.createSession(projectId);
-    setSessions((prev) => [session, ...prev]);
-    setActiveSessionId(session.id);
-  }, [projectId]);
+    if (creating) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const session = await api.createSession(projectId);
+      setSessions((previous) => [session, ...previous]);
+      setActiveSessionId(session.id);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not create session.');
+    } finally {
+      setCreating(false);
+    }
+  }, [projectId, creating]);
 
   const handleCopySessionId = useCallback(() => {
     if (!activeSessionId) return;
-    navigator.clipboard.writeText(activeSessionId);
-    setCopied(true);
-    setTimeout(() => setCopied(false), COPY_FEEDBACK_DURATION_MS);
+    void navigator.clipboard
+      .writeText(activeSessionId)
+      .then(() => {
+        if (currentSession.current !== activeSessionId) return;
+        setCopied(true);
+        setTimeout(() => setCopied(false), COPY_FEEDBACK_DURATION_MS);
+      })
+      .catch(() => setError('Could not copy the session ID.'));
   }, [activeSessionId]);
 
   const handleUpdateSession = useCallback(
@@ -61,12 +102,16 @@ export function ProjectSessionsTab({ projectId }: ProjectTabProps) {
     setRetroResult(null);
     try {
       const result = await api.runSessionRetrospective(activeSessionId);
+      if (currentSession.current !== activeSessionId) return;
       setRetroResult(result);
       // Refresh sessions to get updated summary
       const updated = await api.getProjectSessions(projectId);
       setSessions(updated);
+    } catch (cause) {
+      if (currentSession.current === activeSessionId)
+        setError(cause instanceof Error ? cause.message : 'Retrospective failed.');
     } finally {
-      setRetroLoading(false);
+      if (currentSession.current === activeSessionId) setRetroLoading(false);
     }
   }, [activeSessionId, projectId]);
 
@@ -86,6 +131,11 @@ export function ProjectSessionsTab({ projectId }: ProjectTabProps) {
 
   return (
     <div className="flex h-full">
+      {error && (
+        <p role="alert" className="p-3" style={{ color: 'var(--error)' }}>
+          {error}
+        </p>
+      )}
       {/* Session list sidebar */}
       <div
         className="w-72 border-r flex flex-col shrink-0"
@@ -156,6 +206,7 @@ export function ProjectSessionsTab({ projectId }: ProjectTabProps) {
         <div className="p-3 border-t" style={{ borderColor: 'var(--border)' }}>
           <button
             onClick={() => void handleNewSession()}
+            disabled={creating}
             className="w-full px-3 py-1.5 rounded text-sm font-medium transition-colors"
             style={{ background: 'var(--accent)', color: 'white' }}
           >
@@ -175,7 +226,11 @@ export function ProjectSessionsTab({ projectId }: ProjectTabProps) {
             <div className="flex items-center gap-3">
               <button
                 onClick={() =>
-                  void handleUpdateSession(activeSession.id, { pinned: !activeSession.pinned })
+                  void handleUpdateSession(activeSession.id, {
+                    pinned: !activeSession.pinned,
+                  }).catch((cause: unknown) =>
+                    setError(cause instanceof Error ? cause.message : 'Could not update session.'),
+                  )
                 }
                 className="text-sm hover:opacity-80"
                 title={activeSession.pinned ? 'Unpin session' : 'Pin session'}

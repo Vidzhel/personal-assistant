@@ -1,9 +1,11 @@
 'use client';
 
+import { projectPath } from '@/lib/url-paths';
+
 import { useState } from 'react';
 import { api, type ActiveTaskInfo } from '@/lib/api-client';
 import { Button } from '@/components/ui/Button';
-import { SendMessageModal } from './SendMessageModal';
+import { SendMessageModal } from '@/components/tasks/SendMessageModal';
 
 const MS_PER_SECOND = 1000;
 const SECONDS_PER_MINUTE = 60;
@@ -31,17 +33,18 @@ interface AgentMonitorCardProps {
 // eslint-disable-next-line max-lines-per-function, complexity -- card renders task info, session link, cancel/message actions, and modal
 export function AgentMonitorCard({ task, section, onRefresh }: AgentMonitorCardProps) {
   const [showMessage, setShowMessage] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
 
   const handleCancel = async () => {
     if (!confirm('Terminate this agent task?')) return;
     setCancelling(true);
+    setError(null);
     try {
       await api.cancelTask(task.taskId);
       onRefresh();
-    } catch {
-      /* */
-    } finally {
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not cancel this task.');
       setCancelling(false);
     }
   };
@@ -94,7 +97,7 @@ export function AgentMonitorCard({ task, section, onRefresh }: AgentMonitorCardP
       {/* Session link */}
       {task.sessionId && task.projectId && (
         <a
-          href={`/projects/${task.projectId}`}
+          href={projectPath(task.projectId)}
           className="text-xs mt-1 inline-block"
           style={{ color: 'var(--accent)' }}
         >
@@ -102,6 +105,11 @@ export function AgentMonitorCard({ task, section, onRefresh }: AgentMonitorCardP
         </a>
       )}
 
+      {error && (
+        <p role="alert" style={{ color: 'var(--error)' }}>
+          {error}
+        </p>
+      )}
       {/* Actions */}
       <div className="flex items-center gap-2 mt-3">
         <Button variant="danger" size="sm" onClick={handleCancel} disabled={cancelling}>
@@ -120,7 +128,7 @@ export function AgentMonitorCard({ task, section, onRefresh }: AgentMonitorCardP
 
         {task.sessionId && task.projectId && (
           <a
-            href={`/projects/${task.projectId}`}
+            href={projectPath(task.projectId)}
             className="text-xs px-2 py-1 rounded"
             style={{ color: 'var(--text-muted)' }}
           >

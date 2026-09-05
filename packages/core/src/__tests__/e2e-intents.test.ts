@@ -53,7 +53,7 @@ describe('e2e: intents — create -> matching event -> notification, with budget
     intentStore = undefined;
   });
 
-  it('fires once on match, stays silent within cooldown, exhausts after budget', async () => {
+  it('respects cooldown and budget, and HTTP cancellation suppresses further matches', async () => {
     // The real Orchestrator also subscribes to email:new (unconditionally,
     // to dispatch a gmail-skill triage turn) — every emitted email below
     // triggers that path too, alongside the intent matcher. A fake backend
@@ -145,5 +145,28 @@ describe('e2e: intents — create -> matching event -> notification, with budget
     vi.spyOn(Date, 'now').mockReturnValue(realNow + 100 * MS_PER_HOUR);
     emitEmail();
     expect(notifications).toHaveLength(2);
+
+    // The dashboard's real cancellation route must change the same store the
+    // running matcher reads, before another matching event is processed.
+    const cancelled = intentStore.create({
+      kind: 'event',
+      keywords: ['invoice'],
+      eventTypes: ['email:new'],
+      message: 'A reminder the owner cancelled',
+    });
+    const cancelResponse = await fetch(
+      `http://127.0.0.1:${raven.port}/api/intents/${cancelled.id}/cancel`,
+      { method: 'POST' },
+    );
+    expect(cancelResponse.status).toBe(200);
+    expect(await cancelResponse.json()).toEqual({ id: cancelled.id, status: 'cancelled' });
+    emitEmail();
+    expect(notifications).toHaveLength(2);
+    expect(intentStore.get(cancelled.id)).toMatchObject({ status: 'cancelled', firesUsed: 0 });
+    const listResponse = await fetch(`http://127.0.0.1:${raven.port}/api/intents`);
+    expect(listResponse.status).toBe(200);
+    expect(await listResponse.json()).toContainEqual(
+      expect.objectContaining({ id: cancelled.id, status: 'cancelled', firesUsed: 0 }),
+    );
   }, 10000);
 });

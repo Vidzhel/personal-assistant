@@ -3,7 +3,10 @@ import { HTTP_STATUS, type AgentSession } from '@raven/shared';
 import { getDb } from '../db/database.ts';
 import type { SessionManager } from './session-manager.ts';
 
+export const CHAT_REQUEST_ID_MAX_LENGTH = 128;
+
 export const ChatRequestSchema = z.object({
+  requestId: z.string().min(1).max(CHAT_REQUEST_ID_MAX_LENGTH).optional(),
   projectId: z.string().min(1),
   message: z.string().min(1),
   // The dashboard sends null while its initial session is loading.

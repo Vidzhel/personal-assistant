@@ -1,13 +1,10 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { createLogger } from '@raven/shared';
-
-const log = createLogger('convention-auditor');
-
-const KEBAB_CASE_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
+import { stat } from 'node:fs/promises';
+import { validateProjects } from '../../project-registry/project-validator.ts';
+import { validateLibrary } from '../../capability-library/library-validator.ts';
+import { loadLibrary } from '../../capability-library/library-loader.ts';
 
 export interface ConventionViolation {
-  resourceType: 'agent' | 'schedule';
+  resourceType: 'agent' | 'schedule' | 'project' | 'library';
   resourceName: string;
   rule: string;
   severity: 'error' | 'warning';
@@ -17,245 +14,80 @@ export interface ConventionViolation {
 
 export interface ConventionAuditReport {
   violations: ConventionViolation[];
+  /** Counts validated definition roots, rather than obsolete JSON records. */
   compliantCount: number;
   totalChecked: number;
   checkedAt: string;
 }
 
-/**
- * Scans all resources against convention rules and returns a structured report.
- */
-export async function auditConventions(configDir: string): Promise<ConventionAuditReport> {
+export interface ConventionAuditPaths {
+  projectsDir: string;
+  libraryDir: string;
+  knownSkills?: Set<string>;
+}
+
+/** Use the same validators as validate:projects / validate:library. */
+export async function auditConventions(
+  paths: ConventionAuditPaths,
+): Promise<ConventionAuditReport> {
   const violations: ConventionViolation[] = [];
-  let totalChecked = 0;
-
-  // Audit agents
-  const agentViolations = auditAgents(configDir);
-  violations.push(...agentViolations.violations);
-  totalChecked += agentViolations.checked;
-
-  // Audit schedules
-  const scheduleViolations = auditSchedules(configDir);
-  violations.push(...scheduleViolations.violations);
-  totalChecked += scheduleViolations.checked;
-
-  const compliantCount =
-    totalChecked - new Set(violations.map((v) => `${v.resourceType}:${v.resourceName}`)).size;
-
-  log.info(
-    `Convention audit complete: ${String(violations.length)} violations found across ${String(totalChecked)} resources`,
+  let knownSkills = paths.knownSkills;
+  try {
+    knownSkills ??= new Set((await loadLibrary(paths.libraryDir)).skills.keys());
+  } catch {
+    // The library validation below reports unreadable/malformed definitions.
+  }
+  violations.push(
+    ...(await check('project', paths.projectsDir, () =>
+      validateProjects(paths.projectsDir, { knownSkills }),
+    )),
   );
-
+  violations.push(
+    ...(await check('library', paths.libraryDir, async () => ({
+      errors: await validateLibrary(paths.libraryDir),
+      warnings: [],
+    }))),
+  );
+  const totalChecked = 2;
   return {
     violations,
-    compliantCount,
     totalChecked,
+    compliantCount: totalChecked - new Set(violations.map((v) => v.resourceType)).size,
     checkedAt: new Date().toISOString(),
   };
 }
 
-interface AuditResult {
-  violations: ConventionViolation[];
-  checked: number;
-}
-
-interface AgentEntry {
-  id: string;
-  name: string;
-  description?: string;
-  suite_ids?: string[];
-  is_default?: boolean;
-}
-
-function auditSingleAgent(agent: AgentEntry): ConventionViolation[] {
+async function check(
+  resourceType: 'project' | 'library',
+  resourceName: string,
+  validate: () => Promise<{ errors: string[]; warnings: string[] }>,
+): Promise<ConventionViolation[]> {
   const violations: ConventionViolation[] = [];
-
-  // Check kebab-case naming
-  if (!KEBAB_CASE_RE.test(agent.name)) {
-    violations.push({
-      resourceType: 'agent',
-      resourceName: agent.name,
-      rule: 'kebab-case-name',
-      severity: 'error',
-      message: `Agent name "${agent.name}" is not kebab-case`,
-      fix: `Rename to kebab-case format`,
-    });
-  }
-
-  // Check description
-  if (!agent.description) {
-    violations.push({
-      resourceType: 'agent',
-      resourceName: agent.name,
-      rule: 'has-description',
-      severity: 'warning',
-      message: `Agent missing description`,
-      fix: `Add a description explaining what this agent does`,
-    });
-  }
-
-  return violations;
-}
-
-function auditDefaultAgentCount(defaultCount: number): ConventionViolation[] {
-  if (defaultCount === 0) {
-    return [
-      {
-        resourceType: 'agent',
-        resourceName: 'agents.json',
-        rule: 'has-default-agent',
-        severity: 'error',
-        message: `No default agent configured (need exactly one with is_default: true)`,
-        fix: `Set is_default: true on one agent`,
-      },
-    ];
-  }
-  if (defaultCount > 1) {
-    return [
-      {
-        resourceType: 'agent',
-        resourceName: 'agents.json',
-        rule: 'single-default-agent',
-        severity: 'error',
-        message: `Multiple default agents configured (${String(defaultCount)} found, need exactly 1)`,
-        fix: `Set is_default: true on only one agent`,
-      },
-    ];
-  }
-  return [];
-}
-
-function auditAgents(configDir: string): AuditResult {
-  const violations: ConventionViolation[] = [];
-  let checked = 0;
-
-  const agentsPath = join(configDir, 'agents.json');
-  if (!existsSync(agentsPath)) return { violations, checked };
-
   try {
-    const content = readFileSync(agentsPath, 'utf-8');
-    const agents = JSON.parse(content) as AgentEntry[];
-
-    let defaultCount = 0;
-
-    for (const agent of agents) {
-      checked++;
-      violations.push(...auditSingleAgent(agent));
-      if (agent.is_default) {
-        defaultCount++;
+    if (!(await stat(resourceName)).isDirectory())
+      throw new Error('Definition root is not a directory');
+    const result = await validate();
+    for (const severity of ['error', 'warning'] as const) {
+      for (const message of result[severity === 'error' ? 'errors' : 'warnings']) {
+        violations.push({
+          resourceType,
+          resourceName,
+          rule: 'current-definition-validation',
+          severity,
+          message,
+          fix: `Repair the referenced ${resourceType} definition and rerun its validator`,
+        });
       }
     }
-
-    violations.push(...auditDefaultAgentCount(defaultCount));
   } catch (err) {
     violations.push({
-      resourceType: 'agent',
-      resourceName: 'agents.json',
-      rule: 'valid-json',
-      severity: 'error',
-      message: `Failed to parse agents.json: ${err instanceof Error ? err.message : String(err)}`,
-      fix: `Fix JSON syntax in agents.json`,
-    });
-  }
-
-  return { violations, checked };
-}
-
-interface ScheduleEntry {
-  id: string;
-  name: string;
-  cron: string;
-  taskType?: string;
-  skillName?: string;
-  enabled?: boolean;
-}
-
-const MIN_CRON_FIELDS = 5;
-
-function auditSingleSchedule(schedule: ScheduleEntry, seenIds: Set<string>): ConventionViolation[] {
-  const violations: ConventionViolation[] = [];
-  const resourceName = schedule.name || schedule.id;
-
-  // Check unique ID
-  if (seenIds.has(schedule.id)) {
-    violations.push({
-      resourceType: 'schedule',
+      resourceType,
       resourceName,
-      rule: 'unique-id',
+      rule: 'readable-definition-root',
       severity: 'error',
-      message: `Duplicate schedule ID: ${schedule.id}`,
-      fix: `Use a unique ID for each schedule`,
+      message: String(err),
+      fix: 'Restore a readable definition root and rerun validation',
     });
   }
-  seenIds.add(schedule.id);
-
-  // Check cron expression (basic: 5 fields separated by spaces)
-  if (!schedule.cron || schedule.cron.split(' ').length < MIN_CRON_FIELDS) {
-    violations.push({
-      resourceType: 'schedule',
-      resourceName,
-      rule: 'valid-cron',
-      severity: 'error',
-      message: `Invalid cron expression: "${schedule.cron}"`,
-      fix: `Use a standard 5-field cron expression (e.g. "0 8 * * *")`,
-    });
-  }
-
-  // Check taskType
-  if (!schedule.taskType) {
-    violations.push({
-      resourceType: 'schedule',
-      resourceName,
-      rule: 'has-task-type',
-      severity: 'error',
-      message: `Schedule missing taskType`,
-      fix: `Add taskType field`,
-    });
-  }
-
-  // Check skillName
-  if (!schedule.skillName) {
-    violations.push({
-      resourceType: 'schedule',
-      resourceName,
-      rule: 'has-skill-name',
-      severity: 'warning',
-      message: `Schedule missing skillName`,
-      fix: `Add skillName referencing a registered library skill`,
-    });
-  }
-
   return violations;
-}
-
-function auditSchedules(configDir: string): AuditResult {
-  const violations: ConventionViolation[] = [];
-  let checked = 0;
-
-  // Schedules are in the DB, but we can also check schedules.json if it exists
-  const schedulesPath = join(configDir, 'schedules.json');
-  if (!existsSync(schedulesPath)) return { violations, checked };
-
-  try {
-    const content = readFileSync(schedulesPath, 'utf-8');
-    const schedules = JSON.parse(content) as ScheduleEntry[];
-
-    const ids = new Set<string>();
-
-    for (const schedule of schedules) {
-      checked++;
-      violations.push(...auditSingleSchedule(schedule, ids));
-    }
-  } catch (err) {
-    violations.push({
-      resourceType: 'schedule',
-      resourceName: 'schedules.json',
-      rule: 'valid-json',
-      severity: 'error',
-      message: `Failed to parse schedules.json: ${err instanceof Error ? err.message : String(err)}`,
-      fix: `Fix JSON syntax in schedules.json`,
-    });
-  }
-
-  return { violations, checked };
 }

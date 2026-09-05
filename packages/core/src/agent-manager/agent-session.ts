@@ -11,6 +11,7 @@ import { createToolPolicy } from '../permission-engine/tool-policy.ts';
 import { buildSystemPrompt } from './prompt-builder.ts';
 import { getConfig, projectRoot } from '../config.ts';
 import type { AgentBackend, ToolUseMeta } from './agent-backend.ts';
+import { runCancellableBackend } from './agent-backend.ts';
 import { createSdkBackend } from './sdk-backend.ts';
 import { createRavenMcp, type RavenMcpDeps, type ScopeContext } from '../mcp-server/index.ts';
 import type { MemoryStore } from '../agent-memory/memory-store.ts';
@@ -320,7 +321,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
 
     // Add Raven MCP (in-process, scoped to this task)
     if (opts.ravenMcpDeps) {
-      const ravenMcp = createRavenMcp(opts.ravenMcpDeps, scope);
+      const ravenMcp = createRavenMcp(opts.ravenMcpDeps, scope, signal);
       sdkMcpServers['raven'] = ravenMcp;
     }
 
@@ -328,6 +329,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
     // Identity is the named agent id, which equals the agent's YAML name (id === name).
     if (opts.memoryStore && memoryAgentName) {
       sdkMcpServers['memory'] = createMemoryMcp({
+        signal,
         memoryStore: opts.memoryStore,
         agentName: memoryAgentName,
       });
@@ -411,7 +413,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
         : undefined;
 
     const backend = getActiveBackend();
-    const backendResult = await backend({
+    const backendResult = await runCancellableBackend(backend, {
       prompt,
       resume,
       systemPrompt,
@@ -421,8 +423,18 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       mcpServers: sdkMcpServers,
       agents: agentDefinitions,
       plugins: opts.plugins,
-      canUseTool,
+      canUseTool: canUseTool
+        ? (...args) =>
+            signal?.aborted
+              ? Promise.resolve({ behavior: 'deny' as const, message: 'Task cancelled' })
+              : canUseTool(...args).then((result) =>
+                  signal?.aborted
+                    ? { behavior: 'deny' as const, message: 'Task cancelled' }
+                    : result,
+                )
+        : undefined,
       onAssistantMessage: (text: string, meta?: ToolUseMeta) => {
+        if (signal?.aborted) return;
         const agentName = resolveAgentName(meta);
         let messageId: string | undefined;
         if (task.sessionId && messageStore) {
@@ -441,7 +453,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
           type: 'agent:message',
           payload: {
             taskId: task.id,
-            sessionId: sdkSessionId,
+            sessionId: task.sessionId,
             messageType: 'assistant',
             content: text,
             messageId,
@@ -456,6 +468,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       // would be purely observational and redundant with that policy's own
       // audit writes.
       onToolUse: (toolName: string, toolInput: string, meta?: ToolUseMeta) => {
+        if (signal?.aborted) return;
         trackAgentToolUse(agentToolMap, { toolName, toolInput, meta });
 
         const agentName = resolveAgentName(meta);
@@ -478,7 +491,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
           type: 'agent:message',
           payload: {
             taskId: task.id,
-            sessionId: sdkSessionId,
+            sessionId: task.sessionId,
             messageType: 'tool_use',
             content: `${toolName}: ${toolInput}`,
             messageId,
@@ -487,6 +500,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
         });
       },
       onToolResult: (result) => {
+        if (signal?.aborted) return;
         const agentName = resolveAgentName(result.meta);
         if (task.sessionId && messageStore) {
           messageStore.appendMessage(task.sessionId, {
@@ -500,6 +514,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
         }
       },
       onRawMessage: (rawJson: string) => {
+        if (signal?.aborted) return;
         if (task.sessionId && messageStore) {
           messageStore.appendRawMessage(task.sessionId, rawJson);
         }
@@ -510,10 +525,12 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       // on a throw (backendResult.sessionId is never assigned in that case,
       // since the throw skips the backend's `return` entirely).
       onSessionId: (id: string) => {
+        if (signal?.aborted) return;
         sdkSessionId = id;
       },
       signal,
       onStderr: (data: string) => {
+        if (signal?.aborted) return;
         stderrChunks.push(data);
         log.debug(`Agent stderr: ${data.trim()}`);
       },
@@ -531,7 +548,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
     if (stderrOutput) {
       log.error(`Agent stderr output: ${stderrOutput.slice(STDERR_LOG_TAIL_LENGTH)}`);
     }
-    errors.push(errMsg);
+    errors.push(signal?.aborted ? 'cancelled' : errMsg);
     if (stderrOutput) {
       errors.push(`stderr: ${stderrOutput.slice(STDERR_ERROR_TAIL_LENGTH)}`);
     }

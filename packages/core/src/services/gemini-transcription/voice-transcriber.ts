@@ -1,5 +1,9 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { GoogleAIFileManager, type FileMetadataResponse } from '@google/generative-ai/server';
+import {
+  GoogleAIFileManager,
+  type FileMetadataResponse,
+  type SingleRequestOptions,
+} from '@google/generative-ai/server';
 import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import {
@@ -12,6 +16,11 @@ import {
   type TranscriptionRequestEvent,
 } from '@raven/shared';
 import type { ServiceContext, RavenService } from '../types.ts';
+import {
+  createTranscriptionLifetime,
+  type TranscriptionLifetime,
+  type TranscriptionRequest,
+} from './transcription-lifetime.ts';
 
 const log = createLogger('voice-transcriber');
 const TRANSCRIPTION_TIMEOUT_MS = 30_000;
@@ -20,13 +29,21 @@ const FILE_PROCESSING_POLL_INTERVAL_MS = 5000; // delay between "still processin
 const ISO_DATE_LENGTH = 10; // length of the YYYY-MM-DD prefix of an ISO timestamp
 const TRANSCRIPTION_LOG_PREVIEW_LENGTH = 100; // chars of transcript to include in log lines
 
-let eventBus: EventBusInterface | null = null;
-let voiceHandler: ((event: unknown) => void) | null = null;
-let transcriptionHandler: ((event: unknown) => void) | null = null;
-let pendingTimeouts: Set<ReturnType<typeof setTimeout>> = new Set();
+interface ActiveService {
+  bus: EventBusInterface;
+  lifetime: TranscriptionLifetime;
+  voiceHandler: (event: unknown) => void;
+  transcriptionHandler: (event: unknown) => void;
+}
+let activeService: ActiveService | null = null;
+let stopping = Promise.resolve();
 
 function createTranscriber(): {
-  transcribe: (audioData: string, mimeType: string) => Promise<string>;
+  transcribe: (
+    audioData: string,
+    mimeType: string,
+    request: TranscriptionRequest,
+  ) => Promise<string>;
 } {
   const apiKey = process.env.GOOGLE_API_KEY;
   if (!apiKey) {
@@ -37,13 +54,9 @@ function createTranscriber(): {
   const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
   return {
-    async transcribe(audioData: string, mimeType: string): Promise<string> {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), TRANSCRIPTION_TIMEOUT_MS);
-      pendingTimeouts.add(timeout);
-
-      try {
-        const result = await model.generateContent(
+    async transcribe(audioData, mimeType, request): Promise<string> {
+      const result = await request.wait(() =>
+        model.generateContent(
           {
             contents: [
               {
@@ -57,85 +70,94 @@ function createTranscriber(): {
               },
             ],
           },
-          { signal: controller.signal } as unknown as Record<string, unknown>,
-        );
-
-        return result.response.text();
-      } finally {
-        clearTimeout(timeout);
-        pendingTimeouts.delete(timeout);
-      }
+          { signal: request.signal },
+        ),
+      );
+      return result.response.text();
     },
   };
 }
 
 async function uploadAndAwaitProcessing(
   fileManager: GoogleAIFileManager,
-  filePath: string,
-  mimeType: string,
+  data: { filePath: string; mimeType: string },
+  request: TranscriptionRequest,
 ): Promise<FileMetadataResponse> {
+  const { filePath, mimeType } = data;
   log.info(`Uploading file for transcription: ${filePath}`);
-  const uploadResult = await fileManager.uploadFile(filePath, {
-    mimeType,
-    displayName: basename(filePath),
-  });
+  const uploadResult = await request.wait(() =>
+    fileManager.uploadFile(filePath, { mimeType, displayName: basename(filePath) }),
+  );
 
   let file = uploadResult.file;
   while (file.state === 'PROCESSING') {
     log.info(`Waiting for file processing: ${file.name} (state: ${file.state})`);
-    await new Promise((r) => setTimeout(r, FILE_PROCESSING_POLL_INTERVAL_MS));
-    file = await fileManager.getFile(file.name);
+    await request.delay(FILE_PROCESSING_POLL_INTERVAL_MS);
+    file = await request.wait(() => fileManager.getFile(file.name, { signal: request.signal }));
   }
 
   if (file.state === 'FAILED') {
+    await deleteUploadedFile(fileManager, file.name, request);
     throw new Error(`File processing failed: ${file.name}`);
   }
 
   return file;
 }
 
-async function transcribeFile(filePath: string, mimeType: string): Promise<string> {
+async function deleteUploadedFile(
+  fileManager: GoogleAIFileManager,
+  name: string,
+  request: TranscriptionRequest,
+): Promise<void> {
+  if (request.signal.aborted) return;
+  try {
+    await request.wait(() => fileManager.deleteFile(name));
+  } catch {
+    if (!request.signal.aborted) log.warn(`Failed to delete remote file: ${name}`);
+  }
+}
+
+async function transcribeFile(
+  filePath: string,
+  mimeType: string,
+  request: TranscriptionRequest,
+): Promise<string> {
   const apiKey = process.env.GOOGLE_API_KEY;
   if (!apiKey) throw new Error('GOOGLE_API_KEY is not set');
 
-  const fileManager = new GoogleAIFileManager(apiKey);
+  // The installed SDK forwards these options to upload, get and delete fetches.
+  // Own the deadline locally: the SDK's timeout option leaves its timer behind.
+  const requestOptions: SingleRequestOptions = { signal: request.signal };
+  const fileManager = new GoogleAIFileManager(apiKey, requestOptions);
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
-  const file = await uploadAndAwaitProcessing(fileManager, filePath, mimeType);
+  const file = await uploadAndAwaitProcessing(fileManager, { filePath, mimeType }, request);
 
   log.info(`File ready, starting transcription: ${file.name}`);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FILE_TRANSCRIPTION_TIMEOUT_MS);
-  pendingTimeouts.add(timeout);
-
   try {
-    const result = await model.generateContent(
-      {
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              { fileData: { mimeType: file.mimeType, fileUri: file.uri } },
-              {
-                text: 'Transcribe this audio/video accurately. Return only the transcribed text with natural paragraph breaks. Preserve speaker changes if detectable.',
-              },
-            ],
-          },
-        ],
-      },
-      { signal: controller.signal } as unknown as Record<string, unknown>,
+    const result = await request.wait(() =>
+      model.generateContent(
+        {
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                { fileData: { mimeType: file.mimeType, fileUri: file.uri } },
+                {
+                  text: 'Transcribe this audio/video accurately. Return only the transcribed text with natural paragraph breaks. Preserve speaker changes if detectable.',
+                },
+              ],
+            },
+          ],
+        },
+        { signal: request.signal },
+      ),
     );
 
     return result.response.text();
   } finally {
-    clearTimeout(timeout);
-    pendingTimeouts.delete(timeout);
-    try {
-      await fileManager.deleteFile(file.name);
-    } catch {
-      log.warn(`Failed to delete remote file: ${file.name}`);
-    }
+    await deleteUploadedFile(fileManager, file.name, request);
   }
 }
 
@@ -154,14 +176,14 @@ function saveTranscript(outputDir: string, filePath: string, transcript: string)
 }
 
 interface VoiceTranscriptionContext {
-  bus: EventBusInterface;
+  bus: TranscriptionLifetime;
   projectId: string;
   topicId: number | undefined;
   topicName: string | undefined;
 }
 
 function emitVoiceNotification(
-  bus: EventBusInterface,
+  bus: TranscriptionLifetime,
   topicName: string | undefined,
   body: string,
 ): void {
@@ -218,15 +240,17 @@ function handleVoiceTranscriptionError(ctx: VoiceTranscriptionContext, err: unkn
 
 async function handleVoiceReceived(
   event: VoiceReceivedEvent,
-  transcriber: ReturnType<typeof createTranscriber>,
+  options: { transcriber: ReturnType<typeof createTranscriber>; lifetime: TranscriptionLifetime },
+  request: TranscriptionRequest,
 ): Promise<void> {
+  const { transcriber, lifetime } = options;
   const { projectId, audioData, mimeType, topicId, topicName } = event.payload;
 
-  if (!eventBus) return;
-  const ctx: VoiceTranscriptionContext = { bus: eventBus, projectId, topicId, topicName };
+  const ctx: VoiceTranscriptionContext = { bus: lifetime, projectId, topicId, topicName };
 
   try {
-    const transcription = await transcriber.transcribe(audioData, mimeType);
+    const transcription = await transcriber.transcribe(audioData, mimeType, request);
+    request.signal.throwIfAborted();
 
     log.info(
       `Transcription complete for project ${projectId}: ${transcription.slice(0, TRANSCRIPTION_LOG_PREVIEW_LENGTH)}`,
@@ -238,12 +262,12 @@ async function handleVoiceReceived(
     // Emit as user:chat:message so orchestrator processes it
     emitTranscribedChatMessage(ctx, transcription);
   } catch (err) {
-    handleVoiceTranscriptionError(ctx, err);
+    if (lifetime.isActive()) handleVoiceTranscriptionError(ctx, err);
   }
 }
 
 function emitTranscriptionSuccess(
-  bus: EventBusInterface,
+  bus: TranscriptionLifetime,
   transcriptPath: string,
   data: TranscriptionRequestEvent['payload'],
 ): void {
@@ -264,6 +288,7 @@ function emitTranscriptionSuccess(
       source: SOURCE_GEMINI,
       type: 'knowledge:ingest:request',
       payload: {
+        taskId: generateId(),
         type: 'file' as const,
         filePath: transcriptPath,
         source: 'transcription',
@@ -288,18 +313,21 @@ function emitTranscriptionSuccess(
 }
 
 async function processTranscriptionRequest(
-  bus: EventBusInterface,
+  context: { bus: TranscriptionLifetime; outputDir: string },
   data: TranscriptionRequestEvent['payload'],
-  outputDir: string,
+  request: TranscriptionRequest,
 ): Promise<void> {
+  const { bus, outputDir } = context;
   const { filePath, mimeType, projectId } = data;
 
   try {
-    const transcript = await transcribeFile(filePath, mimeType);
+    const transcript = await transcribeFile(filePath, mimeType, request);
+    request.signal.throwIfAborted();
     const transcriptPath = saveTranscript(outputDir, filePath, transcript);
 
     emitTranscriptionSuccess(bus, transcriptPath, data);
   } catch (err) {
+    if (!bus.isActive()) return;
     const msg = err instanceof Error ? err.message : String(err);
     log.error(`File transcription failed: ${msg}`);
     bus.emit({
@@ -313,10 +341,11 @@ async function processTranscriptionRequest(
 }
 
 function createTranscriptionRequestHandler(
-  bus: EventBusInterface,
+  bus: TranscriptionLifetime,
   outputDir: string,
 ): (event: unknown) => void {
   return (event: unknown): void => {
+    if (!bus.isActive()) return;
     const parsed = TranscriptionRequestPayloadSchema.safeParse(
       (event as Record<string, unknown>).payload,
     );
@@ -325,57 +354,65 @@ function createTranscriptionRequestHandler(
       return;
     }
 
-    processTranscriptionRequest(bus, parsed.data, outputDir).catch((err) => {
-      log.error(`Unhandled error in transcription handler: ${err}`);
-    });
+    void bus
+      .run(FILE_TRANSCRIPTION_TIMEOUT_MS, (request) =>
+        processTranscriptionRequest({ bus, outputDir }, parsed.data, request),
+      )
+      .catch((err: unknown) => {
+        if (bus.isActive()) log.error(`Unhandled error in transcription handler: ${err}`);
+      });
   };
+}
+
+function stopCurrentService(): Promise<void> {
+  const current = activeService;
+  activeService = null;
+  if (!current) return stopping;
+  const stopped = current.lifetime.stop();
+  current.bus.off('voice:received', current.voiceHandler);
+  current.bus.off('transcription:request', current.transcriptionHandler);
+  stopping = Promise.all([stopping, stopped]).then(() => {});
+  return stopping;
 }
 
 const service: RavenService = {
   async start(context: ServiceContext): Promise<void> {
-    eventBus = context.eventBus;
+    const stopped = stopCurrentService();
 
     const apiKey = process.env.GOOGLE_API_KEY;
     if (!apiKey) {
       log.warn('GOOGLE_API_KEY not set, voice transcription disabled');
+      await stopped;
       return;
     }
 
     const transcriber = createTranscriber();
+    const lifetime = createTranscriptionLifetime(context.eventBus);
 
-    voiceHandler = (event: unknown): void => {
+    const voiceHandler = (event: unknown): void => {
       const voiceEvent = event as VoiceReceivedEvent;
-      handleVoiceReceived(voiceEvent, transcriber).catch((err) => {
-        log.error(`Unhandled error in voice handler: ${err}`);
-      });
+      void lifetime
+        .run(TRANSCRIPTION_TIMEOUT_MS, (request) =>
+          handleVoiceReceived(voiceEvent, { transcriber, lifetime }, request),
+        )
+        .catch((err: unknown) => {
+          if (lifetime.isActive()) log.error(`Unhandled error in voice handler: ${err}`);
+        });
     };
 
-    context.eventBus.on('voice:received', voiceHandler);
-
-    transcriptionHandler = createTranscriptionRequestHandler(
-      context.eventBus,
+    const transcriptionHandler = createTranscriptionRequestHandler(
+      lifetime,
       resolve(context.projectRoot, 'data/files/transcripts'),
     );
+    activeService = { bus: context.eventBus, lifetime, voiceHandler, transcriptionHandler };
+    context.eventBus.on('voice:received', voiceHandler);
     context.eventBus.on('transcription:request', transcriptionHandler);
+    await stopped;
     log.info('Voice transcriber service started');
   },
 
   async stop(): Promise<void> {
-    if (eventBus && voiceHandler) {
-      eventBus.off('voice:received', voiceHandler);
-    }
-    if (eventBus && transcriptionHandler) {
-      eventBus.off('transcription:request', transcriptionHandler);
-    }
-    voiceHandler = null;
-    transcriptionHandler = null;
-
-    for (const timeout of pendingTimeouts) {
-      clearTimeout(timeout);
-    }
-    pendingTimeouts = new Set();
-
-    eventBus = null;
+    await stopCurrentService();
     log.info('Voice transcriber service stopped');
   },
 };

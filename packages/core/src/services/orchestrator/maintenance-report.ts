@@ -26,6 +26,7 @@ export interface CompiledReport {
 export async function compileReport(
   data: MaintenanceReportData,
   reportsDir: string,
+  signal?: AbortSignal,
 ): Promise<CompiledReport> {
   log.info('Compiling maintenance report');
 
@@ -33,8 +34,11 @@ export async function compileReport(
   const markdown = data.agentAnalysis ?? buildFallbackReport(data, date);
   const filePath = join(reportsDir, `${date}.md`);
 
+  signal?.throwIfAborted();
   await mkdir(reportsDir, { recursive: true });
+  signal?.throwIfAborted();
   await writeFile(filePath, markdown, 'utf-8');
+  signal?.throwIfAborted();
 
   log.info(`Report saved to ${filePath}`);
   return { markdown, date, filePath };

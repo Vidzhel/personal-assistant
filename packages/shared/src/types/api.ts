@@ -1,7 +1,10 @@
 import type { AgentMessageEvent, RavenEvent, AgentSession } from './index.ts';
 
 export type WsMessageToClient =
-  | { type: 'chat:error'; data: { projectId?: string; sessionId?: string; error: string } }
+  | {
+      type: 'chat:error';
+      data: { requestId?: string; projectId?: string; sessionId?: string; error: string };
+    }
   | { type: 'agent:message'; data: AgentMessageEvent['payload'] }
   | { type: 'agent:status'; data: { taskId: string; status: string } }
   | { type: 'event'; data: RavenEvent }
@@ -13,6 +16,7 @@ export type WsMessageFromClient =
   | { type: 'unsubscribe'; channels: string[] }
   | {
       type: 'chat:send';
+      requestId?: string;
       projectId: string;
       message: string;
       sessionId?: string;

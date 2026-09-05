@@ -5,6 +5,7 @@ import type {
   McpSdkServerConfigWithInstance,
 } from '@anthropic-ai/claude-agent-sdk';
 import type { MemoryStore } from '../agent-memory/memory-store.ts';
+import { guardTool } from './guard-tool.ts';
 
 type OkResult = { content: [{ type: 'text'; text: string }] };
 type ErrResult = { content: [{ type: 'text'; text: string }]; isError: true };
@@ -21,6 +22,7 @@ const errorResult = (message: string): ErrResult => ({
 export interface MemoryToolDeps {
   memoryStore: MemoryStore;
   agentName: string;
+  signal?: AbortSignal;
 }
 
 /** Build the three memory tools bound to one agent's directory. */
@@ -93,7 +95,7 @@ export function createMemoryMcp(deps: MemoryToolDeps): McpSdkServerConfigWithIns
   return createSdkMcpServer({
     name: 'memory',
     version: '1.0.0',
-    tools: buildMemoryTools(deps),
+    tools: buildMemoryTools(deps).map((definition) => guardTool(definition, deps.signal)),
     alwaysLoad: true,
   });
 }

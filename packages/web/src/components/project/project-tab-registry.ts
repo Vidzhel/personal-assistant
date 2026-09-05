@@ -13,6 +13,7 @@ export interface ProjectTabProps {
   project: Project;
   onProjectUpdated: (project: Project) => void;
   onNewSession: () => Promise<void>;
+  requestedSessionId?: string;
 }
 
 export interface ProjectTabDef {

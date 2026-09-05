@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { getEventListeners } from 'node:events';
 
 // Mock the SDK query function to capture what options it receives
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
@@ -90,12 +91,12 @@ describe('SDK backend cancellation + session id (F2)', () => {
     expect(callArgs.options!.abortController).toBeInstanceOf(AbortController);
   });
 
-  it('bridges an already-aborted caller signal into the SDK-native abortController', async () => {
+  it('does not start the SDK for an already-aborted caller signal', async () => {
     const backend = createSdkBackend();
     const controller = new AbortController();
     controller.abort();
 
-    await backend({
+    const result = await backend({
       prompt: 'test',
       systemPrompt: 'test',
       allowedTools: ['Read'],
@@ -108,38 +109,86 @@ describe('SDK backend cancellation + session id (F2)', () => {
       signal: controller.signal,
     });
 
-    const callArgs = mockQuery.mock.calls[0][0];
-    const passedController = callArgs.options!.abortController as AbortController;
-    expect(passedController.signal.aborted).toBe(true);
+    expect(mockQuery).not.toHaveBeenCalled();
+    expect(result).toEqual({ result: '', success: false, errors: ['cancelled'] });
+    expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0);
   });
 
-  it('propagates a caller-signal abort that happens after query() was called', async () => {
+  it('aborts an in-flight SDK query and releases its bridge when iteration closes', async () => {
+    let capturedController: AbortController | undefined;
+    let started!: () => void;
+    let release!: () => void;
+    let closed = false;
+    const startedQuery = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const heldQuery = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    mockQuery.mockImplementation(async function* (queryArgs: {
+      options: { abortController?: AbortController };
+    }) {
+      capturedController = queryArgs.options.abortController;
+      started();
+      try {
+        await heldQuery;
+        yield { type: 'result', result: 'late success', subtype: 'success' };
+      } finally {
+        closed = true;
+      }
+    } as unknown as typeof query);
+
+    const controller = new AbortController();
+    const work = createSdkBackend()({
+      prompt: 'test',
+      systemPrompt: 'test',
+      allowedTools: [],
+      model: 'sonnet',
+      maxTurns: 5,
+      mcpServers: {},
+      agents: {},
+      onAssistantMessage: vi.fn(),
+      onStderr: vi.fn(),
+      signal: controller.signal,
+    });
+    await startedQuery;
+    expect(capturedController?.signal.aborted).toBe(false);
+    expect(getEventListeners(controller.signal, 'abort')).toHaveLength(1);
+    controller.abort();
+    expect(capturedController?.signal.aborted).toBe(true);
+    release();
+    expect(await work).toMatchObject({ success: false, errors: ['cancelled'] });
+    expect(closed).toBe(true);
+    expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0);
+  });
+
+  it.each(['success', 'error'])('removes the abort bridge after query %s', async (outcome) => {
     let capturedController: AbortController | undefined;
     mockQuery.mockImplementation(async function* (queryArgs: {
       options: { abortController?: AbortController };
     }) {
       capturedController = queryArgs.options.abortController;
+      if (outcome === 'error') throw new Error('fake query failure');
       yield { type: 'result', result: 'ok', subtype: 'success' };
     } as unknown as typeof query);
-
-    const backend = createSdkBackend();
     const controller = new AbortController();
-
-    await backend({
+    const work = createSdkBackend()({
       prompt: 'test',
       systemPrompt: 'test',
-      allowedTools: ['Read'],
+      allowedTools: [],
       model: 'sonnet',
       maxTurns: 5,
       mcpServers: {},
       agents: {},
-      onAssistantMessage: () => {},
-      onStderr: () => {},
+      onAssistantMessage: vi.fn(),
+      onStderr: vi.fn(),
       signal: controller.signal,
     });
-
+    if (outcome === 'error') await expect(work).rejects.toThrow('fake query failure');
+    else expect(await work).toMatchObject({ success: true });
+    expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0);
     controller.abort();
-    expect(capturedController?.signal.aborted).toBe(true);
+    expect(capturedController?.signal.aborted).toBe(false);
   });
 
   it('calls onSessionId as soon as the system/init message arrives', async () => {

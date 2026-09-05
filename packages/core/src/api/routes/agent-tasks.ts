@@ -87,6 +87,7 @@ export function registerAgentTaskRoutes(
         .status(HTTP_STATUS.NOT_FOUND)
         .send({ error: 'Task not found or already completed' });
     }
-    return { status: 'cancelled', taskId: req.params.id };
+    // Abort acceptance is not a terminal result; completion arrives on the event stream.
+    return { status: 'accepted', taskId: req.params.id };
   });
 }

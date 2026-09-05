@@ -84,7 +84,8 @@ describe('voice-transcriber service', () => {
     };
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await service?.stop();
     process.env = { ...originalEnv };
     vi.resetModules();
   });

@@ -1,37 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-// Test URL extraction logic extracted from useReferences hook
-const URL_REGEX = /https?:\/\/[^\s)\]>"']+/g;
-const MARKDOWN_LINK_REGEX = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g;
-
-interface ExternalRef {
-  url: string;
-  label: string | null;
-  domain: string;
-}
-
-function extractUrls(messages: Array<{ role: string; content: string }>): ExternalRef[] {
-  const urls = new Map<string, ExternalRef>();
-  for (const msg of messages.filter((m) => m.role === 'assistant')) {
-    for (const match of msg.content.matchAll(MARKDOWN_LINK_REGEX)) {
-      try {
-        urls.set(match[2], { url: match[2], label: match[1], domain: new URL(match[2]).hostname });
-      } catch {
-        /* invalid URL */
-      }
-    }
-    for (const match of msg.content.matchAll(URL_REGEX)) {
-      if (!urls.has(match[0])) {
-        try {
-          urls.set(match[0], { url: match[0], label: null, domain: new URL(match[0]).hostname });
-        } catch {
-          /* invalid URL */
-        }
-      }
-    }
-  }
-  return [...urls.values()];
-}
+import { extractUrls } from '@/lib/references';
 
 describe('URL extraction from assistant messages', () => {
   it('extracts plain URLs from assistant messages', () => {

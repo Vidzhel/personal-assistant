@@ -1,221 +1,86 @@
-import type * as RavenShared from '@raven/shared';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { auditConventions } from '../../../services/orchestrator/convention-auditor.ts';
 
-vi.mock('@raven/shared', async () => {
-  const actual = await vi.importActual<typeof RavenShared>('@raven/shared');
-  return {
-    ...actual,
-    createLogger: () => ({
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-      debug: vi.fn(),
-    }),
-  };
+let root: string;
+let projectsDir: string;
+let libraryDir: string;
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), 'raven-current-audit-'));
+  projectsDir = join(root, 'projects');
+  libraryDir = join(root, 'library');
+  mkdirSync(join(projectsDir, 'agents/raven'), { recursive: true });
+  mkdirSync(join(projectsDir, 'schedules'), { recursive: true });
+  mkdirSync(join(libraryDir, 'skills'), { recursive: true });
+  writeFileSync(join(libraryDir, 'skills/_index.md'), '# Fixture capabilities');
+  mkdirSync(join(libraryDir, 'mcps'), { recursive: true });
+  writeFileSync(
+    join(projectsDir, 'agents/raven/agent.yaml'),
+    'name: raven\ndisplayName: Raven\nisDefault: true\nskills: []\n',
+  );
 });
+afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-// ---------- convention-auditor: agent checks ----------
-
-describe('convention-auditor: agent checks', () => {
-  let tmpDir: string;
-  let configDir: string;
-
-  beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'raven-agent-audit-'));
-    configDir = join(tmpDir, 'config');
-    mkdirSync(configDir, { recursive: true });
+describe('current definition audit', () => {
+  it('validates current YAML and ignores obsolete JSON', async () => {
+    writeFileSync(join(projectsDir, 'agents.json'), 'invalid obsolete JSON');
+    const report = await auditConventions({ projectsDir, libraryDir });
+    expect(report.violations).toEqual([]);
+    expect(report.compliantCount).toBe(report.totalChecked);
   });
 
-  afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('should report no violations for valid agents.json', async () => {
+  it('reports current nested agent, schedule and capability errors', async () => {
+    mkdirSync(join(projectsDir, 'nested/agents/broken'), { recursive: true });
+    writeFileSync(join(projectsDir, 'nested/context.md'), '# Nested');
     writeFileSync(
-      join(configDir, 'agents.json'),
-      JSON.stringify([
-        { id: 'a1', name: 'my-agent', description: 'Test agent', suite_ids: [], is_default: true },
-      ]),
+      join(projectsDir, 'nested/agents/broken/agent.yaml'),
+      'name: broken\ndisplayName: Broken\nskills: [missing]\n',
     );
-
-    const { auditConventions } =
-      await import('../../../services/orchestrator/convention-auditor.ts');
-    const report = await auditConventions(configDir);
-
-    const agentViolations = report.violations.filter((v) => v.resourceType === 'agent');
-    expect(agentViolations).toEqual([]);
+    writeFileSync(join(projectsDir, 'schedules/broken.yaml'), 'name: broken\ncron: impossible\n');
+    writeFileSync(join(libraryDir, 'mcps/broken.json'), '{invalid');
+    const report = await auditConventions({ projectsDir, libraryDir, knownSkills: new Set() });
+    expect(report.violations.some((v) => v.message.includes('missing'))).toBe(true);
+    expect(report.violations.some((v) => v.message.includes('broken.yaml'))).toBe(true);
+    expect(report.violations.some((v) => v.resourceType === 'library')).toBe(true);
+    expect(report.compliantCount).toBe(0);
   });
 
-  it('should detect non-kebab-case agent name', async () => {
+  it('reports missing current roots instead of claiming an empty clean audit', async () => {
+    rmSync(projectsDir, { recursive: true });
+    const report = await auditConventions({ projectsDir, libraryDir });
+    expect(report.violations).toEqual([
+      expect.objectContaining({
+        resourceType: 'project',
+        severity: 'error',
+        rule: 'readable-definition-root',
+      }),
+    ]);
+  });
+  it('reads newly added skills on the next audit without restarting the service', async () => {
     writeFileSync(
-      join(configDir, 'agents.json'),
-      JSON.stringify([{ id: 'a1', name: 'BadName', description: 'Test', is_default: true }]),
+      join(projectsDir, 'agents/raven/agent.yaml'),
+      'name: raven\ndisplayName: Raven\nisDefault: true\nskills: [new-skill]\n',
     );
-
-    const { auditConventions } =
-      await import('../../../services/orchestrator/convention-auditor.ts');
-    const report = await auditConventions(configDir);
-
-    const naming = report.violations.find(
-      (v) => v.rule === 'kebab-case-name' && v.resourceType === 'agent',
-    );
-    expect(naming).toBeDefined();
-  });
-
-  it('should detect missing default agent', async () => {
+    const before = await auditConventions({ projectsDir, libraryDir });
+    expect(before.violations.some((v) => v.message.includes('new-skill'))).toBe(true);
+    mkdirSync(join(libraryDir, 'skills/new-skill'), { recursive: true });
     writeFileSync(
-      join(configDir, 'agents.json'),
-      JSON.stringify([
-        { id: 'a1', name: 'agent-one', description: 'Test', is_default: false },
-        { id: 'a2', name: 'agent-two', description: 'Test', is_default: false },
-      ]),
+      join(libraryDir, 'skills/new-skill/config.json'),
+      JSON.stringify({
+        name: 'new-skill',
+        displayName: 'New skill',
+        description: 'Newly activated capability',
+        mcps: [],
+        actions: [],
+      }),
     );
-
-    const { auditConventions } =
-      await import('../../../services/orchestrator/convention-auditor.ts');
-    const report = await auditConventions(configDir);
-
-    const noDefault = report.violations.find((v) => v.rule === 'has-default-agent');
-    expect(noDefault).toBeDefined();
-    expect(noDefault!.severity).toBe('error');
-  });
-});
-
-// ---------- convention-auditor: schedule checks ----------
-
-describe('convention-auditor: schedule checks', () => {
-  let tmpDir: string;
-  let configDir: string;
-
-  beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'raven-sched-audit-'));
-    configDir = join(tmpDir, 'config');
-    mkdirSync(configDir, { recursive: true });
-  });
-
-  afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('should report no violations for valid schedules.json', async () => {
     writeFileSync(
-      join(configDir, 'schedules.json'),
-      JSON.stringify([
-        {
-          id: 's1',
-          name: 'Morning Digest',
-          cron: '0 8 * * *',
-          taskType: 'morning-digest',
-          skillName: 'digest',
-          enabled: true,
-        },
-      ]),
+      join(libraryDir, 'skills/new-skill/skill.md'),
+      'Use this newly activated capability.',
     );
-
-    const { auditConventions } =
-      await import('../../../services/orchestrator/convention-auditor.ts');
-    const report = await auditConventions(configDir);
-
-    const schedViolations = report.violations.filter((v) => v.resourceType === 'schedule');
-    expect(schedViolations).toEqual([]);
-  });
-
-  it('should detect duplicate IDs and missing fields', async () => {
-    writeFileSync(
-      join(configDir, 'schedules.json'),
-      JSON.stringify([
-        {
-          id: 'dup',
-          name: 'First',
-          cron: '0 8 * * *',
-          taskType: 'test',
-          skillName: 'test',
-          enabled: true,
-        },
-        { id: 'dup', name: 'Second', cron: 'bad', taskType: '', enabled: true },
-      ]),
-    );
-
-    const { auditConventions } =
-      await import('../../../services/orchestrator/convention-auditor.ts');
-    const report = await auditConventions(configDir);
-
-    const schedViolations = report.violations.filter((v) => v.resourceType === 'schedule');
-    const rules = schedViolations.map((v) => v.rule);
-    expect(rules).toContain('unique-id');
-    expect(rules).toContain('valid-cron');
-  });
-});
-
-// ---------- maintenance integration ----------
-
-describe('convention-auditor: maintenance integration', () => {
-  it('should include convention section in maintenance agent prompt', async () => {
-    const { buildMaintenancePrompt } =
-      await import('../../../services/orchestrator/maintenance-agent.ts');
-
-    const prompt = buildMaintenancePrompt({
-      logAnalysis: { recurringErrors: [], silentFailures: [], totalErrors: 0, totalWarnings: 0 },
-      dependencyReport: { outdated: [], vulnerabilities: [], checkedAt: new Date().toISOString() },
-      resourceReport: {
-        dbSizeMB: 1,
-        logSizeMB: 0.5,
-        sessionSizeMB: 0.1,
-        concerns: [],
-        healthStatus: null,
-        checkedAt: new Date().toISOString(),
-      },
-      conventionAuditReport: {
-        violations: [
-          {
-            resourceType: 'agent',
-            resourceName: 'test-agent',
-            rule: 'has-description',
-            severity: 'warning',
-            message: 'Agent missing description',
-            fix: 'Add a description explaining what this agent does',
-          },
-        ],
-        compliantCount: 2,
-        totalChecked: 3,
-        checkedAt: new Date().toISOString(),
-      },
-      runDate: new Date().toISOString(),
-    });
-
-    expect(prompt).toContain('Convention Compliance');
-    expect(prompt).toContain('test-agent');
-    expect(prompt).toContain('has-description');
-    expect(prompt).toContain('Agent missing description');
-  });
-
-  it('should show "All resources are compliant" when no violations', async () => {
-    const { buildMaintenancePrompt } =
-      await import('../../../services/orchestrator/maintenance-agent.ts');
-
-    const prompt = buildMaintenancePrompt({
-      logAnalysis: { recurringErrors: [], silentFailures: [], totalErrors: 0, totalWarnings: 0 },
-      dependencyReport: { outdated: [], vulnerabilities: [], checkedAt: new Date().toISOString() },
-      resourceReport: {
-        dbSizeMB: 1,
-        logSizeMB: 0.5,
-        sessionSizeMB: 0.1,
-        concerns: [],
-        healthStatus: null,
-        checkedAt: new Date().toISOString(),
-      },
-      conventionAuditReport: {
-        violations: [],
-        compliantCount: 5,
-        totalChecked: 5,
-        checkedAt: new Date().toISOString(),
-      },
-      runDate: new Date().toISOString(),
-    });
-
-    expect(prompt).toContain('All resources are compliant with conventions');
+    const after = await auditConventions({ projectsDir, libraryDir });
+    expect(after.violations).toEqual([]);
   });
 });

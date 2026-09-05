@@ -19,6 +19,10 @@ export interface ServiceContext {
   projectRoot: string;
   /** Override configuration storage without changing runtime data locations. */
   configDir?: string;
+  projectsDir?: string;
+  libraryDir?: string;
+  /** Resolve the actual bound port, including ephemeral ports after HTTP startup. */
+  getApiPort?: () => number;
   integrationsConfig: IntegrationsConfig;
   jobRegistry: JobRegistry;
 }

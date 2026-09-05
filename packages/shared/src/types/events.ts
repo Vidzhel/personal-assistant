@@ -120,6 +120,7 @@ export interface AgentMessageEvent extends BaseEvent {
 export interface UserChatMessageEvent extends BaseEvent {
   type: 'user:chat:message';
   payload: {
+    requestId?: string;
     projectId: string;
     sessionId?: string;
     message: string;
@@ -131,6 +132,16 @@ export interface UserChatMessageEvent extends BaseEvent {
       mimeType: string;
       fileName: string;
     };
+  };
+}
+
+export interface UserChatAcceptedEvent extends BaseEvent {
+  type: 'user:chat:accepted';
+  payload: {
+    requestId: string;
+    projectId: string;
+    sessionId: string;
+    messageId: string;
   };
 }
 
@@ -880,6 +891,7 @@ export type RavenEvent =
   | AgentTaskCompleteEvent
   | AgentMessageEvent
   | UserChatMessageEvent
+  | UserChatAcceptedEvent
   | UserChatRejectedEvent
   | NotificationEvent
   | SkillDataEvent

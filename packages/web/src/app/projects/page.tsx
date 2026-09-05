@@ -1,5 +1,7 @@
 'use client';
 
+import { projectPath } from '@/lib/url-paths';
+
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAppStore } from '@/stores/app-store';
@@ -15,6 +17,8 @@ const SYSTEM_ACCESS_LABELS: Record<string, string> = {
 // eslint-disable-next-line max-lines-per-function -- page component with project creation form and listing
 export default function ProjectsPage() {
   const { projects, skills, fetchProjects, fetchSkills } = useAppStore();
+  const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [viewMode, setViewMode] = useState<'flat' | 'tree'>('flat');
   const [name, setName] = useState('');
@@ -22,18 +26,30 @@ export default function ProjectsPage() {
   const [systemAccess, setSystemAccess] = useState<'none' | 'read' | 'read-write'>('none');
 
   useEffect(() => {
-    fetchProjects();
-    fetchSkills();
+    void fetchProjects().catch((cause: unknown) =>
+      setError(cause instanceof Error ? cause.message : 'Could not load projects.'),
+    );
+    void fetchSkills().catch((cause: unknown) =>
+      setError(cause instanceof Error ? cause.message : 'Could not load skills.'),
+    );
   }, [fetchProjects, fetchSkills]);
 
   const handleCreate = async () => {
-    if (!name.trim()) return;
-    await api.createProject({ name: name.trim(), skills: selectedSkills, systemAccess });
-    setName('');
-    setSelectedSkills([]);
-    setSystemAccess('none');
-    setShowCreate(false);
-    fetchProjects();
+    if (!name.trim() || creating) return;
+    setCreating(true);
+    setError(null);
+    try {
+      await api.createProject({ name: name.trim(), skills: selectedSkills, systemAccess });
+      setName('');
+      setSelectedSkills([]);
+      setSystemAccess('none');
+      setShowCreate(false);
+      await fetchProjects();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not create project.');
+    } finally {
+      setCreating(false);
+    }
   };
 
   // Separate meta-project and regular projects
@@ -85,6 +101,9 @@ export default function ProjectsPage() {
         </div>
       </div>
 
+      <p role="alert" hidden={!error} style={{ color: 'var(--error)' }}>
+        {error}
+      </p>
       {showCreate && (
         <div
           className="p-4 rounded-lg space-y-3"
@@ -168,7 +187,7 @@ export default function ProjectsPage() {
           {/* Meta-project pinned first */}
           {metaProject && (
             <Link
-              href={`/projects/${metaProject.id}`}
+              href={projectPath(metaProject.id)}
               className="block p-4 rounded-lg transition-colors"
               style={{
                 background: 'var(--bg-card)',
@@ -207,7 +226,7 @@ export default function ProjectsPage() {
           {regularProjects.map((p) => (
             <Link
               key={p.id}
-              href={`/projects/${p.id}`}
+              href={projectPath(p.id)}
               className="block p-4 rounded-lg transition-colors"
               style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
             >

@@ -3,6 +3,33 @@ import type { CanUseTool } from '@anthropic-ai/claude-agent-sdk';
 
 export type AgentBackend = (opts: BackendOptions) => Promise<BackendResult>;
 
+const CANCEL_DRAIN_MS = 1000;
+
+/** Give cooperative backends time to stop; settle local work even if they ignore abort.
+ * The abandoned promise stays observed. This does not cancel external work itself. */
+export async function runCancellableBackend(
+  backend: AgentBackend,
+  options: BackendOptions,
+): Promise<BackendResult> {
+  const cancelled: BackendResult = { result: '', success: false, errors: ['cancelled'] };
+  if (options.signal?.aborted) return cancelled;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  const cancellation = new Promise<BackendResult>((resolve) => {
+    onAbort = () => {
+      timer = setTimeout(() => resolve(cancelled), CANCEL_DRAIN_MS);
+    };
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    const result = await Promise.race([backend(options), cancellation]);
+    return options.signal?.aborted ? cancelled : result;
+  } finally {
+    clearTimeout(timer);
+    if (onAbort) options.signal?.removeEventListener('abort', onAbort);
+  }
+}
+
 export interface ToolUseMeta {
   parentToolUseId?: string | null; // null = main agent, string = sub-agent
   toolUseId?: string; // ID of this tool_use block

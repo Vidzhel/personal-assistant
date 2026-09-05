@@ -36,7 +36,9 @@
     "test:compiled": "node scripts/smoke-compiled-core.mjs",
     "test:containers": "node scripts/smoke-containers.mjs",
     "test:deployment": "node --experimental-strip-types --test deployment/runtime-init.test.mjs",
-    "test:docker-context": "node scripts/check-docker-context.mjs"
+    "test:docker-context": "node scripts/check-docker-context.mjs",
+    "test:e2e": "npm run build:core && playwright test",
+    "test:mcp:live": "RAVEN_TEST_TICKTICK=1 vitest run --project mcp-ticktick"
   },
   "engines": {
     "node": ">=22.0.0"
@@ -44,6 +46,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
+    "@playwright/test": "^1.63.0",
     "@types/js-yaml": "^4.0.9",
     "concurrently": "^10.0.4",
     "eslint": "^10.8.0",

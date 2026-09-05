@@ -22,6 +22,7 @@ export function InlineEditField({
 }: InlineEditFieldProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
+  const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -39,14 +40,18 @@ export function InlineEditField({
       setEditing(false);
       return;
     }
+    if (saving) return;
     setSaving(true);
+    setError(null);
     try {
       await onSave(trimmed);
       setEditing(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The change could not be saved.');
     } finally {
       setSaving(false);
     }
-  }, [draft, value, onSave]);
+  }, [draft, value, onSave, saving]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -61,16 +66,23 @@ export function InlineEditField({
 
   if (editing) {
     return (
-      <input
-        ref={inputRef}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => void handleSave()}
-        onKeyDown={handleKeyDown}
-        disabled={saving}
-        className={`bg-transparent outline-none border-b ${className}`}
-        style={{ borderColor: 'var(--accent)', ...style }}
-      />
+      <div>
+        <input
+          ref={inputRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => void handleSave()}
+          onKeyDown={handleKeyDown}
+          disabled={saving}
+          className={`bg-transparent outline-none border-b ${className}`}
+          style={{ borderColor: 'var(--accent)', ...style }}
+        />
+        {error && (
+          <p role="alert" style={{ color: 'var(--error)' }}>
+            {error}
+          </p>
+        )}
+      </div>
     );
   }
 

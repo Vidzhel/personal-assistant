@@ -79,7 +79,7 @@ export const SERVICE_DEFINITIONS: ServiceDefinition[] = [
   fromService({
     name: 'imap-watcher',
     description: 'Watches Gmail via IMAP for new mail',
-    requiresEnv: GMAIL_ENV,
+    requiresEnv: ['GMAIL_IMAP_USER', 'GMAIL_IMAP_PASSWORD'],
     service: imapWatcher,
   }),
   fromService({

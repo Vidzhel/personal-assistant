@@ -51,7 +51,12 @@ interface SessionRetrospectiveDeps {
 }
 
 export interface SessionRetrospective {
-  runRetrospective: (sessionId: string, projectId: string) => Promise<SessionRetrospectiveResult>;
+  runRetrospective: (
+    sessionId: string,
+    projectId: string,
+    signal?: AbortSignal,
+  ) => Promise<SessionRetrospectiveResult>;
+  stop(): Promise<void>;
 }
 
 function formatTranscript(messages: StoredMessage[]): string {
@@ -154,7 +159,14 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
     neo4j,
   } = deps;
 
-  async function buildPrompt(messages: StoredMessage[], projectId: string): Promise<string> {
+  const lifetime = new AbortController();
+  const pending = new Set<Promise<SessionRetrospectiveResult>>();
+
+  async function buildPrompt(
+    messages: StoredMessage[],
+    projectId: string,
+    signal: AbortSignal,
+  ): Promise<string> {
     const transcript = formatTranscript(messages);
 
     // Get existing project knowledge for dedup context — only available
@@ -163,7 +175,7 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
     let knowledgeContext = '';
     if (neo4j) {
       try {
-        const links = await getProjectKnowledgeLinks(neo4j, projectId);
+        const links = await awaitRetrospective(getProjectKnowledgeLinks(neo4j, projectId), signal);
         if (links.length > 0) {
           const entries = links
             .map((l) => `- ${l.title} [tags: ${(l.tags ?? []).join(', ')}]`)
@@ -171,6 +183,7 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
           knowledgeContext = `\n\nExisting project knowledge (do NOT duplicate):\n${entries}`;
         }
       } catch (err) {
+        signal.throwIfAborted();
         log.warn(`Failed to load project knowledge for dedup: ${err}`);
       }
     }
@@ -183,6 +196,7 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
     neo4j: Neo4jClient;
     projectId: string;
     sessionId: string;
+    signal: AbortSignal;
   }
 
   // eslint-disable-next-line max-lines-per-function -- processes high/low confidence bubbles with knowledge store + notification
@@ -190,11 +204,12 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
     ctx: BubbleContext,
     bubbles: CandidateBubble[],
   ): Promise<{ created: number; drafted: number }> {
-    const { knowledgeStore, neo4j, projectId, sessionId } = ctx;
+    const { knowledgeStore, neo4j, projectId, sessionId, signal } = ctx;
     let created = 0;
     let drafted = 0;
 
     for (const bubble of bubbles) {
+      signal.throwIfAborted();
       const hash = contentHash(bubble.content);
       if (isContentRejected(projectId, hash)) {
         log.info(`Skipping rejected content: ${bubble.title}`);
@@ -203,38 +218,55 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
 
       if (bubble.confidence === 'high') {
         try {
-          const newBubble = await knowledgeStore.insert({
-            title: bubble.title,
-            content: bubble.content,
-            tags: bubble.tags,
-            source: `auto-retrospective:${sessionId}`,
-          });
-          await linkBubbleToProject({
-            neo4j,
-            projectId,
-            bubbleId: newBubble.id,
-            linkedBy: 'auto-retrospective',
-          });
+          const newBubble = await awaitRetrospective(
+            knowledgeStore.insert({
+              title: bubble.title,
+              content: bubble.content,
+              tags: bubble.tags,
+              source: `auto-retrospective:${sessionId}`,
+            }),
+            signal,
+          );
+          signal.throwIfAborted();
+          await awaitRetrospective(
+            linkBubbleToProject({
+              neo4j,
+              projectId,
+              bubbleId: newBubble.id,
+              linkedBy: 'auto-retrospective',
+            }),
+            signal,
+          );
+          signal.throwIfAborted();
           created++;
         } catch (err) {
+          signal.throwIfAborted();
           log.error(`Failed to create bubble "${bubble.title}": ${err}`);
         }
       } else {
         // Low-confidence: create as draft and notify
         try {
-          const newBubble = await knowledgeStore.insert({
-            title: `[Draft] ${bubble.title}`,
-            content: bubble.content,
-            tags: [...bubble.tags, 'draft'],
-            source: `auto-retrospective:${sessionId}`,
-          });
-          await linkBubbleToProject({
-            neo4j,
-            projectId,
-            bubbleId: newBubble.id,
-            linkedBy: 'auto-retrospective',
-          });
+          const newBubble = await awaitRetrospective(
+            knowledgeStore.insert({
+              title: `[Draft] ${bubble.title}`,
+              content: bubble.content,
+              tags: [...bubble.tags, 'draft'],
+              source: `auto-retrospective:${sessionId}`,
+            }),
+            signal,
+          );
+          signal.throwIfAborted();
+          await awaitRetrospective(
+            linkBubbleToProject({
+              neo4j,
+              projectId,
+              bubbleId: newBubble.id,
+              linkedBy: 'auto-retrospective',
+            }),
+            signal,
+          );
 
+          signal.throwIfAborted();
           const notification: NotificationEvent = {
             id: generateId(),
             timestamp: Date.now(),
@@ -250,6 +282,7 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
           eventBus.emit(notification);
           drafted++;
         } catch (err) {
+          signal.throwIfAborted();
           log.error(`Failed to create draft bubble "${bubble.title}": ${err}`);
         }
       }
@@ -264,7 +297,7 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
   async function maybeProcessCandidateBubbles(
     projectId: string,
     bubbles: CandidateBubble[],
-    sessionId: string,
+    options: { sessionId: string; signal: AbortSignal },
   ): Promise<{ created: number; drafted: number }> {
     if (!knowledgeStore || !neo4j) {
       if (bubbles.length > 0) {
@@ -272,7 +305,7 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
       }
       return { created: 0, drafted: 0 };
     }
-    return processCandidateBubbles({ knowledgeStore, neo4j, projectId, sessionId }, bubbles);
+    return processCandidateBubbles({ knowledgeStore, neo4j, projectId, ...options }, bubbles);
   }
 
   /** Write each proposal as a pending memory candidate for the default
@@ -283,6 +316,7 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
   async function writeCandidates(
     proposals: MemoryCandidateProposal[],
     sessionId: string,
+    signal: AbortSignal,
   ): Promise<number> {
     if (proposals.length === 0) return 0;
 
@@ -296,7 +330,8 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
 
     let written = 0;
     for (const proposal of proposals) {
-      const filename = await writeMemoryCandidate({ projectsDir }, agentName, {
+      signal.throwIfAborted();
+      const filename = await writeMemoryCandidate({ projectsDir, signal }, agentName, {
         title: proposal.title,
         content: proposal.content,
         source: 'session-retrospective',
@@ -308,10 +343,12 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
   }
 
   // eslint-disable-next-line max-lines-per-function -- orchestrates full retrospective: prompt, agent, parse, store, emit
-  async function runRetrospective(
+  async function performRetrospective(
     sessionId: string,
     projectId: string,
+    signal: AbortSignal,
   ): Promise<SessionRetrospectiveResult> {
+    signal.throwIfAborted();
     log.info(`Running retrospective for session ${sessionId}`);
 
     const messages = messageStore.getMessages(sessionId);
@@ -323,7 +360,8 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
     // memory candidate, regardless of how the session came to exist.
     const isInteractive = messages.some((m) => m.role === 'user');
 
-    const prompt = await buildPrompt(messages, projectId);
+    const prompt = await buildPrompt(messages, projectId, signal);
+    signal.throwIfAborted();
 
     const task = {
       id: generateId(),
@@ -338,11 +376,18 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
 
     const agentResult = await runAgentTask({
       task,
+      signal,
       eventBus,
       mcpServers: {},
       agentDefinitions: {},
     });
 
+    signal.throwIfAborted();
+    if (!agentResult.success) {
+      throw new Error(
+        `Retrospective model failed: ${agentResult.errors?.join(', ') ?? 'unknown error'}`,
+      );
+    }
     const { parsed, memoryCandidateProposals } = parseRetrospectiveResult(
       agentResult.result,
       sessionId,
@@ -357,17 +402,19 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
     const { created, drafted } = await maybeProcessCandidateBubbles(
       projectId,
       parsed.candidateBubbles,
-      sessionId,
+      { sessionId, signal },
     );
+    signal.throwIfAborted();
     parsed.bubblesCreated = created;
     parsed.bubblesDrafted = drafted;
 
     // Write memory candidates — unconditional (no Neo4j dependency), gated
     // only on the session being interactive.
     parsed.memoryCandidatesWritten = isInteractive
-      ? await writeCandidates(memoryCandidateProposals, sessionId)
+      ? await writeCandidates(memoryCandidateProposals, sessionId, signal)
       : 0;
 
+    signal.throwIfAborted();
     // Emit completion event
     const completeEvent: SessionRetrospectiveCompleteEvent = {
       id: generateId(),
@@ -392,5 +439,36 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
     return parsed;
   }
 
-  return { runRetrospective };
+  return {
+    runRetrospective(sessionId, projectId, signal) {
+      const combined = signal ? AbortSignal.any([lifetime.signal, signal]) : lifetime.signal;
+      const work = performRetrospective(sessionId, projectId, combined);
+      pending.add(work);
+      void work.then(
+        () => pending.delete(work),
+        () => pending.delete(work),
+      );
+      return awaitRetrospective(work, combined);
+    },
+    async stop() {
+      lifetime.abort(new Error('Session retrospective stopped'));
+      // External model waits settle boundedly and graph waits observe abort.
+      // Drain any already-started local candidate write before callers close stores.
+      await Promise.allSettled([...pending]);
+    },
+  };
+}
+
+async function awaitRetrospective<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  let abort: () => void = () => {};
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+  });
+  try {
+    return await Promise.race([work, cancelled]);
+  } finally {
+    signal.removeEventListener('abort', abort);
+  }
 }

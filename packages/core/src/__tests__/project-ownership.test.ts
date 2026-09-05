@@ -309,17 +309,52 @@ describe('Project ownership across APIs and chat dispatch', () => {
       const projectId = kind === 'unknown-parent' ? 'missing' : 'project-b';
       const sessionId = kind === 'missing' ? 'missing-session' : sessionA.id;
       socket.send(
-        JSON.stringify({ type: 'chat:send', projectId, sessionId, message: 'Wrong context' }),
+        JSON.stringify({
+          type: 'chat:send',
+          requestId: 'client-1',
+          projectId,
+          sessionId,
+          message: 'Wrong context',
+        }),
       );
       await vi.waitFor(() => expect(received).toHaveLength(1));
       expect(received[0]).toMatchObject({
         type: 'chat:error',
-        data: { projectId, sessionId, error: expect.stringContaining('not found') },
+        data: {
+          requestId: 'client-1',
+          projectId,
+          sessionId,
+          error: expect.stringContaining('not found'),
+        },
       });
       expect(requests).toEqual([]);
       expect(chatState()).toEqual(before);
     },
   );
+
+  it('WebSocket correlates malformed message rejection without mutating chat state', async () => {
+    const before = chatState();
+    const socket = await app.injectWS('/ws');
+    sockets.push(socket);
+    const received: any[] = [];
+    socket.on('message', (raw: RawData) => received.push(JSON.parse(raw.toString())));
+    socket.send(
+      JSON.stringify({
+        type: 'chat:send',
+        requestId: 'invalid-message-request',
+        projectId: 'project-a',
+        sessionId: sessionA.id,
+        message: '',
+      }),
+    );
+    await vi.waitFor(() => expect(received).toHaveLength(1));
+    expect(received[0]).toEqual({
+      type: 'chat:error',
+      data: { requestId: 'invalid-message-request', error: 'Invalid chat message' },
+    });
+    expect(requests).toEqual([]);
+    expect(chatState()).toEqual(before);
+  });
 
   it('WebSocket preserves valid resume and accepts null while the dashboard initializes', async () => {
     const socket = await app.injectWS('/ws');

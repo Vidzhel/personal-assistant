@@ -29,6 +29,7 @@ describe('chat capability preflight', () => {
   let deps: OrchestratorDeps;
   const requests = vi.fn<(event: AgentTaskRequestEvent) => void>();
   const rejected = vi.fn<(event: UserChatRejectedEvent) => void>();
+  const accepted = vi.fn();
   const collectMcpServers = vi.fn();
 
   beforeEach(() => {
@@ -38,6 +39,7 @@ describe('chat capability preflight', () => {
     const eventBus = new EventBus();
     eventBus.on('agent:task:request', requests);
     eventBus.on('user:chat:rejected', rejected);
+    eventBus.on('user:chat:accepted', accepted);
     deps = {
       eventBus,
       sessionManager: new SessionManager(),
@@ -59,7 +61,7 @@ describe('chat capability preflight', () => {
       timestamp: Date.now(),
       source: 'test',
       type: 'user:chat:message',
-      payload: { projectId, sessionId, message: 'Hello' },
+      payload: { requestId: 'client-request', projectId, sessionId, message: 'Hello' },
     });
   }
 
@@ -93,7 +95,7 @@ describe('chat capability preflight', () => {
       send(session.id);
       await vi.waitFor(() => expect(rejected).toHaveBeenCalledOnce());
       expect(rejected.mock.calls[0][0].payload).toMatchObject({
-        requestId: 'request-1',
+        requestId: 'client-request',
         sessionId: session.id,
         error: expect.stringContaining('invalid agent binding'),
       });
@@ -101,6 +103,7 @@ describe('chat capability preflight', () => {
       expect(deps.messageStore.getMessages(session.id)).toEqual(messages);
       expect(deps.sessionManager.getSdkSessionId(session.id)).toBe('existing-sdk-session');
       expect(requests).not.toHaveBeenCalled();
+      expect(accepted).not.toHaveBeenCalled();
       expect(collectMcpServers).not.toHaveBeenCalled();
 
       send(session.id);
@@ -114,6 +117,18 @@ describe('chat capability preflight', () => {
         plugins: [],
       });
       expect(deps.messageStore.getMessages(session.id)).toHaveLength(messages.length + 1);
+      expect(accepted).toHaveBeenCalledOnce();
+      const stored = deps.messageStore.getMessages(session.id).at(-1)!;
+      expect(accepted.mock.calls[0][0]).toMatchObject({
+        type: 'user:chat:accepted',
+        payload: {
+          requestId: 'client-request',
+          projectId: 'meta',
+          sessionId: session.id,
+          messageId: stored.id,
+        },
+      });
+      expect(accepted.mock.calls[0][0].id).not.toBe('client-request');
     },
   );
 
@@ -147,5 +162,34 @@ describe('chat capability preflight', () => {
       plugins: [],
     });
     expect(collectMcpServers).not.toHaveBeenCalled();
+  });
+
+  it('rejects a failed transcript write without claiming acceptance or dispatching work', async () => {
+    new Orchestrator(deps);
+    const session = deps.sessionManager.getOrCreateSession('meta');
+    vi.spyOn(deps.messageStore, 'appendMessage').mockReturnValueOnce(undefined);
+    send(session.id);
+    await vi.waitFor(() => expect(rejected).toHaveBeenCalledOnce());
+    expect(rejected.mock.calls[0][0].payload.requestId).toBe('client-request');
+    expect(rejected.mock.calls[0][0].payload.error).toContain('save your message');
+    expect(accepted).not.toHaveBeenCalled();
+    expect(requests).not.toHaveBeenCalled();
+    expect(deps.sessionManager.getSession(session.id)?.status).toBe('idle');
+    expect(deps.messageStore.getMessages(session.id)).toEqual([]);
+  });
+
+  it('drains an admitted preflight during stop without saving or dispatching the turn', async () => {
+    const orchestrator = new Orchestrator(deps);
+    send();
+    await orchestrator.stop();
+    expect(rejected).toHaveBeenCalledOnce();
+    expect(rejected.mock.calls[0][0].payload.error).toContain('stopping');
+    expect(accepted).not.toHaveBeenCalled();
+    expect(requests).not.toHaveBeenCalled();
+    expect(deps.sessionManager.getProjectSessions('meta')).toEqual([]);
+    send();
+    await orchestrator.stop();
+    expect(rejected).toHaveBeenCalledOnce();
+    expect(requests).not.toHaveBeenCalled();
   });
 });

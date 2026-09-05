@@ -1,5 +1,7 @@
 'use client';
 
+import { projectPath } from '@/lib/url-paths';
+
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
@@ -29,7 +31,7 @@ interface SidebarProps {
 // eslint-disable-next-line max-lines-per-function, complexity -- sidebar with collapsed/expanded modes
 export function Sidebar({ collapsed, onNavigate }: SidebarProps) {
   const pathname = usePathname() ?? '/';
-  const metaHref = `/projects/${META_PROJECT_ID}`;
+  const metaHref = projectPath(META_PROJECT_ID);
   const metaActive = pathname === metaHref;
 
   const widthClass = collapsed ? 'w-14' : 'w-56';

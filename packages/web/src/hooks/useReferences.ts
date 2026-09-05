@@ -2,118 +2,78 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import type { EnrichedReference, ExternalRef } from '@/components/session/ReferencesPanel';
-import { useWebSocket } from './useWebSocket';
+import { useWebSocket } from '@/hooks/useWebSocket';
+import { apiRequest } from '@/lib/api-request';
+import { extractUrls } from '@/lib/references';
+import { consumeWsMessages } from '@/lib/ws-message-cursor';
+import type { WsMessage } from '@/lib/ws-client';
 
-import { CORE_API_URL as API_URL } from '@/lib/core-endpoints';
-
-const URL_REGEX = /https?:\/\/[^\s)\]>"']+/g;
-const MARKDOWN_LINK_REGEX = /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g;
-
-interface ReferencesApiResponse {
-  references: Record<
-    string,
-    Array<{
-      bubbleId: string;
-      title: string;
-      snippet: string;
-      score: number;
-      tags: string[];
-      domains: string[];
-      permanence: string;
-    }>
-  >;
-}
-
-interface StoredMessage {
-  role: string;
-  content: string;
-}
-
-function extractUrls(messages: StoredMessage[]): ExternalRef[] {
-  const urls = new Map<string, ExternalRef>();
-  for (const msg of messages.filter((m) => m.role === 'assistant')) {
-    for (const match of msg.content.matchAll(MARKDOWN_LINK_REGEX)) {
-      try {
-        urls.set(match[2], { url: match[2], label: match[1], domain: new URL(match[2]).hostname });
-      } catch {
-        /* invalid URL */
-      }
-    }
-    for (const match of msg.content.matchAll(URL_REGEX)) {
-      if (!urls.has(match[0])) {
-        try {
-          urls.set(match[0], { url: match[0], label: null, domain: new URL(match[0]).hostname });
-        } catch {
-          /* invalid URL */
-        }
-      }
-    }
-  }
-  return [...urls.values()];
-}
-
-interface UseReferencesResult {
+interface ReferenceState {
+  sessionId: string | null;
   references: Record<string, EnrichedReference[]>;
   externalRefs: ExternalRef[];
   loading: boolean;
 }
 
-// eslint-disable-next-line max-lines-per-function -- hook managing API fetch, URL extraction, and WebSocket updates
-export function useReferences(sessionId: string | null): UseReferencesResult {
-  const [references, setReferences] = useState<Record<string, EnrichedReference[]>>({});
-  const [externalRefs, setExternalRefs] = useState<ExternalRef[]>([]);
-  const [loading, setLoading] = useState(false);
-  const channels = useMemo(() => (sessionId ? ['project:*'] : []), [sessionId]);
-  const { messages: wsMessages } = useWebSocket(channels);
-  const processedWsRef = useRef(0);
+async function fetchReferences(sessionId: string, signal: AbortSignal): Promise<ReferenceState> {
+  const prefix = `/sessions/${encodeURIComponent(sessionId)}`;
+  const [refs, messages] = await Promise.all([
+    apiRequest<{ references: Record<string, EnrichedReference[]> }>(`${prefix}/references`, {
+      signal,
+    }).catch(() => null),
+    apiRequest<Array<{ role: string; content: string }>>(`${prefix}/messages`, { signal }).catch(
+      () => null,
+    ),
+  ]);
+  return {
+    sessionId,
+    references: refs?.references ?? {},
+    externalRefs: extractUrls(messages ?? []),
+    loading: false,
+  };
+}
 
-  const fetchData = useCallback(
-    (sid: string): Promise<void> =>
-      Promise.all([
-        fetch(`${API_URL}/sessions/${sid}/references`)
-          .then((res) => (res.ok ? (res.json() as Promise<ReferencesApiResponse>) : null))
-          .catch(() => null),
-        fetch(`${API_URL}/sessions/${sid}/messages`)
-          .then((res) => (res.ok ? (res.json() as Promise<StoredMessage[]>) : null))
-          .catch(() => null),
-      ]).then(([refsData, messagesData]) => {
-        if (refsData) {
-          setReferences(refsData.references as Record<string, EnrichedReference[]>);
-        }
-        if (messagesData) {
-          setExternalRefs(extractUrls(messagesData));
-        }
-      }),
-    [],
+function relevantEvent(message: WsMessage, sessionId: string | null): boolean {
+  if (message.type !== 'event' || !message.data || typeof message.data !== 'object') return false;
+  const event = message.data as { type: string; payload?: { sessionId?: string } };
+  return Boolean(
+    sessionId &&
+    event.payload?.sessionId === sessionId &&
+    ['agent:message', 'agent:task:complete'].includes(event.type),
   );
+}
 
+export function useReferences(sessionId: string | null): ReferenceState {
+  const [state, setState] = useState<ReferenceState>({
+    sessionId,
+    references: {},
+    externalRefs: [],
+    loading: false,
+  });
+  const request = useRef<AbortController | null>(null);
+  const cursor = useRef<WsMessage | undefined>(undefined);
+  const channels = useMemo(() => (sessionId ? ['global'] : []), [sessionId]);
+  const { messages } = useWebSocket(channels);
+  const refresh = useCallback(() => {
+    if (!sessionId) return;
+    request.current?.abort();
+    const controller = new AbortController();
+    request.current = controller;
+    void fetchReferences(sessionId, controller.signal).then((next) => {
+      if (!controller.signal.aborted) setState(next);
+    });
+  }, [sessionId]);
   useEffect(() => {
-    if (!sessionId) {
-      setReferences({});
-      setExternalRefs([]);
-      return;
-    }
-    setLoading(true);
-    fetchData(sessionId).finally(() => setLoading(false));
-  }, [sessionId, fetchData]);
-
-  // Listen for real-time context messages via WebSocket
+    cursor.current = messages.at(-1);
+    setState({ sessionId, references: {}, externalRefs: [], loading: Boolean(sessionId) });
+    refresh();
+    return () => request.current?.abort();
+  }, [sessionId, refresh]);
   useEffect(() => {
-    const newMessages = wsMessages.slice(processedWsRef.current);
-    processedWsRef.current = wsMessages.length;
-
-    for (const msg of newMessages) {
-      if (msg.type === 'event') {
-        const event = msg.data as {
-          type: string;
-          payload?: { messageType?: string };
-        };
-        if (event.type === 'agent:message' && event.payload?.messageType === 'context') {
-          if (sessionId) fetchData(sessionId);
-        }
-      }
-    }
-  }, [wsMessages, sessionId, fetchData]);
-
-  return { references, externalRefs, loading };
+    if (consumeWsMessages(messages, cursor).some((message) => relevantEvent(message, sessionId)))
+      refresh();
+  }, [messages, sessionId, refresh]);
+  return state.sessionId === sessionId
+    ? state
+    : { sessionId, references: {}, externalRefs: [], loading: Boolean(sessionId) };
 }

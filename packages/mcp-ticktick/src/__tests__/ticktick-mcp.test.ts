@@ -21,7 +21,9 @@ describe('TickTick MCP Server (startup)', () => {
 });
 
 const TOKEN = process.env.TICKTICK_ACCESS_TOKEN;
-const describeWithToken = TOKEN ? describe : describe.skip;
+// Having credentials in a shell must never silently enable live account tests.
+const describeWithToken =
+  process.env.RAVEN_TEST_TICKTICK === '1' && TOKEN ? describe : describe.skip;
 
 describeWithToken('TickTick MCP Server (real API)', () => {
   let client: Client;

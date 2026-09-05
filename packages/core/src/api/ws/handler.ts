@@ -4,7 +4,11 @@ import { createLogger } from '@raven/shared';
 import type { RavenEvent, WsMessageFromClient } from '@raven/shared';
 import type { EventBus } from '../../event-bus/event-bus.ts';
 import type { SessionManager } from '../../session-manager/session-manager.ts';
-import { ChatRequestSchema, validateChatTarget } from '../../session-manager/chat-validation.ts';
+import {
+  CHAT_REQUEST_ID_MAX_LENGTH,
+  ChatRequestSchema,
+  validateChatTarget,
+} from '../../session-manager/chat-validation.ts';
 
 const log = createLogger('ws');
 
@@ -16,16 +20,25 @@ interface ChatDeps {
 function handleChatSend(socket: WebSocket, deps: ChatDeps, msg: WsMessageFromClient): void {
   const parsed = ChatRequestSchema.safeParse(msg);
   if (!parsed.success) {
-    socket.send(JSON.stringify({ type: 'chat:error', data: { error: 'Invalid chat message' } }));
+    // Preserve a valid correlation key even when another field failed validation.
+    const requestId =
+      'requestId' in msg &&
+      typeof msg.requestId === 'string' &&
+      msg.requestId.length <= CHAT_REQUEST_ID_MAX_LENGTH
+        ? msg.requestId
+        : undefined;
+    socket.send(
+      JSON.stringify({ type: 'chat:error', data: { requestId, error: 'Invalid chat message' } }),
+    );
     return;
   }
-  const { projectId, sessionId } = parsed.data;
+  const { projectId, sessionId, requestId } = parsed.data;
   const target = validateChatTarget(deps.sessionManager, projectId, sessionId);
   if (!target.ok) {
     socket.send(
       JSON.stringify({
         type: 'chat:error',
-        data: { projectId, sessionId, error: target.error },
+        data: { requestId, projectId, sessionId, error: target.error },
       }),
     );
     return;

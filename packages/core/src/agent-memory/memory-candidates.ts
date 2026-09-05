@@ -94,11 +94,12 @@ export interface WriteCandidateInput {
  * returns undefined on failure so a bad candidate never takes down the
  * retrospective/system job that produced it. */
 export async function writeMemoryCandidate(
-  deps: { projectsDir: string },
+  deps: { projectsDir: string; signal?: AbortSignal },
   agentName: string,
   input: WriteCandidateInput,
 ): Promise<string | undefined> {
   try {
+    deps.signal?.throwIfAborted();
     validateAgentName(agentName);
     const dir = candidatesDir(deps.projectsDir, agentName);
     const now = new Date();
@@ -115,10 +116,13 @@ export async function writeMemoryCandidate(
     const content = `---\n${yamlDump(frontmatter)}---\n\n# ${input.title}\n\n${input.content}\n`;
 
     await mkdir(dir, { recursive: true });
+    deps.signal?.throwIfAborted();
     await writeFile(join(dir, filename), content, 'utf-8');
+    deps.signal?.throwIfAborted();
     log.info(`Wrote memory candidate: ${agentName}/candidates/${filename}`);
     return filename;
   } catch (err) {
+    deps.signal?.throwIfAborted();
     log.error(`Failed to write memory candidate for ${agentName}: ${err}`);
     return undefined;
   }
@@ -206,7 +210,7 @@ export async function archiveCandidate(
   projectsDir: string,
   agentName: string,
   filename: string,
-): Promise<void> {
+): Promise<boolean> {
   validateAgentName(agentName);
   const dir = candidatesDir(projectsDir, agentName);
   const dest = archiveDir(projectsDir, agentName);
@@ -214,7 +218,9 @@ export async function archiveCandidate(
     await mkdir(dest, { recursive: true });
     await rename(join(dir, filename), join(dest, filename));
     log.info(`Archived memory candidate: ${agentName}/candidates/${filename}`);
+    return true;
   } catch (err) {
     log.warn(`Failed to archive candidate ${filename} for ${agentName}: ${err}`);
+    return false;
   }
 }

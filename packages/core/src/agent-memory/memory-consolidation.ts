@@ -47,14 +47,18 @@ function resolveModel(config: AppConfig, agentModel: string | null): string {
   return config.CLAUDE_MODEL;
 }
 
-const ConsolidationOpSchema = z.object({
-  action: z.enum(['create', 'update', 'delete']),
-  path: z.string().min(1),
-  content: z.string().optional(),
-});
+const ConsolidationOpSchema = z
+  .object({
+    action: z.enum(['create', 'update', 'delete']),
+    path: z.string().min(1),
+    content: z.string().optional(),
+  })
+  .refine((op) => op.action === 'delete' || op.content !== undefined, {
+    message: 'create and update require content',
+  });
 
 const ConsolidationResultSchema = z.object({
-  ops: z.array(ConsolidationOpSchema).default([]),
+  ops: z.array(ConsolidationOpSchema),
 });
 
 type ConsolidationOp = z.infer<typeof ConsolidationOpSchema>;
@@ -94,21 +98,32 @@ export interface MemoryConsolidationResult {
 
 export interface MemoryConsolidation {
   runConsolidation: () => Promise<MemoryConsolidationResult>;
+  stop: () => Promise<void>;
+}
+
+interface ActiveConsolidationDeps extends MemoryConsolidationDeps {
+  signal: AbortSignal;
 }
 
 async function buildPrompt(
-  memoryStore: MemoryStore,
+  context: { memoryStore: MemoryStore; signal: AbortSignal },
   agentName: string,
   candidates: PendingCandidate[],
 ): Promise<string> {
+  const { memoryStore, signal } = context;
+  signal.throwIfAborted();
   const memoryIndex = (await memoryStore.readIndex(agentName)) ?? '(no index yet)';
+  signal.throwIfAborted();
   const fileNames = (await memoryStore.list(agentName)).filter((f) => f !== INDEX_FILE);
+  signal.throwIfAborted();
 
   const fileSections: string[] = [];
   for (const file of fileNames) {
     try {
       fileSections.push(`### ${file}\n${await memoryStore.read(agentName, file)}`);
+      signal.throwIfAborted();
     } catch (err) {
+      signal.throwIfAborted();
       log.warn(`Failed to read memory file ${file} for ${agentName}: ${err}`);
     }
   }
@@ -153,20 +168,29 @@ interface ApplyOpsInput {
    * frontmatter (see buildProvenanceFrontmatter). Bundled into one input
    * object, alongside the other three, to stay under max-params. */
   candidates: PendingCandidate[];
+  signal: AbortSignal;
+}
+
+interface AppliedOps {
+  applied: number;
+  complete: boolean;
 }
 
 /** Apply at most MAX_CONSOLIDATION_OPS ops via memoryStore, skipping any
  * that target MEMORY.md (regenerated separately, never model-authored) or
  * that memoryStore itself rejects (budget, path-traversal, missing file for
- * update/delete — see checkAndWrite/safePath in memory-store.ts). Never
- * throws — a rejected or errored op is logged and simply not counted. */
-async function applyOps(input: ApplyOpsInput): Promise<number> {
-  const { memoryStore, agentName, ops, candidates } = input;
+ * update/delete — see checkAndWrite/safePath in memory-store.ts). Rejections
+ * retain the input candidates; cancellation stops follow-on operations. */
+async function applyOps(input: ApplyOpsInput): Promise<AppliedOps> {
+  const { memoryStore, agentName, ops, candidates, signal } = input;
   let applied = 0;
+  let complete = ops.length <= MAX_CONSOLIDATION_OPS;
   const frontmatter = buildProvenanceFrontmatter(candidates);
 
   for (const op of ops.slice(0, MAX_CONSOLIDATION_OPS)) {
+    signal.throwIfAborted();
     if (op.path === INDEX_FILE) {
+      complete = false;
       log.warn(
         `Consolidation for ${agentName} proposed touching ${INDEX_FILE} directly — skipped (regenerated separately)`,
       );
@@ -184,20 +208,24 @@ async function applyOps(input: ApplyOpsInput): Promise<number> {
             ? await memoryStore.write(agentName, op.path, content)
             : await memoryStore.update(agentName, op.path, content);
       }
+      signal.throwIfAborted();
 
       if (result.ok) {
         applied++;
       } else {
+        complete = false;
         log.warn(
           `Consolidation op ${op.action} ${op.path} for ${agentName} rejected: ${result.error}`,
         );
       }
     } catch (err) {
+      signal.throwIfAborted();
+      complete = false;
       log.error(`Consolidation op ${op.action} ${op.path} for ${agentName} failed: ${err}`);
     }
   }
 
-  return applied;
+  return { applied, complete };
 }
 
 /** Humanizes a memory filename for the index line — "user-preferences.md"
@@ -215,8 +243,14 @@ function humanizeFilename(file: string): string {
 /** Rebuild MEMORY.md deterministically from whatever memory files actually
  * exist after ops were applied — the index is never model-authored, so it
  * can't drift from reality or leak a rejected/partial op. */
-async function regenerateIndex(memoryStore: MemoryStore, agentName: string): Promise<void> {
+async function regenerateIndex(
+  memoryStore: MemoryStore,
+  agentName: string,
+  signal: AbortSignal,
+): Promise<boolean> {
+  signal.throwIfAborted();
   const files = (await memoryStore.list(agentName)).filter((f) => f !== INDEX_FILE).sort();
+  signal.throwIfAborted();
 
   const lines = files.map(
     (file) => `- **${file}** — ${humanizeFilename(file).slice(0, INDEX_LINE_MAX_LENGTH)}`,
@@ -227,13 +261,16 @@ async function regenerateIndex(memoryStore: MemoryStore, agentName: string): Pro
   const content = `# ${title} Memory Index\n\n${body}\n`;
 
   const existing = await memoryStore.readIndex(agentName);
+  signal.throwIfAborted();
   const result =
     existing !== null
       ? await memoryStore.update(agentName, INDEX_FILE, content)
       : await memoryStore.write(agentName, INDEX_FILE, content);
+  signal.throwIfAborted();
   if (!result.ok) {
     log.error(`Failed to regenerate ${INDEX_FILE} for ${agentName}: ${result.error}`);
   }
+  return result.ok;
 }
 
 interface ProcessAgentResult {
@@ -241,9 +278,7 @@ interface ProcessAgentResult {
   candidatesArchived: number;
 }
 
-/** Defensive JSON parse of the consolidation agent's raw output — a
- * malformed or non-JSON response yields an empty op list (logged) rather
- * than throwing, so one bad model turn can't take down the whole run. */
+/** Invalid output must leave the source candidates pending for a retry. */
 function parseConsolidationOps(rawResult: string, agentName: string): ConsolidationOp[] {
   try {
     const parsed = ConsolidationResultSchema.safeParse(JSON.parse(rawResult));
@@ -254,22 +289,41 @@ function parseConsolidationOps(rawResult: string, agentName: string): Consolidat
   } catch (err) {
     log.warn(`Consolidation result for ${agentName} was not valid JSON: ${err}`);
   }
-  return [];
+  throw new Error(`Invalid memory consolidation response for ${agentName}`);
+}
+
+async function archiveAppliedCandidates(
+  deps: ActiveConsolidationDeps,
+  agentName: string,
+  candidates: PendingCandidate[],
+): Promise<number> {
+  let archivedCount = 0;
+  for (const candidate of candidates) {
+    deps.signal.throwIfAborted();
+    const archived = await archiveCandidate(deps.projectsDir, agentName, candidate.filename);
+    deps.signal.throwIfAborted();
+    if (!archived) break;
+    archivedCount++;
+  }
+  return archivedCount;
 }
 
 async function consolidateAgent(
-  deps: MemoryConsolidationDeps,
+  deps: ActiveConsolidationDeps,
   agentName: string,
   agentModel: string | null,
 ): Promise<ProcessAgentResult> {
-  const { projectsDir, memoryStore, eventBus, config } = deps;
+  const { projectsDir, memoryStore, eventBus, config, signal } = deps;
 
+  signal.throwIfAborted();
   const candidates = await listPendingCandidates(projectsDir, agentName);
+  signal.throwIfAborted();
   if (candidates.length === 0) return { opsApplied: 0, candidatesArchived: 0 };
 
   log.info(`Consolidating ${candidates.length} candidate(s) for agent ${agentName}`);
 
-  const prompt = await buildPrompt(memoryStore, agentName, candidates);
+  const prompt = await buildPrompt({ memoryStore, signal }, agentName, candidates);
+  signal.throwIfAborted();
   const task = {
     id: generateId(),
     skillName: 'memory-consolidation',
@@ -287,17 +341,22 @@ async function consolidateAgent(
     mcpServers: {},
     agentDefinitions: {},
     model: resolveModel(config, agentModel),
+    signal,
   });
+  signal.throwIfAborted();
+  if (!agentResult.success) throw new Error(`Memory consolidation failed for ${agentName}`);
 
   const ops = parseConsolidationOps(agentResult.result, agentName);
-  const opsApplied = await applyOps({ memoryStore, agentName, ops, candidates });
-  await regenerateIndex(memoryStore, agentName);
+  const application = await applyOps({ memoryStore, agentName, ops, candidates, signal });
+  signal.throwIfAborted();
+  const indexReady = await regenerateIndex(memoryStore, agentName, signal);
+  signal.throwIfAborted();
 
-  let candidatesArchived = 0;
-  for (const candidate of candidates) {
-    await archiveCandidate(projectsDir, agentName, candidate.filename);
-    candidatesArchived++;
-  }
+  const candidatesArchived =
+    application.complete && indexReady
+      ? await archiveAppliedCandidates(deps, agentName, candidates)
+      : 0;
+  signal.throwIfAborted();
 
   // Commit the whole memory dir (new/updated/deleted fact files, the
   // regenerated index, and the candidate archive moves) in one shot — same
@@ -308,41 +367,69 @@ async function consolidateAgent(
     [resolveMemoryDir(projectsDir, agentName)],
     `chore(memory): consolidate ${candidates.length} candidate(s) for ${agentName}`,
   );
+  signal.throwIfAborted();
 
-  return { opsApplied, candidatesArchived };
+  return { opsApplied: application.applied, candidatesArchived };
+}
+
+async function consolidateAgents(
+  deps: ActiveConsolidationDeps,
+): Promise<MemoryConsolidationResult> {
+  const { namedAgentStore } = deps;
+  deps.signal.throwIfAborted();
+  const agents = namedAgentStore.listAgents();
+
+  let agentsProcessed = 0;
+  let totalOpsApplied = 0;
+  let totalCandidatesArchived = 0;
+
+  for (const agent of agents) {
+    deps.signal.throwIfAborted();
+    const { opsApplied, candidatesArchived } = await consolidateAgent(
+      deps,
+      agent.name,
+      agent.model,
+    );
+    deps.signal.throwIfAborted();
+    if (candidatesArchived > 0) agentsProcessed++;
+    totalOpsApplied += opsApplied;
+    totalCandidatesArchived += candidatesArchived;
+  }
+
+  log.info(
+    `Memory consolidation complete: agents=${agentsProcessed}, ops=${totalOpsApplied}, candidates=${totalCandidatesArchived}`,
+  );
+
+  return {
+    agentsProcessed,
+    opsApplied: totalOpsApplied,
+    candidatesArchived: totalCandidatesArchived,
+  };
 }
 
 export function createMemoryConsolidation(deps: MemoryConsolidationDeps): MemoryConsolidation {
-  const { namedAgentStore } = deps;
-
-  async function runConsolidation(): Promise<MemoryConsolidationResult> {
-    const agents = namedAgentStore.listAgents();
-
-    let agentsProcessed = 0;
-    let totalOpsApplied = 0;
-    let totalCandidatesArchived = 0;
-
-    for (const agent of agents) {
-      const { opsApplied, candidatesArchived } = await consolidateAgent(
-        deps,
-        agent.name,
-        agent.model,
+  const controller = new AbortController();
+  const activeDeps = { ...deps, signal: controller.signal };
+  let pending: Promise<MemoryConsolidationResult> | undefined;
+  return {
+    runConsolidation: () => {
+      if (controller.signal.aborted) return Promise.reject(controller.signal.reason);
+      if (pending) return pending;
+      const work = consolidateAgents(activeDeps);
+      pending = work;
+      void work.then(
+        () => {
+          pending = undefined;
+        },
+        () => {
+          pending = undefined;
+        },
       );
-      if (candidatesArchived > 0) agentsProcessed++;
-      totalOpsApplied += opsApplied;
-      totalCandidatesArchived += candidatesArchived;
-    }
-
-    log.info(
-      `Memory consolidation complete: agents=${agentsProcessed}, ops=${totalOpsApplied}, candidates=${totalCandidatesArchived}`,
-    );
-
-    return {
-      agentsProcessed,
-      opsApplied: totalOpsApplied,
-      candidatesArchived: totalCandidatesArchived,
-    };
-  }
-
-  return { runConsolidation };
+      return work;
+    },
+    stop: async () => {
+      controller.abort();
+      await Promise.allSettled(pending ? [pending] : []);
+    },
+  };
 }

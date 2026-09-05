@@ -1,5 +1,7 @@
 'use client';
 
+import { projectPath } from '@/lib/url-paths';
+
 import Link from 'next/link';
 import { useState } from 'react';
 import type { Project } from '@/lib/api-client';
@@ -94,7 +96,7 @@ function TreeItemLabel({ project }: { project: Project }) {
         </span>
       )}
       <Link
-        href={`/projects/${project.id}`}
+        href={projectPath(project.id)}
         className="text-sm font-medium hover:underline"
         style={{ color: 'var(--text)' }}
       >

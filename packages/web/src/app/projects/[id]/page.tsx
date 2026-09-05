@@ -1,17 +1,26 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { api, type Project } from '@/lib/api-client';
 import { getProjectTabs, type ProjectTabDef } from '@/components/project/project-tab-registry';
 import { InlineEditField } from '@/components/project/InlineEditField';
+import { projectIdFromRoute } from '@/lib/url-paths';
 
-// eslint-disable-next-line max-lines-per-function -- page component with tab layout and project header
 export default function ProjectPage() {
   const params = useParams();
-  const id = params.id as string;
+  const id = projectIdFromRoute(params.id as string);
+  return <ProjectDetail key={id} id={id} />;
+}
+
+// eslint-disable-next-line max-lines-per-function -- page component with tab layout and project header
+function ProjectDetail({ id }: { id: string }) {
+  const router = useRouter();
   const [project, setProject] = useState<Project | null>(null);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const [requestedSessionId, setRequestedSessionId] = useState<string>();
   const [activeTab, setActiveTab] = useState('overview');
 
   const tabs: ProjectTabDef[] = getProjectTabs();
@@ -20,11 +29,14 @@ export default function ProjectPage() {
     api
       .getProject(id)
       .then(setProject)
-      .catch(() => setError(true));
+      .catch((cause: unknown) =>
+        setError(cause instanceof Error ? cause.message : 'Could not load project.'),
+      );
   }, [id]);
 
   const handleNewSession = useCallback(async () => {
-    await api.createSession(id);
+    const session = await api.createSession(id);
+    setRequestedSessionId(session.id);
     setActiveTab('sessions');
   }, [id]);
 
@@ -38,16 +50,33 @@ export default function ProjectPage() {
 
   const handleUpdateDescription = useCallback(
     async (description: string) => {
-      const updated = await api.updateProject(id, { description: description || undefined });
+      const updated = await api.updateProject(id, { description });
       setProject(updated);
     },
     [id],
   );
 
+  const runAction = async (action: () => Promise<void>) => {
+    setPending(true);
+    setActionError(null);
+    try {
+      await action();
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : 'The action failed.');
+    } finally {
+      setPending(false);
+    }
+  };
+  const handleDelete = async () => {
+    if (!confirm('Delete this project? Its context will be archived.')) return;
+    await api.deleteProject(id);
+    router.push('/projects');
+  };
+
   if (error) {
     return (
       <div className="p-8" style={{ color: 'var(--text-muted)' }}>
-        Project not found.
+        {error}
       </div>
     );
   }
@@ -92,14 +121,28 @@ export default function ProjectPage() {
             </div>
           </div>
           <button
-            onClick={() => void handleNewSession()}
+            onClick={() => void runAction(handleNewSession)}
+            disabled={pending}
             className="px-3 py-1.5 rounded text-sm font-medium transition-colors shrink-0"
             style={{ background: 'var(--accent)', color: 'white' }}
           >
             New Chat
           </button>
+          <button
+            onClick={() => void runAction(handleDelete)}
+            disabled={pending}
+            className="px-3 py-1.5 text-sm"
+            style={{ color: 'var(--error)' }}
+          >
+            Delete Project
+          </button>
         </div>
 
+        {actionError && (
+          <p role="alert" style={{ color: 'var(--error)' }}>
+            {actionError}
+          </p>
+        )}
         {/* Tab bar */}
         <div className="flex gap-1">
           {tabs.map((t) => (
@@ -132,6 +175,7 @@ export default function ProjectPage() {
               project={project}
               onProjectUpdated={setProject}
               onNewSession={handleNewSession}
+              requestedSessionId={requestedSessionId}
             />
           </div>
         ))}

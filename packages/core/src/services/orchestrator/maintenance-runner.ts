@@ -20,25 +20,38 @@ const DEFAULT_PORT = 4001;
 
 let eventBus: EventBusInterface;
 let projectRoot: string;
-let configDir: string;
+let projectsDir: string;
+let libraryDir: string;
+let getPort: () => number;
+let lifetime: AbortController | undefined;
+let requestHandler: ((event: unknown) => void) | undefined;
+let activeRun: Promise<void> | undefined;
 let port: number;
 let running = false;
 
 const service: RavenService = {
   async start(context: ServiceContext): Promise<void> {
+    if (lifetime) await service.stop();
     eventBus = context.eventBus;
     projectRoot = context.projectRoot;
-    configDir = context.configDir ?? resolve(context.projectRoot, 'config');
-    port = (context.config.port as number) ?? DEFAULT_PORT;
+    projectsDir = context.projectsDir ?? resolve(context.projectRoot, 'projects');
+    libraryDir = context.libraryDir ?? resolve(context.projectRoot, 'library');
+    port = (context.config.RAVEN_PORT as number) ?? DEFAULT_PORT;
+    getPort = context.getApiPort ?? (() => port);
+    lifetime = new AbortController();
+    const current = lifetime;
+    running = false;
+    activeRun = undefined;
 
     // Listen for agent:task:complete events from pipeline nodes that trigger maintenance
-    eventBus.on('agent:task:request', (event: unknown) => {
+    requestHandler = (event: unknown) => {
       const payload = (event as { payload: unknown }).payload as {
         actionName?: string;
         taskId: string;
       };
       if (payload.actionName === 'maintenance:run') {
-        runMaintenance(payload.taskId).catch((err) => {
+        startRun(payload.taskId, current.signal).catch((err) => {
+          if (current.signal.aborted) return;
           log.error(`Maintenance run failed: ${err instanceof Error ? err.message : String(err)}`);
           // Emit completion so pipeline doesn't hang
           eventBus.emit({
@@ -56,17 +69,30 @@ const service: RavenService = {
           });
         });
       }
-    });
+    };
 
     context.jobRegistry.register('system-maintenance', async () => {
-      await runMaintenance(generateId());
+      await startRun(generateId(), current.signal);
       return { summary: 'System maintenance complete' };
     });
 
+    eventBus.on('agent:task:request', requestHandler);
     log.info('Maintenance runner service started');
   },
 
   async stop(): Promise<void> {
+    lifetime?.abort(new Error('Maintenance stopped'));
+    if (requestHandler) eventBus.off('agent:task:request', requestHandler);
+    requestHandler = undefined;
+    const DRAIN_TIMEOUT_MS = 1000;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      activeRun?.catch(() => {}),
+      new Promise<void>((resolveDrain) => {
+        timer = setTimeout(resolveDrain, DRAIN_TIMEOUT_MS);
+      }),
+    ]);
+    clearTimeout(timer);
     log.info('Maintenance runner service stopped');
   },
 };
@@ -83,13 +109,13 @@ interface GatheredMaintenanceData {
 async function gatherMaintenanceData(): Promise<GatheredMaintenanceData> {
   const logDir = getLogDir() ?? resolve(projectRoot, 'data/logs');
   const dataDir = resolve(projectRoot, 'data');
-  const healthUrl = `http://localhost:${String(port)}/api/health`;
+  const healthUrl = `http://localhost:${String(getPort())}/api/health`;
 
   const [logAnalysis, dependencyReport, resourceReport, conventionAuditReport] = await Promise.all([
     analyzeLogs(logDir),
     checkDependencies(projectRoot),
     checkResources(dataDir, healthUrl),
-    auditConventions(configDir),
+    auditConventions({ projectsDir, libraryDir }),
   ]);
 
   return {
@@ -101,33 +127,48 @@ async function gatherMaintenanceData(): Promise<GatheredMaintenanceData> {
 }
 
 // Spawns a Claude sub-agent for analysis via agent:task:request and awaits its result.
-async function requestAgentAnalysis(prompt: string): Promise<string | null> {
+async function requestAgentAnalysis(prompt: string, signal: AbortSignal): Promise<string | null> {
   const analysisTaskId = generateId();
-  const analysisPromise = waitForAnalysis(analysisTaskId);
+  const dispatch = new AbortController();
+  const analysisPromise = waitForAnalysis(
+    analysisTaskId,
+    AbortSignal.any([signal, dispatch.signal]),
+  );
 
-  eventBus.emit({
-    id: generateId(),
-    timestamp: Date.now(),
-    source: SOURCE_MAINTENANCE,
-    type: 'agent:task:request',
-    payload: {
-      taskId: analysisTaskId,
-      prompt,
-      // L17: must match the library skill name (library/skills/system/
-      // orchestration/config.json) — 'orchestrator' isn't a library-known
-      // skill, so resolveTier(actionName) would fall back to 'red' if this
-      // task ever carried an actionName (it doesn't today, but skillName is
-      // also used for MCP/agent-definition resolution — see agent-manager.ts).
-      skillName: 'orchestration',
-      mcpServers: {},
-      priority: 'normal',
-    },
-  });
-
+  try {
+    eventBus.emit({
+      id: generateId(),
+      timestamp: Date.now(),
+      source: SOURCE_MAINTENANCE,
+      type: 'agent:task:request',
+      payload: {
+        taskId: analysisTaskId,
+        prompt,
+        // L17: must match the library skill name (library/skills/system/
+        // orchestration/config.json) — 'orchestrator' isn't a library-known
+        // skill, so resolveTier(actionName) would fall back to 'red' if this
+        // task ever carried an actionName (it doesn't today, but skillName is
+        // also used for MCP/agent-definition resolution — see agent-manager.ts).
+        skillName: 'orchestration',
+        mcpServers: {},
+        priority: 'normal',
+      },
+    });
+  } catch (err) {
+    dispatch.abort(err);
+  }
   return analysisPromise;
 }
 
-async function runMaintenance(taskId: string): Promise<void> {
+function startRun(taskId: string, signal: AbortSignal): Promise<void> {
+  if (signal.aborted || signal !== lifetime?.signal)
+    return Promise.reject(new Error('Maintenance stopped'));
+  if (running) return Promise.reject(new Error('Maintenance already running'));
+  activeRun = runMaintenance(taskId, signal);
+  return activeRun;
+}
+
+async function runMaintenance(taskId: string, signal: AbortSignal): Promise<void> {
   if (running) {
     log.warn('Maintenance already running, skipping');
     return;
@@ -140,20 +181,24 @@ async function runMaintenance(taskId: string): Promise<void> {
   try {
     // Phase 1: Gather data from all modules in parallel
     const data = await gatherMaintenanceData();
+    signal.throwIfAborted();
     log.info('Data gathering complete, building agent prompt');
 
     // Phase 2: Build prompt for the maintenance agent
     const prompt = buildMaintenancePrompt({ ...data, runDate: new Date().toISOString() });
 
     // Phase 3: Spawn a Claude sub-agent for analysis via agent:task:request
-    const analysisResult = await requestAgentAnalysis(prompt);
+    const analysisResult = await requestAgentAnalysis(prompt, signal);
+    signal.throwIfAborted();
 
     // Phase 4: Compile report (use agent analysis if available, fallback to data-only report)
     const reportsDir = resolve(projectRoot, 'data', 'maintenance-reports');
     const report = await compileReport(
       { ...data, agentAnalysis: analysisResult ?? undefined },
       reportsDir,
+      signal,
     );
+    signal.throwIfAborted();
 
     // Phase 5: Emit event and send notification
     emitReportEvent(eventBus, report);
@@ -176,14 +221,14 @@ async function runMaintenance(taskId: string): Promise<void> {
       },
     });
   } finally {
-    running = false;
+    if (lifetime?.signal === signal) running = false;
   }
 }
 
-function waitForAnalysis(taskId: string): Promise<string | null> {
+function waitForAnalysis(taskId: string, signal: AbortSignal): Promise<string | null> {
   const ANALYSIS_TIMEOUT_MS = 300_000; // 5 minutes
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       log.warn('Analysis agent timed out, using fallback report');
       cleanup();
@@ -205,11 +250,18 @@ function waitForAnalysis(taskId: string): Promise<string | null> {
       }
     }
 
+    function onAbort(): void {
+      cleanup();
+      reject(signal.reason);
+    }
     function cleanup(): void {
+      signal.removeEventListener('abort', onAbort);
       clearTimeout(timeout);
       eventBus.off('agent:task:complete', handler);
     }
 
     eventBus.on('agent:task:complete', handler);
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) onAbort();
   });
 }

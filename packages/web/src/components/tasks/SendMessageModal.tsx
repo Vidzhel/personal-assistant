@@ -13,6 +13,7 @@ interface SendMessageModalProps {
 
 // eslint-disable-next-line max-lines-per-function -- modal with sent/unsent states, textarea, and action buttons
 export function SendMessageModal({ sessionId, onClose }: SendMessageModalProps) {
+  const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
@@ -20,12 +21,13 @@ export function SendMessageModal({ sessionId, onClose }: SendMessageModalProps) 
   const handleSend = async () => {
     if (!message.trim()) return;
     setSending(true);
+    setError(null);
     try {
       await api.enqueueMessage(sessionId, message);
       setSent(true);
       setTimeout(onClose, COPY_FEEDBACK_MS);
-    } catch {
-      /* handle error silently */
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not queue this message.');
     } finally {
       setSending(false);
     }
@@ -36,6 +38,11 @@ export function SendMessageModal({ sessionId, onClose }: SendMessageModalProps) 
       className="mt-2 p-3 rounded-lg border"
       style={{ background: 'var(--bg-primary)', borderColor: 'var(--border)' }}
     >
+      {error && (
+        <p role="alert" style={{ color: 'var(--error)' }}>
+          {error}
+        </p>
+      )}
       {sent ? (
         <p className="text-xs text-center" style={{ color: 'var(--success)' }}>
           Message queued — will be processed after current task completes

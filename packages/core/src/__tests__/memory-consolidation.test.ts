@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { EventBus } from '../event-bus/event-bus.ts';
@@ -214,6 +214,12 @@ describe('createMemoryConsolidation', () => {
     // MAX_CONSOLIDATION_OPS in memory-consolidation.ts is 10 — asserted by
     // value here rather than importing the internal constant.
     expect(result.opsApplied).toBe(10);
+    expect(result.candidatesArchived).toBe(0);
+    expect(
+      readdirSync(join(projectsDir, 'agents/test-agent/memory/candidates')).filter((file) =>
+        file.endsWith('.md'),
+      ),
+    ).toHaveLength(1);
   });
 
   it('skips an op that targets MEMORY.md directly (regenerated separately)', async () => {
@@ -248,5 +254,142 @@ describe('createMemoryConsolidation', () => {
     expect(result.opsApplied).toBe(0);
     const memoryIndex = await memoryStore.readIndex('test-agent');
     expect(memoryIndex).not.toContain('hijacked');
+    expect(result.candidatesArchived).toBe(0);
+  });
+
+  it.each([
+    { name: 'unsuccessful model call', success: false, result: '{"ops":[]}' },
+    { name: 'malformed JSON', success: true, result: 'not json' },
+    { name: 'missing ops', success: true, result: '{}' },
+    {
+      name: 'missing write content',
+      success: true,
+      result: '{"ops":[{"action":"create","path":"empty.md"}]}',
+    },
+  ])('retains pending sources after $name', async (response) => {
+    const memoryStore = createMemoryStore({ projectsDir });
+    const candidate = await writeMemoryCandidate({ projectsDir }, 'test-agent', {
+      title: 'Keep this',
+      content: 'A durable source fact.',
+      source: 'session-retrospective',
+    });
+    const pendingDir = join(projectsDir, 'agents/test-agent/memory/candidates');
+    const original = readFileSync(join(pendingDir, candidate!), 'utf8');
+    vi.mocked(runAgentTask).mockResolvedValue({
+      taskId: 'failed-task',
+      durationMs: 1,
+      success: response.success,
+      result: response.result,
+    });
+    const consolidation = createMemoryConsolidation({
+      projectsDir,
+      memoryStore,
+      namedAgentStore: { listAgents: () => [fakeAgent()] } as any,
+      eventBus,
+      config: { CLAUDE_MODEL: 'claude-sonnet-4-6' } as any,
+    });
+    await expect(consolidation.runConsolidation()).rejects.toThrow(/consolidation/i);
+    expect(readdirSync(pendingDir)).toEqual([candidate]);
+    expect(readFileSync(join(pendingDir, candidate!), 'utf8')).toBe(original);
+    expect(await memoryStore.list('test-agent')).toEqual([]);
+  });
+
+  it.each(['rejected', 'thrown'])(
+    'retains every candidate after a %s partial write and can retry',
+    async (failure) => {
+      const memoryStore = createMemoryStore({ projectsDir });
+      const candidates = await Promise.all(
+        ['First source', 'Second source'].map((title) =>
+          writeMemoryCandidate({ projectsDir }, 'test-agent', {
+            title,
+            content: title,
+            source: 'session-retrospective',
+          }),
+        ),
+      );
+      const pendingDir = join(projectsDir, 'agents/test-agent/memory/candidates');
+      const originals = candidates.map((file) => readFileSync(join(pendingDir, file!), 'utf8'));
+      const ops = [
+        { action: 'create', path: 'first.md', content: 'First fact' },
+        { action: 'create', path: 'second.md', content: 'Second fact' },
+      ];
+      vi.mocked(runAgentTask).mockResolvedValue({
+        taskId: 'task',
+        durationMs: 1,
+        success: true,
+        result: JSON.stringify({ ops }),
+      });
+      const actualWrite = memoryStore.write.bind(memoryStore);
+      const write = vi
+        .spyOn(memoryStore, 'write')
+        .mockImplementation(async (agent, path, content) => {
+          if (path === 'second.md') {
+            if (failure === 'thrown') throw new Error('Temporary disk error');
+            return { ok: false, error: 'Temporary write rejection' };
+          }
+          return actualWrite(agent, path, content);
+        });
+      const consolidation = createMemoryConsolidation({
+        projectsDir,
+        memoryStore,
+        namedAgentStore: { listAgents: () => [fakeAgent()] } as any,
+        eventBus,
+        config: { CLAUDE_MODEL: 'claude-sonnet-4-6' } as any,
+      });
+      expect(await consolidation.runConsolidation()).toMatchObject({
+        opsApplied: 1,
+        candidatesArchived: 0,
+      });
+      expect(readdirSync(pendingDir).sort()).toEqual([...candidates].sort());
+      expect(candidates.map((file) => readFileSync(join(pendingDir, file!), 'utf8'))).toEqual(
+        originals,
+      );
+      expect(await memoryStore.readIndex('test-agent')).toContain('first.md');
+      write.mockRestore();
+      expect(await consolidation.runConsolidation()).toMatchObject({
+        opsApplied: 2,
+        candidatesArchived: 2,
+      });
+      expect(readdirSync(pendingDir)).toEqual(['archive']);
+      expect(readdirSync(join(pendingDir, 'archive')).sort()).toEqual([...candidates].sort());
+      expect(await memoryStore.read('test-agent', 'second.md')).toContain('Second fact');
+    },
+  );
+
+  it('retains candidates when actual memory budget or index regeneration rejects writes', async () => {
+    const agentDir = join(projectsDir, 'agents/test-agent');
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(join(agentDir, 'agent.yaml'), 'memory:\n  maxFiles: 1\n');
+    const memoryStore = createMemoryStore({ projectsDir });
+    const candidate = await writeMemoryCandidate({ projectsDir }, 'test-agent', {
+      title: 'Keep this',
+      content: 'Do not discard an oversized proposal.',
+      source: 'session-retrospective',
+    });
+    vi.mocked(runAgentTask).mockResolvedValue({
+      taskId: 'budget-task',
+      durationMs: 1,
+      success: true,
+      result: JSON.stringify({
+        ops: [
+          { action: 'create', path: 'first.md', content: 'First fact' },
+          { action: 'create', path: 'second.md', content: 'Second fact' },
+        ],
+      }),
+    });
+    const consolidation = createMemoryConsolidation({
+      projectsDir,
+      memoryStore,
+      namedAgentStore: { listAgents: () => [fakeAgent()] } as any,
+      eventBus,
+      config: { CLAUDE_MODEL: 'claude-sonnet-4-6' } as any,
+    });
+    expect(await consolidation.runConsolidation()).toMatchObject({
+      opsApplied: 1,
+      candidatesArchived: 0,
+    });
+    expect(readdirSync(join(agentDir, 'memory/candidates'))).toEqual([candidate]);
+    expect(await memoryStore.readIndex('test-agent')).toBeNull();
+    expect(await memoryStore.list('test-agent')).toEqual(['first.md']);
   });
 });

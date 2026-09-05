@@ -34,13 +34,9 @@ export function createSdkBackend(): AgentBackend {
     // abortController lets it cancel deterministically, including killing
     // the underlying subprocess.
     const abortController = new AbortController();
-    if (opts.signal) {
-      if (opts.signal.aborted) {
-        abortController.abort();
-      } else {
-        opts.signal.addEventListener('abort', () => abortController.abort(), { once: true });
-      }
-    }
+    if (opts.signal?.aborted) return { result: '', success: false, errors: ['cancelled'] };
+    const onAbort = (): void => abortController.abort();
+    opts.signal?.addEventListener('abort', onAbort, { once: true });
 
     const queryOptions: Record<string, unknown> = {
       systemPrompt: opts.systemPrompt,
@@ -91,88 +87,91 @@ export function createSdkBackend(): AgentBackend {
       queryOptions.plugins = opts.plugins;
     }
 
-    for await (const message of query({
-      prompt: opts.prompt,
-      options: queryOptions as Parameters<typeof query>[0]['options'],
-    })) {
-      if (opts.signal?.aborted) {
-        errors.push('cancelled');
-        break;
-      }
-      const msg = message as Record<string, unknown>;
-      opts.onRawMessage?.(JSON.stringify(msg));
-
-      if (msg.type === 'system' && msg.subtype === 'init') {
-        sessionId = msg.session_id as string;
-        opts.onSessionId?.(sessionId);
-      }
-
-      if (msg.type === 'assistant') {
-        const parentToolUseId = (msg.parent_tool_use_id as string | null) ?? null;
-        const content = msg.message as {
-          content?: Array<{
-            type: string;
-            text?: string;
-            name?: string;
-            input?: unknown;
-            id?: string;
-          }>;
-        };
-        if (content?.content) {
-          for (const block of content.content) {
-            if (block.type === 'text' && block.text) {
-              opts.onAssistantMessage(block.text, { parentToolUseId });
-            }
-            if (block.type === 'tool_use' && block.name && opts.onToolUse) {
-              const inputSummary = block.input
-                ? JSON.stringify(block.input).slice(0, INPUT_SUMMARY_MAX_LENGTH)
-                : '';
-              opts.onToolUse(block.name, inputSummary, {
-                parentToolUseId,
-                toolUseId: block.id,
-              });
-            }
-          }
+    try {
+      for await (const message of query({
+        prompt: opts.prompt,
+        options: queryOptions as Parameters<typeof query>[0]['options'],
+      })) {
+        if (opts.signal?.aborted) {
+          errors.push('cancelled');
+          break;
         }
-      }
+        const msg = message as Record<string, unknown>;
+        opts.onRawMessage?.(JSON.stringify(msg));
 
-      if (msg.type === 'user') {
-        const parentToolUseId = (msg.parent_tool_use_id as string | null) ?? null;
-        const content = msg.message as {
-          content?: Array<{
-            type: string;
-            tool_use_id?: string;
-            content?: unknown;
-            is_error?: boolean;
-          }>;
-        };
-        if (content?.content && opts.onToolResult) {
-          for (const block of content.content) {
-            if (block.type === 'tool_result' && block.tool_use_id) {
-              const output =
-                typeof block.content === 'string'
-                  ? block.content
-                  : JSON.stringify(block.content ?? '').slice(0, TOOL_RESULT_MAX_LENGTH);
-              opts.onToolResult({
-                toolUseId: block.tool_use_id,
-                output,
-                isError: block.is_error ?? false,
-                meta: { parentToolUseId },
-              });
+        if (msg.type === 'system' && msg.subtype === 'init') {
+          sessionId = msg.session_id as string;
+          opts.onSessionId?.(sessionId);
+        }
+
+        if (msg.type === 'assistant') {
+          const parentToolUseId = (msg.parent_tool_use_id as string | null) ?? null;
+          const content = msg.message as {
+            content?: Array<{
+              type: string;
+              text?: string;
+              name?: string;
+              input?: unknown;
+              id?: string;
+            }>;
+          };
+          if (content?.content) {
+            for (const block of content.content) {
+              if (block.type === 'text' && block.text) {
+                opts.onAssistantMessage(block.text, { parentToolUseId });
+              }
+              if (block.type === 'tool_use' && block.name && opts.onToolUse) {
+                const inputSummary = block.input
+                  ? JSON.stringify(block.input).slice(0, INPUT_SUMMARY_MAX_LENGTH)
+                  : '';
+                opts.onToolUse(block.name, inputSummary, {
+                  parentToolUseId,
+                  toolUseId: block.id,
+                });
+              }
             }
           }
         }
-      }
 
-      if (msg.type === 'result') {
-        success = msg.subtype === 'success';
-        resultText = (msg.result as string) ?? '';
-        if (!success) {
-          errors.push(`Agent ended with status: ${msg.subtype}`);
+        if (msg.type === 'user') {
+          const parentToolUseId = (msg.parent_tool_use_id as string | null) ?? null;
+          const content = msg.message as {
+            content?: Array<{
+              type: string;
+              tool_use_id?: string;
+              content?: unknown;
+              is_error?: boolean;
+            }>;
+          };
+          if (content?.content && opts.onToolResult) {
+            for (const block of content.content) {
+              if (block.type === 'tool_result' && block.tool_use_id) {
+                const output =
+                  typeof block.content === 'string'
+                    ? block.content
+                    : JSON.stringify(block.content ?? '').slice(0, TOOL_RESULT_MAX_LENGTH);
+                opts.onToolResult({
+                  toolUseId: block.tool_use_id,
+                  output,
+                  isError: block.is_error ?? false,
+                  meta: { parentToolUseId },
+                });
+              }
+            }
+          }
+        }
+
+        if (msg.type === 'result') {
+          success = msg.subtype === 'success';
+          resultText = (msg.result as string) ?? '';
+          if (!success) {
+            errors.push(`Agent ended with status: ${msg.subtype}`);
+          }
         }
       }
+    } finally {
+      opts.signal?.removeEventListener('abort', onAbort);
     }
-
     return { sessionId, result: resultText, success, errors };
   };
 }

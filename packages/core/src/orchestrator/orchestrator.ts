@@ -81,6 +81,14 @@ export class Orchestrator {
   private scaffoldingApi?: ScaffoldingApi;
   private projectsDir?: string;
   private port: number;
+  private lifetime = new AbortController();
+  private pending = new Set<Promise<void>>();
+  private readonly emailHandler = (event: NewEmailEvent): void => {
+    if (!this.lifetime.signal.aborted) this.track(() => this.handleNewEmail(event));
+  };
+  private readonly chatHandler = (event: UserChatMessageEvent): void => {
+    if (!this.lifetime.signal.aborted) this.track(() => this.handleUserChat(event));
+  };
 
   constructor(deps: OrchestratorDeps) {
     this.eventBus = deps.eventBus;
@@ -94,17 +102,33 @@ export class Orchestrator {
     this.scaffoldingApi = deps.scaffoldingApi;
     this.projectsDir = deps.projectsDir;
     this.port = deps.port;
-    this.eventBus.on<NewEmailEvent>('email:new', (e) => {
-      this.handleNewEmail(e).catch((err: unknown) => log.error(`handleNewEmail failed: ${err}`));
-    });
-    this.eventBus.on<UserChatMessageEvent>('user:chat:message', (e) => {
-      this.handleUserChat(e).catch((err: unknown) => log.error(`handleUserChat failed: ${err}`));
-    });
+    this.eventBus.on('email:new', this.emailHandler);
+    this.eventBus.on('user:chat:message', this.chatHandler);
 
     log.info('Orchestrator initialized');
   }
 
+  private track(work: () => Promise<void>): void {
+    // Register before work begins: a synchronous event listener may call stop().
+    const observed = Promise.resolve()
+      .then(work)
+      .catch((err: unknown) => {
+        if (!this.lifetime.signal.aborted) log.error(`Orchestrator event failed: ${err}`);
+      });
+    this.pending.add(observed);
+    void observed.finally(() => this.pending.delete(observed));
+  }
+
+  /** Detach intake immediately, then let admitted filesystem work settle while stores are open. */
+  async stop(): Promise<void> {
+    this.lifetime.abort(new Error('Raven is stopping'));
+    this.eventBus.off('email:new', this.emailHandler);
+    this.eventBus.off('user:chat:message', this.chatHandler);
+    await Promise.allSettled([...this.pending]);
+  }
+
   private async handleNewEmail(event: NewEmailEvent): Promise<void> {
+    if (this.lifetime.signal.aborted) return;
     const { from, subject, snippet } = event.payload;
     log.info(`New email from ${from}: ${subject}`);
 
@@ -177,12 +201,16 @@ export class Orchestrator {
       source: SOURCE_ORCHESTRATOR,
       type: 'user:chat:rejected',
       projectId,
-      payload: { requestId: event.id, projectId, sessionId, error },
+      payload: { requestId: event.payload.requestId ?? event.id, projectId, sessionId, error },
     });
   }
 
   // eslint-disable-next-line max-lines-per-function, complexity -- async handler with project context, capability resolution, and session dispatch
   private async handleUserChat(event: UserChatMessageEvent): Promise<void> {
+    if (this.lifetime.signal.aborted) {
+      this.rejectChat(event, 'Raven is stopping. Your message was not accepted.');
+      return;
+    }
     const { projectId, sessionId, message, topicId, topicName } = event.payload;
     log.info(`User chat in project ${projectId}: ${message.slice(0, LOG_MESSAGE_PREVIEW_LENGTH)}`);
 
@@ -213,6 +241,10 @@ export class Orchestrator {
       this.rejectChat(event, `Project creation failed: ${String(error)}`);
       return;
     }
+    if (this.lifetime.signal.aborted) {
+      this.rejectChat(event, 'Raven is stopping. Your message was not accepted.');
+      return;
+    }
 
     const target = validateChatTarget(this.sessionManager, projectId, sessionId);
     if (!target.ok) {
@@ -220,13 +252,37 @@ export class Orchestrator {
       return;
     }
     const session = target.session ?? this.sessionManager.getOrCreateSession(projectId);
-    this.sessionManager.updateStatus(session.id, 'running');
 
     // Store the user message
-    this.messageStore.appendMessage(session.id, {
+    const stored = this.messageStore.appendMessage(session.id, {
       role: 'user',
       content: message,
     });
+    if (!stored) {
+      this.rejectChat(event, 'Could not save your message. Please try again.');
+      return;
+    }
+    this.sessionManager.updateStatus(session.id, 'running');
+    if (event.payload.requestId) {
+      this.eventBus.emit({
+        id: generateId(),
+        timestamp: Date.now(),
+        source: SOURCE_ORCHESTRATOR,
+        type: 'user:chat:accepted',
+        projectId,
+        payload: {
+          requestId: event.payload.requestId,
+          projectId,
+          sessionId: session.id,
+          messageId: stored,
+        },
+      });
+    }
+
+    if (this.lifetime.signal.aborted) {
+      this.sessionManager.updateStatus(session.id, 'idle');
+      return;
+    }
 
     // Check for manual retrospective intent
     const lowerMsg = message.toLowerCase();
@@ -237,7 +293,15 @@ export class Orchestrator {
         lowerMsg.includes('run retrospective'))
     ) {
       try {
-        const result = await this.sessionRetrospective.runRetrospective(session.id, projectId);
+        const result = await this.sessionRetrospective.runRetrospective(
+          session.id,
+          projectId,
+          this.lifetime.signal,
+        );
+        if (this.lifetime.signal.aborted) {
+          this.sessionManager.updateStatus(session.id, 'idle');
+          return;
+        }
         this.messageStore.appendMessage(session.id, {
           role: 'assistant',
           content: `**Session Retrospective**\n\n${result.summary}\n\n**Decisions:** ${result.decisions.length ? result.decisions.join(', ') : 'None'}\n**Findings:** ${result.findings.length ? result.findings.join(', ') : 'None'}\n**Action Items:** ${result.actionItems.length ? result.actionItems.join(', ') : 'None'}`,
@@ -245,6 +309,10 @@ export class Orchestrator {
         this.sessionManager.updateStatus(session.id, 'idle');
         return;
       } catch (err) {
+        if (this.lifetime.signal.aborted) {
+          this.sessionManager.updateStatus(session.id, 'idle');
+          return;
+        }
         log.error(`Manual retrospective failed: ${err}`);
       }
     }

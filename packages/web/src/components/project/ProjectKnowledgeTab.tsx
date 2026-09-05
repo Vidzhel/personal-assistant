@@ -3,7 +3,10 @@
 import { useEffect, useState, useCallback } from 'react';
 import { api } from '@/lib/api-client';
 import type { ProjectDataSource, LinkedBubbleSummary } from '@/lib/api-client';
-import type { ProjectTabProps } from './project-tab-registry';
+import type { ProjectTabProps } from '@/components/project/project-tab-registry';
+import { usePolling } from '@/hooks/usePolling';
+import { projectPath } from '@/lib/url-paths';
+const REFERENCE_POLL_MS = 15000;
 
 const SAVE_INDICATOR_MS = 2000;
 const PREVIEW_MAX_CHARS = 100;
@@ -17,8 +20,19 @@ const SOURCE_TYPE_LABELS: Record<string, string> = {
 
 // eslint-disable-next-line max-lines-per-function -- unified tab with three sections
 export function ProjectKnowledgeTab({ projectId, project, onProjectUpdated }: ProjectTabProps) {
-  const [dataSources, setDataSources] = useState<ProjectDataSource[]>([]);
-  const [knowledgeLinks, setKnowledgeLinks] = useState<LinkedBubbleSummary[]>([]);
+  const sources = usePolling<ProjectDataSource[]>(
+    `${projectPath(projectId)}/data-sources`,
+    REFERENCE_POLL_MS,
+  );
+  const links = usePolling<LinkedBubbleSummary[]>(
+    `${projectPath(projectId)}/knowledge-links`,
+    REFERENCE_POLL_MS,
+  );
+  const dataSources = sources.data ?? [];
+  const knowledgeLinks = links.data ?? [];
+  const [error, setError] = useState<string | null>(null);
+  const reportError = (cause: unknown) =>
+    setError(cause instanceof Error ? cause.message : 'The change could not be saved.');
   const [systemPrompt, setSystemPrompt] = useState(project.systemPrompt ?? '');
   const [saved, setSaved] = useState(false);
   const [showAddSource, setShowAddSource] = useState(false);
@@ -34,18 +48,11 @@ export function ProjectKnowledgeTab({ projectId, project, onProjectUpdated }: Pr
     sourceType: 'url',
   });
 
-  const loadData = useCallback(async () => {
-    const [ds, kl] = await Promise.all([
-      api.getProjectDataSources(projectId),
-      api.getProjectKnowledgeLinks(projectId),
-    ]);
-    setDataSources(ds);
-    setKnowledgeLinks(kl);
-  }, [projectId]);
+  const loadData = useCallback(() => {
+    sources.refresh();
+    links.refresh();
+  }, [sources.refresh, links.refresh]);
 
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
   useEffect(() => {
     setSystemPrompt(project.systemPrompt ?? '');
   }, [project.systemPrompt]);
@@ -106,6 +113,7 @@ export function ProjectKnowledgeTab({ projectId, project, onProjectUpdated }: Pr
 
   return (
     <div className="space-y-6">
+      <KnowledgeErrors error={error} sources={sources.error} links={links.error} />
       {/* Linked Knowledge Section */}
       <section>
         <div className="flex items-center justify-between mb-3">
@@ -116,6 +124,7 @@ export function ProjectKnowledgeTab({ projectId, project, onProjectUpdated }: Pr
             className="px-3 py-1.5 rounded text-sm"
             style={{ background: 'var(--accent)', color: '#fff' }}
             onClick={() => setShowLinkPicker(!showLinkPicker)}
+            disabled={Boolean(links.error)}
           >
             Link Knowledge
           </button>
@@ -137,12 +146,15 @@ export function ProjectKnowledgeTab({ projectId, project, onProjectUpdated }: Pr
                 placeholder="Search knowledge bubbles..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                onKeyDown={(e) => e.key === 'Enter' && void handleSearch().catch(reportError)}
               />
               <button
                 className="px-3 py-1.5 rounded text-sm"
                 style={{ background: 'var(--bg-hover)', color: 'var(--text)' }}
-                onClick={handleSearch}
+                onClick={() => {
+                  setError(null);
+                  void handleSearch().catch(reportError);
+                }}
               >
                 Search
               </button>
@@ -159,7 +171,10 @@ export function ProjectKnowledgeTab({ projectId, project, onProjectUpdated }: Pr
                 <button
                   className="text-xs px-2 py-0.5 rounded"
                   style={{ background: 'var(--accent)', color: '#fff' }}
-                  onClick={() => handleLinkBubble(r.bubbleId)}
+                  onClick={() => {
+                    setError(null);
+                    void handleLinkBubble(r.bubbleId).catch(reportError);
+                  }}
                 >
                   Link
                 </button>
@@ -207,7 +222,10 @@ export function ProjectKnowledgeTab({ projectId, project, onProjectUpdated }: Pr
                   <button
                     className="text-xs px-2 py-1 rounded ml-2"
                     style={{ background: 'var(--bg-hover)', color: 'var(--text-muted)' }}
-                    onClick={() => handleUnlink(link.bubbleId)}
+                    onClick={() => {
+                      setError(null);
+                      void handleUnlink(link.bubbleId).catch(reportError);
+                    }}
                   >
                     Unlink
                   </button>
@@ -290,7 +308,10 @@ export function ProjectKnowledgeTab({ projectId, project, onProjectUpdated }: Pr
               <button
                 className="px-3 py-1.5 rounded text-sm"
                 style={{ background: 'var(--accent)', color: '#fff' }}
-                onClick={handleAddSource}
+                onClick={() => {
+                  setError(null);
+                  void handleAddSource().catch(reportError);
+                }}
                 disabled={!newSource.uri || !newSource.label}
               >
                 Add
@@ -353,7 +374,10 @@ export function ProjectKnowledgeTab({ projectId, project, onProjectUpdated }: Pr
                 <button
                   className="text-xs px-2 py-1 rounded ml-2"
                   style={{ background: 'var(--bg-hover)', color: 'var(--text-muted)' }}
-                  onClick={() => handleDeleteSource(ds.id)}
+                  onClick={() => {
+                    setError(null);
+                    void handleDeleteSource(ds.id).catch(reportError);
+                  }}
                 >
                   Remove
                 </button>
@@ -384,12 +408,37 @@ export function ProjectKnowledgeTab({ projectId, project, onProjectUpdated }: Pr
           placeholder="Custom instructions for agents working in this project..."
           value={systemPrompt}
           onChange={(e) => setSystemPrompt(e.target.value)}
-          onBlur={handleSavePrompt}
+          onBlur={() => {
+            setError(null);
+            void handleSavePrompt().catch(reportError);
+          }}
         />
         <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
           Auto-saves when you click away.
         </p>
       </section>
     </div>
+  );
+}
+
+function KnowledgeErrors({
+  error,
+  sources,
+  links,
+}: {
+  error: string | null;
+  sources: Error | null;
+  links: Error | null;
+}) {
+  return (
+    <>
+      {error && (
+        <p role="alert" style={{ color: 'var(--error)' }}>
+          {error}
+        </p>
+      )}
+      {sources && <p role="alert">{sources.message}</p>}
+      {links && <p role="status">{links.message}</p>}
+    </>
   );
 }

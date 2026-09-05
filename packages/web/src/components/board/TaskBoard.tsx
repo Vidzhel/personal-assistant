@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
+import { usePolling } from '@/hooks/usePolling';
 import { api, type RavenTaskRecord, type TaskTreeRecord } from '@/lib/api-client';
 import {
-  applyTreeCancelled,
   buildBoard,
   type Board,
   type BoardColumn as ColKey,
@@ -50,24 +50,8 @@ function DraggableCard({
 
 export function TaskBoard({ projectId, search }: { projectId?: string; search?: string }) {
   const { selectTask, selectedTask } = useTaskStore();
-  const [tasks, setTasks] = useState<RavenTaskRecord[]>([]);
-  const [trees, setTrees] = useState<TaskTreeRecord[]>([]);
-
-  const load = useCallback(async (): Promise<void> => {
-    const [t, tr] = await Promise.all([
-      api.getTasks({ ...(projectId ? { projectId } : {}), ...(search ? { search } : {}) }),
-      api.getTaskTrees(),
-    ]);
-    setTasks(t);
-    // TaskTreeRecord has no projectId, so trees cannot be project-filtered here.
-    setTrees(tr);
-  }, [projectId, search]);
-
-  useEffect(() => {
-    void load();
-    const id = setInterval(() => void load(), POLL_MS);
-    return () => clearInterval(id);
-  }, [load]);
+  const [error, setError] = useState<string | null>(null);
+  const { tasks, trees, load, loadError } = useBoardResources(projectId, search);
 
   const board: Board = buildBoard(tasks, trees, { doneSinceMs: Date.now() - DONE_WINDOW_MS });
 
@@ -75,8 +59,13 @@ export function TaskBoard({ projectId, search }: { projectId?: string; search?: 
     const target = COLUMN_TARGET_STATUS[column];
     const card = tasks.find((t) => t.id === cardId);
     if (!target || !card || card.source !== 'manual') return;
-    setTasks((prev) => prev.map((t) => (t.id === cardId ? { ...t, status: target } : t)));
-    api.updateTask(cardId, { status: target }).catch(() => void load());
+    setError(null);
+    api
+      .updateTask(cardId, { status: target })
+      .then(load)
+      .catch((cause: unknown) =>
+        setError(cause instanceof Error ? cause.message : 'Could not update task.'),
+      );
   };
 
   const onOpen = (card: BoardCard): void => {
@@ -84,12 +73,13 @@ export function TaskBoard({ projectId, search }: { projectId?: string; search?: 
   };
 
   const handleCancelTree = async (treeId: string): Promise<void> => {
-    setTrees((prev) => applyTreeCancelled(prev, treeId));
-    await api.cancelTaskTree(treeId).catch(() => void load());
+    await api.cancelTaskTree(treeId);
+    load();
   };
 
   return (
     <div className="flex gap-3" style={{ minHeight: '320px' }}>
+      {(error || loadError) && <p role="alert">{error ?? loadError}</p>}
       {COLUMNS.map((col) => (
         <BoardColumn key={col} column={col} cards={board[col]} onDropCard={handleDrop}>
           {board[col].map((card) => (
@@ -105,4 +95,33 @@ export function TaskBoard({ projectId, search }: { projectId?: string; search?: 
       {selectedTask && <TaskDetailPanel />}
     </div>
   );
+}
+
+function useBoardResources(
+  projectId?: string,
+  search?: string,
+): {
+  tasks: RavenTaskRecord[];
+  trees: TaskTreeRecord[];
+  load: () => void;
+  loadError: string | null;
+} {
+  const query = new URLSearchParams();
+  if (projectId) query.set('projectId', projectId);
+  if (search) query.set('search', search);
+  const taskList = usePolling<RavenTaskRecord[]>(`/tasks?${query}`, POLL_MS);
+  const treeList = usePolling<TaskTreeRecord[]>('/task-trees', POLL_MS);
+  const tasks = taskList.data ?? [];
+  const trees = (treeList.data ?? []).filter((tree) => !projectId || tree.projectId === projectId);
+  const load = () => {
+    taskList.refresh();
+    treeList.refresh();
+  };
+
+  return {
+    tasks,
+    trees,
+    load,
+    loadError: taskList.error?.message ?? treeList.error?.message ?? null,
+  };
 }

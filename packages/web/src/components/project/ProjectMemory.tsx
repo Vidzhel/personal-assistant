@@ -29,9 +29,9 @@ export function ProjectMemory({ systemPrompt, projectId, onSaved }: ProjectMemor
     try {
       await api.updateProject(projectId, { systemPrompt: value || null });
       setExpanded(false);
-    } catch {
+    } catch (cause) {
       onSaved(previousPrompt ?? null);
-      setError('Failed to save');
+      setError(cause instanceof Error ? cause.message : 'Failed to save');
     } finally {
       setSaving(false);
     }

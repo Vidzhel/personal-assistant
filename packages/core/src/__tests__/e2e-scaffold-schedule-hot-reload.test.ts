@@ -31,6 +31,7 @@ import type { NotificationDeliverEvent } from '@raven/shared';
 interface ScheduleFireRow {
   schedule_name: string;
   status: string;
+  detail: string;
 }
 
 async function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void> {
@@ -123,9 +124,23 @@ describe('e2e: POST /api/scaffold/schedule goes live without a restart', () => {
     expect(notifications[0].payload.body).toContain('ping fired');
 
     const fireRow = raven.db.get<ScheduleFireRow>(
-      'SELECT schedule_name, status FROM schedule_fires WHERE schedule_name = ? ORDER BY fired_at DESC LIMIT 1',
+      'SELECT schedule_name, status, detail FROM schedule_fires WHERE schedule_name = ? ORDER BY fired_at DESC LIMIT 1',
       'ping-now',
     );
     expect(fireRow?.status).toBe('fired');
+    expect(fireRow?.detail).toBeTruthy();
+    await waitFor(
+      () =>
+        raven!.db.get<{ status: string }>(
+          'SELECT status FROM task_trees WHERE id = ?',
+          fireRow!.detail,
+        )?.status === 'completed',
+    );
+    const treeResponse = await fetch(`${baseUrl}/api/task-trees/${fireRow!.detail}`);
+    expect(treeResponse.status).toBe(200);
+    expect(await treeResponse.json()).toMatchObject({
+      status: 'completed',
+      tasks: [expect.objectContaining({ type: 'notify', status: 'completed' })],
+    });
   }, 10000);
 });
