@@ -38,7 +38,15 @@ export function kebabCase(input: string): string {
   return slug || 'untitled';
 }
 
+function pathUnavailable(path: string | null, blocked: readonly string[]): boolean {
+  return (
+    path !== null &&
+    blocked.some((root) => root === '.' || path === root || path.startsWith(`${root}/`))
+  );
+}
+
 async function ensureMetaProjectNode(deps: ProjectSyncDeps): Promise<void> {
+  if (pathUnavailable('system', deps.projectRegistry.getInvalidProjectPaths())) return;
   if (!deps.projectRegistry.getProject('system')) {
     // The reserved system project is the one built-in definition whose
     // invariants do not come from a project file or a stale cache row.
@@ -140,10 +148,11 @@ export function syncProjectCache(deps: Pick<ProjectSyncDeps, 'db' | 'projectRegi
       if (kind) result[kind]++;
     }
     const currentIds = new Set(nodes.map(canonicalProjectId));
+    const unavailable = deps.projectRegistry.getInvalidProjectPaths();
     for (const row of deps.db
       .prepare('SELECT * FROM projects WHERE is_meta = 0')
       .all() as ProjectRow[]) {
-      if (currentIds.has(row.id)) continue;
+      if (currentIds.has(row.id) || pathUnavailable(row.fs_path, unavailable)) continue;
       const references = projectReferences(deps.db, row.id);
       if (references.length > 0) {
         if (row.fs_path !== null) {

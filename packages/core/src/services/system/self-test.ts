@@ -12,6 +12,8 @@ import type {
 import type { ScheduleHealth } from '../../scheduler/schedule-engine.ts';
 import { SERVICE_DEFINITIONS } from '../registry.ts';
 import { Cron } from 'croner';
+import { formatDefinitionDiagnostic } from '../../diagnostics/current-definition-diagnostics.ts';
+import type { DefinitionDiagnostic } from '../../diagnostics/definition-diagnostics.ts';
 
 const log = createLogger('self-test');
 
@@ -357,6 +359,10 @@ export interface SelfTestDeps {
   pendingApprovals: PendingApprovals;
   serviceRunner: { getRunningCount(): number };
   dataDir: string;
+  /** Current definition diagnostics are read on each run; persisted prior
+   * violations remain notification history and do not replace this snapshot. */
+  getDefinitionDiagnostics?: () => readonly DefinitionDiagnostic[];
+  getProjectRecoveryDiagnostics?: () => readonly DefinitionDiagnostic[];
   /** Optional so callers/tests that construct SelfTestDeps by hand don't
    * need a real schedule engine — when absent, checkCanary treats the
    * canary schedule as "can't tell if it's enabled" and skips the
@@ -397,6 +403,12 @@ export function runSelfTestChecks(deps: SelfTestDeps, nowMs = Date.now()): SelfT
         )
       : checkScheduleHealth(deps.db, health, nowMs);
   const violations = [
+    ...[
+      ...(deps.getDefinitionDiagnostics?.() ?? []),
+      ...(deps.getProjectRecoveryDiagnostics?.() ?? []),
+    ]
+      .filter((diagnostic) => diagnostic.severity === 'error')
+      .map(formatDefinitionDiagnostic),
     ...checkStuckTrees(deps.executionEngine, nowMs),
     ...checkFailedTrees(deps.executionEngine, nowMs),
     ...checkServicesLoaded(deps.serviceRunner.getRunningCount(), countEnvEligibleServices()),

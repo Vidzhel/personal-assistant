@@ -26,6 +26,9 @@ function resolveValueAndColor(
   if (selfTest !== undefined && !selfTest.ok) {
     return { value: `${selfTest.violations.length} issue(s)`, color: 'var(--error)' };
   }
+  if (systemHealthStatus === 'degraded' || systemHealthStatus === 'error') {
+    return { value: systemHealthStatus, color: 'var(--error)' };
+  }
   if (selfTest !== undefined && selfTest.lastRun === null) {
     return { value: 'not yet run', color: 'var(--text-muted)' };
   }

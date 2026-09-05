@@ -11,6 +11,7 @@ import {
 } from '@raven/shared';
 import type { TaskTemplate } from '@raven/shared';
 import { readProjectDefinition } from './project-definition.ts';
+import { validateScheduleTiming } from '../diagnostics/definition-diagnostics.ts';
 
 const yamlLoad = yaml.load;
 
@@ -53,7 +54,15 @@ async function validateYamlFiles(opts: YamlValidateOpts): Promise<string[]> {
     try {
       const content = await readFile(filePath, 'utf-8');
       const raw = yamlLoad(content);
-      opts.schema.parse(raw);
+      const parsed = opts.schema.parse(raw) as { cron?: string; timezone?: string };
+      if (opts.kind === 'schedule' && parsed.cron && parsed.timezone) {
+        const timingError = validateScheduleTiming(parsed.cron, parsed.timezone);
+        if (timingError) {
+          errors.push(
+            `Invalid schedule timing in ${opts.projectRel}/${entry.name}: ${timingError}`,
+          );
+        }
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       errors.push(`Invalid ${opts.kind} YAML in ${opts.projectRel}/${entry.name}: ${msg}`);

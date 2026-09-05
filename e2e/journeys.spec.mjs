@@ -562,3 +562,45 @@ test('interrupted execution can be reviewed and deliberately resumed from mobile
     (await state(request)).calls.filter((call) => call.prompt.includes('resume-browser-tree')),
   ).toHaveLength(1);
 });
+
+test('mobile dashboard identifies rejected definitions and reload clears the correction', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect((await request.post('http://127.0.0.1:4422/invalid-definition')).ok()).toBe(true);
+  try {
+    expect((await request.post(`${API}/definitions/reload`)).ok()).toBe(true);
+    const health = await (await request.get(`${API}/health`)).json();
+    expect(health.status).toBe('degraded');
+    expect(health.subsystems.definitions.diagnostics).toContainEqual(
+      expect.objectContaining({
+        path: 'schedules/browser-invalid.yaml',
+        code: 'invalid-schedule-timing',
+      }),
+    );
+    expect(
+      (await (await request.get(`${API}/projects`)).json()).some(
+        (project) => project.id === 'course',
+      ),
+    ).toBe(true);
+    await page.goto('/');
+    const issue = page.getByRole('region', { name: 'Definition issues' });
+    await expect(issue.getByText('schedules/browser-invalid.yaml', { exact: true })).toBeVisible();
+    const bounds = await issue.boundingBox();
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(390);
+    expect((await request.post('http://127.0.0.1:4422/repair-definition')).ok()).toBe(true);
+    await issue.getByRole('button', { name: 'Reload definitions', exact: true }).click();
+    await expect(page.getByText('schedules/browser-invalid.yaml', { exact: true })).toHaveCount(0);
+    const repaired = await (await request.get(`${API}/health`)).json();
+    expect(
+      repaired.subsystems.definitions.diagnostics.some(
+        (entry) => entry.path === 'schedules/browser-invalid.yaml',
+      ),
+    ).toBe(false);
+  } finally {
+    await request.post('http://127.0.0.1:4422/repair-definition');
+    await request.post(`${API}/definitions/reload`);
+  }
+});

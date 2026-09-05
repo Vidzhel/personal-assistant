@@ -31,11 +31,14 @@ describe('current project checks', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it('fails closed after a reload error until a valid definition reloads', async () => {
+  it('keeps a rejected project inactive until a valid definition reloads', async () => {
     expect(isCurrentProject(getDb(), 'alpha', registry)).toBe(true);
 
     writeFileSync(join(root, 'alpha', 'context.md'), '---\nravenProject: [\n---\n');
-    await expect(registry.load(root)).rejects.toThrow();
+    await registry.load(root);
+    expect(registry.getDefinitionDiagnostics()).toEqual([
+      expect.objectContaining({ path: 'alpha/context.md', code: 'invalid-project-context' }),
+    ]);
     expect(isCurrentProject(getDb(), 'alpha', registry)).toBe(false);
 
     writeFileSync(join(root, 'alpha', 'context.md'), 'Alpha context restored');

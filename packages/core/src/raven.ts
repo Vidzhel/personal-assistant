@@ -46,7 +46,13 @@ import {
   createReloadRegistries,
 } from './scaffolding/scaffold-and-activate.ts';
 import { getMetaProject } from './project-manager/meta-project.ts';
+import { ensureProjectRoot } from './project-manager/definition-root.ts';
 import { runProjectSync, syncProjectCache } from './project-manager/project-sync.ts';
+import {
+  readProjectRecoveryDiagnostics,
+  recoverInterruptedProjects,
+  unavailableProjectMutationPaths,
+} from './project-manager/project-recovery/diagnostics.ts';
 import { createIdleDetector } from './session-manager/idle-detector.ts';
 import { createSessionRetrospective } from './session-manager/session-retrospective.ts';
 import { TaskExecutionEngine } from './task-execution/task-execution-engine.ts';
@@ -212,10 +218,22 @@ export async function createRaven(
   // Load project registry (filesystem-based project hierarchy). projectsDir
   // is overridable so tests never scaffold real directories into the repo
   // (see RavenOverrides.projectsDir).
-  const projectRegistry = new ProjectRegistry();
   const projectsDir = overrides.projectsDir ?? resolve(projectRoot, 'projects');
-  if (!existsSync(projectsDir)) mkdirSync(projectsDir, { recursive: true });
+  const projectRegistry = new ProjectRegistry({
+    getUnavailableProjectPaths: () => unavailableProjectMutationPaths(projectsDir),
+    getKnownSkills: () => {
+      try {
+        return new Set(capabilityLibrary.getSkillNames());
+      } catch {
+        return new Set<string>();
+      }
+    },
+  });
+  const getProjectRecoveryDiagnostics = (): ReturnType<typeof readProjectRecoveryDiagnostics> =>
+    readProjectRecoveryDiagnostics(projectsDir);
   try {
+    ensureProjectRoot(projectsDir, getDb());
+    await recoverInterruptedProjects({ projectsDir, projectRegistry, db: getDb() });
     await projectRegistry.load(projectsDir);
     log.info('Project registry loaded');
   } catch (err) {
@@ -570,6 +588,12 @@ export async function createRaven(
     serviceRunner,
     dataDir,
     eventBus,
+    getDefinitionDiagnostics: () => [
+      ...projectRegistry.getDefinitionDiagnostics(),
+      ...capabilityLibrary.getDefinitionDiagnostics(),
+      ...templateRegistry.getDefinitionDiagnostics(),
+    ],
+    getProjectRecoveryDiagnostics,
   };
 
   // Durable per-fire log the self-test job reads to check "every schedule's
@@ -720,6 +744,8 @@ export async function createRaven(
     unsnoozableCategories: [...UNSNOOZABLE_CATEGORIES],
     sessionRetrospective,
     dataDir,
+    getProjectRecoveryDiagnostics,
+    reloadRegistries,
     projectRegistry,
     agentYamlStore,
     projectsDir,

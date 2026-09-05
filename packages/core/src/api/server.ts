@@ -1,4 +1,6 @@
 import Fastify from 'fastify';
+import type { DefinitionDiagnostic } from '../diagnostics/definition-diagnostics.ts';
+import type { ReloadRegistriesResult } from '../scaffolding/scaffold-and-activate.ts';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import { createLogger } from '@raven/shared';
@@ -27,6 +29,7 @@ import type { MemoryStore } from '../agent-memory/memory-store.ts';
 import type { DatabaseInterface } from '@raven/shared';
 import { registerHealthRoute } from './routes/health.ts';
 import { registerProjectRoutes } from './routes/projects.ts';
+import { registerProjectRecoveryRoutes } from './routes/project-recovery.ts';
 import { registerSessionRoutes } from './routes/sessions.ts';
 import { registerChatRoute } from './routes/chat.ts';
 import { registerSuiteRoutes } from './routes/suites.ts';
@@ -102,6 +105,8 @@ export interface ApiDeps {
   sessionRetrospective?: SessionRetrospective;
   dataDir?: string;
   projectRegistry?: ProjectRegistry;
+  getProjectRecoveryDiagnostics?: () => readonly DefinitionDiagnostic[];
+  reloadRegistries?: () => Promise<ReloadRegistriesResult>;
   agentYamlStore?: AgentYamlStore;
   projectsDir?: string;
   executionEngine?: TaskExecutionEngine;
@@ -143,6 +148,7 @@ export async function createApiServer(
 
   // REST routes
   registerHealthRoute(app, deps);
+  registerProjectRecoveryRoutes(app, deps);
   registerProjectRoutes(app, {
     eventBus: deps.eventBus,
     projectRegistry: deps.projectRegistry,

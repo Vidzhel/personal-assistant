@@ -5,6 +5,7 @@ import { createLogger } from '@raven/shared';
 import type { TaskTemplate } from '@raven/shared';
 
 import { loadTemplatesFromDir } from './template-loader.ts';
+import type { DefinitionDiagnostic } from '../diagnostics/definition-diagnostics.ts';
 
 const logger = createLogger('template-registry');
 
@@ -28,15 +29,38 @@ export class TemplateRegistry {
 
   /** Map of projectId → parentId for scope resolution */
   private parentMap = new Map<string, string | null>();
+  private diagnostics: DefinitionDiagnostic[] = [];
 
   async load(projectsDir: string): Promise<void> {
-    this.globalTemplates.clear();
-    this.projectTemplates.clear();
-    this.parentMap.clear();
+    const candidate = new TemplateRegistry();
+    try {
+      await candidate.loadCurrent(projectsDir);
+      this.globalTemplates = candidate.globalTemplates;
+      this.projectTemplates = candidate.projectTemplates;
+      this.parentMap = candidate.parentMap;
+      this.diagnostics = candidate.diagnostics;
+    } catch (error) {
+      this.diagnostics = [
+        {
+          source: 'template',
+          path: '.',
+          code: 'template-root-unavailable',
+          message: `Cannot load templates: ${String(error)}`,
+          severity: 'error',
+        },
+      ];
+      throw error;
+    }
+  }
 
+  getDefinitionDiagnostics(): readonly DefinitionDiagnostic[] {
+    return [...this.diagnostics];
+  }
+
+  private async loadCurrent(projectsDir: string): Promise<void> {
     // 1. Load global templates
     const globalDir = join(projectsDir, 'templates');
-    const globalMap = await loadTemplatesFromDir(globalDir);
+    const globalMap = await this.loadDirectory(globalDir, projectsDir);
     for (const [name, template] of globalMap) {
       this.globalTemplates.set(name, { template, projectPath: projectsDir });
     }
@@ -47,6 +71,12 @@ export class TemplateRegistry {
 
     // 2. Walk project directories
     await this.scanDir(projectsDir, '_global', projectsDir);
+  }
+
+  private loadDirectory(dir: string, root: string): Promise<Map<string, TaskTemplate>> {
+    return loadTemplatesFromDir(dir, (diagnostic) => {
+      this.diagnostics.push({ ...diagnostic, path: relative(root, diagnostic.path) || '.' });
+    });
   }
 
   getTemplate(name: string, projectId?: string): TaskTemplate | undefined {
@@ -118,12 +148,27 @@ export class TemplateRegistry {
   }
 
   private async scanDir(dirPath: string, parentId: string, projectsDir: string): Promise<void> {
-    const SKIP_DIRS = new Set(['agents', 'templates', 'schedules', 'node_modules', '.git']);
+    const SKIP_DIRS = new Set([
+      'agents',
+      'templates',
+      'schedules',
+      'tasks',
+      'node_modules',
+      '.git',
+    ]);
 
     let entries;
     try {
       entries = await readdir(dirPath, { withFileTypes: true });
-    } catch {
+    } catch (error) {
+      if (dirPath === projectsDir) throw error;
+      this.diagnostics.push({
+        source: 'template',
+        path: relative(projectsDir, dirPath),
+        code: 'template-project-unreadable',
+        message: `Cannot inspect project templates: ${String(error)}`,
+        severity: 'error',
+      });
       return;
     }
 
@@ -142,7 +187,7 @@ export class TemplateRegistry {
 
       // Load templates for this project scope
       const templatesDir = join(childPath, 'templates');
-      const templateMap = await loadTemplatesFromDir(templatesDir);
+      const templateMap = await this.loadDirectory(templatesDir, projectsDir);
 
       const scopeEntries = new Map<string, TemplateEntry>();
       for (const [name, template] of templateMap) {

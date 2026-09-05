@@ -18,6 +18,12 @@ describe('buildSystemHealthCard', () => {
     expect(card.value).toBe('degraded');
   });
 
+  it('shows current definition degradation when self-test has never run', () => {
+    const card = buildSystemHealthCard('degraded', { lastRun: null, ok: true, violations: [] });
+    expect(card.value).toBe('degraded');
+    expect(card.color).toBe('var(--error)');
+  });
+
   it('shows a neutral "not yet run" state distinct from passed, not folded into healthy', () => {
     const card = buildSystemHealthCard('ok', { lastRun: null, ok: true, violations: [] });
     expect(card.value).toBe('not yet run');

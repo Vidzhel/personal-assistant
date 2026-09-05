@@ -51,6 +51,56 @@ function mkProject(relPath: string, contextMd = 'Project context'): string {
 }
 
 describe('TemplateRegistry', () => {
+  it('reports invalid templates while retaining valid siblings and clears repaired diagnostics', async () => {
+    writeTemplate(tmpDir, makeTemplate({ name: 'healthy' }));
+    const child = mkProject('course');
+    const templates = join(child, 'templates');
+    mkdirSync(templates);
+    writeFileSync(join(templates, 'broken.yaml'), 'tasks: [');
+    await registry.load(tmpDir);
+    expect(registry.getTemplate('healthy', 'course')).toBeDefined();
+    expect(registry.getDefinitionDiagnostics()).toEqual([
+      expect.objectContaining({
+        source: 'template',
+        path: 'course/templates/broken.yaml',
+        code: 'invalid-template-definition',
+        severity: 'error',
+      }),
+    ]);
+    writeFileSync(
+      join(templates, 'broken.yaml'),
+      yamlStringify(makeTemplate({ name: 'repaired' })),
+    );
+    await registry.load(tmpDir);
+    expect(registry.getDefinitionDiagnostics()).toEqual([]);
+    expect(registry.getTemplate('repaired', 'course')).toBeDefined();
+  });
+
+  it('retains the previous index and reports a missing root instead of publishing an empty reload', async () => {
+    writeTemplate(tmpDir, makeTemplate({ name: 'healthy' }));
+    await registry.load(tmpDir);
+    await expect(registry.load(join(tmpDir, 'absent'))).rejects.toThrow();
+    expect(registry.getTemplate('healthy')).toBeDefined();
+    expect(registry.getDefinitionDiagnostics()).toEqual([
+      expect.objectContaining({ code: 'template-root-unavailable', severity: 'error' }),
+    ]);
+  });
+
+  it('reports the deterministic last-file override for duplicate template names', async () => {
+    const templates = join(tmpDir, 'templates');
+    mkdirSync(templates);
+    writeFileSync(join(templates, 'a.yaml'), yamlStringify(makeTemplate({ displayName: 'First' })));
+    writeFileSync(
+      join(templates, 'z.yaml'),
+      yamlStringify(makeTemplate({ displayName: 'Second' })),
+    );
+    await registry.load(tmpDir);
+    expect(registry.getTemplate('default-template')?.displayName).toBe('Second');
+    expect(registry.getDefinitionDiagnostics()).toEqual([
+      expect.objectContaining({ path: 'templates/z.yaml', code: 'duplicate-template-name' }),
+    ]);
+  });
+
   it('loads templates from global directory', async () => {
     writeTemplate(tmpDir, makeTemplate({ name: 'global-task' }));
 

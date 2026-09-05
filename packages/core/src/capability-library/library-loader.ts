@@ -9,6 +9,7 @@ import type {
   LoadedLibrary,
   LibraryIndex,
 } from '@raven/shared';
+import type { DefinitionDiagnostic } from '../diagnostics/definition-diagnostics.ts';
 
 const log = createLogger('library-loader');
 
@@ -18,12 +19,16 @@ async function dirExists(path: string): Promise<boolean> {
   try {
     const s = await stat(path);
     return s.isDirectory();
-  } catch {
-    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw error;
   }
 }
 
-async function loadMcps(mcpsDir: string): Promise<Map<string, McpDefinition>> {
+async function loadMcps(
+  mcpsDir: string,
+  diagnostics: DefinitionDiagnostic[],
+): Promise<Map<string, McpDefinition>> {
   const mcps = new Map<string, McpDefinition>();
 
   if (!(await dirExists(mcpsDir))) {
@@ -40,8 +45,25 @@ async function loadMcps(mcpsDir: string): Promise<Map<string, McpDefinition>> {
       const raw = await readFile(filePath, 'utf-8');
       const parsed = JSON.parse(raw) as unknown;
       const mcp = McpDefinitionSchema.parse(parsed);
+      if (mcps.has(mcp.name)) {
+        diagnostics.push({
+          source: 'mcp',
+          path: `mcps/${entry}`,
+          code: 'duplicate-mcp-name',
+          message: `Duplicate MCP name "${mcp.name}"; keeping the first definition`,
+          severity: 'warning',
+        });
+        continue;
+      }
       mcps.set(mcp.name, mcp);
-    } catch {
+    } catch (error) {
+      diagnostics.push({
+        source: 'mcp',
+        path: `mcps/${entry}`,
+        code: 'invalid-mcp-definition',
+        message: `Invalid MCP definition: ${errorMessage(error)}`,
+        severity: 'error',
+      });
       log.warn(`Skipping invalid MCP definition: ${entry}`);
     }
   }
@@ -49,10 +71,31 @@ async function loadMcps(mcpsDir: string): Promise<Map<string, McpDefinition>> {
   return mcps;
 }
 
-async function readOptionalFile(filePath: string): Promise<string> {
+async function readOptionalFile(
+  filePath: string,
+  libraryDir: string,
+  diagnostics: DefinitionDiagnostic[],
+): Promise<string> {
   try {
     return await readFile(filePath, 'utf-8');
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      diagnostics.push({
+        source: 'skill',
+        path: `skills/${relativePath(libraryDir, filePath)}`,
+        code: 'missing-skill-document',
+        message: 'Skill has no skill.md document',
+        severity: 'warning',
+      });
+      return '';
+    }
+    diagnostics.push({
+      source: 'skill',
+      path: `skills/${relativePath(libraryDir, filePath)}`,
+      code: 'skill-document-unreadable',
+      message: `Cannot read skill.md: ${errorMessage(error)}`,
+      severity: 'error',
+    });
     return '';
   }
 }
@@ -64,12 +107,23 @@ interface SkillRegistration {
   skillMd: string;
 }
 
-function registerSkill(reg: SkillRegistration, skills: Map<string, LoadedSkill>): void {
+function registerSkill(
+  reg: SkillRegistration,
+  skills: Map<string, LoadedSkill>,
+  diagnostics: DefinitionDiagnostic[],
+): void {
   const relPath = relative(reg.baseDir, reg.currentDir);
   const domain = relPath.split(sep)[0] ?? '';
 
   if (skills.has(reg.config.name)) {
     const existing = skills.get(reg.config.name);
+    diagnostics.push({
+      source: 'skill',
+      path: `skills/${relativePath(reg.baseDir, reg.currentDir)}/config.json`,
+      code: 'duplicate-skill-name',
+      message: `Duplicate skill name "${reg.config.name}" (already at ${existing?.path ?? 'unknown'})`,
+      severity: 'warning',
+    });
     log.warn(
       `Duplicate skill name "${reg.config.name}" at ${relPath} (already at ${existing?.path ?? 'unknown'}), keeping first`,
     );
@@ -84,15 +138,22 @@ function registerSkill(reg: SkillRegistration, skills: Map<string, LoadedSkill>)
   });
 }
 
+function relativePath(root: string, path: string): string {
+  return relative(root, path).split(sep).join('/');
+}
+
 function shouldSkipDir(name: string): boolean {
   return SKIP_DIRS.has(name) || name.startsWith('.');
 }
 
-async function walkSkills(
-  baseDir: string,
-  currentDir: string,
-  skills: Map<string, LoadedSkill>,
-): Promise<void> {
+interface SkillWalkContext {
+  baseDir: string;
+  skills: Map<string, LoadedSkill>;
+  diagnostics: DefinitionDiagnostic[];
+}
+
+async function walkSkills(currentDir: string, context: SkillWalkContext): Promise<void> {
+  const { baseDir, skills, diagnostics } = context;
   const entries = await readdir(currentDir, { withFileTypes: true });
   const hasConfig = entries.some((e) => e.isFile() && e.name === 'config.json');
 
@@ -100,9 +161,16 @@ async function walkSkills(
     try {
       const raw = await readFile(join(currentDir, 'config.json'), 'utf-8');
       const config = SkillConfigSchema.parse(JSON.parse(raw) as unknown);
-      const skillMd = await readOptionalFile(join(currentDir, 'skill.md'));
-      registerSkill({ baseDir, currentDir, config, skillMd }, skills);
-    } catch {
+      const skillMd = await readOptionalFile(join(currentDir, 'skill.md'), baseDir, diagnostics);
+      registerSkill({ baseDir, currentDir, config, skillMd }, skills, diagnostics);
+    } catch (error) {
+      diagnostics.push({
+        source: 'skill',
+        path: `skills/${relativePath(baseDir, join(currentDir, 'config.json'))}`,
+        code: 'invalid-skill-definition',
+        message: `Invalid skill definition: ${errorMessage(error)}`,
+        severity: 'error',
+      });
       log.warn(`Skipping invalid skill config in ${currentDir}`);
     }
     return;
@@ -110,18 +178,21 @@ async function walkSkills(
 
   for (const entry of entries) {
     if (!entry.isDirectory() || shouldSkipDir(entry.name)) continue;
-    await walkSkills(baseDir, join(currentDir, entry.name), skills);
+    await walkSkills(join(currentDir, entry.name), context);
   }
 }
 
-async function loadSkills(skillsDir: string): Promise<Map<string, LoadedSkill>> {
+async function loadSkills(
+  skillsDir: string,
+  diagnostics: DefinitionDiagnostic[],
+): Promise<Map<string, LoadedSkill>> {
   const skills = new Map<string, LoadedSkill>();
 
   if (!(await dirExists(skillsDir))) {
     return skills;
   }
 
-  await walkSkills(skillsDir, skillsDir, skills);
+  await walkSkills(skillsDir, { baseDir: skillsDir, skills, diagnostics });
   return skills;
 }
 
@@ -160,15 +231,61 @@ function buildIndex(
   return { skills: skillEntries, mcps: mcpEntries };
 }
 
-export async function loadLibrary(libraryDir: string): Promise<LoadedLibrary> {
-  const mcps = await loadMcps(join(libraryDir, 'mcps'));
-  const skills = await loadSkills(join(libraryDir, 'skills'));
+interface LoadedLibraryWithDiagnostics extends LoadedLibrary {
+  diagnostics: DefinitionDiagnostic[];
+}
+
+interface SkillReferenceContext {
+  skills: Map<string, LoadedSkill>;
+  mcps: Map<string, McpDefinition>;
+  vendorPaths: Map<string, string>;
+  diagnostics: DefinitionDiagnostic[];
+}
+
+function validateSkillReferences(context: SkillReferenceContext): void {
+  const { skills, mcps, vendorPaths, diagnostics } = context;
+  for (const skill of skills.values()) {
+    for (const mcp of skill.config.mcps) {
+      if (!mcps.has(mcp)) {
+        diagnostics.push({
+          source: 'skill',
+          path: `skills/${skill.path}/config.json`,
+          code: 'unknown-mcp-reference',
+          message: `Skill "${skill.config.name}" references unknown MCP "${mcp}"`,
+          severity: 'error',
+        });
+      }
+    }
+    for (const reference of skill.config.vendorSkills) {
+      const vendor = reference.split('/')[0];
+      if (!vendorPaths.has(vendor ?? '')) {
+        diagnostics.push({
+          source: 'skill',
+          path: `skills/${skill.path}/config.json`,
+          code: 'unknown-vendor-reference',
+          message: `Skill "${skill.config.name}" references unknown vendor "${vendor ?? ''}"`,
+          severity: 'error',
+        });
+      }
+    }
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export async function loadLibrary(libraryDir: string): Promise<LoadedLibraryWithDiagnostics> {
+  const diagnostics: DefinitionDiagnostic[] = [];
+  const mcps = await loadMcps(join(libraryDir, 'mcps'), diagnostics);
+  const skills = await loadSkills(join(libraryDir, 'skills'), diagnostics);
   const vendorPaths = await loadVendorPaths(join(libraryDir, 'vendor'));
+  validateSkillReferences({ skills, mcps, vendorPaths, diagnostics });
   const index = buildIndex(skills, mcps);
 
   log.info(
     `Library loaded: ${String(skills.size)} skills, ${String(mcps.size)} mcps, ${String(vendorPaths.size)} vendors`,
   );
 
-  return { skills, mcps, vendorPaths, index };
+  return { skills, mcps, vendorPaths, index, diagnostics };
 }

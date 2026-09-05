@@ -16,11 +16,13 @@ import {
   checkCanary,
   countEnvEligibleServices,
   runSelfTestJob,
+  runSelfTestChecks,
   getSelfTestStatus,
   type SelfTestJobDeps,
 } from '../services/system/self-test.ts';
 import type { DatabaseInterface, TaskTree } from '@raven/shared';
 import type { PendingApproval } from '../permission-engine/pending-approvals.ts';
+import type { DefinitionDiagnostic } from '../diagnostics/definition-diagnostics.ts';
 
 const MS_PER_HOUR = 3_600_000;
 
@@ -414,6 +416,30 @@ describe('runSelfTestJob + getSelfTestStatus', () => {
     expect(status.ok).toBe(true);
     expect(status.violations).toEqual([]);
     expect(status.lastRun).not.toBeNull();
+  });
+
+  it('uses current definition diagnostics and clears corrected violations', async () => {
+    const diagnostics: DefinitionDiagnostic[] = [
+      {
+        source: 'schedule',
+        path: 'projects/system/schedules/broken.yaml',
+        code: 'invalid-cron',
+        message: 'Schedule expression is invalid',
+        severity: 'error',
+      },
+    ];
+    const deps = makeDeps({
+      getDefinitionDiagnostics: () => diagnostics,
+    });
+
+    expect(runSelfTestChecks(deps).violations).toEqual([
+      '[definition] schedule projects/system/schedules/broken.yaml (invalid-cron): Schedule expression is invalid',
+    ]);
+    await runSelfTestJob(deps);
+    diagnostics.length = 0;
+    await runSelfTestJob(deps);
+
+    expect(getSelfTestStatus(dbInterface)).toMatchObject({ ok: true, violations: [] });
   });
 
   it('persists a violation and emits one batched notification for a stuck tree', async () => {

@@ -98,6 +98,16 @@ versions; do not copy versions from historical planning documents.
   managed definitions use their explicit metadata ID. Missing settings take file
   defaults. Referenced missing definitions remain inactive historical rows and
   cannot be recreated from cache settings.
+- Current definition errors belong in registry diagnostics and health/self-test.
+  Skip malformed definitions while keeping valid siblings; retain cache evidence
+  for unavailable project subtrees and pending mutation paths. A failed root scan
+  must not become an empty successful index. Reload the capability library before
+  checking project references. Project create/update/archive records current YAML
+  intentions under `.project-mutations`; recover only verified hashes and safe
+  paths before cache sync, preserving conflicts. Do not add compensation that
+  overwrites canonical files after an uncertain cache operation. Actual SIGKILL
+  tests exercise interruption; they do not establish cross-store power-loss
+  atomicity or restore pre-use legacy data.
 - Board tasks live in validated YAML at `projects/<fsPath>/tasks/board/<id>.yaml`.
   Resolve project IDs through current definitions; projectless tasks use `system`.
   Execution trees and their nodes commit together at `tasks/trees/<id>.yaml`.

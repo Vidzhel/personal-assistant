@@ -2,21 +2,62 @@ import type { ProjectNode, ResolvedProjectContext, ProjectIndex, AgentYaml } fro
 
 import { scanProjects } from './project-scanner.ts';
 import { withProjectMutation } from '../project-manager/project-mutation.ts';
+import type { DefinitionDiagnostic } from '../diagnostics/definition-diagnostics.ts';
+
+export interface ProjectRegistryOptions {
+  /** Runtime mutation recovery can temporarily make a path unavailable. */
+  getUnavailableProjectPaths?: () => readonly string[];
+  /** Capability names are read at each reload so repaired bindings are fresh. */
+  getKnownSkills?: () => ReadonlySet<string>;
+}
 
 export class ProjectRegistry {
   private index: ProjectIndex = { projects: new Map(), rootProjects: [] };
   private loadError?: unknown;
+  private diagnostics: DefinitionDiagnostic[] = [];
+  private invalidProjectPaths: string[] = [];
 
-  async load(projectsDir: string): Promise<void> {
+  private readonly options: ProjectRegistryOptions;
+
+  constructor(options: ProjectRegistryOptions = {}) {
+    this.options = options;
+  }
+
+  async load(
+    projectsDir: string,
+    options: { knownSkills?: ReadonlySet<string> } = {},
+  ): Promise<void> {
     await withProjectMutation(projectsDir, async () => {
       try {
-        this.index = await scanProjects(projectsDir);
+        const scanned = await scanProjects(projectsDir, {
+          knownSkills: options.knownSkills ?? this.options.getKnownSkills?.(),
+        });
+        this.index = scanned;
+        this.diagnostics = scanned.diagnostics;
+        this.invalidProjectPaths = scanned.invalidProjectPaths;
         this.loadError = undefined;
       } catch (error) {
         this.loadError = error;
+        this.diagnostics = [
+          {
+            source: 'project',
+            path: 'context.md',
+            code: 'project-root-unavailable',
+            message: error instanceof Error ? error.message : String(error),
+            severity: 'error',
+          },
+        ];
         throw error;
       }
     });
+  }
+
+  getDefinitionDiagnostics(): readonly DefinitionDiagnostic[] {
+    return [...this.diagnostics];
+  }
+
+  getInvalidProjectPaths(): readonly string[] {
+    return [...new Set([...this.invalidProjectPaths, ...this.unavailablePaths()])];
   }
 
   assertHealthy(): void {
@@ -25,12 +66,14 @@ export class ProjectRegistry {
   }
 
   getProject(id: string): ProjectNode | undefined {
+    if (id !== '_global' && this.isUnavailable(id)) return undefined;
     return this.index.projects.get(id);
   }
 
   findByName(name: string): ProjectNode | undefined {
     const lower = name.toLowerCase();
     for (const node of this.index.projects.values()) {
+      if (node.id !== '_global' && this.isUnavailable(node.id)) continue;
       if (node.name.toLowerCase() === lower) return node;
     }
     return undefined;
@@ -45,15 +88,18 @@ export class ProjectRegistry {
   }
 
   listProjects(): ProjectNode[] {
-    return [...this.index.projects.values()].filter((p) => p.id !== '_global');
+    return [...this.index.projects.values()].filter(
+      (p) => p.id !== '_global' && !this.isUnavailable(p.id),
+    );
   }
 
   getProjectChildren(id: string): ProjectNode[] {
+    if (id !== '_global' && this.isUnavailable(id)) return [];
     const node = this.index.projects.get(id);
     if (!node) return [];
     return node.children
       .map((childId) => this.index.projects.get(childId))
-      .filter((n): n is ProjectNode => n !== undefined);
+      .filter((n): n is ProjectNode => n !== undefined && !this.isUnavailable(n.id));
   }
 
   resolveProjectContext(projectId: string): ResolvedProjectContext {
@@ -80,6 +126,9 @@ export class ProjectRegistry {
   }
 
   private buildAncestorChain(projectId: string): ProjectNode[] {
+    if (projectId !== '_global' && this.isUnavailable(projectId)) {
+      throw new Error(`Project definition is unavailable: ${projectId}`);
+    }
     const chain: ProjectNode[] = [];
     const seen = new Set<string>();
     let current = this.index.projects.get(projectId);
@@ -99,5 +148,14 @@ export class ProjectRegistry {
     }
 
     return chain;
+  }
+
+  private unavailablePaths(): readonly string[] {
+    return this.options.getUnavailableProjectPaths?.() ?? [];
+  }
+
+  private isUnavailable(id: string): boolean {
+    const blocked = new Set([...this.invalidProjectPaths, ...this.unavailablePaths()]);
+    return [...blocked].some((path) => path === '.' || id === path || id.startsWith(`${path}/`));
   }
 }

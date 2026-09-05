@@ -9,6 +9,7 @@ import type {
 import type { ActionDefinition } from '@raven/shared';
 
 import { loadLibrary } from './library-loader.ts';
+import type { DefinitionDiagnostic } from '../diagnostics/definition-diagnostics.ts';
 
 const log = createLogger('capability-library');
 
@@ -30,13 +31,32 @@ function resolveEnvVars(env?: Record<string, string>): Record<string, string> | 
 }
 
 export class CapabilityLibrary {
-  private library: LoadedLibrary | null = null;
+  private library: (LoadedLibrary & { diagnostics?: DefinitionDiagnostic[] }) | null = null;
+  private diagnostics: DefinitionDiagnostic[] = [];
 
   async load(libraryDir: string): Promise<void> {
-    this.library = await loadLibrary(libraryDir);
+    try {
+      this.library = await loadLibrary(libraryDir);
+      this.diagnostics = [...(this.library.diagnostics ?? [])];
+    } catch (error) {
+      this.diagnostics = [
+        {
+          source: 'skill',
+          path: '.',
+          code: 'library-root-unavailable',
+          message: error instanceof Error ? error.message : String(error),
+          severity: 'error',
+        },
+      ];
+      throw error;
+    }
     log.info(
       `CapabilityLibrary loaded: ${String(this.library.skills.size)} skills, ${String(this.library.mcps.size)} mcps`,
     );
+  }
+
+  getDefinitionDiagnostics(): readonly DefinitionDiagnostic[] {
+    return [...this.diagnostics];
   }
 
   private ensureLoaded(): LoadedLibrary {

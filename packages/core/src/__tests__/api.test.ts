@@ -4,8 +4,10 @@ import cors from '@fastify/cors';
 import { EventBus } from '../event-bus/event-bus.ts';
 import { SessionManager } from '../session-manager/session-manager.ts';
 import type { ScheduleEngine } from '../scheduler/schedule-engine.ts';
-import { initDatabase, getDb } from '../db/database.ts';
+import { initDatabase, getDb, createDbInterface } from '../db/database.ts';
 import { registerHealthRoute } from '../api/routes/health.ts';
+import { formatDefinitionDiagnostic } from '../diagnostics/current-definition-diagnostics.ts';
+import type { DefinitionDiagnostic } from '../diagnostics/definition-diagnostics.ts';
 import { registerProjectRoutes } from '../api/routes/projects.ts';
 import { registerChatRoute } from '../api/routes/chat.ts';
 import { registerSuiteRoutes } from '../api/routes/suites.ts';
@@ -75,6 +77,7 @@ describe('API routes', () => {
   let eventBus: EventBus;
   let scheduleEngine: ScheduleEngine;
   let executionLogger: ReturnType<typeof createExecutionLogger>;
+  let healthDeps: { capabilityLibrary?: Record<string, unknown> };
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-api-'));
@@ -104,6 +107,7 @@ describe('API routes', () => {
 
     const deps = {
       eventBus,
+      db: createDbInterface(),
       sessionManager,
       scheduleEngine,
       agentManager: makeMockAgentManager() as any,
@@ -136,6 +140,7 @@ describe('API routes', () => {
         })),
     });
     deps.executionLogger = executionLogger;
+    healthDeps = deps;
 
     registerHealthRoute(app, deps);
     registerProjectRoutes(app, { eventBus, projectsDir, projectRegistry, scaffoldingApi });
@@ -191,6 +196,83 @@ describe('API routes', () => {
       expect(body).toHaveProperty('memory');
       expect(body.knowledge).toBe('unavailable');
       expect(body.services).toEqual({ loaded: 0, configured: 0 });
+    });
+
+    it('clears recorded definition failures on reload while retaining other historical failures', async () => {
+      const diagnostic: DefinitionDiagnostic = {
+        source: 'schedule',
+        path: 'schedules/broken.yaml',
+        code: 'invalid-timing',
+        message: 'Invalid cron pattern',
+        severity: 'error',
+      };
+      const diagnostics = [diagnostic];
+      healthDeps.capabilityLibrary = {
+        getSkillNames: () => [],
+        getDefinitionDiagnostics: () => diagnostics,
+      };
+      const definitionViolation = formatDefinitionDiagnostic(diagnostic);
+      const insert = getDb().prepare(
+        'INSERT INTO self_test_results (id, ran_at, ok, violations_json) VALUES (?, ?, ?, ?)',
+      );
+      insert.run(
+        'definition-history',
+        Date.now(),
+        0,
+        JSON.stringify([definitionViolation, 'Database integrity failed']),
+      );
+      try {
+        expect((await app.inject({ method: 'GET', url: '/api/health' })).json().status).toBe(
+          'degraded',
+        );
+        diagnostics.length = 0;
+        const stillFailed = (await app.inject({ method: 'GET', url: '/api/health' })).json();
+        expect(stillFailed.status).toBe('degraded');
+        expect(stillFailed.selfTest.violations).toEqual(['Database integrity failed']);
+        getDb()
+          .prepare('UPDATE self_test_results SET violations_json = ? WHERE id = ?')
+          .run(JSON.stringify([definitionViolation]), 'definition-history');
+        const repaired = (await app.inject({ method: 'GET', url: '/api/health' })).json();
+        expect(repaired.status).toBe('ok');
+        expect(repaired.selfTest).toMatchObject({ ok: true, violations: [] });
+        expect(
+          getDb()
+            .prepare('SELECT ok FROM self_test_results WHERE id = ?')
+            .get('definition-history'),
+        ).toEqual({ ok: 0 });
+      } finally {
+        getDb().prepare('DELETE FROM self_test_results WHERE id = ?').run('definition-history');
+        healthDeps.capabilityLibrary = undefined;
+      }
+    });
+
+    it('surfaces current definition diagnostics and clears them after correction', async () => {
+      const diagnostics = [
+        {
+          source: 'project',
+          path: 'projects/broken/context.md',
+          code: 'invalid-yaml',
+          message: 'Project metadata is invalid',
+          severity: 'error',
+        },
+      ];
+      healthDeps.capabilityLibrary = {
+        getSkillNames: () => [],
+        getDefinitionDiagnostics: () => diagnostics,
+      };
+
+      const degraded = await app.inject({ method: 'GET', url: '/api/health' });
+      const degradedBody = JSON.parse(degraded.payload);
+      expect(degradedBody.status).toBe('degraded');
+      expect(degradedBody.subsystems.definitions.status).toBe('error');
+      expect(degradedBody.subsystems.definitions.diagnostics).toEqual(diagnostics);
+
+      diagnostics.length = 0;
+      const healthy = await app.inject({ method: 'GET', url: '/api/health' });
+      const healthyBody = JSON.parse(healthy.payload);
+      expect(healthyBody.status).toBe('ok');
+      expect(healthyBody.subsystems.definitions).toEqual({ status: 'ok', diagnostics: [] });
+      healthDeps.capabilityLibrary = undefined;
     });
   });
 

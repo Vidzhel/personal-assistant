@@ -209,8 +209,74 @@ Logs: `/tmp/raven-f9c-check-final.log`, `/tmp/raven-f9c-full-final.log`,
 `/tmp/raven-f9c-graph-final.log`, `/tmp/raven-f9c-graph-recovery-final.log`,
 `/tmp/raven-f9c-final-focused.log`, `/tmp/raven-f9c-build-core.log`,
 `/tmp/raven-f9c-browser.log`, `/tmp/raven-f9c-compiled.log`.
-F9d definition diagnostics and interruption recovery are next; production web
-and deployment/container verification remain scheduled for F9e.
+F9d completion is recorded below. Final disposable graph and deployment/container
+verification remains scheduled for F9e.
+
+## F9d implementation and review scope
+
+F9c is pushed as `bbe4865`. F9d is complete. Scanner/registry and capability
+library retain current per-file diagnostics, continue valid siblings, and clear
+repaired entries on reload. Invalid project subtrees and unresolved mutation paths
+are unavailable for new work while their cache rows and paths are preserved.
+A root-level unknown mutation conflict conservatively protects every project.
+Missing configured skill/MCP/vendor references and invalid cron/timezone inputs
+must be visible. The current library must be reloaded before validating project
+references; constructor callbacks keep later scaffold/recovery reloads consistent.
+
+Health and self-test use current diagnostics. Definition failures are explicitly
+marked in self-test history so repaired definitions can clear live health without
+hiding unrelated older operational failures. Dashboard diagnostics list affected
+paths and offer the existing registry reload operation through
+`POST /api/definitions/reload`; mobile browser coverage verifies correction.
+
+New create/update/archive operations record durable YAML intentions before
+filesystem changes. Create publishes a complete prepared directory. Update checks
+current context bytes before replacement. Archive records the original project
+identity and snapshot before moving its directory. Recovery classifies actual
+source/prepared/archive state and hashes; it never overwrites external edits or
+reconstructs a legacy definition from cache. Startup tries only unambiguous
+current journals before cache sync. `GET /api/project-recovery` exposes pending
+state without raw context bytes; `POST /api/project-recovery/:mutationId/recover`
+performs validated recovery, reload and cache synchronization. Archive recovery
+must preserve evidence if new references prevent completion.
+
+## F9d completion evidence
+
+Current per-file project, agent, schedule, template and capability diagnostics
+retain valid siblings, hide invalid project subtrees, preserve their cache rows,
+and clear on repair/reload. Missing roots and duplicate effective identities
+cannot be mistaken for empty healthy definitions. The dashboard lists affected
+paths, including on mobile, and uses the existing registry reload path. Current
+definition failures clear independently from older operational self-test errors.
+
+Parent review closed journal-parent symlink handling, metadata/hash validation,
+empty staging cleanup, both rename-parent flushes, cache admission while a journal
+is pending, and changes made while graph archive checks await. Archive records
+use exactly the context bytes validated before the graph query. Recovery never
+recursively deletes staging or overwrites externally changed context. Failure
+regressions follow recovery through to the actual SQLite cache outcome, including
+retaining archives when new event history prevents deletion.
+
+Validation: required `npm run check`; 224 default files / 2,342 passing tests
+(six explicit live skips); production core and dashboard builds; all 16 isolated
+browser journeys, including mobile definition correction; compiled HTTP/chat,
+persisted state and two clean process exits. Seven real SIGKILL tests cover create,
+update and archive boundaries, with edited-file conflict retention. Five API tests
+cover sanitized reports, success/conflict outcomes and composed startup recovery.
+Eleven journal boundary tests cover hash/shape conflicts, unsafe paths and empty
+preparation. The first full runs identified old compensation expectations and
+in-progress fixture failures; the final full run is green. No owner runtime,
+provider account or graph was used. All 86 original definitions outside the prior
+maintenance-template change retain their hashes; owner Next.js and local work
+remain intact.
+
+Logs: `/tmp/raven-f9d-check-final.log`, `/tmp/raven-f9d-full-final.log`,
+`/tmp/raven-f9d-recovery-final.log`, `/tmp/raven-f9d-journal-final.log`,
+`/tmp/raven-f9d-build-core.log`, `/tmp/raven-f9d-build-web.log`,
+`/tmp/raven-f9d-browser.log`, `/tmp/raven-f9d-compiled.log`.
+
+F9e now reconciles the final assessment/setup documents and repeats disposable
+Neo4j and isolated deployment/container verification before W1 begins.
 
 ## Remaining constraints
 

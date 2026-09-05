@@ -145,6 +145,7 @@ async function activateSkill(
 ): Promise<ScaffoldActivateResult> {
   const { name, indexMdPath } = await deps.scaffoldingApi.createSkill(input);
   await deps.capabilityLibrary.load(deps.libraryDir);
+  await deps.projectRegistry.load(deps.projectsDir);
   const filePath = join(deps.libraryDir, 'skills', input.domain, name);
   const paths = indexMdPath ? [filePath, indexMdPath] : filePath;
   return commit(paths, `feat(skill): scaffold "${input.domain}/${name}"`);
@@ -187,6 +188,13 @@ export function createReloadRegistries(
     };
 
     try {
+      await deps.capabilityLibrary.load(deps.libraryDir);
+      result.library = true;
+    } catch (err) {
+      log.warn(`Capability library reload failed: ${String(err)}`);
+    }
+
+    try {
       await withProjectMutation(deps.projectsDir, async () => {
         await deps.projectRegistry.load(deps.projectsDir);
         deps.syncProjects?.();
@@ -201,13 +209,6 @@ export function createReloadRegistries(
       result.template = true;
     } catch (err) {
       log.warn(`Template registry reload failed: ${String(err)}`);
-    }
-
-    try {
-      await deps.capabilityLibrary.load(deps.libraryDir);
-      result.library = true;
-    } catch (err) {
-      log.warn(`Capability library reload failed: ${String(err)}`);
     }
 
     try {

@@ -333,13 +333,22 @@ their definition and identity; system projects and known SQLite references preve
 deletion. Graph memberships also prevent deletion when Neo4j is available. Without
 it, an otherwise empty project can archive with `knowledgeReferencesChecked: false`;
 this does not prove that it has no graph memberships.
-Handled filesystem/cache failures have compensation. Startup reconciliation after
-process interruption remains deferred; cross-store power-loss atomicity is not
-claimed. Plain definitions use their relative path as identity and intrinsic
+Create/update/archive operations write flushed YAML intentions under
+`projects/.project-mutations` before publishing filesystem changes. Creation stages
+a complete directory; updates check context hashes; archives preserve the original
+context and an identity snapshot. Startup completes or cancels unambiguous current
+journals before cache synchronization. Edited or unsafe paths remain conflicts,
+with their project unavailable and cache evidence retained. Recovery reports are
+available at `GET /api/project-recovery`; explicit hash-checked recovery uses
+`POST /api/project-recovery/:mutationId/recover`. Files and SQLite are not one
+atomic transaction, and process-kill tests do not certify power-loss behavior.
+Plain definitions use their relative path as identity and intrinsic
 defaults for settings; no fields fall back to old database values. Missing
 definitions never reappear from SQLite. Referenced missing projects remain
 inactive historical rows; unreferenced stale rows are removed. Invalid definitions
-or identity conflicts stop startup instead of activating stale cache permissions.
+and duplicate identities make affected subtrees unavailable while valid siblings
+continue. Root scan failure prevents cache synchronization; an absent root with
+known project paths is not silently recreated at startup.
 
 Data-source rows hold labeled URIs. Their ownership-checked CRUD is available even
 when graph knowledge is disabled, but a row does not attach a repository, grant
@@ -468,7 +477,11 @@ a fresh ID so old completions cannot mask a missed run. Cron and manual invocati
 are tracked before handlers start, including self-test's own run. Stop closes
 admission and drains them before store disposal. Disabled/removed schedules do
 not contribute ordinary health failures. Scanner-rejected invalid files remain
-outside accepted definitions; F9 will expose those registry diagnostics.
+outside accepted definitions and appear in current health/self-test diagnostics,
+alongside project, agent, template and capability definition problems. Dashboard
+diagnostics show affected paths and offer `POST /api/definitions/reload`. Reload
+reads the library before checking project skill references. Repaired definitions
+clear live health without concealing unrelated persisted operational failures.
 
 **Intents (prospective memory).** `intents/intent-matcher.ts` is a service that turns owner requests like "remind me when X arrives" into deterministic rows (`intents` table in the fresh schema): keyword/event-type matches with a fire budget, cooldown, and expiry — no LLM inference at match time. Created via the `create_intent` MCP tool, listed/cancelled from the Schedules page.
 

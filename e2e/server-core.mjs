@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, realpathSync } from 'node:fs';
+import { mkdirSync, writeFileSync, realpathSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -138,6 +138,18 @@ const control = createServer(async (req, res) => {
         events,
         approvals: getDb().prepare('SELECT id, resolution FROM pending_approvals').all(),
       };
+    } else if (req.method === 'POST' && req.url === '/invalid-definition') {
+      write('projects/schedules/browser-invalid.yaml', {
+        name: 'browser-invalid',
+        cron: 'invalid cron',
+        timezone: 'UTC',
+        enabled: true,
+        run: { kind: 'job', ref: 'self-test' },
+      });
+      result = { written: true };
+    } else if (req.method === 'POST' && req.url === '/repair-definition') {
+      rmSync(join(root, 'projects/schedules/browser-invalid.yaml'), { force: true });
+      result = { repaired: true };
     } else if (req.method === 'POST' && req.url === '/approval') {
       result = pending.insert({
         actionName: 'browser-fixture:confirm',

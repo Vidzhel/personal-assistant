@@ -67,6 +67,7 @@ function makeMockProjectRegistry(): ProjectRegistry {
     getGlobal: vi.fn(),
     listProjects: vi.fn().mockReturnValue([]),
     getProjectChildren: vi.fn().mockReturnValue([]),
+    getInvalidProjectPaths: vi.fn().mockReturnValue([]),
     resolveProjectContext: vi.fn(),
   } as unknown as ProjectRegistry;
 }

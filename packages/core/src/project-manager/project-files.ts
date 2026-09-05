@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { closeSync, fsyncSync, openSync } from 'node:fs';
 import { lstat, realpath, readFile, writeFile, rename, unlink } from 'node:fs/promises';
 import { join, resolve, dirname } from 'node:path';
 import { HTTP_STATUS } from '@raven/shared';
@@ -77,16 +78,57 @@ export async function readManagedContext(root: string, path: string): Promise<st
 
 /** Same-directory rename keeps readers from observing a truncated definition. */
 export async function replaceContext(root: string, path: string, content: string): Promise<void> {
+  await replaceContextChecked({ root, path, content });
+}
+
+export async function replaceContextChecked(options: {
+  root: string;
+  path: string;
+  content: string;
+  expectedHash?: string;
+}): Promise<void> {
+  const { root, path, content, expectedHash } = options;
   const destination = await managedPath(root, `${path}/context.md`);
+  if (expectedHash !== undefined) {
+    await assertContextHash(destination, expectedHash);
+  }
   const temporary = join(dirname(destination), `.context-${randomUUID()}.tmp`);
   try {
     const mode = (await lstat(destination)).mode;
     await writeFile(temporary, content, { encoding: 'utf8', flag: 'wx', mode });
     await managedPath(root, `${path}/context.md`);
+    if (expectedHash !== undefined) await assertContextHash(destination, expectedHash);
+    fsyncFile(temporary);
     await rename(temporary, destination);
+    fsyncDirectory(dirname(destination));
   } finally {
     await unlink(temporary).catch((error: NodeJS.ErrnoException) => {
       if (error.code !== 'ENOENT') throw error;
     });
+  }
+}
+
+async function assertContextHash(path: string, expectedHash: string): Promise<void> {
+  const current = await readFile(path, 'utf8');
+  const hash = createHash('sha256').update(current).digest('hex');
+  if (hash !== expectedHash)
+    throw new ProjectMutationError(`Project context changed before update`);
+}
+
+function fsyncFile(path: string): void {
+  const fd = openSync(path, 'r');
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function fsyncDirectory(path: string): void {
+  const fd = openSync(path, 'r');
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
   }
 }

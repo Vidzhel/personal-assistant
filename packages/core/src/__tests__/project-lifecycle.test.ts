@@ -40,6 +40,10 @@ import {
   parseProjectRow,
   saveProjectRow,
 } from '../project-manager/project-cache.ts';
+import {
+  readProjectRecoveryReport,
+  recoverProjectMutation,
+} from '../project-manager/project-recovery/journal.ts';
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof fs>();
@@ -153,7 +157,7 @@ describe('managed project lifecycle failures and legacy data', () => {
     expect(existsSync(file('access-only'))).toBe(false);
   });
 
-  it('invalid metadata cannot turn a failed registry load into orphan deletion', async () => {
+  it('invalid global metadata cannot turn a failed registry load into orphan deletion', async () => {
     saveProjectRow(deps.db, {
       id: 'unlinked',
       name: 'Unlinked',
@@ -161,9 +165,8 @@ describe('managed project lifecycle failures and legacy data', () => {
       createdAt: 1,
       updatedAt: 1,
     });
-    mkdirSync(join(deps.projectsDir, 'invalid'));
     writeFileSync(
-      file('invalid'),
+      join(deps.projectsDir, 'context.md'),
       '---\nravenProject: {version: 1, systemAccess: admin}\n---\nBody',
     );
     await expect(deps.projectRegistry.load(deps.projectsDir)).rejects.toThrow();
@@ -365,7 +368,7 @@ describe('managed project lifecycle failures and legacy data', () => {
   });
 
   it.each(['write', 'reload', 'database'])(
-    'compensates a failed %s update with original file/cache/registry',
+    'retains a failed %s update journal and authoritative file state',
     async (kind) => {
       const project = await create();
       const original = readFileSync(file(), 'utf8');
@@ -380,24 +383,53 @@ describe('managed project lifecycle failures and legacy data', () => {
       await expect(updateManagedProject(deps, project.id, { name: 'Lost update' })).rejects.toThrow(
         'failed',
       );
-      expect(readFileSync(file(), 'utf8')).toBe(original);
-      expect(parseProjectRow(getProjectRow(deps.db, project.id))).toEqual(project);
-      expect(deps.projectRegistry.getProject('example')?.metadata?.displayName).toBe('Example');
+      if (kind === 'write') expect(readFileSync(file(), 'utf8')).toBe(original);
+      else
+        expect(readProjectDefinition(readFileSync(file(), 'utf8')).metadata?.displayName).toBe(
+          'Lost update',
+        );
+      expect(parseProjectRow(getProjectRow(deps.db, project.id)).name).toBe('Example');
+      if (kind === 'database')
+        expect(deps.projectRegistry.getProject('example')?.metadata?.displayName).toBe(
+          'Lost update',
+        );
+      else
+        expect(deps.projectRegistry.getProject('example')?.metadata?.displayName).toBe('Example');
       expect(readdirSync(join(deps.projectsDir, 'example'))).toEqual(['context.md']);
+      const pending = readProjectRecoveryReport(deps.projectsDir).entries;
+      expect(pending).toEqual([
+        expect.objectContaining({
+          projectId: project.id,
+          state: kind === 'write' ? 'preparing' : 'published',
+        }),
+      ]);
+      if (kind === 'database') deps.db.exec('DROP TRIGGER fail_update');
+      await recoverProjectMutation(deps, pending[0].mutationId);
+      syncProjectCache(deps);
+      expect(getProjectRow(deps.db, project.id).name).toBe(
+        kind === 'write' ? 'Example' : 'Lost update',
+      );
+      expect(readProjectRecoveryReport(deps.projectsDir).entries).toEqual([]);
     },
   );
 
-  it('removes a failed create before it can reappear on restart', async () => {
+  it('retains a published create when its cache write fails', async () => {
     deps.db.exec(
       "CREATE TRIGGER fail_insert BEFORE INSERT ON projects BEGIN SELECT RAISE(ABORT, 'insert failed'); END",
     );
     await expect(create()).rejects.toThrow('insert failed');
-    expect(existsSync(file())).toBe(false);
-    expect(deps.projectRegistry.getProject('example')).toBeUndefined();
+    expect(existsSync(file())).toBe(true);
+    expect(deps.projectRegistry.getProject('example')).toBeDefined();
+    deps.db.exec('DROP TRIGGER fail_insert');
+    await deps.projectRegistry.load(deps.projectsDir);
+    syncProjectCache(deps);
+    expect(deps.db.prepare('SELECT name FROM projects WHERE fs_path = ?').get('example')).toEqual({
+      name: 'Example',
+    });
   });
 
   it.each(['move', 'snapshot', 'database', 'reload'])(
-    'keeps a failed %s delete recoverable and live',
+    'keeps a failed %s archive recoverable and durable',
     async (kind) => {
       const project = await create();
       const original = readFileSync(file(), 'utf8');
@@ -411,9 +443,32 @@ describe('managed project lifecycle failures and legacy data', () => {
           "CREATE TRIGGER fail_delete BEFORE DELETE ON projects BEGIN SELECT RAISE(ABORT, 'delete failed'); END",
         );
       await expect(deleteManagedProject(deps, project.id)).rejects.toThrow('failed');
-      expect(readFileSync(file(), 'utf8')).toBe(original);
+      const archiveRoot = join(deps.projectsDir, '.archive');
+      if (kind === 'move') {
+        expect(readFileSync(file(), 'utf8')).toBe(original);
+        expect(readdirSync(archiveRoot)).toEqual([]);
+      } else {
+        expect(existsSync(file())).toBe(false);
+        const archive = join(archiveRoot, readdirSync(archiveRoot)[0]);
+        expect(readFileSync(join(archive, 'context.md'), 'utf8')).toBe(original);
+        expect(existsSync(join(archive, 'archive.json'))).toBe(kind !== 'snapshot');
+      }
       expect(getProjectRow(deps.db, project.id)).toBeDefined();
-      expect(deps.projectRegistry.getProject('example')).toBeDefined();
+      const pending = readProjectRecoveryReport(deps.projectsDir).entries;
+      expect(pending).toEqual([
+        expect.objectContaining({
+          projectId: project.id,
+          state: kind === 'move' ? 'preparing' : 'published',
+        }),
+      ]);
+      if (kind === 'database') deps.db.exec('DROP TRIGGER fail_delete');
+      await recoverProjectMutation(deps, pending[0].mutationId);
+      await deps.projectRegistry.load(deps.projectsDir);
+      syncProjectCache(deps);
+      expect(Boolean(deps.db.prepare('SELECT id FROM projects WHERE id = ?').get(project.id))).toBe(
+        kind === 'move',
+      );
+      expect(readProjectRecoveryReport(deps.projectsDir).entries).toEqual([]);
     },
   );
 
@@ -464,7 +519,28 @@ describe('managed project lifecycle failures and legacy data', () => {
         .run(project.id);
     });
     await expect(deleteManagedProject(deps, project.id)).rejects.toThrow('events');
-    expect(existsSync(file())).toBe(true);
+    expect(existsSync(file())).toBe(false);
+    expect(getProjectRow(deps.db, project.id)).toBeDefined();
+    const pending = readProjectRecoveryReport(deps.projectsDir).entries;
+    await expect(recoverProjectMutation(deps, pending[0].mutationId)).rejects.toThrow('references');
+    expect(readProjectRecoveryReport(deps.projectsDir).entries).toHaveLength(1);
+  });
+
+  it('retains edits made while archive checks graph references', async () => {
+    const project = await create();
+    const edited = `${readFileSync(file(), 'utf8')}Owner edit during graph query\n`;
+    const query = vi.fn(async () => {
+      writeFileSync(file(), edited);
+      return [];
+    });
+    await expect(
+      deleteManagedProject({ ...deps, neo4jClient: { query } as never }, project.id),
+    ).rejects.toThrow('context changed');
+    expect(readFileSync(file(), 'utf8')).toBe(edited);
+    expect(getProjectRow(deps.db, project.id).name).toBe('Example');
+    expect(readProjectRecoveryReport(deps.projectsDir).entries).toEqual([
+      expect.objectContaining({ projectId: project.id, state: 'conflict' }),
+    ]);
   });
 
   it('rejects reserved paths, existing unindexed directories and symlink archive/context destinations', async () => {

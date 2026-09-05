@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useAppStore } from '@/stores/app-store';
 import { usePolling } from '@/hooks/usePolling';
+import { DefinitionIssues, type DefinitionIssue } from '@/components/dashboard/DefinitionIssues';
 import { StatusCards } from '@/components/dashboard/StatusCards';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { LifeSummary } from '@/components/dashboard/LifeSummary';
@@ -20,9 +21,14 @@ interface HealthResponse {
   uptime: number;
   subsystems: {
     skills: { names: string[] };
+    definitions?: { diagnostics: DefinitionIssue[] };
     agentManager: { queueLength: number; runningCount: number };
   };
   selfTest?: { lastRun: string | null; ok: boolean; violations: string[] };
+}
+
+function definitionIssues(health: HealthResponse | null): DefinitionIssue[] {
+  return health?.subsystems.definitions?.diagnostics ?? [];
 }
 
 // eslint-disable-next-line max-lines-per-function -- life dashboard page with multiple data sources
@@ -43,7 +49,10 @@ export default function DashboardPage() {
     fetchAll();
   }, [fetchAll]);
 
-  const { data: healthData } = usePolling<HealthResponse>('/health', HEALTH_REFRESH_INTERVAL_MS);
+  const { data: healthData, refresh: refreshHealth } = usePolling<HealthResponse>(
+    '/health',
+    HEALTH_REFRESH_INTERVAL_MS,
+  );
   const { data: dashboardData } = usePolling<LifeDashboardData>(
     '/dashboard/life',
     DASHBOARD_REFRESH_INTERVAL_MS,
@@ -119,6 +128,8 @@ export default function DashboardPage() {
       />
 
       {dashboardData && <LifeSummary cards={summaryCards} />}
+
+      <DefinitionIssues issues={definitionIssues(healthData)} onReload={refreshHealth} />
 
       <ApprovalsInbox />
 
