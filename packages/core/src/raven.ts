@@ -564,8 +564,8 @@ export async function createRaven(
   // 11a-4. Self-test deps (Phase 3): deterministic invariants over the same
   // subsystems raven.ts already wired — no model call, no Neo4j dep.
   // scheduleEngine is added below via Object.assign once it exists — the
-  // canary check needs it to tell "never fired, but disabled" apart from
-  // "never fired, but enabled" — and selfTestDeps must be constructed here
+  // schedule health needs current activation/in-flight state and the canary
+  // check needs effective enabled definitions — and selfTestDeps must be constructed here
   // (before registerCoreJobs) while scheduleEngine isn't built until after.
   const selfTestDeps: SelfTestJobDeps = {
     db: getDb(),
@@ -581,7 +581,7 @@ export async function createRaven(
   // last fire reached a healthy terminal status" (see schedule-fire-log.ts).
   const scheduleFireLog = createScheduleFireLog(getDb());
 
-  // Unified schedule engine (job-kind schedules; template/agent kinds land in Plan 1b)
+  // Existing schedule engine dispatches registered jobs, templates and heartbeat.
   registerCoreJobs(jobRegistry, {
     taskStore,
     retrospective,
@@ -768,6 +768,11 @@ export async function createRaven(
     const agentsStopped = cleanup(() => agentManager.stop());
     const heartbeatStopped = cleanup(() => heartbeat.stop());
     const memoryStopped = cleanup(() => memoryConsolidation.stop());
+    // Scheduled knowledge jobs own direct model/graph work. Abort their
+    // processors before waiting for schedule drain; keep shared stores open.
+    const consolidationStopped = cleanup(() => knowledgeConsolidation?.stop());
+    const knowledgeRetrospectiveStopped = cleanup(() => retrospective?.stop());
+    const servicesStopped = cleanup(() => serviceRunner.stopAll());
     const schedulesStopped = cleanup(() => scheduleEngine.stop());
     await Promise.all([
       orchestratorStopped,
@@ -775,6 +780,9 @@ export async function createRaven(
       agentsStopped,
       heartbeatStopped,
       memoryStopped,
+      consolidationStopped,
+      knowledgeRetrospectiveStopped,
+      servicesStopped,
       schedulesStopped,
     ]);
     await cleanup(() => idleDetector.stop());
@@ -782,7 +790,6 @@ export async function createRaven(
     await cleanup(() => executionEngine.stop());
     await cleanup(() => configCommitter.stop());
     await cleanup(() => permissionEngine.shutdown());
-    await cleanup(() => serviceRunner.stopAll());
     await serverClosed;
     delete ravenMcpDeps.knowledgeStore;
     delete ravenMcpDeps.retrievalEngine;

@@ -90,6 +90,7 @@ describe('API routes', () => {
       stop: () => {},
       getActiveCount: () => 0,
       getUpcoming: () => [],
+      getHealth: () => [],
     } as unknown as ScheduleEngine;
 
     app = Fastify({ logger: false });

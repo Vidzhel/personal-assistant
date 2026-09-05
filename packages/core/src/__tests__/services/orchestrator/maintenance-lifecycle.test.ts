@@ -180,6 +180,36 @@ describe('maintenance lifetime', () => {
     expect(bus.listenerCount()).toBe(0);
   });
 
+  it('settles promptly when knowledge maintenance remains pending after stop', async () => {
+    let release!: () => void;
+    let knowledgeStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      knowledgeStarted = resolve;
+    });
+    mocks.knowledge.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+          knowledgeStarted();
+        }),
+    );
+
+    const pending = run();
+    await started;
+    const settled = expect(pending).rejects.toThrow('Maintenance stopped');
+    await service.stop();
+    await settled;
+
+    expect(mocks.report).not.toHaveBeenCalled();
+    expect(mocks.notify).not.toHaveBeenCalled();
+    expect(bus.listenerCount()).toBe(0);
+
+    release();
+    await Promise.resolve();
+    expect(mocks.report).not.toHaveBeenCalled();
+    expect(mocks.notify).not.toHaveBeenCalled();
+  });
+
   it('cleans its waiter when dispatch throws', async () => {
     bus.on('agent:task:request', () => {
       throw new Error('dispatch failed');

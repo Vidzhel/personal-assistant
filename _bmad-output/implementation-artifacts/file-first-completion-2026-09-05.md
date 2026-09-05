@@ -21,7 +21,7 @@ external repositories.
 | F4 | Drain admitted MCP mutations before terminal task state and store shutdown | Complete; reviewed, 2,105 tests and 14 browser journeys passed |
 | F5 | File/graph reconciliation and changed-content derived-index refresh | Complete; 2,138 default / 132 graph tests, 14 browser journeys |
 | F6 | Enforced global daily budget through existing execution paths | Complete; 2,176 tests, 14 browser journeys and packaged restart |
-| F7 | Ordinary schedule absence/staleness detection | Pending |
+| F7 | Ordinary schedule absence/staleness detection | Complete; 2,200 tests, 14 browser journeys and packaged restart |
 | F8 | Durable provider upload cleanup/retry after cancellation and restart | Pending |
 | F9 | Remove obsolete storage compatibility/schema paths, reconcile docs, full/browser/compiled/container verification | Pending |
 | W1 | Review dissertation/teaching and implement flexible repository workspaces with browser artifact access | Authorized after F1–F9 |
@@ -76,7 +76,14 @@ F6 evidence and cost-accounting limits are in
 known/unknown settlement and SDK query caps are complete across chat, tasks,
 heartbeat and learning. The default suite passed 207 files / 2,176 tests (six
 live skips); required checks, core build, fourteen browser journeys and packaged
-restart passed. F7 is next.
+restart passed.
+
+F7 evidence and calendar/shutdown limits are in
+[tech-spec-f7-schedule-health.md](tech-spec-f7-schedule-health.md). Current activation
+health, ordinary absence/staleness checks and graceful scheduled-work cancellation
+are complete. Required checks, 211 files / 2,200 tests (six live skips), fresh core
+build, fourteen browser journeys and two clean packaged process exits passed.
+F8 provider upload cleanup is next.
 
 Implementation remains ordered, with parent review and a tested commit/push for
 each checkpoint.

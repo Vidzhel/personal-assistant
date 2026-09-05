@@ -19,11 +19,9 @@ describe('runScheduledHeartbeat', () => {
     await runScheduledHeartbeat(heartbeatDef, { fireHeartbeat, scheduleFireLog });
 
     expect(fireHeartbeat).toHaveBeenCalledTimes(1);
-    expect(scheduleFireLog.record).toHaveBeenCalledWith(
-      'heartbeat',
-      'completed',
-      'HEARTBEAT_OK (swallowed)',
-    );
+    expect(scheduleFireLog.record).toHaveBeenCalledWith('heartbeat', 'completed', {
+      detail: 'HEARTBEAT_OK (swallowed)',
+    });
   });
 
   it('does not throw when fireHeartbeat rejects, and records a failed fire-log entry', async () => {
@@ -33,7 +31,9 @@ describe('runScheduledHeartbeat', () => {
     await expect(
       runScheduledHeartbeat(heartbeatDef, { fireHeartbeat, scheduleFireLog }),
     ).resolves.toBeUndefined();
-    expect(scheduleFireLog.record).toHaveBeenCalledWith('heartbeat', 'failed', expect.any(String));
+    expect(scheduleFireLog.record).toHaveBeenCalledWith('heartbeat', 'failed', {
+      detail: expect.any(String),
+    });
   });
 });
 
@@ -82,7 +82,7 @@ describe('createScheduleEngine: heartbeat-kind wiring', () => {
     expect(scheduleFireLog.record).toHaveBeenCalledWith(
       'heartbeat',
       'blocked',
-      expect.stringContaining('no fireHeartbeat handler'),
+      expect.objectContaining({ detail: expect.stringContaining('no fireHeartbeat handler') }),
     );
     engine.stop();
   });

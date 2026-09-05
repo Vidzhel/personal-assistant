@@ -395,11 +395,20 @@ Uses `croner` for timezone-aware cron. Schedules are YAML files under `projects/
 - `template` — instantiates a task template (`projects/templates/*.yaml`) into a task tree; used by the morning digest and the weekly canary.
 - `heartbeat` — an ambient check-in turn with a silence contract (`HEARTBEAT_OK` → swallowed), off by default.
 
-Every fire is recorded in `schedule_fires`. The nightly self-test checks each
-recorded schedule's latest status, accepting `completed` and `fired`; it does not
-detect a missing or stale fire for ordinary schedules. Only the weekly canary has
-absence/staleness checks. `scheduleEngine.reload()` re-syncs the cron set after a
-schedule is scaffolded from chat, with no restart.
+Terminal fire outcomes are recorded in `schedule_fires` with the invocation's
+activation ID. The nightly self-test checks current enabled definitions for
+missing/stale fires, failure, absent registration and invocations stuck over an
+hour. Croner computes expected windows in each schedule's timezone, with five
+minutes of activation grace and one minute of completion grace. Healthy manual
+runs satisfy the current window. A `fired` template row proves dispatch; the
+weekly canary additionally checks task-tree completion.
+
+Unchanged reloads preserve activation; new, changed or re-enabled definitions get
+a fresh ID so old completions cannot mask a missed run. Cron and manual invocations
+are tracked before handlers start, including self-test's own run. Stop closes
+admission and drains them before store disposal. Disabled/removed schedules do
+not contribute ordinary health failures. Scanner-rejected invalid files remain
+outside accepted definitions; F9 will expose those registry diagnostics.
 
 **Intents (prospective memory).** `intents/intent-matcher.ts` is a service that turns owner requests like "remind me when X arrives" into deterministic rows (`intents` table, migration 033): keyword/event-type matches with a fire budget, cooldown, and expiry — no LLM inference at match time. Created via the `create_intent` MCP tool, listed/cancelled from the Schedules page.
 
@@ -410,7 +419,7 @@ and an in-progress heartbeat suppress redundant runs before model execution.
 
 **Self-verification.** A nightly self-test job (`services/system/self-test.ts`)
 checks stuck/failed task trees, loaded service count below environment eligibility,
-recorded schedule failure statuses, agent-task error rate, stale approvals, data
+current schedule freshness/failure, agent-task error rate, stale approvals, data
 directory writability and DB integrity. It batches violations into one notification
 for configured delivery and records results for `/api/health`; this is not a
 Telegram receipt. The weekly canary uses a dedicated minimal template. Its check

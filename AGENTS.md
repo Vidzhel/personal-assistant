@@ -120,6 +120,14 @@ versions; do not copy versions from historical planning documents.
   admitted Raven/memory handlers before returning. Keep stores alive during that
   drain. Cancellation does not roll back committed mutations or prove remote work
   stopped.
+- Schedule health uses current effective definitions and activation IDs in the
+  existing fire log. Preserve activation on unchanged reloads; replace it when
+  definitions change or become enabled. Track manual and cron invocations before
+  starting handlers. Cancel job-owning services/knowledge processors before waiting
+  for schedule drain, while keeping shared graph/SQLite stores open. Self-test
+  grants startup/completion grace and distinguishes current in-flight work from
+  missing, stale, failed or unregistered schedules; old activations cannot satisfy
+  current health. Croner defines calendar behavior, including its tested DST edges.
 - Learning uses interactive retrospectives, candidate files and consolidation.
   Rejected, failed or partial consolidation must retain pending candidates; archive
   only after successful application and index generation. Heartbeat is disabled

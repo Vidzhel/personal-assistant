@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { stringify } from 'yaml';
 import { join } from 'node:path';
@@ -32,11 +32,88 @@ describe('e2e: self-test detects a stuck task tree', () => {
   let raven: RavenInstance | undefined;
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     if (raven) await raven.stop();
     if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
     raven = undefined;
     tmpDir = undefined;
   });
+
+  it('reports missed ordinary fires, observes its own running fire, and clears repaired or disabled schedules', async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'raven-e2e-schedule-health-'));
+    const fixture = createRavenTestFixture(tmpDir, { schedule: 'self-test' });
+    const now = Date.now();
+    // A daily cron three minutes ago is overdue without racing ambient timers.
+    const due = new Date(now - 3 * 60_000);
+    const cron = `${due.getUTCMinutes()} ${due.getUTCHours()} * * *`;
+    for (const [name, ref] of [
+      ['self-test', 'self-test'],
+      ['ordinary', 'task-archival'],
+    ]) {
+      writeFileSync(
+        join(fixture.projectsDir, 'schedules', `${name}.yaml`),
+        stringify({
+          name,
+          cron,
+          timezone: 'UTC',
+          enabled: true,
+          run: { kind: 'job', ref },
+        }),
+      );
+    }
+    // Age activation only. Real Croner and HTTP timers still use the real clock.
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now - 10 * 60_000);
+    try {
+      raven = await createRaven(buildTestConfig(), {
+        ...fixture,
+        agentBackend: async () => {
+          throw new Error('Self-test must not call a model');
+        },
+        skipSuites: true,
+      });
+    } finally {
+      clock.mockRestore();
+    }
+    await raven.start();
+    const baseUrl = `http://127.0.0.1:${raven.port}`;
+    const run = async (name: string) => {
+      const response = await fetch(`${baseUrl}/api/schedules/${name}/trigger`, { method: 'POST' });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ triggered: true });
+    };
+    const scheduleViolations = async (): Promise<string[]> => {
+      const response = await fetch(`${baseUrl}/api/health`);
+      expect(response.status).toBe(200);
+      const health = (await response.json()) as { selfTest: { violations: string[] } };
+      return health.selfTest.violations.filter((issue) => issue.startsWith('Schedule '));
+    };
+
+    await run('self-test');
+    const missing = await scheduleViolations();
+    expect(missing.some((issue) => issue.includes('ordinary'))).toBe(true);
+    expect(missing.some((issue) => issue.includes('Schedule "self-test"'))).toBe(false);
+
+    await run('ordinary');
+    await run('self-test');
+    expect(await scheduleViolations()).toEqual([]);
+
+    raven.db.run(
+      'INSERT INTO schedule_fires (id, schedule_name, fired_at, status, detail) VALUES (?, ?, ?, ?, ?)',
+      'disabled-failure',
+      'ordinary',
+      new Date(Date.now() + 1).toISOString(),
+      'blocked',
+      'test failure',
+    );
+    const disabled = await fetch(`${baseUrl}/api/schedules/ordinary`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(disabled.status).toBe(200);
+    await run('self-test');
+    expect(await scheduleViolations()).toEqual([]);
+  }, 15_000);
 
   it('seeded stuck tree -> self-test job -> notification + health violation', async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-e2e-self-test-'));

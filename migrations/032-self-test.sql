@@ -5,11 +5,13 @@ CREATE TABLE IF NOT EXISTS schedule_fires (
   id TEXT PRIMARY KEY,
   schedule_name TEXT NOT NULL,
   fired_at TEXT NOT NULL,
+  activation_id TEXT,
   status TEXT NOT NULL CHECK (status IN ('completed', 'blocked', 'fired', 'failed')),
   detail TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_schedule_fires_schedule_name ON schedule_fires(schedule_name);
 CREATE INDEX IF NOT EXISTS idx_schedule_fires_fired_at ON schedule_fires(fired_at);
+CREATE INDEX IF NOT EXISTS idx_schedule_fires_activation ON schedule_fires(schedule_name, activation_id, fired_at);
 
 CREATE TABLE IF NOT EXISTS self_test_results (
   id TEXT PRIMARY KEY,

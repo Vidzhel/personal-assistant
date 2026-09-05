@@ -1,5 +1,5 @@
 import { Cron } from 'croner';
-import { createLogger } from '@raven/shared';
+import { createLogger, generateId } from '@raven/shared';
 import type { ScheduleYaml, RavenTask } from '@raven/shared';
 import type { JobRegistry } from './job-registry.ts';
 import type { SchedulePrefs } from './schedule-prefs.ts';
@@ -53,7 +53,7 @@ export async function runScheduledJob(def: ScheduleYaml, deps: RunJobDeps): Prom
   if (!handler) {
     log.error(`No job registered for "${def.run.ref}" (schedule ${def.name})`);
     markBlocked(deps, task.id, `No job handler registered: ${def.run.ref}`);
-    deps.scheduleFireLog?.record(def.name, 'blocked', 'No job handler registered');
+    deps.scheduleFireLog?.record(def.name, 'blocked', { detail: 'No job handler registered' });
     return;
   }
 
@@ -64,11 +64,11 @@ export async function runScheduledJob(def: ScheduleYaml, deps: RunJobDeps): Prom
       ...(result.summary !== undefined && { description: result.summary }),
     });
     log.info(`Schedule "${def.name}" completed: ${result.summary ?? 'ok'}`);
-    deps.scheduleFireLog?.record(def.name, 'completed', result.summary);
+    deps.scheduleFireLog?.record(def.name, 'completed', { detail: result.summary });
   } catch (err) {
     log.error(`Schedule "${def.name}" failed: ${String(err)}`);
     markBlocked(deps, task.id, String(err));
-    deps.scheduleFireLog?.record(def.name, 'blocked', String(err));
+    deps.scheduleFireLog?.record(def.name, 'blocked', { detail: String(err) });
   }
 }
 
@@ -88,10 +88,10 @@ export async function runScheduledTemplate(
       params: def.params ?? {},
     });
     log.info(`Schedule "${def.name}" fired template "${def.run.ref}" → tree ${treeId}`);
-    deps.scheduleFireLog?.record(def.name, 'fired', treeId);
+    deps.scheduleFireLog?.record(def.name, 'fired', { detail: treeId });
   } catch (err) {
     log.error(`Schedule "${def.name}" template fire failed: ${String(err)}`);
-    deps.scheduleFireLog?.record(def.name, 'failed', String(err));
+    deps.scheduleFireLog?.record(def.name, 'failed', { detail: String(err) });
   }
 }
 
@@ -116,10 +116,10 @@ export async function runScheduledHeartbeat(
   try {
     const result = await deps.fireHeartbeat();
     log.info(`Schedule "${def.name}" heartbeat: ${result.summary}`);
-    deps.scheduleFireLog?.record(def.name, 'completed', result.summary);
+    deps.scheduleFireLog?.record(def.name, 'completed', { detail: result.summary });
   } catch (err) {
     log.error(`Schedule "${def.name}" heartbeat failed: ${String(err)}`);
-    deps.scheduleFireLog?.record(def.name, 'failed', String(err));
+    deps.scheduleFireLog?.record(def.name, 'failed', { detail: String(err) });
   }
 }
 
@@ -132,6 +132,8 @@ export interface ScheduleEngineDeps {
   fireHeartbeat?: FireHeartbeat;
   schedulePrefs?: SchedulePrefs;
   scheduleFireLog?: ScheduleFireLog;
+  /** Test seam for deterministic schedule-health timestamps. */
+  now?: () => number;
 }
 
 export interface ScheduleInfo {
@@ -145,6 +147,13 @@ export interface ScheduleInfo {
   nextRun: string | null;
 }
 
+export interface ScheduleHealth extends ScheduleInfo {
+  active: boolean;
+  activatedAt: number | null;
+  activationId: string | null;
+  inFlightSince: number | null;
+}
+
 export interface ScheduleEngine {
   start(): void;
   /** Stops every cron job, then awaits any fireDef() calls already in
@@ -153,6 +162,7 @@ export interface ScheduleEngine {
    * still mid-flight). */
   stop(): Promise<void>;
   list(): ScheduleInfo[];
+  getHealth(): ScheduleHealth[];
   setEnabled(name: string, enabled: boolean): boolean;
   runNow(name: string): Promise<boolean>;
   getActiveCount(): number;
@@ -164,14 +174,28 @@ export interface ScheduleEngine {
   reload(schedules: ScheduleYaml[]): void;
 }
 
-type EntryMap = Map<string, { def: ScheduleYaml; job: Cron | null }>;
+interface ScheduleEntry {
+  def: ScheduleYaml;
+  job: Cron | null;
+  activatedAt: number | null;
+  activationId: string | null;
+  signature: string;
+}
+
+type EntryMap = Map<string, ScheduleEntry>;
 
 /** entries + inFlight are created together and threaded through together —
  * bundled into one param so startEntry (which needs both, plus name and
  * deps) stays under the max-params guardrail. */
 interface EngineState {
   entries: EntryMap;
-  inFlight: Set<Promise<void>>;
+  inFlight: Map<
+    Promise<void>,
+    { name: string; startedAt: number; signature: string; activationId: string | null }
+  >;
+  overrides: Map<string, boolean>;
+  admissionOpen: boolean;
+  stopPromise?: Promise<void>;
 }
 
 function checkRegistered(def: ScheduleYaml, deps: ScheduleEngineDeps): boolean {
@@ -181,9 +205,37 @@ function checkRegistered(def: ScheduleYaml, deps: ScheduleEngineDeps): boolean {
   return false;
 }
 
-function checkEffectiveEnabled(def: ScheduleYaml, deps: ScheduleEngineDeps): boolean {
+function checkEffectiveEnabled(
+  def: ScheduleYaml,
+  deps: ScheduleEngineDeps,
+  overrides?: Map<string, boolean>,
+): boolean {
+  const inMemoryOverride = overrides?.get(def.name);
+  if (inMemoryOverride !== undefined) return inMemoryOverride;
   const override = deps.schedulePrefs?.getEnabledOverride(def.name);
   return override ?? def.enabled !== false;
+}
+
+function scheduleSignature(def: ScheduleYaml, enabled: boolean): string {
+  const canonicalize = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(canonicalize);
+    if (value !== null && typeof value === 'object') {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>)
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([key, nested]) => [key, canonicalize(nested)]),
+      );
+    }
+    return value;
+  };
+
+  return JSON.stringify({
+    cron: def.cron,
+    timezone: def.timezone,
+    enabled,
+    params: canonicalize(def.params ?? null),
+    run: canonicalize(def.run),
+  });
 }
 
 async function fireDef(def: ScheduleYaml, deps: ScheduleEngineDeps): Promise<void> {
@@ -230,33 +282,53 @@ async function fireDef(def: ScheduleYaml, deps: ScheduleEngineDeps): Promise<voi
         ? `Schedule "${def.name}" is heartbeat-kind but no fireHeartbeat handler is configured`
         : `Schedule "${def.name}" has unsupported run.kind "${def.run.kind}" — nothing fired`;
   log.error(reason);
-  deps.scheduleFireLog?.record(def.name, 'blocked', reason);
+  deps.scheduleFireLog?.record(def.name, 'blocked', { detail: reason });
 }
 
 /** Fires def and tracks the resulting promise in `inFlight` for the
  * duration of the call, so stop() can await anything already running when
  * it's invoked instead of abandoning it mid-flight. */
 function trackedFire(
-  def: ScheduleYaml,
+  entry: ScheduleEntry,
   deps: ScheduleEngineDeps,
-  inFlight: Set<Promise<void>>,
-): void {
-  const promise = fireDef(def, deps).finally(() => inFlight.delete(promise));
-  inFlight.add(promise);
+  state: EngineState,
+): Promise<void> {
+  if (!state.admissionOpen) return Promise.resolve();
+
+  const signature = entry.signature;
+  const activationId = entry.activationId;
+  const promiseState = {
+    name: entry.def.name,
+    startedAt: (deps.now ?? Date.now)(),
+    signature,
+    activationId,
+  };
+  const fireLog = deps.scheduleFireLog;
+  const invocationDeps: ScheduleEngineDeps = fireLog
+    ? {
+        ...deps,
+        scheduleFireLog: {
+          record: (name, status, details) =>
+            fireLog.record(name, status, { ...details, activationId }),
+        },
+      }
+    : deps;
+  // Admission is recorded before yielding to the microtask that starts the
+  // handler. This makes synchronous task creation visible to health checks.
+  const promise = Promise.resolve()
+    .then(() => fireDef(entry.def, invocationDeps))
+    .catch((err: unknown) => {
+      log.error(`Schedule "${entry.def.name}" fire failed: ${String(err)}`);
+    });
+  const trackedPromise = promise.finally(() => state.inFlight.delete(trackedPromise));
+  state.inFlight.set(trackedPromise, promiseState);
+  return trackedPromise;
 }
 
 function startEntry(name: string, state: EngineState, deps: ScheduleEngineDeps): void {
-  const { entries, inFlight } = state;
+  const { entries } = state;
   const entry = entries.get(name);
-  if (!entry || entry.job) return;
-  if (!checkRegistered(entry.def, deps)) {
-    log.warn(`Schedule "${name}" handler not registered (suite disabled?) — not scheduled`);
-    return;
-  }
-  if (!checkEffectiveEnabled(entry.def, deps)) {
-    log.info(`Schedule "${name}" disabled — not scheduled`);
-    return;
-  }
+  if (!entry || entry.job || !canStartEntry(name, entry, { state, deps })) return;
   // F1 defense-in-depth: croner throws SYNCHRONOUSLY on a bad cron pattern
   // (at construction) or bad IANA timezone (as soon as it computes the
   // first run, which happens here too since a callback is supplied). The
@@ -269,9 +341,11 @@ function startEntry(name: string, state: EngineState, deps: ScheduleEngineDeps):
   // means the bad entry is logged and left unscheduled (entry.job stays
   // null) while every other schedule starts normally.
   try {
-    entry.job = new Cron(entry.def.cron, { timezone: entry.def.timezone }, () => {
-      trackedFire(entry.def, deps, inFlight);
-    });
+    entry.job = new Cron(entry.def.cron, { timezone: entry.def.timezone }, () =>
+      trackedFire(entry, deps, state),
+    );
+    entry.activatedAt ??= (deps.now ?? Date.now)();
+    entry.activationId ??= generateId();
     log.info(
       `Scheduled "${name}" (${entry.def.cron}) → next ${entry.job.nextRun()?.toISOString() ?? 'n/a'}`,
     );
@@ -283,24 +357,71 @@ function startEntry(name: string, state: EngineState, deps: ScheduleEngineDeps):
   }
 }
 
-function stopEntry(name: string, entries: EntryMap): void {
+function canStartEntry(name: string, entry: ScheduleEntry, context: EngineContext): boolean {
+  const { state, deps } = context;
+  if (!state.admissionOpen) return false;
+  if (!checkRegistered(entry.def, deps)) {
+    log.warn(`Schedule "${name}" handler not registered (suite disabled?) — not scheduled`);
+    return false;
+  }
+  if (!checkEffectiveEnabled(entry.def, deps, state.overrides)) {
+    log.info(`Schedule "${name}" disabled — not scheduled`);
+    return false;
+  }
+  return true;
+}
+
+function stopEntry(name: string, entries: EntryMap, clearActivation = false): void {
   const entry = entries.get(name);
   if (entry?.job) {
     entry.job.stop();
     entry.job = null;
   }
+  if (clearActivation && entry) entry.activatedAt = null;
+  if (clearActivation && entry) entry.activationId = null;
 }
 
-function buildList(entries: EntryMap, deps: ScheduleEngineDeps): ScheduleInfo[] {
+function buildList(
+  entries: EntryMap,
+  deps: ScheduleEngineDeps,
+  overrides: Map<string, boolean>,
+): ScheduleInfo[] {
   return [...entries.values()].map(({ def, job }) => ({
     name: def.name,
     cron: def.cron,
     timezone: def.timezone,
     kind: def.run.kind,
     ref: def.run.ref,
-    enabled: checkEffectiveEnabled(def, deps),
+    enabled: checkEffectiveEnabled(def, deps, overrides),
     registered: checkRegistered(def, deps),
     nextRun: job?.nextRun()?.toISOString() ?? null,
+  }));
+}
+
+function buildHealth(state: EngineState, deps: ScheduleEngineDeps): ScheduleHealth[] {
+  const inFlightSince = new Map<string, number>();
+  for (const { name, startedAt, signature, activationId } of state.inFlight.values()) {
+    const current = state.entries.get(name);
+    if (current?.signature !== signature || current.activationId !== activationId) continue;
+    const currentSince = inFlightSince.get(name);
+    if (currentSince === undefined || startedAt < currentSince) {
+      inFlightSince.set(name, startedAt);
+    }
+  }
+
+  return [...state.entries.values()].map(({ def, job, activatedAt, activationId }) => ({
+    name: def.name,
+    cron: def.cron,
+    timezone: def.timezone,
+    kind: def.run.kind,
+    ref: def.run.ref,
+    enabled: checkEffectiveEnabled(def, deps, state.overrides),
+    registered: checkRegistered(def, deps),
+    nextRun: job?.nextRun()?.toISOString() ?? null,
+    active: job !== null,
+    activatedAt,
+    activationId,
+    inFlightSince: inFlightSince.get(def.name) ?? null,
   }));
 }
 
@@ -329,18 +450,77 @@ function buildUpcoming(
  * cron jobs. */
 function resync(state: EngineState, deps: ScheduleEngineDeps): number {
   const { entries } = state;
+  const previous = new Map(entries);
   for (const name of entries.keys()) stopEntry(name, entries);
   entries.clear();
-  for (const def of deps.schedules) entries.set(def.name, { def, job: null });
-  for (const name of entries.keys()) startEntry(name, state, deps);
+  for (const def of deps.schedules) {
+    const enabled = checkEffectiveEnabled(def, deps, state.overrides);
+    const signature = scheduleSignature(def, enabled);
+    const old = previous.get(def.name);
+    entries.set(def.name, {
+      def,
+      job: null,
+      activatedAt: old?.signature === signature ? old.activatedAt : null,
+      activationId: old?.signature === signature ? old.activationId : null,
+      signature,
+    });
+  }
+  if (state.admissionOpen) {
+    for (const name of entries.keys()) startEntry(name, state, deps);
+  }
   return [...entries.values()].filter((e) => e.job).length;
 }
 
+async function stopEngine(state: EngineState): Promise<void> {
+  state.admissionOpen = false;
+  for (const name of state.entries.keys()) stopEntry(name, state.entries, true);
+  if (state.inFlight.size > 0) {
+    log.info(`Schedule engine stop: awaiting ${String(state.inFlight.size)} in-flight fire(s)`);
+    await Promise.allSettled([...state.inFlight.keys()]);
+  }
+}
+
+function requestStop(state: EngineState): Promise<void> {
+  if (state.stopPromise) return state.stopPromise;
+  const draining = stopEngine(state);
+  state.stopPromise = draining.finally(() => {
+    state.stopPromise = undefined;
+  });
+  return state.stopPromise;
+}
+
+interface EngineContext {
+  state: EngineState;
+  deps: ScheduleEngineDeps;
+}
+
+function setEntryEnabled(name: string, enabled: boolean, context: EngineContext): boolean {
+  const { state, deps } = context;
+  const entry = state.entries.get(name);
+  if (!entry) return false;
+  const previous = checkEffectiveEnabled(entry.def, deps, state.overrides);
+  deps.schedulePrefs?.setEnabledOverride(name, enabled);
+  state.overrides.set(name, enabled);
+  entry.signature = scheduleSignature(entry.def, enabled);
+  if (enabled) {
+    if (!previous) entry.activatedAt = null;
+    if (state.admissionOpen) startEntry(name, state, deps);
+  } else stopEntry(name, state.entries, true);
+  return true;
+}
+
 export function createScheduleEngine(deps: ScheduleEngineDeps): ScheduleEngine {
-  const state: EngineState = { entries: new Map(), inFlight: new Set() };
+  const state: EngineState = {
+    entries: new Map(),
+    inFlight: new Map(),
+    overrides: new Map(),
+    admissionOpen: false,
+  };
 
   return {
     start(): void {
+      if (state.admissionOpen || state.stopPromise) return;
+      state.admissionOpen = true;
       const active = resync(state, deps);
       log.info(`Schedule engine started with ${active} active schedules`);
     },
@@ -349,27 +529,18 @@ export function createScheduleEngine(deps: ScheduleEngineDeps): ScheduleEngine {
       const active = resync(state, deps);
       log.info(`Schedule engine reloaded with ${active} active schedules`);
     },
-    async stop(): Promise<void> {
-      for (const name of state.entries.keys()) stopEntry(name, state.entries);
-      if (state.inFlight.size > 0) {
-        log.info(`Schedule engine stop: awaiting ${String(state.inFlight.size)} in-flight fire(s)`);
-        await Promise.allSettled([...state.inFlight]);
-      }
-    },
+    stop: () => requestStop(state),
     list(): ScheduleInfo[] {
-      return buildList(state.entries, deps);
+      return buildList(state.entries, deps, state.overrides);
     },
-    setEnabled(name: string, enabled: boolean): boolean {
-      if (!state.entries.has(name)) return false;
-      deps.schedulePrefs?.setEnabledOverride(name, enabled);
-      if (enabled) startEntry(name, state, deps);
-      else stopEntry(name, state.entries);
-      return true;
+    getHealth(): ScheduleHealth[] {
+      return buildHealth(state, deps);
     },
+    setEnabled: (name, enabled) => setEntryEnabled(name, enabled, { state, deps }),
     async runNow(name: string): Promise<boolean> {
       const entry = state.entries.get(name);
-      if (!entry) return false;
-      await fireDef(entry.def, deps);
+      if (!entry || !state.admissionOpen) return false;
+      await trackedFire(entry, deps, state);
       return true;
     },
     getActiveCount(): number {

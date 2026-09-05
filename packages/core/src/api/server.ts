@@ -117,6 +117,16 @@ export async function createApiServer(
   host = '0.0.0.0',
 ): Promise<ReturnType<typeof Fastify>> {
   const app = Fastify({ logger: false });
+  let closing = false;
+  app.addHook('preClose', async () => {
+    closing = true;
+  });
+  app.addHook('onSend', async (request, reply, payload) => {
+    // Finish admitted responses, then close their HTTP/1 connections. A request
+    // that was active at server.close() must not become a new idle keep-alive.
+    if (closing && request.raw.httpVersionMajor === 1) reply.header('Connection', 'close');
+    return payload;
+  });
 
   await app.register(cors, {
     origin: true,

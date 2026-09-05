@@ -110,6 +110,28 @@ interface GatheredMaintenanceData {
   knowledgeMaintenanceError?: string;
 }
 
+/** Let a scheduled run settle when its service lifetime ends while observing
+ * the underlying operation until it eventually resolves. The maintenance
+ * processors own their resources and may finish in the background; every
+ * caller here checks the same signal before reporting or writing results. */
+async function awaitWithAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    operation.catch(() => {});
+    throw signal.reason ?? new Error('Maintenance stopped');
+  }
+
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<T>((_resolve, reject) => {
+    onAbort = () => reject(signal.reason ?? new Error('Maintenance stopped'));
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([operation, aborted]);
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+  }
+}
+
 async function gatherMaintenanceData(signal: AbortSignal): Promise<GatheredMaintenanceData> {
   const logDir = getLogDir() ?? resolve(projectRoot, 'data/logs');
   const dataDir = resolve(projectRoot, 'data');
@@ -195,7 +217,7 @@ async function runMaintenance(taskId: string, signal: AbortSignal): Promise<void
 
   try {
     // Phase 1: Gather data from all modules in parallel
-    const data = await gatherMaintenanceData(signal);
+    const data = await awaitWithAbort(gatherMaintenanceData(signal), signal);
     signal.throwIfAborted();
     log.info('Data gathering complete, building agent prompt');
 

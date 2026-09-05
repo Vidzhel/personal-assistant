@@ -29,6 +29,7 @@ function createMockScheduleEngine(): ScheduleEngine {
         { name: 'morning-digest', scheduledAt: '2026-03-24T07:00:00.000Z', kind: 'template' },
         { name: 'email-check', scheduledAt: '2026-03-24T08:00:00.000Z', kind: 'job' },
       ].slice(0, limit),
+    getHealth: () => [],
   } as unknown as ScheduleEngine;
 }
 
