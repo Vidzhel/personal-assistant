@@ -1,2 +1,0 @@
--- Knowledge source refs moved to Neo4j (Bubble node properties: sourceFile, sourceUrl).
--- This migration kept as placeholder for sequential migration numbering.

@@ -163,14 +163,14 @@ export async function createRaven(
   if (overrides.agentBackend) setActiveBackend(overrides.agentBackend, modelBudget);
   else initializeBackend(modelBudget);
 
-  // 3b. Verify meta-project exists (seeded by migration 017). Throws rather
+  // 3b. Verify meta-project exists (seeded by the fresh schema). Throws rather
   // than process.exit(1) — this function must stay testable; the fatal exit
   // now happens once, at the top-level main() in index.ts.
   try {
     const meta = getMetaProject();
     log.info(`Meta-project verified: "${meta.name}" (id: ${meta.id})`);
   } catch (err) {
-    log.error(`Meta-project missing — migration 017 may not have run: ${err}`);
+    log.error(`Meta-project missing after schema initialization: ${err}`);
     throw err;
   }
 

@@ -12,7 +12,6 @@ export interface PendingApproval {
   resolvedAt?: string;
   resolution?: 'approved' | 'denied';
   sessionId?: string;
-  pipelineName?: string;
 }
 
 export interface PendingApprovals {
@@ -41,7 +40,6 @@ interface PendingApprovalRow {
   resolved_at: string | null;
   resolution: string | null;
   session_id: string | null;
-  pipeline_name: string | null;
 }
 
 function rowToApproval(row: PendingApprovalRow): PendingApproval {
@@ -56,7 +54,6 @@ function rowToApproval(row: PendingApprovalRow): PendingApproval {
       resolution: row.resolution as 'approved' | 'denied',
     }),
     ...(row.session_id !== null && { sessionId: row.session_id }),
-    ...(row.pipeline_name !== null && { pipelineName: row.pipeline_name }),
   };
 }
 
@@ -80,8 +77,8 @@ export function createPendingApprovals(db: Database.Database): PendingApprovals 
       const requestedAt = new Date().toISOString();
 
       db.prepare(
-        `INSERT INTO pending_approvals (id, action_name, skill_name, details, requested_at, session_id, pipeline_name)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO pending_approvals (id, action_name, skill_name, details, requested_at, session_id)
+         VALUES (?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         entry.actionName,
@@ -89,7 +86,6 @@ export function createPendingApprovals(db: Database.Database): PendingApprovals 
         entry.details ?? null,
         requestedAt,
         entry.sessionId ?? null,
-        entry.pipelineName ?? null,
       );
 
       const inserted = db

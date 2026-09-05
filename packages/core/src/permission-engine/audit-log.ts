@@ -20,7 +20,6 @@ interface AuditLogRow {
   outcome: string;
   details: string | null;
   session_id: string | null;
-  pipeline_name: string | null;
 }
 
 function rowToEntry(row: AuditLogRow): AuditEntry {
@@ -33,7 +32,6 @@ function rowToEntry(row: AuditLogRow): AuditEntry {
     outcome: row.outcome as AuditEntry['outcome'],
     ...(row.details !== null && { details: row.details }),
     ...(row.session_id !== null && { sessionId: row.session_id }),
-    ...(row.pipeline_name !== null && { pipelineName: row.pipeline_name }),
   };
 }
 
@@ -55,8 +53,8 @@ export function createAuditLog(db: Database.Database): AuditLog {
       const timestamp = new Date().toISOString();
 
       db.prepare(
-        `INSERT INTO audit_log (id, timestamp, skill_name, action_name, permission_tier, outcome, details, session_id, pipeline_name)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO audit_log (id, timestamp, skill_name, action_name, permission_tier, outcome, details, session_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         timestamp,
@@ -66,7 +64,6 @@ export function createAuditLog(db: Database.Database): AuditLog {
         entry.outcome,
         entry.details ?? null,
         entry.sessionId ?? null,
-        entry.pipelineName ?? null,
       );
 
       const inserted = db.prepare('SELECT * FROM audit_log WHERE id = ?').get(id) as AuditLogRow;

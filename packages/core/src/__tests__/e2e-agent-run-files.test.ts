@@ -131,8 +131,8 @@ describe('e2e: agent run history is YAML-backed across restart', () => {
     });
     expect(calls).toEqual([]);
     expect(
-      raven.db.get<{ count: number }>('SELECT COUNT(*) AS count FROM agent_tasks')?.count,
-    ).toBe(0);
+      raven.db.get("SELECT name FROM sqlite_master WHERE name = 'agent_tasks'"),
+    ).toBeUndefined();
 
     await raven.stop();
     raven = undefined;
@@ -186,8 +186,8 @@ describe('e2e: agent run history is YAML-backed across restart', () => {
     });
     expect((await request(`/api/projects/${project.id}`, 'DELETE')).status).toBe(409);
     expect(
-      raven.db.get<{ count: number }>('SELECT COUNT(*) AS count FROM agent_tasks')?.count,
-    ).toBe(0);
+      raven.db.get("SELECT name FROM sqlite_master WHERE name = 'agent_tasks'"),
+    ).toBeUndefined();
 
     await raven.stop();
     raven = undefined;

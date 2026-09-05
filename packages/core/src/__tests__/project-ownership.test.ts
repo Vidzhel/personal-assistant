@@ -90,7 +90,7 @@ describe('Project ownership across APIs and chat dispatch', () => {
       projects: getDb().prepare('SELECT * FROM projects ORDER BY id').all(),
       sessions: getDb().prepare('SELECT * FROM sessions ORDER BY id').all(),
       messagesA: messages.getMessages(sessionA.id),
-      tasks: getDb().prepare('SELECT * FROM agent_tasks ORDER BY id').all(),
+      taskRequests: [...requests],
     };
   }
 

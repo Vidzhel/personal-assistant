@@ -224,9 +224,7 @@ describe('agent shutdown', () => {
     expect((await fetch(url, { method: 'POST' })).status).toBe(404);
     const persisted = await fetch(`http://127.0.0.1:${app.port}/api/agent-tasks/cancel-me`);
     expect(await persisted.json()).toMatchObject({ status: 'cancelled' });
-    expect(app.db.get<{ count: number }>('SELECT COUNT(*) AS count FROM agent_tasks')?.count).toBe(
-      0,
-    );
+    expect(app.db.get("SELECT name FROM sqlite_master WHERE name = 'agent_tasks'")).toBeUndefined();
   });
   it('cancels direct retrospective work without late summaries or memory candidates', async () => {
     let started!: () => void;

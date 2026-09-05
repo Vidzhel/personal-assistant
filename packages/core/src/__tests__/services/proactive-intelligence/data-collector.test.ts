@@ -50,7 +50,6 @@ describe('data-collector buildSnapshot', () => {
     expect(snapshot).toContain('No events in the last 7 days');
     expect(snapshot).toContain('No agent tasks in the last 7 days');
     expect(snapshot).toContain('No audit entries in the last 7 days');
-    expect(snapshot).toContain('No pipeline runs in the last 7 days');
     expect(snapshot).toContain('No sessions in the last 30 days');
     expect(snapshot).toContain('No knowledge activity in the last 7 days');
     expect(snapshot).toContain('No conversation activity in the last 7 days');

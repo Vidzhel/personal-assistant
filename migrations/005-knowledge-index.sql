@@ -1,3 +1,0 @@
--- Knowledge index tables moved to Neo4j graph database.
--- This migration kept as placeholder for sequential migration numbering.
--- See packages/core/src/knowledge-engine/neo4j-client.ts for graph schema.

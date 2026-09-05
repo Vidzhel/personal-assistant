@@ -255,7 +255,7 @@ the library and existing scaffold-and-activate tools; do not recreate suites.
 ## Data Layer
 
 - **SQLite** via `better-sqlite3` — single file at `data/raven.db`
-- Operational tables include `events`, `sessions`, `projects`, `schedule_fires`, `preferences`, `audit_log`, `pending_approvals`, and `intents` (see `migrations/`). The unused old `tasks`, `task_trees`, `execution_tasks` and `agent_tasks` tables await F9 schema cleanup; task, tree and run persistence no longer read or write them.
+- Operational tables include sessions, the project cache, events, schedule fires, preferences, permissions, notifications, integrations, intents, model-budget leases and Gemini upload cleanup. `migrations/001-initial-schema.sql` installs the current schema atomically. Retired SQL task/tree/run, pipeline, schedule-definition and pending-config tables are removed; task, tree and run persistence uses project YAML. Historical pre-use schema versions are unsupported and are never imported or rewritten automatically.
 - Repositories in `packages/core/src/db/repositories/`
 
 Board tasks are validated YAML documents under
@@ -422,7 +422,7 @@ admission and drains them before store disposal. Disabled/removed schedules do
 not contribute ordinary health failures. Scanner-rejected invalid files remain
 outside accepted definitions; F9 will expose those registry diagnostics.
 
-**Intents (prospective memory).** `intents/intent-matcher.ts` is a service that turns owner requests like "remind me when X arrives" into deterministic rows (`intents` table, migration 033): keyword/event-type matches with a fire budget, cooldown, and expiry — no LLM inference at match time. Created via the `create_intent` MCP tool, listed/cancelled from the Schedules page.
+**Intents (prospective memory).** `intents/intent-matcher.ts` is a service that turns owner requests like "remind me when X arrives" into deterministic rows (`intents` table in the fresh schema): keyword/event-type matches with a fire budget, cooldown, and expiry — no LLM inference at match time. Created via the `create_intent` MCP tool, listed/cancelled from the Schedules page.
 
 Time intents use the existing matcher's sweep, not a new schedule file. Heartbeat
 uses a dedicated throwaway SDK session with a small turn cap; it does not resume

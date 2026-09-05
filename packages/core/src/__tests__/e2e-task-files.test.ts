@@ -73,7 +73,7 @@ describe('composed project task files', () => {
     const task = (await response.json()) as RavenTask;
     const path = join(paths.projectsDir, project.fsPath, 'tasks', 'board', `${task.id}.yaml`);
     expect(parse(readFileSync(path, 'utf8'))).toMatchObject(task);
-    expect(raven.db.get<{ count: number }>('SELECT COUNT(*) AS count FROM tasks')?.count).toBe(0);
+    expect(raven.db.get("SELECT name FROM sqlite_master WHERE name = 'tasks'")).toBeUndefined();
 
     let chatCompleted = false;
     raven.eventBus.on('agent:task:complete', () => {

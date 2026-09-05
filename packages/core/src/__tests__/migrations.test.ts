@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runFileMigrations } from '../db/migrations.ts';
-import { initDatabase } from '../db/database.ts';
+import { closeDatabase, getDb, initDatabase } from '../db/database.ts';
 
 describe('migrations', () => {
   let tmpDir: string;
@@ -19,6 +19,7 @@ describe('migrations', () => {
   });
 
   afterEach(() => {
+    closeDatabase();
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -78,7 +79,7 @@ describe('migrations', () => {
     db.close();
   });
 
-  it('creates all permission and pipeline tables with correct columns', () => {
+  it('creates current permission tables without retired pipeline annotations', () => {
     const db = initDatabase(dbPath);
 
     // audit_log columns
@@ -94,9 +95,9 @@ describe('migrations', () => {
         'outcome',
         'details',
         'session_id',
-        'pipeline_name',
       ]),
     );
+    expect(auditColNames).not.toContain('pipeline_name');
 
     // pending_approvals columns
     const approvalCols = db.pragma('table_info(pending_approvals)') as Array<{ name: string }>;
@@ -111,33 +112,23 @@ describe('migrations', () => {
         'resolved_at',
         'resolution',
         'session_id',
-        'pipeline_name',
       ]),
     );
+    expect(approvalColNames).not.toContain('pipeline_name');
 
-    // pipeline_runs columns
-    const pipelineCols = db.pragma('table_info(pipeline_runs)') as Array<{ name: string }>;
-    const pipelineColNames = pipelineCols.map((c) => c.name);
-    expect(pipelineColNames).toEqual(
-      expect.arrayContaining([
-        'id',
-        'pipeline_name',
-        'trigger_type',
-        'status',
-        'started_at',
-        'completed_at',
-        'node_results',
-        'error',
-      ]),
-    );
+    expect(
+      db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='pipeline_runs'")
+        .get(),
+    ).toBeUndefined();
 
     db.close();
   });
 
-  it('handles backward compatibility with legacy 001-init migration', () => {
+  it('rejects an unsupported historical migration history without rewriting it', () => {
     const db = new Database(dbPath);
 
-    // Simulate the old system: create _migrations and record 001-init
+    // Simulate a database created by the removed historical migration chain.
     db.exec(`
       CREATE TABLE IF NOT EXISTS _migrations (
         id INTEGER PRIMARY KEY,
@@ -146,34 +137,69 @@ describe('migrations', () => {
       )
     `);
     db.prepare('INSERT INTO _migrations (name, applied_at) VALUES (?, ?)').run(
-      '001-init',
+      '004-execution-logging',
       Date.now(),
     );
-
-    // Also create tables as old system would have
-    db.exec('CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL)');
-
-    // Now run file-based migrations with 001-initial-schema + 002
     writeFileSync(
       join(migrationsDir, '001-initial-schema.sql'),
-      'CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, name TEXT NOT NULL);',
+      'CREATE TABLE projects (id TEXT PRIMARY KEY);',
     );
+    expect(() => runFileMigrations(db, migrationsDir)).toThrow(
+      'Unsupported database migration history: 004-execution-logging',
+    );
+    const applied = db.prepare('SELECT name FROM _migrations').all() as Array<{ name: string }>;
+    expect(applied.map((row) => row.name)).toEqual(['004-execution-logging']);
+    db.close();
+  });
+
+  it('does not mark a failed fresh schema as applied', () => {
+    const db = new Database(dbPath);
     writeFileSync(
-      join(migrationsDir, '002-permission-tables.sql'),
-      'CREATE TABLE IF NOT EXISTS audit_log (id TEXT PRIMARY KEY);',
+      join(migrationsDir, '001-initial-schema.sql'),
+      'CREATE TABLE projects (id TEXT PRIMARY KEY); INVALID SQL;',
     );
-
-    runFileMigrations(db, migrationsDir);
-
-    // 001-init should be renamed to 001-initial-schema
-    const applied = db.prepare('SELECT name FROM _migrations ORDER BY id').all() as Array<{
-      name: string;
-    }>;
-    const names = applied.map((r) => r.name);
-    expect(names).toContain('001-initial-schema');
-    expect(names).not.toContain('001-init');
-    expect(names).toContain('002-permission-tables');
+    expect(() => runFileMigrations(db, migrationsDir)).toThrow();
+    expect(db.prepare('SELECT name FROM _migrations').all()).toEqual([]);
+    expect(
+      db.prepare("SELECT name FROM sqlite_master WHERE name = 'projects'").get(),
+    ).toBeUndefined();
 
     db.close();
+  });
+
+  it('rolls back duplicate-column failures instead of accepting a partial script', () => {
+    const db = new Database(dbPath);
+    db.exec('CREATE TABLE existing (id TEXT PRIMARY KEY);');
+    writeFileSync(
+      join(migrationsDir, '001-initial-schema.sql'),
+      'CREATE TABLE partial (id TEXT); ALTER TABLE existing ADD COLUMN id TEXT;',
+    );
+
+    expect(() => runFileMigrations(db, migrationsDir)).toThrow('duplicate column name');
+    expect(db.prepare('SELECT name FROM _migrations').all()).toEqual([]);
+    expect(
+      db.prepare("SELECT name FROM sqlite_master WHERE name = 'partial'").get(),
+    ).toBeUndefined();
+    expect(
+      db.prepare("SELECT name FROM sqlite_master WHERE name = 'existing'").get(),
+    ).toBeDefined();
+    db.close();
+  });
+
+  it('does not expose a database handle after initialization fails and can retry cleanly', () => {
+    const schema = join(migrationsDir, '001-initial-schema.sql');
+    writeFileSync(schema, 'CREATE TABLE partial (id TEXT); INVALID SQL;');
+    expect(() => initDatabase(dbPath, migrationsDir)).toThrow();
+    expect(() => getDb()).toThrow('Database not initialized');
+
+    writeFileSync(schema, 'CREATE TABLE current (id TEXT PRIMARY KEY);');
+    const db = initDatabase(dbPath, migrationsDir);
+    expect(
+      db.prepare("SELECT name FROM sqlite_master WHERE name = 'partial'").get(),
+    ).toBeUndefined();
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE name = 'current'").get()).toBeDefined();
+    expect(db.prepare('SELECT name FROM _migrations').all()).toEqual([
+      { name: '001-initial-schema' },
+    ]);
   });
 });

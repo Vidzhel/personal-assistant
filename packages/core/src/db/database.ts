@@ -22,10 +22,16 @@ export function initDatabase(dbPath: string, migrationsDir?: string): Database.D
     closeDatabase();
   }
   log.info(`Opening database at ${dbPath}`);
-  db = new Database(dbPath);
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
-  runFileMigrations(db, migrationsDir ?? defaultMigrationsDir);
+  const candidate = new Database(dbPath);
+  try {
+    candidate.pragma('journal_mode = WAL');
+    candidate.pragma('foreign_keys = ON');
+    runFileMigrations(candidate, migrationsDir ?? defaultMigrationsDir);
+  } catch (error) {
+    candidate.close();
+    throw error;
+  }
+  db = candidate;
   return db;
 }
 

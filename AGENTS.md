@@ -31,6 +31,10 @@ Keep the custom runtime small; use the existing agent SDK for model execution.
   discarded. Do not build legacy exports, migrations or restoration flows.
   Task state is moving to validated YAML inside each project. Use cheaper
   implementation agents when delegated work is appropriate; the parent reviews.
+- The sole `migrations/001-initial-schema.sql` initializes current operational
+  SQLite atomically. Retired task/tree/run/pipeline/definition tables and old
+  default seeds are removed. Unsupported historical migration histories fail
+  explicitly; never silently apply part of a SQL script or reset an existing DB.
 
 ## Repository and conventions
 
@@ -116,6 +120,8 @@ versions; do not copy versions from historical planning documents.
   Permission checks must be enforced in tools/runtime, not only prompt text.
 - Stop admission and own listeners, timers and in-flight local work across
   stop/restart. Use abort signals and post-await checks around side effects.
+  Keep the release callback returned by `JobRegistry.register()` and invoke it
+  on service stop so restart can register the same job in the same registry.
   Each model task closes local MCP admission on abort/completion and drains
   admitted Raven/memory handlers before returning. Keep stores alive during that
   drain. Cancellation does not roll back committed mutations or prove remote work

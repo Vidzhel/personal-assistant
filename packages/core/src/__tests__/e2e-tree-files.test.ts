@@ -182,9 +182,9 @@ describe('e2e: execution trees are YAML-backed across restart', () => {
         expect.objectContaining({ id: INTERRUPTED_TASK_ID, status: 'blocked' }),
       ]),
     );
-    expect(raven.db.get<{ count: number }>('SELECT COUNT(*) AS count FROM task_trees')?.count).toBe(
-      0,
-    );
+    expect(
+      raven.db.get("SELECT name FROM sqlite_master WHERE name = 'task_trees'"),
+    ).toBeUndefined();
 
     await raven.stop();
     raven = undefined;
@@ -236,9 +236,9 @@ describe('e2e: execution trees are YAML-backed across restart', () => {
       ]),
     );
     expect(parse(readFileSync(treePath, 'utf8'))).toMatchObject({ status: 'completed' });
-    expect(raven.db.get<{ count: number }>('SELECT COUNT(*) AS count FROM task_trees')?.count).toBe(
-      0,
-    );
+    expect(
+      raven.db.get("SELECT name FROM sqlite_master WHERE name = 'task_trees'"),
+    ).toBeUndefined();
   }, 15_000);
 
   it('fails before serving when a tree YAML record is invalid, then boots cleanly', async () => {

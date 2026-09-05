@@ -21,12 +21,6 @@ interface EventSummary {
   count: number;
 }
 
-interface PipelineSummary {
-  pipeline_name: string;
-  status: string;
-  count: number;
-}
-
 interface AuditSummary {
   action_name: string;
   outcome: string;
@@ -95,19 +89,6 @@ function collectAuditSnapshot(): string {
 
   const lines = rows.map((r) => `  ${r.action_name} → ${r.outcome}: ${r.count}`);
   return `Audit Log (7d):\n${lines.join('\n')}`;
-}
-
-function collectPipelineSnapshot(): string {
-  const cutoff = isoCutoff(DEFAULT_WINDOW_DAYS);
-  const rows = db.all<PipelineSummary>(
-    'SELECT pipeline_name, status, COUNT(*) as count FROM pipeline_runs WHERE started_at > ? GROUP BY pipeline_name, status ORDER BY count DESC',
-    cutoff,
-  );
-
-  if (rows.length === 0) return 'No pipeline runs in the last 7 days.';
-
-  const lines = rows.map((r) => `  ${r.pipeline_name} [${r.status}]: ${r.count}`);
-  return `Pipeline Runs (7d):\n${lines.join('\n')}`;
 }
 
 function collectSessionSnapshot(): string {
@@ -198,7 +179,6 @@ export function buildSnapshot(database: DatabaseInterface, logger: ExecutionLogg
     collectEventSnapshot(),
     collectTaskSnapshot(),
     collectAuditSnapshot(),
-    collectPipelineSnapshot(),
     collectSessionSnapshot(),
     collectKnowledgeSnapshot(),
     collectConversationSnapshot(),

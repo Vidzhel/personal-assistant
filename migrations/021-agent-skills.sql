@@ -1,1 +1,0 @@
-ALTER TABLE named_agents ADD COLUMN skills TEXT NOT NULL DEFAULT '[]';

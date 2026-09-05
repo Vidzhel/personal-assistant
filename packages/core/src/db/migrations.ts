@@ -5,7 +5,6 @@ import { createLogger } from '@raven/shared';
 
 const log = createLogger('migrations');
 
-// eslint-disable-next-line max-lines-per-function -- sequential migration runner
 export function runFileMigrations(db: Database.Database, migrationsDir: string): void {
   if (!existsSync(migrationsDir)) {
     throw new Error(`Migrations directory not found: ${migrationsDir}`);
@@ -19,31 +18,25 @@ export function runFileMigrations(db: Database.Database, migrationsDir: string):
     )
   `);
 
+  const files = readdirSync(migrationsDir)
+    .filter((f) => f.endsWith('.sql'))
+    .sort();
+  const migrationNames = new Set(files.map((file) => file.replace(/\.sql$/, '')));
   const applied = new Set(
     (db.prepare('SELECT name FROM _migrations').all() as Array<{ name: string }>).map(
       (r) => r.name,
     ),
   );
-
-  const files = readdirSync(migrationsDir)
-    .filter((f) => f.endsWith('.sql'))
-    .sort();
+  const unsupported = [...applied].filter((name) => !migrationNames.has(name));
+  if (unsupported.length > 0) {
+    throw new Error(`Unsupported database migration history: ${unsupported.sort().join(', ')}`);
+  }
 
   for (const file of files) {
     const name = file.replace(/\.sql$/, '');
 
     if (applied.has(name)) {
       log.debug(`Skipping already-applied migration: ${name}`);
-      continue;
-    }
-
-    // Backward compat: if "001-init" was applied by old system, skip "001-initial-schema"
-    if (name === '001-initial-schema' && applied.has('001-init')) {
-      log.info('Mapping legacy 001-init to 001-initial-schema');
-      db.prepare('UPDATE _migrations SET name = ? WHERE name = ?').run(
-        '001-initial-schema',
-        '001-init',
-      );
       continue;
     }
 
@@ -55,21 +48,6 @@ export function runFileMigrations(db: Database.Database, migrationsDir: string):
       db.prepare('INSERT INTO _migrations (name, applied_at) VALUES (?, ?)').run(name, Date.now());
     });
 
-    try {
-      migrate();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      // Tolerate "duplicate column" errors from idempotent ALTER TABLE migrations
-      if (msg.includes('duplicate column name')) {
-        log.info(`Migration ${name} skipped (column already exists)`);
-        db.prepare('INSERT OR IGNORE INTO _migrations (name, applied_at) VALUES (?, ?)').run(
-          name,
-          Date.now(),
-        );
-      } else {
-        log.error(`Migration failed: ${name} — ${msg}`);
-        throw err;
-      }
-    }
+    migrate();
   }
 }

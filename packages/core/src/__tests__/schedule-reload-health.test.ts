@@ -9,9 +9,9 @@ import { createScheduleEngine, type TaskStoreLike } from '../scheduler/schedule-
 import { createScheduleFireLog } from '../scheduler/schedule-fire-log.ts';
 import { checkScheduleHealth } from '../services/system/self-test.ts';
 
-const selfTestMigration = join(
+const initialSchema = join(
   dirname(fileURLToPath(import.meta.url)),
-  '../../../../migrations/032-self-test.sql',
+  '../../../../migrations/001-initial-schema.sql',
 );
 const MINUTE_MS = 60_000;
 
@@ -73,7 +73,7 @@ describe('schedule reload health generations', () => {
   function setup(definition: ScheduleYaml, now: () => number) {
     root = mkdtempSync(join('/tmp', 'raven-schedule-health-'));
     db = new Database(join(root, 'schedule.db'));
-    db.exec(readFileSync(selfTestMigration, 'utf8'));
+    db.exec(readFileSync(initialSchema, 'utf8'));
     const jobs = createJobRegistry();
     engine = createScheduleEngine({
       schedules: [definition],

@@ -202,7 +202,10 @@ async function seedState(migrations) {
   );
   assert(runBytes.includes(runId));
   assert.equal((await request(`/api/agent-tasks/${runId}`)).status, 'completed');
-  assert.equal(raven.db.get('SELECT COUNT(*) AS count FROM agent_tasks').count, 0);
+  assert.equal(
+    raven.db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='agent_tasks'"),
+    undefined,
+  );
   const store = createMemoryStore({ projectsDir: paths.projectsDir });
   assert.equal((await store.write('raven', 'smoke.md', memoryText)).ok, true);
   const memoryPath = join(paths.projectsDir, 'agents/raven/memory/smoke.md');
@@ -275,7 +278,10 @@ async function verifyState(migrations) {
     ),
     state.runBytes,
   );
-  assert.equal(raven.db.get('SELECT COUNT(*) AS count FROM agent_tasks').count, 0);
+  assert.equal(
+    raven.db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='agent_tasks'"),
+    undefined,
+  );
   await checkChat(project.id);
   await verifyInterruptedTree(state.treeId);
 }

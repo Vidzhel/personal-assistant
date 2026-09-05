@@ -22,7 +22,9 @@ function uploaded(name: string): UploadFileResponse {
 function database(): { db: Database.Database; api: DatabaseInterface; directory: string } {
   const directory = mkdtempSync(join(tmpdir(), 'raven-upload-cleanup-'));
   const db = new Database(join(directory, 'raven.db'));
-  db.exec(readFileSync(migration, 'utf8'));
+  db.pragma('journal_mode = WAL');
+  db.pragma('foreign_keys = ON');
+  db.transaction(() => db.exec(readFileSync(migration, 'utf8')))();
   const api: DatabaseInterface = {
     run: (sql, ...params) => {
       db.prepare(sql).run(...params);

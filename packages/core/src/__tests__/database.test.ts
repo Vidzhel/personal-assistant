@@ -32,10 +32,18 @@ describe('database', () => {
     const tableNames = tables.map((t) => t.name);
     expect(tableNames).toContain('projects');
     expect(tableNames).toContain('sessions');
-    expect(tableNames).toContain('agent_tasks');
     expect(tableNames).toContain('events');
-    expect(tableNames).toContain('schedules');
     expect(tableNames).toContain('preferences');
+    expect(tableNames).toContain('model_budget_leases');
+    expect(tableNames).toContain('gemini_uploads');
+    expect(tableNames).not.toContain('agent_tasks');
+    expect(tableNames).not.toContain('tasks');
+    expect(tableNames).not.toContain('task_trees');
+    expect(tableNames).not.toContain('execution_tasks');
+    expect(tableNames).not.toContain('schedules');
+    expect(tableNames).not.toContain('pipeline_runs');
+    expect(tableNames).not.toContain('named_agents');
+    expect(tableNames).not.toContain('pending_config_changes');
     expect(tableNames).toContain('_migrations');
   });
 
@@ -97,34 +105,12 @@ describe('database', () => {
       now,
     );
     const all = dbi.all<{ id: string }>('SELECT * FROM projects');
-    expect(all).toHaveLength(3); // p1, p2, + meta-project from migration 017
+    expect(all).toHaveLength(3); // p1, p2, + the built-in meta project
 
     // Delete
     dbi.run('DELETE FROM projects WHERE id = ?', 'p1');
     const deleted = dbi.get('SELECT * FROM projects WHERE id = ?', 'p1');
     expect(deleted).toBeUndefined();
-  });
-
-  it('CRUD on agent_tasks table', () => {
-    initDatabase(dbPath);
-    const dbi = createDbInterface();
-    const now = Date.now();
-
-    dbi.run(
-      'INSERT INTO agent_tasks (id, skill_name, prompt, status, priority, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-      't1',
-      'orchestrator',
-      'hello',
-      'queued',
-      'normal',
-      now,
-    );
-
-    const task = dbi.get<{ id: string; status: string }>(
-      'SELECT * FROM agent_tasks WHERE id = ?',
-      't1',
-    );
-    expect(task!.status).toBe('queued');
   });
 
   it('CRUD on sessions table', () => {

@@ -1,8 +1,0 @@
--- Knowledge intelligence tables moved to Neo4j graph database.
--- Embeddings: stored as vector property on Bubble nodes
--- Domains: Domain nodes with IN_DOMAIN relationships
--- Tag tree: CHILD_OF relationships between Tag nodes
--- Links: LINKS_TO relationships between Bubble nodes
--- Clusters: Cluster nodes with IN_CLUSTER relationships
--- Merge suggestions: MERGE_CANDIDATE relationships between Bubble nodes
--- This migration kept as placeholder for sequential migration numbering.

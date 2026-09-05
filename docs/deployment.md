@@ -21,7 +21,7 @@ Open `http://localhost:4000`; core health is at
 Core's health response reports graph availability separately from service health.
 
 The core image builds shared/core from the lockfile and includes the compiled
-services and SQL migrations. It also includes the in-repo TickTick server source,
+services and the current SQL schema. It also includes the in-repo TickTick server source,
 which runs using Node's `--experimental-strip-types`. The image contains Git for
 definition and memory commits. The web image serves the monorepo standalone
 output and its static files. Images run as the unprivileged `node` user (UID 1000).
@@ -64,8 +64,12 @@ definition files; this private history includes committed memory. No Git remote
 is configured by the entrypoint.
 
 To upgrade, back up these volumes together, build the new images and run
-`docker compose --env-file /dev/null up -d` again. Database migrations run from the
-packaged SQL assets. Existing files and Git history remain in their volumes.
+`docker compose --env-file /dev/null up -d` again. Fresh SQLite initialization runs
+the packaged schema atomically; restart preserves its operational state. This
+pre-use schema cleanup does not support databases initialized by the retired
+historical migration chain: startup reports unsupported history instead of
+converting or deleting it. Use a fresh dedicated runtime database for that
+transition. Project files and Git history remain in their volumes.
 Review future seed changes explicitly if you want to adopt them. Use one core
 instance for these volumes. If using bind mounts, create dedicated runtime
 directories writable by UID 1000; do not point the initializer at a source Git

@@ -743,7 +743,6 @@ export interface PendingApproval {
   resolvedAt?: string;
   resolution?: 'approved' | 'denied';
   sessionId?: string;
-  pipelineName?: string;
 }
 
 export interface ActionCatalogEntry {

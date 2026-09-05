@@ -34,7 +34,7 @@ export function getMetaProject(): Project {
   const row = db.prepare('SELECT * FROM projects WHERE is_meta = 1').get() as
     ProjectRow | undefined;
   if (!row) {
-    throw new Error('Meta-project not found in database — migration 017 may not have run');
+    throw new Error('Meta-project not found in database after schema initialization');
   }
   return rowToProject(row);
 }

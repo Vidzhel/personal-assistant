@@ -39,7 +39,6 @@ describe('Audit Log', () => {
         outcome: 'denied',
         details: 'User denied send',
         sessionId: 'sess-1',
-        pipelineName: 'morning-pipeline',
       });
 
       expect(entry.id).toBeDefined();
@@ -50,7 +49,6 @@ describe('Audit Log', () => {
       expect(entry.outcome).toBe('denied');
       expect(entry.details).toBe('User denied send');
       expect(entry.sessionId).toBe('sess-1');
-      expect(entry.pipelineName).toBe('morning-pipeline');
     });
 
     it('auto-generates id and timestamp', () => {

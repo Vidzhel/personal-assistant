@@ -17,7 +17,6 @@ export interface AuditEntry {
   outcome: AuditOutcome;
   details?: string;
   sessionId?: string;
-  pipelineName?: string;
 }
 
 export interface AuditLogFilter {
