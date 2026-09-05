@@ -1,3 +1,4 @@
+import { createProcessorLifecycle } from './processor-lifecycle.ts';
 import { join } from 'node:path';
 import { generateId, createLogger, type KnowledgeChunk, type RavenEvent } from '@raven/shared';
 import type { EventBus } from '../event-bus/event-bus.ts';
@@ -115,6 +116,7 @@ export interface ChunkingEngine {
   backfillChunks: () => Promise<{ indexed: number; skipped: number }>;
   reindexAllChunks: () => Promise<{ total: number; indexed: number; errors: string[] }>;
   start: () => void;
+  stop: () => Promise<void>;
 }
 
 interface ChunkingDeps {
@@ -126,11 +128,17 @@ interface ChunkingDeps {
 
 // eslint-disable-next-line max-lines-per-function -- factory function for chunking engine
 export function createChunkingEngine(deps: ChunkingDeps): ChunkingEngine {
-  const { neo4j, eventBus, knowledgeStore, knowledgeDir } = deps;
+  const { eventBus, knowledgeDir } = deps;
+  const lifetime = createProcessorLifecycle(eventBus, 'chunking');
+  const neo4j = lifetime.guard(deps.neo4j);
+  const knowledgeStore = lifetime.guard(deps.knowledgeStore);
+  let started = false;
 
   async function embedChunkText(text: string, tags: string[]): Promise<number[]> {
+    lifetime.assertActive();
     const input = BGE_DOC_PREFIX + `Tags: ${tags.join(', ')}. ` + text;
     const pipe = await getPipeline();
+    lifetime.assertActive();
     const output = await pipe(input, { pooling: 'mean', normalize: true });
     return Array.from(new Float32Array(output.data));
   }
@@ -183,7 +191,7 @@ export function createChunkingEngine(deps: ChunkingDeps): ChunkingEngine {
       );
     }
 
-    eventBus.emit({
+    lifetime.emit({
       id: generateId(),
       timestamp: Date.now(),
       source: 'chunking',
@@ -240,7 +248,8 @@ export function createChunkingEngine(deps: ChunkingDeps): ChunkingEngine {
         await indexBubble(row.id);
         indexed++;
 
-        eventBus.emit({
+        lifetime.assertActive();
+        lifetime.emit({
           id: generateId(),
           timestamp: Date.now(),
           source: 'chunking',
@@ -254,7 +263,7 @@ export function createChunkingEngine(deps: ChunkingDeps): ChunkingEngine {
       }
     }
 
-    eventBus.emit({
+    lifetime.emit({
       id: generateId(),
       timestamp: Date.now(),
       source: 'chunking',
@@ -267,28 +276,23 @@ export function createChunkingEngine(deps: ChunkingDeps): ChunkingEngine {
   }
 
   function start(): void {
-    // Listen for embedding generated → index chunks for that bubble
-    eventBus.on('knowledge:embedding:generated', (event: RavenEvent) => {
-      if (event.type !== 'knowledge:embedding:generated') return;
-      indexBubble(event.payload.bubbleId).catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error(`Unhandled error in chunk indexing for ${event.payload.bubbleId}: ${msg}`);
-      });
+    lifetime.assertActive();
+    if (started) return;
+    started = true;
+    lifetime.listen('knowledge:embedding:generated', async (event) => {
+      if (event.type === 'knowledge:embedding:generated') await indexBubble(event.payload.bubbleId);
     });
-
-    // Listen for bubble delete → clean up chunks
-    eventBus.on('knowledge:bubble:deleted', (event: RavenEvent) => {
-      if (event.type !== 'knowledge:bubble:deleted') return;
-      removeChunks(event.payload.bubbleId).catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error(`Unhandled error removing chunks for ${event.payload.bubbleId}: ${msg}`);
-      });
+    lifetime.listen('knowledge:bubble:deleted', async (event) => {
+      if (event.type === 'knowledge:bubble:deleted') await removeChunks(event.payload.bubbleId);
     });
-
-    log.info(
-      'Chunking engine started — listening for embedding:generated and bubble:deleted events',
-    );
   }
 
-  return { indexBubble, removeChunks, backfillChunks, reindexAllChunks, start };
+  return {
+    indexBubble: (id) => lifetime.run(() => indexBubble(id)),
+    removeChunks: (id) => lifetime.run(() => removeChunks(id)),
+    backfillChunks: () => lifetime.run(backfillChunks),
+    reindexAllChunks: () => lifetime.run(reindexAllChunks),
+    start,
+    stop: lifetime.stop,
+  };
 }

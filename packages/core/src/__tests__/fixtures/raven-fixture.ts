@@ -109,6 +109,7 @@ export function buildTestConfig(): AppConfig {
     DATABASE_PATH: './data/raven.db',
     SESSION_PATH: './data/sessions',
     LOG_LEVEL: 'info',
+    NEO4J_ENABLED: false,
     NEO4J_URI: 'bolt://graph.invalid:7687',
     NEO4J_USER: 'test-user',
     NEO4J_PASSWORD: 'test-password',

@@ -22,6 +22,19 @@ describe('buildScaffoldTools', () => {
     scope = { role: 'chat' };
   });
 
+  it('describes autonomous yellow actions and approval-required red actions truthfully', () => {
+    const definition = buildScaffoldTools(deps, scope).find(
+      (tool) => tool.name === 'create_skill',
+    )!;
+    expect(definition.description).toContain(
+      'yellow tier (autonomous with audit and notification)',
+    );
+    expect(definition.description).toContain(
+      'red tier (requires explicit approval before running)',
+    );
+    expect(definition.description).not.toContain('fully autonomous, high-risk');
+  });
+
   describe('create_template', () => {
     it('calls scaffoldAndActivate with kind=template and the given tasks', async () => {
       const tools = buildScaffoldTools(deps, scope);

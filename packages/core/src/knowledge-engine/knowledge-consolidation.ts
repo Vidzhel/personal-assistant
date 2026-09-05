@@ -1,3 +1,4 @@
+import { createProcessorLifecycle } from './processor-lifecycle.ts';
 import { createLogger, generateId } from '@raven/shared';
 import { z } from 'zod';
 import type { Neo4jClient } from './neo4j-client.ts';
@@ -60,6 +61,7 @@ Guidelines:
 
 export interface KnowledgeConsolidation {
   runConsolidation: (projectId?: string) => Promise<ConsolidationResult>;
+  stop: () => Promise<void>;
 }
 
 function groupByProject(bubbles: ConsolidationBubbleRow[]): Map<string, ConsolidationBubbleRow[]> {
@@ -162,7 +164,8 @@ async function consolidateProjectBubbles(
 }
 
 export function createKnowledgeConsolidation(deps: ConsolidationDeps): KnowledgeConsolidation {
-  const { neo4j } = deps;
+  const lifetime = createProcessorLifecycle(deps.eventBus, 'knowledge-consolidation');
+  const neo4j = lifetime.guard(deps.neo4j);
 
   async function runConsolidation(projectId?: string): Promise<ConsolidationResult> {
     log.info(`Running knowledge consolidation${projectId ? ` for project ${projectId}` : ''}`);
@@ -187,7 +190,12 @@ export function createKnowledgeConsolidation(deps: ConsolidationDeps): Knowledge
     let digestCreated = false;
 
     for (const [pid, projectBubbles] of byProject) {
-      const projectResult = await consolidateProjectBubbles(deps, pid, projectBubbles);
+      lifetime.assertActive();
+      const projectResult = await consolidateProjectBubbles(
+        { ...deps, neo4j },
+        pid,
+        projectBubbles,
+      );
       totalMerged += projectResult.merged;
       totalPruned += projectResult.pruned;
       if (projectResult.digestCreated) digestCreated = true;
@@ -200,5 +208,8 @@ export function createKnowledgeConsolidation(deps: ConsolidationDeps): Knowledge
     return { mergedCount: totalMerged, prunedCount: totalPruned, digestCreated };
   }
 
-  return { runConsolidation };
+  return {
+    runConsolidation: (id) => lifetime.run(() => runConsolidation(id)),
+    stop: lifetime.stop,
+  };
 }

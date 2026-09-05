@@ -95,12 +95,14 @@ export async function extractFromFile(filePath: string): Promise<string> {
   }
 }
 
-export async function extractFromUrl(url: string): Promise<string> {
+export async function extractFromUrl(url: string, signal?: AbortSignal): Promise<string> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), URL_FETCH_TIMEOUT_MS);
 
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await fetch(url, {
+      signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
+    });
     if (!response.ok) {
       throw new Error(`URL fetch failed: ${response.status} ${response.statusText}`);
     }
@@ -111,6 +113,7 @@ export async function extractFromUrl(url: string): Promise<string> {
     const content = isHtml ? stripHtml(text) : text;
     return content.slice(0, MAX_URL_CONTENT_BYTES);
   } catch (err) {
+    if (signal?.aborted) throw new Error('URL extraction stopped', { cause: err });
     if (err instanceof DOMException && err.name === 'AbortError') {
       throw new Error(`URL fetch timed out after ${URL_FETCH_TIMEOUT_MS}ms: ${url}`, {
         cause: err,

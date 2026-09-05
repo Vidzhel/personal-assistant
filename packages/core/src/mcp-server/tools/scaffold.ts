@@ -143,7 +143,7 @@ export function buildScaffoldTools(
 
   const createSkill = tool(
     'create_skill',
-    'Add a new skill to the capability library — a reusable capability agents can be given (optionally backed by existing MCP tools). Use this when the owner asks Raven to "learn" a new capability. Actions declared here are capped at yellow tier (require approval before running) — red tier (fully autonomous, high-risk) is deliberately unavailable from chat and requires the owner to edit the skill\'s config.json directly.',
+    'Add a new skill to the capability library — a reusable capability agents can be given (optionally backed by existing MCP tools). Use this when the owner asks Raven to "learn" a new capability. Actions declared here are capped at yellow tier (autonomous with audit and notification) — red tier (requires explicit approval before running) is deliberately unavailable from chat and requires the owner to edit the skill\'s config.json directly.',
     {
       domain: z
         .string()

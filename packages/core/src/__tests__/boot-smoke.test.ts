@@ -8,8 +8,8 @@ import type { AgentBackend } from '../agent-manager/agent-backend.ts';
 
 /**
  * E2E boot test over the real composition root: real SQLite and files in a
- * temp dir, a fake agent backend, and the default suite's Neo4j boundary
- * guard rejecting client creation regardless of local services. Exercises the
+ * temp dir, a fake agent backend, and an explicitly disabled graph. The
+ * default suite's Neo4j guard remains a backstop against client creation. Exercises the
  * exact path production takes: createRaven -> start -> serve -> stop.
  *
  * The critical assertion isn't in any `expect()` — it's that this test file
@@ -59,7 +59,7 @@ describe('boot-smoke: createRaven over the real composition root', () => {
       subsystems: Record<string, unknown>;
     };
 
-    // The Neo4j boundary rejects initialization -> knowledge engine degrades.
+    // Graph disabled in the fixture -> knowledge remains unavailable.
     expect(body.knowledge).toBe('unavailable');
     // skipSuites: true -> no background services were started. The configured
     // count is environment-dependent, so only its type is asserted.

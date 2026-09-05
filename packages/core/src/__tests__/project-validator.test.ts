@@ -39,6 +39,12 @@ function mkAgent(relPath: string, agent: Record<string, unknown>): void {
   writeFileSync(join(agentsDir, `${name}.yaml`), yamlDump(agent));
 }
 
+function mkNestedAgent(relPath: string, folder: string, agent: Record<string, unknown>): void {
+  const dir = join(tmpDir, relPath, 'agents', folder);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'agent.yaml'), yamlDump(agent));
+}
+
 function mkSchedule(relPath: string, schedule: Record<string, unknown>): void {
   const base = relPath ? join(tmpDir, relPath) : tmpDir;
   const schedulesDir = join(base, 'schedules');
@@ -93,6 +99,51 @@ const VALID_TEMPLATE = {
 };
 
 describe('validateProjects', () => {
+  it('validates current agent directories alongside legacy flat definitions', async () => {
+    mkProject('', '# Global context');
+    mkAgent('', VALID_AGENT);
+    mkNestedAgent('', 'raven', { ...VALID_AGENT, name: 'raven', skills: ['known-skill'] });
+    mkdirSync(join(tmpDir, 'agents', 'retired-agent', 'memory'), { recursive: true });
+
+    expect(
+      (await validateProjects(tmpDir, { knownSkills: new Set(['known-skill']) })).errors,
+    ).toEqual([]);
+  });
+
+  it('reports invalid nested agent YAML with its actual definition path', async () => {
+    mkNestedAgent('', 'raven', { name: 'INVALID NAME' });
+
+    expect((await validateProjects(tmpDir)).errors).toEqual([
+      expect.stringContaining('Invalid agent YAML in _global/raven/agent.yaml'),
+    ]);
+  });
+
+  it('checks bindings and permissions in nested definitions', async () => {
+    mkProject('research', '# Research context');
+    mkNestedAgent('research', 'researcher', {
+      ...VALID_AGENT,
+      skills: ['missing-skill'],
+      bash: { access: 'full' },
+    });
+
+    const result = await validateProjects(tmpDir, { knownSkills: new Set(['known-skill']) });
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('unknown skill "missing-skill"'),
+        expect.stringContaining('bash.access: full not allowed'),
+      ]),
+    );
+  });
+
+  it('detects duplicate names across flat and nested agent layouts', async () => {
+    mkAgent('', VALID_AGENT);
+    mkNestedAgent('', 'same-agent', VALID_AGENT);
+
+    expect((await validateProjects(tmpDir)).errors).toEqual([
+      expect.stringContaining('Duplicate agent name "test-agent"'),
+    ]);
+  });
+
   it('rejects duplicate effective identities including a legacy path identity', async () => {
     mkProject('legacy', '# Legacy');
     mkProject('managed', '---\nravenProject: {version: 1, id: legacy}\n---\n# Managed');

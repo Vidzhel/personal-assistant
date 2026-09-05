@@ -1,3 +1,4 @@
+import { createProcessorLifecycle } from './processor-lifecycle.ts';
 import {
   generateId,
   createLogger,
@@ -58,6 +59,7 @@ export interface ClusteringEngine {
     bubbleId: string,
   ) => Promise<Array<{ tag: string; confidence: number; parentTag: string | null }>>;
   start: () => Promise<void>;
+  stop: () => Promise<void>;
 }
 
 interface ClusteringDeps {
@@ -70,7 +72,12 @@ interface ClusteringDeps {
 
 // eslint-disable-next-line max-lines-per-function -- facade composing sub-engines
 export function createClusteringEngine(deps: ClusteringDeps): ClusteringEngine {
-  const { neo4j, eventBus, embeddingEngine, knowledgeStore, domainConfig } = deps;
+  const { eventBus, domainConfig } = deps;
+  const lifetime = createProcessorLifecycle(eventBus, 'clustering');
+  const neo4j = lifetime.guard(deps.neo4j);
+  const embeddingEngine = lifetime.guard(deps.embeddingEngine);
+  const knowledgeStore = lifetime.guard(deps.knowledgeStore);
+  let started = false;
 
   // Create sub-engines
   const tagTree: TagTreeEngine = createTagTreeEngine({ neo4j, embeddingEngine, domainConfig });
@@ -83,7 +90,11 @@ export function createClusteringEngine(deps: ClusteringDeps): ClusteringEngine {
     linkEngine,
   });
   const clusteringOps: ClusteringOps = createClusteringOps({ neo4j, eventBus, embeddingEngine });
-  const mergeEngine: MergeEngine = createMergeEngine({ neo4j, eventBus, embeddingEngine });
+  const mergeEngine: MergeEngine = createMergeEngine({
+    neo4j,
+    eventBus: lifetime.guard(eventBus),
+    embeddingEngine,
+  });
 
   // --- Domain classification ---
   function classifyDomains(bubble: {
@@ -206,7 +217,7 @@ export function createClusteringEngine(deps: ClusteringDeps): ClusteringEngine {
   async function chainSuggestLinks(bubbleId: string): Promise<void> {
     const linkSuggestions = await linkEngine.suggestLinks(bubbleId);
     if (linkSuggestions.length > 0) {
-      eventBus.emit({
+      lifetime.emit({
         id: generateId(),
         timestamp: Date.now(),
         source: 'clustering',
@@ -226,7 +237,7 @@ export function createClusteringEngine(deps: ClusteringDeps): ClusteringEngine {
   async function chainSuggestTags(bubbleId: string): Promise<void> {
     const tagSuggestions = await suggestTags(bubbleId);
     if (tagSuggestions.length > 0) {
-      eventBus.emit({
+      lifetime.emit({
         id: generateId(),
         timestamp: Date.now(),
         source: 'clustering',
@@ -240,7 +251,7 @@ export function createClusteringEngine(deps: ClusteringDeps): ClusteringEngine {
     const hubLinks = await linkEngine.getLinksForBubble(bubbleId);
     const acceptedLinks = hubLinks.filter((l) => l.status === 'accepted');
     if (acceptedLinks.length >= HUB_LINK_THRESHOLD) {
-      eventBus.emit({
+      lifetime.emit({
         id: generateId(),
         timestamp: Date.now(),
         source: 'clustering',
@@ -256,6 +267,7 @@ export function createClusteringEngine(deps: ClusteringDeps): ClusteringEngine {
     bubbleId: string,
     fn: () => Promise<void>,
   ): Promise<void> {
+    if (lifetime.signal.aborted) return;
     try {
       await fn();
     } catch (err) {
@@ -276,6 +288,7 @@ export function createClusteringEngine(deps: ClusteringDeps): ClusteringEngine {
        RETURN b.title AS title, b.contentPreview AS contentPreview`,
       { bubbleId },
     );
+    lifetime.assertActive();
     if (!bubbleInfo) return;
 
     const tagRows = await neo4j.query<{ name: string }>(
@@ -298,12 +311,10 @@ export function createClusteringEngine(deps: ClusteringDeps): ClusteringEngine {
   }
 
   async function start(): Promise<void> {
-    eventBus.on('knowledge:embedding:generated', (event: RavenEvent) => {
-      handleEmbeddingGenerated(event).catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error(`Unhandled error in embedding chain: ${msg}`);
-      });
-    });
+    lifetime.assertActive();
+    if (started) return;
+    started = true;
+    lifetime.listen('knowledge:embedding:generated', handleEmbeddingGenerated);
     // Start sub-engines (LLM response handlers)
     clusteringOps.start();
     hubEngine.start();
@@ -317,6 +328,10 @@ export function createClusteringEngine(deps: ClusteringDeps): ClusteringEngine {
       });
     }
     log.info('Clustering engine started — listening for knowledge:embedding:generated events');
+  }
+
+  async function stop(): Promise<void> {
+    await Promise.allSettled([lifetime.stop(), clusteringOps.stop(), hubEngine.stop()]);
   }
 
   return {
@@ -336,10 +351,11 @@ export function createClusteringEngine(deps: ClusteringDeps): ClusteringEngine {
     getClusters: clusteringOps.getClusters,
     getClusterMembers: clusteringOps.getClusterMembers,
     deleteCluster: clusteringOps.deleteCluster,
-    detectMerges: mergeEngine.detectMerges,
+    detectMerges: () => lifetime.run(mergeEngine.detectMerges),
     getMergeSuggestions: mergeEngine.getMergeSuggestions,
     resolveMerge: mergeEngine.resolveMerge,
     suggestTags,
     start,
+    stop,
   };
 }

@@ -89,7 +89,11 @@ describe('Knowledge API routes', () => {
 
     app = Fastify({ logger: false });
     await app.register(cors, { origin: true });
-    const mockIngestion = { ingest: async () => ({ taskId: 'mock' }), start: () => {} };
+    const mockIngestion = {
+      ingest: async () => ({ taskId: 'mock' }),
+      start: () => {},
+      stop: async () => {},
+    };
     const mockExecLogger = { getTaskById: () => undefined } as any;
     registerKnowledgeRoutes(app, {
       eventBus,

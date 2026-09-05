@@ -57,6 +57,7 @@ function createMockEmbeddingEngine(): EmbeddingEngine {
     findSimilar: vi.fn().mockResolvedValue([]),
     removeEmbedding: vi.fn().mockResolvedValue(undefined),
     start: vi.fn(),
+    stop: vi.fn(async () => {}),
   };
 }
 
@@ -67,6 +68,7 @@ function createMockChunkingEngine(): ChunkingEngine {
     backfillChunks: vi.fn().mockResolvedValue({ indexed: 0, skipped: 0 }),
     reindexAllChunks: vi.fn().mockResolvedValue({ total: 0, indexed: 0, errors: [] }),
     start: vi.fn(),
+    stop: vi.fn(async () => {}),
   };
 }
 

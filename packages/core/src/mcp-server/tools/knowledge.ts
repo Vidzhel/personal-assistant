@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { tool } from '@anthropic-ai/claude-agent-sdk';
 import type { SdkMcpToolDefinition } from '@anthropic-ai/claude-agent-sdk';
 import type { RavenMcpDeps } from '../types.ts';
-import type { ScopeContext } from '../scope.ts';
+import { isToolAllowed, type ScopeContext } from '../scope.ts';
 
 const DEFAULT_SEARCH_LIMIT = 10;
 const MAX_SEARCH_LIMIT = 50;
@@ -55,8 +55,6 @@ async function handleSearchKnowledge(
 
 const SearchKnowledgeSchema = {
   query: z.string().describe('Search query'),
-  tags: z.array(z.string()).optional().describe('Filter by tags'),
-  domain: z.string().optional().describe('Filter by domain'),
   limit: z
     .number()
     .int()
@@ -85,7 +83,6 @@ const SaveKnowledgeSchema = {
     .optional()
     .describe('Title for the bubble (defaults to first 80 chars of content)'),
   tags: z.array(z.string()).optional().describe('Tags to associate with this bubble'),
-  domain: z.string().optional().describe('Domain to categorize this bubble'),
   permanence: z
     .enum(['temporary', 'normal', 'robust'])
     .optional()
@@ -157,6 +154,15 @@ function buildGetKnowledgeContextTool(
   );
 }
 
+/** Same availability contract used for registration and session prompt hints. */
+export function getAvailableKnowledgeTools(deps: RavenMcpDeps, scope: ScopeContext): string[] {
+  const names: string[] = [];
+  if (deps.retrievalEngine || deps.knowledgeStore) names.push('search_knowledge');
+  if (deps.knowledgeStore) names.push('save_knowledge');
+  if (deps.retrievalEngine) names.push('get_knowledge_context');
+  return names.filter((name) => isToolAllowed(scope, name));
+}
+
 // Heterogeneous collection: each builder above keeps its own concrete,
 // zod-inferred schema type (no `any`); only this array — which must hold
 // tools with different schemas side by side, and whose elements are called
@@ -165,12 +171,13 @@ function buildGetKnowledgeContextTool(
 // on `createSdkMcpServer`.
 export function buildKnowledgeTools(
   deps: RavenMcpDeps,
-  _scope: ScopeContext,
+  scope: ScopeContext,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- SDK type erasure at heterogeneous tool collection (see comment above)
 ): Array<SdkMcpToolDefinition<any>> {
+  const available = new Set(getAvailableKnowledgeTools(deps, scope));
   return [
     buildSearchKnowledgeTool(deps),
     buildSaveKnowledgeTool(deps),
     buildGetKnowledgeContextTool(deps),
-  ];
+  ].filter((definition) => available.has(definition.name));
 }

@@ -3,8 +3,6 @@ import {
   generateId,
   SOURCE_ORCHESTRATOR,
   SKILL_ORCHESTRATOR,
-  type McpServerConfig,
-  type SubAgentDefinition,
   type NewEmailEvent,
   type UserChatMessageEvent,
   type Project,
@@ -17,11 +15,14 @@ import type { SessionManager } from '../session-manager/session-manager.ts';
 import type { MessageStore } from '../session-manager/message-store.ts';
 import type { SessionRetrospective } from '../session-manager/session-retrospective.ts';
 import type { NamedAgentStore } from '../agent-registry/yaml-named-agent-store.ts';
-import type { AgentResolver } from '../agent-registry/agent-resolver.ts';
+import {
+  resolveDefaultAgentCapabilities,
+  type AgentResolver,
+  type ResolvedDefaultAgent,
+} from '../agent-registry/agent-resolver.ts';
 import type { CapabilityLibrary } from '../capability-library/capability-library.ts';
 import type { ProjectRegistry } from '../project-registry/project-registry.ts';
 import type { ScaffoldingApi } from '../scaffolding/scaffolding-api.ts';
-import { createKnowledgeAgentDefinition } from '../knowledge-engine/knowledge-agent.ts';
 import { getDb } from '../db/database.ts';
 import { resolveSystemAccessInstructions } from '../project-manager/system-access-gate.ts';
 import { createAuditLog } from '../permission-engine/audit-log.ts';
@@ -65,10 +66,8 @@ export interface OrchestratorDeps {
 }
 
 /**
- * The Orchestrator subscribes to events and routes them to appropriate suite agents.
- *
- * CRITICAL: The orchestrator itself has NO MCP servers.
- * It delegates to suite-specific sub-agents that carry their own MCPs.
+ * Routes events to agents with explicit capability bindings. Raven MCP tools
+ * are separately scoped to each task by agent-session.
  */
 export class Orchestrator {
   private eventBus: EventBus;
@@ -145,22 +144,6 @@ export class Orchestrator {
     });
   }
 
-  /** Fallback when no named agent could be resolved: the full capability library. */
-  private resolveFullLibraryCapabilities(): {
-    agentDefinitions: Record<string, SubAgentDefinition>;
-    mcpServers: Record<string, McpServerConfig>;
-    plugins: Array<{ type: 'local'; path: string }>;
-  } {
-    if (!this.capabilityLibrary) {
-      return { agentDefinitions: {}, mcpServers: {}, plugins: [] };
-    }
-    return {
-      agentDefinitions: this.capabilityLibrary.collectAgentDefinitions(),
-      mcpServers: this.capabilityLibrary.collectMcpServers(),
-      plugins: this.capabilityLibrary.resolveVendorPlugins(),
-    };
-  }
-
   /**
    * Ensure a project row exists for auto-created project ids (Telegram
    * topics, direct-mode chat). Filesystem is the source of truth: when no
@@ -198,10 +181,29 @@ export class Orchestrator {
     });
   }
 
-  // eslint-disable-next-line max-lines-per-function, complexity -- async handler with context injection, named agent resolution, and knowledge agent merging
+  // eslint-disable-next-line max-lines-per-function, complexity -- async handler with project context, capability resolution, and session dispatch
   private async handleUserChat(event: UserChatMessageEvent): Promise<void> {
     const { projectId, sessionId, message, topicId, topicName } = event.payload;
     log.info(`User chat in project ${projectId}: ${message.slice(0, LOG_MESSAGE_PREVIEW_LENGTH)}`);
+
+    let capabilities: ResolvedDefaultAgent;
+    try {
+      capabilities = resolveDefaultAgentCapabilities({
+        namedAgentStore: this.namedAgentStore,
+        agentResolver: this.agentResolver,
+      });
+    } catch (error) {
+      this.rejectChat(event, `Agent capability resolution failed: ${String(error)}`);
+      return;
+    }
+    const {
+      agentDefinitions,
+      mcpServers,
+      plugins,
+      namedAgentInstructions,
+      namedAgentId,
+      agentName,
+    } = capabilities;
 
     // Only new conversations may create a project, before the session FK is written.
     // Explicit session IDs must never select a replacement conversation.
@@ -252,34 +254,6 @@ export class Orchestrator {
       this.sessionManager.autoGenerateName(session.id, message);
     }
 
-    // Resolve capabilities from named agent (if configured) or fall back to all suites
-    let agentDefinitions: Record<string, SubAgentDefinition>;
-    let mcpServers: Record<string, McpServerConfig>;
-    let plugins: Array<{ type: 'local'; path: string }>;
-    let namedAgentInstructions: string | undefined;
-    let namedAgentId: string | undefined;
-    let agentName: string | undefined;
-
-    if (this.namedAgentStore && this.agentResolver) {
-      try {
-        const namedAgent = this.namedAgentStore.getDefaultAgent();
-        const capabilities = this.agentResolver.resolveAgentCapabilities(namedAgent);
-        agentDefinitions = capabilities.agentDefinitions;
-        mcpServers = capabilities.mcpServers;
-        plugins = capabilities.plugins;
-        namedAgentId = namedAgent.id;
-        agentName = namedAgent.name;
-        if (namedAgent.instructions) {
-          namedAgentInstructions = namedAgent.instructions;
-        }
-      } catch (err) {
-        log.warn(`Named agent resolution failed, falling back to the full library: ${err}`);
-        ({ agentDefinitions, mcpServers, plugins } = this.resolveFullLibraryCapabilities());
-      }
-    } else {
-      ({ agentDefinitions, mcpServers, plugins } = this.resolveFullLibraryCapabilities());
-    }
-
     // Resolve bash access config from project registry agent YAML
     let bashAccess: BashAccess | undefined;
     if (this.projectRegistry && agentName) {
@@ -293,9 +267,6 @@ export class Orchestrator {
         log.debug(`Bash access resolution skipped: ${err}`);
       }
     }
-
-    // Merge knowledge agent into agent definitions
-    agentDefinitions['knowledge-agent'] = createKnowledgeAgentDefinition();
 
     // Look up project for system access level
     const db = getDb();
@@ -395,8 +366,8 @@ export class Orchestrator {
         taskId,
         prompt,
         skillName: SKILL_ORCHESTRATOR,
-        mcpServers, // Resolved from named agent or all suites
-        agentDefinitions, // Sub-agents carry the MCPs + knowledge agent
+        mcpServers,
+        agentDefinitions,
         plugins,
         projectContextChain,
         namedAgentInstructions,

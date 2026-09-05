@@ -177,6 +177,7 @@ interface ValidateAgentFileOptions {
   projectRel: string;
   seenAgentNames: Set<string>;
   opts?: ValidatorOptions;
+  optional?: boolean;
 }
 
 async function validateAgentFile(options: ValidateAgentFileOptions): Promise<AgentsDirResult> {
@@ -201,6 +202,9 @@ async function validateAgentFile(options: ValidateAgentFileOptions): Promise<Age
 
     errors.push(...checkKnownSkills({ raw, agentName: parsed.name, projectRel, opts }));
   } catch (err) {
+    if (options.optional && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { errors, warnings };
+    }
     const msg = err instanceof Error ? err.message : String(err);
     errors.push(`Invalid agent YAML in ${projectRel || '_global'}/${entryName}: ${msg}`);
   }
@@ -229,17 +233,22 @@ async function validateAgentsDir(options: ValidateAgentsDirOptions): Promise<Age
     return { errors, warnings };
   }
 
-  const yamlFiles = entries.filter(
-    (e) => e.isFile() && (e.name.endsWith('.yaml') || e.name.endsWith('.yml')),
-  );
+  const candidates = entries.flatMap((entry) => {
+    if (entry.isDirectory()) return [{ name: join(entry.name, 'agent.yaml'), optional: true }];
+    if (entry.isFile() && (entry.name.endsWith('.yaml') || entry.name.endsWith('.yml'))) {
+      return [{ name: entry.name, optional: false }];
+    }
+    return [];
+  });
 
-  for (const entry of yamlFiles) {
+  for (const entry of candidates) {
     const fileResult = await validateAgentFile({
       filePath: join(agentsDir, entry.name),
       entryName: entry.name,
       projectRel,
       seenAgentNames,
       opts,
+      optional: entry.optional,
     });
     errors.push(...fileResult.errors);
     warnings.push(...fileResult.warnings);

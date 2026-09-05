@@ -1,3 +1,4 @@
+import { createProcessorLifecycle } from './processor-lifecycle.ts';
 import { generateId, createLogger, type RavenEvent } from '@raven/shared';
 import { z } from 'zod';
 import type { Neo4jClient } from './neo4j-client.ts';
@@ -19,6 +20,7 @@ export interface HubEngine {
   detectHubs: () => Promise<Array<{ bubbleId: string; linkCount: number }>>;
   splitHub: (hubBubbleId: string) => Promise<void>;
   start: () => void;
+  stop: () => Promise<void>;
 }
 
 interface HubDeps {
@@ -31,7 +33,13 @@ interface HubDeps {
 
 // eslint-disable-next-line max-lines-per-function -- factory function for hub engine
 export function createHubEngine(deps: HubDeps): HubEngine {
-  const { neo4j, eventBus, embeddingEngine, knowledgeStore, linkEngine } = deps;
+  const { eventBus } = deps;
+  const lifetime = createProcessorLifecycle(eventBus, 'hub-ops');
+  const neo4j = lifetime.guard(deps.neo4j);
+  const embeddingEngine = lifetime.guard(deps.embeddingEngine);
+  const knowledgeStore = lifetime.guard(deps.knowledgeStore);
+  const linkEngine = lifetime.guard(deps.linkEngine);
+  let started = false;
 
   // Track pending LLM synthesis tasks: taskId → synthBubbleId
   const pendingSynthesisTasks = new Map<string, string>();
@@ -81,6 +89,7 @@ export function createHubEngine(deps: HubDeps): HubEngine {
       );
       const groupTags = tagRows.map((r) => r.name);
 
+      lifetime.assertActive();
       // Create placeholder synthesis bubble in knowledge store (creates file + Neo4j node)
       const synthBubble = await knowledgeStore.insert({
         title: `Synthesis: Hub ${hubBubbleId.slice(0, HUB_ID_PREVIEW_LENGTH)} group`,
@@ -89,10 +98,11 @@ export function createHubEngine(deps: HubDeps): HubEngine {
         source: 'synthesis',
       });
 
+      lifetime.assertActive();
       // Request LLM to generate proper title/summary
       const taskId = generateId();
       pendingSynthesisTasks.set(taskId, synthBubble.id);
-      eventBus.emit({
+      lifetime.emit({
         id: generateId(),
         timestamp: Date.now(),
         source: 'clustering',
@@ -126,6 +136,7 @@ export function createHubEngine(deps: HubDeps): HubEngine {
           status: 'accepted',
         });
         // Remove old direct link from hub to member
+        lifetime.assertActive();
         await neo4j.run(
           `MATCH (a:Bubble {id: $hubId})-[r:LINKS_TO]-(b:Bubble {id: $memberId})
            DELETE r`,
@@ -139,7 +150,7 @@ export function createHubEngine(deps: HubDeps): HubEngine {
     }
   }
 
-  function handleSynthesisComplete(event: RavenEvent): void {
+  async function handleSynthesisComplete(event: RavenEvent): Promise<void> {
     if (event.type !== 'agent:task:complete') return;
     const payload = event.payload as {
       taskId: string;
@@ -168,7 +179,7 @@ export function createHubEngine(deps: HubDeps): HubEngine {
     }
     const parsed = synthParseResult.data;
     if (parsed.title) {
-      knowledgeStore
+      await knowledgeStore
         .update(synthBubbleId, {
           title: parsed.title,
           content: parsed.summary ?? parsed.title,
@@ -182,10 +193,16 @@ export function createHubEngine(deps: HubDeps): HubEngine {
   }
 
   function start(): void {
-    eventBus.on('agent:task:complete', (event: RavenEvent) => {
-      handleSynthesisComplete(event);
-    });
+    lifetime.assertActive();
+    if (started) return;
+    started = true;
+    lifetime.listen('agent:task:complete', handleSynthesisComplete);
   }
 
-  return { detectHubs, splitHub, start };
+  function stop(): Promise<void> {
+    pendingSynthesisTasks.clear();
+    return lifetime.stop();
+  }
+
+  return { detectHubs, splitHub: (id) => lifetime.run(() => splitHub(id)), start, stop };
 }

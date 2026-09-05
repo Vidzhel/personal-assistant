@@ -76,6 +76,10 @@ export class CapabilityLibrary {
     return lib.mcps.get(name);
   }
 
+  getVendorPath(name: string): string | undefined {
+    return this.ensureLoaded().vendorPaths.get(name);
+  }
+
   collectMcpServers(skillNames?: string[]): Record<string, McpServerConfig> {
     const lib = this.ensureLoaded();
     const skills = this.resolveSkills(skillNames);

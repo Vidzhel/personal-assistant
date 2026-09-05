@@ -1,3 +1,4 @@
+import { createProcessorLifecycle } from './processor-lifecycle.ts';
 import { generateId, createLogger, type RavenEvent, type SimilarBubble } from '@raven/shared';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { Neo4jClient } from './neo4j-client.ts';
@@ -85,6 +86,7 @@ export interface EmbeddingEngine {
   ) => Promise<SimilarBubble[]>;
   removeEmbedding: (bubbleId: string) => Promise<void>;
   start: () => void;
+  stop: () => Promise<void>;
 }
 
 interface EmbeddingDeps {
@@ -99,16 +101,23 @@ const FLOAT32_BYTES = 4;
 
 // eslint-disable-next-line max-lines-per-function -- factory function for embedding engine
 export function createEmbeddingEngine(deps: EmbeddingDeps): EmbeddingEngine {
-  const { neo4j, eventBus, knowledgeStore } = deps;
+  const { eventBus } = deps;
+  const lifetime = createProcessorLifecycle(eventBus, 'embeddings');
+  const neo4j = lifetime.guard(deps.neo4j);
+  const knowledgeStore = lifetime.guard(deps.knowledgeStore);
+  let started = false;
 
   async function generateEmbedding(text: string): Promise<Float32Array> {
+    lifetime.assertActive();
     const pipe = await getPipeline();
+    lifetime.assertActive();
     const output = await pipe(text, { pooling: 'mean', normalize: true });
     return new Float32Array(output.data);
   }
 
   async function generateAndStore(bubbleId: string, text: string): Promise<void> {
     const embedding = await generateEmbedding(text);
+    lifetime.assertActive();
     const embeddingArray = Array.from(embedding);
     await neo4j.run(
       `MATCH (b:Bubble {id: $bubbleId})
@@ -179,9 +188,11 @@ export function createEmbeddingEngine(deps: EmbeddingDeps): EmbeddingEngine {
     const { bubbleId, title } = event.payload;
     try {
       const preview = await knowledgeStore.getContentPreview(bubbleId);
+      lifetime.assertActive();
       const text = buildBubbleEmbeddingInput({ title, contentPreview: preview ?? '' });
       await generateAndStore(bubbleId, text);
-      eventBus.emit({
+      lifetime.assertActive();
+      lifetime.emit({
         id: generateId(),
         timestamp: Date.now(),
         source: 'embeddings',
@@ -195,30 +206,21 @@ export function createEmbeddingEngine(deps: EmbeddingDeps): EmbeddingEngine {
   }
 
   function start(): void {
-    eventBus.on('knowledge:bubble:created', (event: RavenEvent) => {
-      handleBubbleEvent(event).catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error(`Unhandled error in bubble:created handler: ${msg}`);
-      });
-    });
-    eventBus.on('knowledge:bubble:updated', (event: RavenEvent) => {
-      handleBubbleEvent(event).catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        log.error(`Unhandled error in bubble:updated handler: ${msg}`);
-      });
-    });
-    log.info(
-      'Embedding engine started — listening for knowledge:bubble:created/updated events (lazy model init)',
-    );
+    lifetime.assertActive();
+    if (started) return;
+    started = true;
+    lifetime.listen('knowledge:bubble:created', handleBubbleEvent);
+    lifetime.listen('knowledge:bubble:updated', handleBubbleEvent);
   }
 
   return {
-    generateEmbedding,
-    generateAndStore,
+    generateEmbedding: (text) => lifetime.run(() => generateEmbedding(text)),
+    generateAndStore: (id, text) => lifetime.run(() => generateAndStore(id, text)),
     getEmbedding,
     getAllEmbeddings,
     findSimilar,
     removeEmbedding,
     start,
+    stop: lifetime.stop,
   };
 }

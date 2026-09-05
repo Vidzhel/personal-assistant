@@ -62,7 +62,10 @@ interface Neo4jClientDeps {
 export function createNeo4jClient(deps: Neo4jClientDeps): Neo4jClient {
   const driver: Driver = neo4j.driver(deps.uri, neo4j.auth.basic(deps.user, deps.password));
 
+  let closed = false;
+
   async function run(cypher: string, params?: Record<string, unknown>): Promise<QueryResult> {
+    if (closed) throw new Error('Neo4j client is closed');
     const session: Session = driver.session();
     try {
       return await session.run(cypher, params);
@@ -88,6 +91,7 @@ export function createNeo4jClient(deps: Neo4jClientDeps): Neo4jClient {
     fn: (tx: ManagedTransaction) => Promise<T>,
     mode: 'read' | 'write' = 'write',
   ): Promise<T> {
+    if (closed) throw new Error('Neo4j client is closed');
     const session: Session = driver.session();
     try {
       if (mode === 'read') {
@@ -135,32 +139,17 @@ export function createNeo4jClient(deps: Neo4jClientDeps): Neo4jClient {
        }}`,
     ];
 
-    for (const stmt of statements) {
-      try {
-        await run(stmt);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        // Ignore "already exists" errors for idempotency
-        if (!msg.includes('already exists') && !msg.includes('equivalent')) {
-          log.warn(`Schema statement warning: ${msg}`);
-        }
-      }
-    }
-
-    // Story 6.6: Backfill lastAccessedAt for existing bubbles without it
-    try {
-      await run(
-        `MATCH (b:Bubble) WHERE b.lastAccessedAt IS NULL SET b.lastAccessedAt = b.updatedAt`,
-      );
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      log.warn(`lastAccessedAt backfill warning: ${msg}`);
-    }
+    // Every schema statement is explicitly idempotent. Connectivity, permissions,
+    // unsupported schema and conflicting data must fail startup, not look healthy.
+    for (const stmt of statements) await run(stmt);
+    await run(`MATCH (b:Bubble) WHERE b.lastAccessedAt IS NULL SET b.lastAccessedAt = b.updatedAt`);
 
     log.info('Neo4j schema ensured (constraints, indexes, vector index)');
   }
 
   async function close(): Promise<void> {
+    if (closed) return;
+    closed = true;
     await driver.close();
     log.info('Neo4j driver closed');
   }

@@ -1,3 +1,4 @@
+import { createProcessorLifecycle } from './processor-lifecycle.ts';
 import { createLogger, generateId, type RavenEvent } from '@raven/shared';
 import type { Neo4jClient } from './neo4j-client.ts';
 import type { EventBus } from '../event-bus/event-bus.ts';
@@ -24,6 +25,7 @@ export interface Retrospective {
   generateSummary: (since?: string) => Promise<RetrospectiveSummary>;
   formatSummaryMarkdown: (summary: RetrospectiveSummary) => string;
   runFullRetrospective: () => Promise<RetrospectiveSummary>;
+  stop: () => Promise<void>;
 }
 
 interface RetrospectiveDeps {
@@ -34,7 +36,9 @@ interface RetrospectiveDeps {
 
 // eslint-disable-next-line max-lines-per-function -- factory function for retrospective engine
 export function createRetrospective(deps: RetrospectiveDeps): Retrospective {
-  const { neo4j, eventBus, lifecycle } = deps;
+  const lifetime = createProcessorLifecycle(deps.eventBus, 'retrospective');
+  const neo4j = lifetime.guard(deps.neo4j);
+  const lifecycle = lifetime.guard(deps.lifecycle);
 
   async function generateSummary(since?: string): Promise<RetrospectiveSummary> {
     const now = new Date();
@@ -161,7 +165,7 @@ export function createRetrospective(deps: RetrospectiveDeps): Retrospective {
     const markdown = formatSummaryMarkdown(summary);
 
     // Emit notification event for Telegram/dashboard delivery
-    eventBus.emit({
+    lifetime.emit({
       id: generateId(),
       timestamp: Date.now(),
       source: 'retrospective',
@@ -174,7 +178,7 @@ export function createRetrospective(deps: RetrospectiveDeps): Retrospective {
     } as RavenEvent);
 
     // Emit retrospective complete event
-    eventBus.emit({
+    lifetime.emit({
       id: generateId(),
       timestamp: Date.now(),
       source: 'retrospective',
@@ -192,7 +196,7 @@ export function createRetrospective(deps: RetrospectiveDeps): Retrospective {
     // Emit stale bubbles detected event if any found
     const allStale = [...summary.staleBubbles, ...summary.temporaryBubbles];
     if (allStale.length > 0) {
-      eventBus.emit({
+      lifetime.emit({
         id: generateId(),
         timestamp: Date.now(),
         source: 'retrospective',
@@ -211,5 +215,10 @@ export function createRetrospective(deps: RetrospectiveDeps): Retrospective {
     return summary;
   }
 
-  return { generateSummary, formatSummaryMarkdown, runFullRetrospective };
+  return {
+    generateSummary: (since) => lifetime.run(() => generateSummary(since)),
+    formatSummaryMarkdown,
+    runFullRetrospective: () => lifetime.run(runFullRetrospective),
+    stop: lifetime.stop,
+  };
 }

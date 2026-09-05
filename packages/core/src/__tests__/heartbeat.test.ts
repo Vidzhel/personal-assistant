@@ -5,6 +5,9 @@ import { tmpdir } from 'node:os';
 import type Database from 'better-sqlite3';
 import { initDatabase, closeDatabase } from '../db/database.ts';
 import { EventBus } from '../event-bus/event-bus.ts';
+import type { NamedAgentStore } from '../agent-registry/yaml-named-agent-store.ts';
+import type { AgentResolver } from '../agent-registry/agent-resolver.ts';
+import type { CapabilityLibrary } from '../capability-library/capability-library.ts';
 import type { NotificationEvent } from '@raven/shared';
 
 // runAgentTask is mocked at the module level — same convention
@@ -320,5 +323,69 @@ describe('createHeartbeat', () => {
 
     resolveFirst?.();
     await firstFire;
+  });
+  it('rejects failed resolution without library fallback or notification and can fire again', async () => {
+    const base = makeDeps();
+    const notifications = vi.fn();
+    base.eventBus.on('notification', notifications);
+    const getDefaultAgent = vi
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error('broken agent');
+      })
+      .mockReturnValue({ id: 'raven', name: 'raven' });
+    const resolveAgentCapabilities = vi
+      .fn()
+      .mockReturnValue({ mcpServers: {}, agentDefinitions: {}, plugins: [] });
+    const collectMcpServers = vi.fn();
+    const heartbeat = createHeartbeat({
+      ...base,
+      namedAgentStore: { getDefaultAgent } as unknown as NamedAgentStore,
+      agentResolver: { resolveAgentCapabilities },
+      capabilityLibrary: { collectMcpServers } as unknown as CapabilityLibrary,
+    });
+    await expect(heartbeat.fireHeartbeat()).rejects.toThrow('broken agent');
+    expect(heartbeat.isRunning()).toBe(false);
+    expect(runAgentTask).not.toHaveBeenCalled();
+    expect(collectMcpServers).not.toHaveBeenCalled();
+    expect(notifications).not.toHaveBeenCalled();
+    vi.mocked(runAgentTask).mockResolvedValue({
+      taskId: 'ok',
+      result: 'HEARTBEAT_OK',
+      success: true,
+      durationMs: 1,
+    });
+    await expect(heartbeat.fireHeartbeat()).resolves.toEqual({
+      summary: 'HEARTBEAT_OK (swallowed)',
+    });
+    expect(vi.mocked(runAgentTask).mock.calls[0][0].agentDefinitions).toEqual({});
+  });
+
+  it.each(['store', 'resolver'])(
+    'rejects partially configured %s dependency',
+    async (configured) => {
+      const heartbeat = createHeartbeat({
+        ...makeDeps(),
+        namedAgentStore: configured === 'store' ? ({} as NamedAgentStore) : undefined,
+        agentResolver: configured === 'resolver' ? ({} as AgentResolver) : undefined,
+      });
+      await expect(heartbeat.fireHeartbeat()).rejects.toThrow('requires both');
+      expect(heartbeat.isRunning()).toBe(false);
+      expect(runAgentTask).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { success: false, result: 'partial output', errors: ['failed query'] },
+    { success: true, result: '   ' },
+  ])('rejects failed/empty backend response without notifying', async (response) => {
+    const deps = makeDeps();
+    const notifications = vi.fn();
+    deps.eventBus.on('notification', notifications);
+    vi.mocked(runAgentTask).mockResolvedValue({ taskId: 'bad', durationMs: 1, ...response });
+    const heartbeat = createHeartbeat(deps);
+    await expect(heartbeat.fireHeartbeat()).rejects.toThrow(/failed query|empty response/);
+    expect(heartbeat.isRunning()).toBe(false);
+    expect(notifications).not.toHaveBeenCalled();
   });
 });

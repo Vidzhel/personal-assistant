@@ -138,7 +138,7 @@ describe('buildKnowledgeTools', () => {
       expect(data.results[0].id).toBe('store-1');
     });
 
-    it('returns error when neither retrievalEngine nor knowledgeStore available', async () => {
+    it('omits search when neither retrievalEngine nor knowledgeStore is available', async () => {
       const emptyDeps: RavenMcpDeps = {
         ...deps,
         retrievalEngine: undefined,
@@ -146,10 +146,7 @@ describe('buildKnowledgeTools', () => {
       };
 
       const tools = buildKnowledgeTools(emptyDeps, scope);
-      const searchTool = findTool(tools, 'search_knowledge');
-      const result = await searchTool.handler({ query: 'test' }, {});
-
-      expect(result.isError).toBe(true);
+      expect(tools).toEqual([]);
     });
 
     it('has readOnlyHint and idempotentHint annotations', () => {
@@ -224,13 +221,10 @@ describe('buildKnowledgeTools', () => {
       );
     });
 
-    it('returns error when knowledgeStore not available', async () => {
+    it('omits save when knowledgeStore is unavailable', async () => {
       const noDeps: RavenMcpDeps = { ...deps, knowledgeStore: undefined };
       const tools = buildKnowledgeTools(noDeps, scope);
-      const saveTool = findTool(tools, 'save_knowledge');
-      const result = await saveTool.handler({ content: 'test' }, {});
-
-      expect(result.isError).toBe(true);
+      expect(tools.map((tool) => tool.name)).toEqual(['search_knowledge', 'get_knowledge_context']);
     });
   });
 
@@ -275,13 +269,10 @@ describe('buildKnowledgeTools', () => {
       expect(searchMock).toHaveBeenCalledWith('test', expect.objectContaining({ limit: 5 }));
     });
 
-    it('returns error when retrievalEngine not available', async () => {
+    it('omits context when retrievalEngine is unavailable', async () => {
       const noDeps: RavenMcpDeps = { ...deps, retrievalEngine: undefined };
       const tools = buildKnowledgeTools(noDeps, scope);
-      const contextTool = findTool(tools, 'get_knowledge_context');
-      const result = await contextTool.handler({ query: 'test' }, {});
-
-      expect(result.isError).toBe(true);
+      expect(tools.map((tool) => tool.name)).toEqual(['search_knowledge', 'save_knowledge']);
     });
 
     it('has readOnlyHint and idempotentHint annotations', () => {

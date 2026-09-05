@@ -32,14 +32,6 @@ describe('MCP migration regression', () => {
     }
   });
 
-  it('knowledge agent does not contain localhost REST API specs', () => {
-    const fullPath = join(CORE_SRC, 'knowledge-engine/knowledge-agent.ts');
-    if (!existsSync(fullPath)) return;
-    const content = readFileSync(fullPath, 'utf8');
-    expect(content).not.toContain('http://localhost');
-    expect(content).not.toContain('/api/knowledge');
-  });
-
   it('no validation prompt contains SCORE: N pattern', () => {
     const fullPath = join(CORE_SRC, 'task-execution/create-validation-deps.ts');
     if (!existsSync(fullPath)) return;

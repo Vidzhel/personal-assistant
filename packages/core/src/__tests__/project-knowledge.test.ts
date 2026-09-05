@@ -259,7 +259,7 @@ describe('Project Knowledge (10.9)', () => {
   });
 
   describe('Context Injection', () => {
-    it('buildSystemPrompt includes knowledge discovery instruction for project sessions', () => {
+    it('buildSystemPrompt describes only available knowledge retrieval for project sessions', () => {
       const task: AgentTask = {
         id: 'test-task',
         skillName: SKILL_ORCHESTRATOR,
@@ -272,9 +272,10 @@ describe('Project Knowledge (10.9)', () => {
         createdAt: Date.now(),
       };
 
-      const prompt = buildSystemPrompt(task);
-      expect(prompt).toContain('## Knowledge Discovery');
-      expect(prompt).toContain('propose adding it to project');
+      const prompt = buildSystemPrompt(task, undefined, { knowledgeTools: ['search_knowledge'] });
+      expect(prompt).toContain('## Knowledge Tools');
+      expect(prompt).toContain('search_knowledge');
+      expect(prompt).not.toContain('save_knowledge');
     });
 
     it('does not include knowledge discovery for non-project tasks', () => {

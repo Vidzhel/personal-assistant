@@ -3,7 +3,6 @@ import type { RetrievalResult, RavenEvent, McpServerConfig } from '@raven/shared
 import { createContextInjector } from '../knowledge-engine/context-injector.ts';
 import type { RetrievalEngine } from '../knowledge-engine/retrieval.ts';
 import type { MessageStore } from '../session-manager/message-store.ts';
-import { createKnowledgeAgentDefinition } from '../knowledge-engine/knowledge-agent.ts';
 import { Orchestrator } from '../orchestrator/orchestrator.ts';
 import { EventBus } from '../event-bus/event-bus.ts';
 import { SessionManager } from '../session-manager/session-manager.ts';
@@ -312,7 +311,7 @@ describe('Orchestrator context injection integration', () => {
     expect(payload.prompt).toContain('What do I know about TypeScript?');
   });
 
-  it('user:chat:message merges knowledge-agent into agentDefinitions', async () => {
+  it('user:chat:message does not invent a knowledge specialist', async () => {
     const db = getDb();
     const now = Date.now();
     db.prepare(
@@ -340,12 +339,7 @@ describe('Orchestrator context injection integration', () => {
 
     const event = await taskRequestPromise;
     const payload = (event as any).payload;
-    expect(payload.agentDefinitions).toHaveProperty('knowledge-agent');
-    expect(payload.agentDefinitions['knowledge-agent'].description).toContain(
-      'Knowledge management',
-    );
-    expect(payload.agentDefinitions['knowledge-agent'].tools).toHaveLength(0);
-    expect(payload.agentDefinitions['knowledge-agent'].prompt).toContain('search_knowledge');
+    expect(payload.agentDefinitions).toEqual({});
   });
 
   it('email:new does not inject knowledgeContext (agents use MCP tools instead)', async () => {
@@ -385,24 +379,6 @@ describe('Orchestrator context injection integration', () => {
     expect(payload.knowledgeContext).toBeUndefined();
     // Search mock should NOT have been called — no upfront context injection
     expect(searchMock).not.toHaveBeenCalled();
-  });
-});
-
-describe('Knowledge agent definition', () => {
-  it('creates agent definition with correct description and MCP-only tools', () => {
-    const def = createKnowledgeAgentDefinition();
-
-    expect(def.description).toContain('Knowledge management');
-    expect(def.tools).toHaveLength(0);
-    expect(def.prompt).toContain('search_knowledge');
-    expect(def.prompt).toContain('save_knowledge');
-    expect(def.prompt).toContain('get_knowledge_context');
-  });
-
-  it('instructs agent not to use WebFetch for localhost APIs', () => {
-    const def = createKnowledgeAgentDefinition();
-
-    expect(def.prompt).toContain('Do not use WebFetch');
   });
 });
 

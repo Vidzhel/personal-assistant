@@ -1,22 +1,18 @@
 import { createLogger, generateId, META_PROJECT_ID } from '@raven/shared';
-import type {
-  AgentTask,
-  McpServerConfig,
-  SubAgentDefinition,
-  Project,
-  SystemAccessLevel,
-} from '@raven/shared';
+import type { AgentTask, Project, SystemAccessLevel } from '@raven/shared';
 import type Database from 'better-sqlite3';
 import type { EventBus } from '../../event-bus/event-bus.ts';
 import type { SessionManager } from '../../session-manager/session-manager.ts';
 import type { NamedAgentStore } from '../../agent-registry/yaml-named-agent-store.ts';
-import type { AgentResolver } from '../../agent-registry/agent-resolver.ts';
+import {
+  resolveDefaultAgentCapabilities,
+  type AgentResolver,
+} from '../../agent-registry/agent-resolver.ts';
 import type { CapabilityLibrary } from '../../capability-library/capability-library.ts';
 import type { RavenMcpDeps } from '../../mcp-server/index.ts';
 import type { MemoryStore } from '../../agent-memory/memory-store.ts';
 import type { PermissionDeps } from '../../agent-manager/agent-session.ts';
 import { runAgentTask } from '../../agent-manager/agent-session.ts';
-import { createKnowledgeAgentDefinition } from '../../knowledge-engine/knowledge-agent.ts';
 import { resolveSystemAccessInstructions } from '../../project-manager/system-access-gate.ts';
 import type { AppConfig } from '../../config.ts';
 import type { FireHeartbeat } from '../../scheduler/schedule-engine.ts';
@@ -105,46 +101,6 @@ export interface HeartbeatDeps {
   targetProjectId?: string;
 }
 
-interface ResolvedHeartbeatCapabilities {
-  mcpServers: Record<string, McpServerConfig>;
-  agentDefinitions: Record<string, SubAgentDefinition>;
-  plugins: Array<{ type: 'local'; path: string }>;
-  namedAgentInstructions?: string;
-  namedAgentId?: string;
-}
-
-/** Mirrors orchestrator.ts handleUserChat's own capability resolution
- * (named agent's explicit skills, falling back to the full library) so the
- * heartbeat's synthetic turn sees the SAME tools a real chat turn would —
- * duplicated rather than extracted from orchestrator.ts to avoid widening
- * that file's surface for a single internal caller. */
-function resolveCapabilities(deps: HeartbeatDeps): ResolvedHeartbeatCapabilities {
-  const { namedAgentStore, agentResolver, capabilityLibrary } = deps;
-
-  if (namedAgentStore && agentResolver) {
-    try {
-      const namedAgent = namedAgentStore.getDefaultAgent();
-      const capabilities = agentResolver.resolveAgentCapabilities(namedAgent);
-      return {
-        mcpServers: capabilities.mcpServers,
-        agentDefinitions: capabilities.agentDefinitions,
-        plugins: capabilities.plugins,
-        ...(namedAgent.instructions && { namedAgentInstructions: namedAgent.instructions }),
-        namedAgentId: namedAgent.id,
-      };
-    } catch (err) {
-      log.warn(`Named agent resolution failed, falling back to the full library: ${err}`);
-    }
-  }
-
-  if (!capabilityLibrary) return { mcpServers: {}, agentDefinitions: {}, plugins: [] };
-  return {
-    mcpServers: capabilityLibrary.collectMcpServers(),
-    agentDefinitions: capabilityLibrary.collectAgentDefinitions(),
-    plugins: capabilityLibrary.resolveVendorPlugins(),
-  };
-}
-
 function resolveTargetSystemAccessInstructions(db: Database.Database, projectId: string): string {
   const row = db.prepare('SELECT name, system_access FROM projects WHERE id = ?').get(projectId) as
     { name: string; system_access: string } | undefined;
@@ -186,7 +142,7 @@ function resolveTargetSystemAccessInstructions(db: Database.Database, projectId:
  * linkSdkSession(freshId, ...) is a harmless no-op UPDATE against a row
  * that was never inserted. The heartbeat doesn't need chat history or
  * cross-fire continuity — only memory/approvals/task-board tool access,
- * which resolveCapabilities below provides independently of any session.
+ * which capability resolution provides independently of any session.
  * messageStore is deliberately NOT passed either, so this synthetic turn
  * never shows up in the owner's own chat transcript — only its (rare)
  * notification is owner-visible, per the silence contract. */
@@ -194,10 +150,7 @@ async function dispatchHeartbeatTurn(deps: HeartbeatDeps): Promise<string> {
   const { db, eventBus, sessionManager, ravenMcpDeps, memoryStore, permissionDeps, config } = deps;
   const projectId = deps.targetProjectId ?? META_PROJECT_ID;
   const sessionId = generateId();
-  const capabilities = resolveCapabilities(deps);
-  // Every real chat turn carries the knowledge-agent sub-agent (see
-  // orchestrator.ts) — heartbeat mirrors that for parity.
-  capabilities.agentDefinitions['knowledge-agent'] = createKnowledgeAgentDefinition();
+  const capabilities = resolveDefaultAgentCapabilities(deps);
 
   const task: AgentTask = {
     id: generateId(),
@@ -232,6 +185,12 @@ async function dispatchHeartbeatTurn(deps: HeartbeatDeps): Promise<string> {
     maxTurns: HEARTBEAT_MAX_TURNS,
   });
 
+  if (!result.success) {
+    throw new Error(
+      `Heartbeat agent failed: ${result.errors?.join('; ') ?? 'unsuccessful result'}`,
+    );
+  }
+  if (!result.result.trim()) throw new Error('Heartbeat agent returned an empty response');
   return result.result;
 }
 

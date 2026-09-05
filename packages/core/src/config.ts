@@ -42,7 +42,11 @@ const envSchema = z.object({
   SESSION_PATH: z.string().default('./data/sessions'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 
-  // Neo4j (knowledge engine graph store)
+  // Neo4j (knowledge engine graph store; memory learning remains available when off)
+  NEO4J_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
   NEO4J_URI: z.string().default('bolt://localhost:7687'),
   NEO4J_USER: z.string().default('neo4j'),
   NEO4J_PASSWORD: z.string().default('ravenpassword'),

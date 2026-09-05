@@ -1,3 +1,5 @@
+import { createProcessorLifecycle } from './processor-lifecycle.ts';
+import { waitForAgentTask } from './task-completion.ts';
 import { unlink } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { createLogger, generateId, type Permanence, type RavenEvent } from '@raven/shared';
@@ -37,6 +39,7 @@ export interface KnowledgeLifecycle {
   removeBubbleWithMedia: (id: string) => Promise<boolean>;
   mergeBubbles: (bubbleIds: string[]) => Promise<string | undefined>;
   upgradePermanence: (id: string, newLevel: Permanence) => Promise<boolean>;
+  stop: () => Promise<void>;
 }
 
 interface LifecycleDeps {
@@ -50,7 +53,12 @@ interface LifecycleDeps {
 
 // eslint-disable-next-line max-lines-per-function -- factory function for knowledge lifecycle engine
 export function createKnowledgeLifecycle(deps: LifecycleDeps): KnowledgeLifecycle {
-  const { neo4j, knowledgeStore, eventBus, embeddingEngine, chunkingEngine } = deps;
+  const { eventBus } = deps;
+  const lifetime = createProcessorLifecycle(eventBus, 'knowledge-lifecycle');
+  const neo4j = lifetime.guard(deps.neo4j);
+  const knowledgeStore = lifetime.guard(deps.knowledgeStore);
+  const embeddingEngine = lifetime.guard(deps.embeddingEngine);
+  const chunkingEngine = lifetime.guard(deps.chunkingEngine);
   const mediaDir = resolve(deps.knowledgeDir, '..', 'media');
 
   const staleDaysNormal = parseStaleDays(
@@ -129,6 +137,7 @@ export function createKnowledgeLifecycle(deps: LifecycleDeps): KnowledgeLifecycl
     const bubble = await knowledgeStore.getById(id);
     if (!bubble) return false;
 
+    lifetime.assertActive();
     // Clean up source media file if present
     if (bubble.sourceFile) {
       const mediaPath = join(mediaDir, bubble.sourceFile);
@@ -174,51 +183,42 @@ export function createKnowledgeLifecycle(deps: LifecycleDeps): KnowledgeLifecycl
     let synthesizedContent = combinedContent;
     try {
       const synthesisTaskId = generateId();
-      const synthesisPromise = new Promise<string>((resolve) => {
-        const handler = (event: RavenEvent): void => {
-          if (
-            event.type === 'agent:task:complete' &&
-            'payload' in event &&
-            (event as { payload: { taskId: string } }).payload.taskId === synthesisTaskId
-          ) {
-            eventBus.off('agent:task:complete', handler);
-            const result = (event as { payload: { result: string; success: boolean } }).payload;
-            resolve(result.success ? result.result : combinedContent);
-          }
-        };
-        eventBus.on('agent:task:complete', handler);
-        // Timeout: fall back to concatenated content after 30s
-        setTimeout(() => {
-          eventBus.off('agent:task:complete', handler);
-          resolve(combinedContent);
-        }, MERGE_SYNTHESIS_TIMEOUT_MS);
+      lifetime.assertActive();
+      const synthesisPromise = waitForAgentTask({
+        eventBus,
+        taskId: synthesisTaskId,
+        timeoutMs: MERGE_SYNTHESIS_TIMEOUT_MS,
+        signal: lifetime.signal,
+        dispatch: () => {
+          lifetime.emit({
+            id: generateId(),
+            timestamp: Date.now(),
+            source: 'knowledge-lifecycle',
+            type: 'agent:task:request',
+            payload: {
+              taskId: synthesisTaskId,
+              prompt: [
+                'Synthesize the following knowledge bubbles into a single coherent summary.',
+                'Preserve all key facts, deduplicate overlapping content, and organize logically.',
+                'Return ONLY the synthesized text, no preamble.',
+                '',
+                combinedContent,
+              ].join('\n'),
+              skillName: 'knowledge',
+              mcpServers: {},
+              priority: 'normal',
+            },
+          } as RavenEvent);
+        },
       });
 
-      eventBus.emit({
-        id: generateId(),
-        timestamp: Date.now(),
-        source: 'knowledge-lifecycle',
-        type: 'agent:task:request',
-        payload: {
-          taskId: synthesisTaskId,
-          prompt: [
-            'Synthesize the following knowledge bubbles into a single coherent summary.',
-            'Preserve all key facts, deduplicate overlapping content, and organize logically.',
-            'Return ONLY the synthesized text, no preamble.',
-            '',
-            combinedContent,
-          ].join('\n'),
-          skillName: 'knowledge',
-          mcpServers: {},
-          priority: 'normal',
-        },
-      } as RavenEvent);
-
-      synthesizedContent = await synthesisPromise;
+      const completion = await synthesisPromise;
+      synthesizedContent = completion.result ?? combinedContent;
     } catch (err) {
       log.warn(`LLM synthesis failed, using concatenated content: ${err}`);
     }
 
+    lifetime.assertActive();
     // Create the merged bubble
     const merged = await knowledgeStore.insert({
       title: mergedTitle,
@@ -282,7 +282,7 @@ export function createKnowledgeLifecycle(deps: LifecycleDeps): KnowledgeLifecycl
 
     log.info(`Merged ${bubbles.length} bubbles into ${merged.id}: ${mergedTitle}`);
 
-    eventBus.emit({
+    lifetime.emit({
       id: generateId(),
       timestamp: Date.now(),
       source: 'knowledge-lifecycle',
@@ -310,10 +310,11 @@ export function createKnowledgeLifecycle(deps: LifecycleDeps): KnowledgeLifecycl
   }
 
   return {
-    detectStaleBubbles,
-    snoozeBubble,
-    removeBubbleWithMedia,
-    mergeBubbles,
-    upgradePermanence,
+    detectStaleBubbles: (days) => lifetime.run(() => detectStaleBubbles(days)),
+    snoozeBubble: (id, days) => lifetime.run(() => snoozeBubble(id, days)),
+    removeBubbleWithMedia: (id) => lifetime.run(() => removeBubbleWithMedia(id)),
+    mergeBubbles: (ids) => lifetime.run(() => mergeBubbles(ids)),
+    upgradePermanence: (id, level) => lifetime.run(() => upgradePermanence(id, level)),
+    stop: lifetime.stop,
   };
 }

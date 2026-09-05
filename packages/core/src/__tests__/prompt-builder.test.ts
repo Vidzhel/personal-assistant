@@ -81,7 +81,7 @@ describe('buildSystemPrompt', () => {
   // assertions on the fields that feed these). Moved here so SDK session
   // resume doesn't re-teach the same rules every turn.
   it('includes MCP tool instructions for orchestrator tasks', () => {
-    const prompt = buildSystemPrompt(makeTask());
+    const prompt = buildSystemPrompt(makeTask(), undefined, { chatMcpAvailable: true });
     expect(prompt).toContain('Raven MCP tools');
     expect(prompt).toContain('classify_request');
     expect(prompt).toContain('create_task_tree');
@@ -131,9 +131,9 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('Never output raw JSON');
   });
 
-  it('still includes the Delegation block for internal validator tasks (unaffected by the F4 gate)', () => {
+  it('omits delegation when no subagents are bound', () => {
     const prompt = buildSystemPrompt(makeTask({ internal: 'validator' }));
-    expect(prompt).toContain('## Delegation');
+    expect(prompt).not.toContain('## Delegation');
   });
 
   it('includes systemAccessInstructions for internal validator tasks when set (unaffected by the F4 gate)', () => {
@@ -145,7 +145,7 @@ describe('buildSystemPrompt', () => {
   });
 
   it('includes Tool Use and MCP Tools blocks for non-internal orchestrator tasks (gate does not over-suppress)', () => {
-    const prompt = buildSystemPrompt(makeTask());
+    const prompt = buildSystemPrompt(makeTask(), undefined, { chatMcpAvailable: true });
     expect(prompt).toContain('## Tool Use');
     expect(prompt).toContain('## MCP Tools');
   });

@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { mkdtempSync, writeFileSync, existsSync, readFileSync, mkdirSync } from 'node:fs';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, writeFileSync, existsSync, readFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Neo4jContainer, type StartedNeo4jContainer } from '@testcontainers/neo4j';
@@ -7,6 +7,7 @@ import { createNeo4jClient } from '../knowledge-engine/neo4j-client.ts';
 import { createKnowledgeStore } from '../knowledge-engine/knowledge-store.ts';
 import type { KnowledgeStore } from '../knowledge-engine/knowledge-store.ts';
 import type { Neo4jClient } from '../knowledge-engine/neo4j-client.ts';
+import { readBubbleFile, writeBubbleFile } from '../knowledge-engine/knowledge-file.ts';
 
 describe('KnowledgeStore', () => {
   let container: StartedNeo4jContainer;
@@ -16,7 +17,7 @@ describe('KnowledgeStore', () => {
   let store: KnowledgeStore;
 
   beforeAll(async () => {
-    container = await new Neo4jContainer('neo4j:5-community').withApoc().start();
+    container = await new Neo4jContainer('neo4j:5-community').start();
     neo4j = createNeo4jClient({
       uri: container.getBoltUri(),
       user: 'neo4j',
@@ -26,8 +27,15 @@ describe('KnowledgeStore', () => {
   }, 120_000);
 
   afterAll(async () => {
-    if (neo4j) await neo4j.close();
-    if (container) await container.stop();
+    try {
+      if (neo4j) await neo4j.close();
+    } finally {
+      if (container) await container.stop();
+    }
+  });
+
+  afterEach(() => {
+    if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
   });
 
   beforeEach(async () => {
@@ -232,8 +240,31 @@ describe('KnowledgeStore', () => {
   });
 
   describe('reindexAll', () => {
+    it('preserves an unmatched record without letting its stale path control a replacement file', async () => {
+      const original = await store.insert({ title: 'Replaced', content: 'Original', tags: [] });
+      const path = join(knowledgeDir, original.filePath);
+      const parsed = readBubbleFile(path);
+      writeBubbleFile(path, { ...parsed.meta, id: 'replacement' }, 'Replacement content');
+      const replacementBytes = readFileSync(path, 'utf8');
+      expect(await store.reindexAll()).toEqual({ indexed: 1, errors: [] });
+      expect((await store.getById('replacement'))?.content).toBe('Replacement content');
+      await expect(store.getById(original.id)).rejects.toThrow('identity mismatch');
+      await expect(store.update(original.id, { content: 'Overwrite' })).rejects.toThrow(
+        'identity mismatch',
+      );
+      await expect(store.remove(original.id)).rejects.toThrow('identity mismatch');
+      expect(readFileSync(path, 'utf8')).toBe(replacementBytes);
+      expect(
+        await neo4j.queryOne('MATCH (b:Bubble {id: $id}) RETURN b.id AS id', { id: original.id }),
+      ).toEqual({ id: original.id });
+    });
+
     it('rebuilds index from files on disk', async () => {
-      await store.insert({ title: 'Persist', content: 'Will survive reindex', tags: ['test'] });
+      const original = await store.insert({
+        title: 'Persist',
+        content: 'Will survive reindex',
+        tags: ['test'],
+      });
 
       // Clear Neo4j bubble nodes
       await neo4j.run('MATCH (b:Bubble) DETACH DELETE b');
@@ -249,6 +280,8 @@ describe('KnowledgeStore', () => {
       const list = await store.list({ limit: 50, offset: 0 });
       expect(list).toHaveLength(1);
       expect(list[0].title).toBe('Persist');
+      expect(list[0].id).toBe(original.id);
+      expect(list[0].filePath).toBe(original.filePath);
     });
 
     it('generates id for files without one in frontmatter', async () => {
@@ -271,6 +304,170 @@ describe('KnowledgeStore', () => {
 
       const raw = readFileSync(join(knowledgeDir, 'manual-note.md'), 'utf-8');
       expect(raw).toContain('id:');
+    });
+
+    async function graphSnapshot(includeTags = false) {
+      const nodes = await neo4j.query(
+        'MATCH (n) RETURN elementId(n) AS nodeId, labels(n) AS labels, properties(n) AS properties ORDER BY nodeId',
+      );
+      // HAS_TAG is a rebuildable file index. Every other edge owns durable
+      // graph information and must retain both identity and properties.
+      const relationships = await neo4j.query(
+        `MATCH (a)-[r]->(b) WHERE $includeTags OR type(r) <> 'HAS_TAG'
+         RETURN elementId(r) AS edgeId, elementId(a) AS sourceId, elementId(b) AS targetId,
+                type(r) AS type, properties(r) AS properties ORDER BY edgeId`,
+        { includeTags },
+      );
+      return { nodes, relationships };
+    }
+
+    async function seedLinkedBubbles() {
+      const bubble = await store.insert({
+        title: 'Linked Note',
+        content: 'Original file content',
+        tags: ['old'],
+      });
+      const other = await store.insert({
+        title: 'Related Note',
+        content: 'Related content',
+        tags: ['related'],
+      });
+      const embedding = Array.from({ length: 384 }, (_, index) => (index === 0 ? 0.5 : 0.1));
+      await neo4j.run(
+        `MATCH (b:Bubble {id: $id}), (other:Bubble {id: $otherId})
+         SET b.permanence = 'robust', b.lastAccessedAt = $accessedAt, b.embedding = $embedding,
+             b.status = 'reviewed', b.snoozedUntil = $snoozedUntil
+         CREATE (project:Project {id: 'project-fixture', name: 'Fixture project'})
+         CREATE (domain:Domain {name: 'fixture-domain'})
+         CREATE (chunk:Chunk {id: 'fixture-chunk', text: 'Original chunk'})
+         CREATE (cluster:Cluster {id: 'fixture-cluster', name: 'Fixture cluster'})
+         CREATE (b)-[:BELONGS_TO_PROJECT {linkedBy: 'owner', createdAt: $createdAt}]->(project)
+         CREATE (b)-[:IN_DOMAIN]->(domain)
+         CREATE (b)-[:HAS_CHUNK]->(chunk)
+         CREATE (b)-[:IN_CLUSTER]->(cluster)
+         CREATE (b)-[:LINKS_TO {id: 'accepted-link', relationshipType: 'supports',
+           confidence: 0.9, autoSuggested: false, status: 'accepted', createdAt: $createdAt}]->(other)
+         CREATE (other)-[:LINKS_TO {id: 'dismissed-link', relationshipType: 'contradicts',
+           confidence: 0.4, autoSuggested: true, status: 'dismissed', createdAt: $createdAt}]->(b)`,
+        {
+          id: bubble.id,
+          otherId: other.id,
+          embedding,
+          accessedAt: '2026-06-01T10:00:00Z',
+          snoozedUntil: '2026-12-01T10:00:00Z',
+          createdAt: '2026-05-01T10:00:00Z',
+        },
+      );
+      return { bubble, other, embedding };
+    }
+
+    it('repeated reindex preserves node identity, graph metadata, memberships and typed-link decisions', async () => {
+      const { bubble, other, embedding } = await seedLinkedBubbles();
+      const before = await graphSnapshot();
+      for (let pass = 0; pass < 2; pass++) {
+        expect(await store.reindexAll()).toEqual({ indexed: 2, errors: [] });
+        expect(await graphSnapshot()).toEqual(before);
+      }
+      expect((await store.list({ limit: 50, offset: 0 })).map((item) => item.id).sort()).toEqual(
+        [bubble.id, other.id].sort(),
+      );
+      expect(
+        await neo4j.queryOne(
+          `MATCH (b:Bubble {id: $id}) RETURN b.permanence AS permanence,
+         b.lastAccessedAt AS lastAccessedAt, b.embedding AS embedding, b.status AS status`,
+          { id: bubble.id },
+        ),
+      ).toEqual({
+        permanence: 'robust',
+        lastAccessedAt: '2026-06-01T10:00:00Z',
+        embedding,
+        status: 'reviewed',
+      });
+      expect(
+        await neo4j.queryOne('MATCH (:Bubble {id: $id})-[r:HAS_TAG]->() RETURN count(r) AS count', {
+          id: bubble.id,
+        }),
+      ).toEqual({ count: 1 });
+    });
+
+    it('refreshes changed file fields and exact tags without duplicating tags or disturbing other edges', async () => {
+      const { bubble, embedding } = await seedLinkedBubbles();
+      const before = await graphSnapshot();
+      const path = join(knowledgeDir, bubble.filePath);
+      const parsed = readBubbleFile(path);
+      writeBubbleFile(
+        path,
+        {
+          ...parsed.meta,
+          title: 'Edited on disk',
+          tags: ['new', 'shared', 'new'],
+          source: 'manual-edit',
+          updated_at: '2026-07-01T10:00:00Z',
+        },
+        'Changed file content',
+      );
+      expect(await store.reindexAll()).toEqual({ indexed: 2, errors: [] });
+      expect(await store.reindexAll()).toEqual({ indexed: 2, errors: [] });
+      expect((await graphSnapshot()).relationships).toEqual(before.relationships);
+      expect(
+        await neo4j.queryOne(
+          `MATCH (b:Bubble {id: $id}) RETURN b.title AS title, b.contentPreview AS preview,
+         b.source AS source, b.updatedAt AS updatedAt, b.permanence AS permanence, b.embedding AS embedding`,
+          { id: bubble.id },
+        ),
+      ).toEqual({
+        title: 'Edited on disk',
+        preview: 'Changed file content',
+        source: 'manual-edit',
+        updatedAt: '2026-07-01T10:00:00Z',
+        permanence: 'robust',
+        embedding,
+      });
+      expect(
+        await neo4j.query(
+          `MATCH (:Bubble {id: $id})-[r:HAS_TAG]->(t:Tag)
+         RETURN t.name AS tag, count(r) AS count ORDER BY tag`,
+          { id: bubble.id },
+        ),
+      ).toEqual([
+        { tag: 'new', count: 1 },
+        { tag: 'shared', count: 1 },
+      ]);
+    });
+
+    it.each(['empty', 'missing', 'malformed'])(
+      'preserves unmatched graph records with a %s knowledge directory',
+      async (kind) => {
+        await seedLinkedBubbles();
+        const before = await graphSnapshot(true);
+        const alternateDir = join(tmpDir, kind);
+        if (kind !== 'missing') mkdirSync(alternateDir);
+        if (kind === 'malformed')
+          writeFileSync(join(alternateDir, 'broken.md'), '---\ntitle: [unterminated\n---\nBroken');
+        const alternate = createKnowledgeStore({ neo4j, knowledgeDir: alternateDir });
+        const result = await alternate.reindexAll();
+        expect(result.indexed).toBe(0);
+        expect(result.errors).toHaveLength(kind === 'malformed' ? 1 : 0);
+        expect(await graphSnapshot(true)).toEqual(before);
+      },
+    );
+
+    it('rejects duplicate file IDs before changing any graph record, including otherwise valid edits', async () => {
+      const { bubble, other } = await seedLinkedBubbles();
+      const before = await graphSnapshot(true);
+      const originalPath = join(knowledgeDir, bubble.filePath);
+      writeFileSync(join(knowledgeDir, 'duplicate.md'), readFileSync(originalPath, 'utf8'));
+      const otherPath = join(knowledgeDir, other.filePath);
+      const parsed = readBubbleFile(otherPath);
+      writeBubbleFile(
+        otherPath,
+        { ...parsed.meta, title: 'Must not reach graph' },
+        'Uncommitted index refresh',
+      );
+      const result = await store.reindexAll();
+      expect(result.indexed).toBe(0);
+      expect(result.errors.join('\n')).toMatch(/duplicate/i);
+      expect(await graphSnapshot(true)).toEqual(before);
     });
   });
 

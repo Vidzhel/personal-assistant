@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import {
   createLogger,
   generateId,
@@ -14,9 +15,15 @@ const DEFAULT_THRESHOLD = 0.75;
 
 let eventBus: EventBusInterface;
 let db: DatabaseInterface;
-let neo4j: Neo4jClient;
+let neo4j: Neo4jClient | undefined;
 let confidenceThreshold = DEFAULT_THRESHOLD;
-let degraded = false;
+let degraded = true;
+const GraphConfigSchema = z.object({
+  enabled: z.boolean(),
+  uri: z.string(),
+  user: z.string(),
+  password: z.string(),
+});
 
 interface BubbleDomainInfo {
   id: string;
@@ -24,8 +31,8 @@ interface BubbleDomainInfo {
   domains: string[];
 }
 
-async function getBubbleDomains(bubbleId: string): Promise<BubbleDomainInfo> {
-  const rows = await neo4j.query<{ title: string; name: string | null }>(
+async function getBubbleDomains(client: Neo4jClient, bubbleId: string): Promise<BubbleDomainInfo> {
+  const rows = await client.query<{ title: string; name: string | null }>(
     `MATCH (b:Bubble {id: $id})
      OPTIONAL MATCH (b)-[:IN_DOMAIN]->(d:Domain)
      RETURN b.title AS title, d.name AS name`,
@@ -55,72 +62,71 @@ function getAdaptiveThreshold(domainPair: string): number {
   return row?.threshold ?? confidenceThreshold;
 }
 
-// eslint-disable-next-line max-lines-per-function -- event handler with domain comparison logic
+interface SuggestedLink {
+  targetBubbleId: string;
+  confidence: number;
+  relationshipType: string;
+}
+
+function isCurrentClient(client: Neo4jClient): boolean {
+  return !degraded && neo4j === client;
+}
+
+function emitInsight(
+  sourceBubble: BubbleDomainInfo,
+  targetBubble: BubbleDomainInfo,
+  link: SuggestedLink,
+): void {
+  eventBus.emit({
+    id: generateId(),
+    timestamp: Date.now(),
+    source: SUITE_PROACTIVE_INTELLIGENCE,
+    type: 'knowledge:insight:cross-domain',
+    payload: {
+      sourceBubble,
+      targetBubble,
+      confidence: link.confidence,
+      relationshipType: link.relationshipType,
+    },
+  });
+  log.info(
+    `Cross-domain insight: ${sourceBubble.title} → ${targetBubble.title} [${link.confidence}]`,
+  );
+}
+
+async function processLink(
+  client: Neo4jClient,
+  bubbleId: string,
+  link: SuggestedLink,
+): Promise<void> {
+  const sourceBubble = await getBubbleDomains(client, bubbleId);
+  if (!isCurrentClient(client)) return;
+  const targetBubble = await getBubbleDomains(client, link.targetBubbleId);
+  if (!isCurrentClient(client)) return;
+  if (sourceBubble.domains.length === 0 || targetBubble.domains.length === 0) return;
+  if (haveDomainOverlap(sourceBubble.domains, targetBubble.domains)) return;
+  const domainPair = makeDomainPairKey(sourceBubble.domains, targetBubble.domains);
+  if (link.confidence < getAdaptiveThreshold(domainPair)) return;
+  emitInsight(sourceBubble, targetBubble, link);
+}
+
 async function handleLinksSuggested(event: unknown): Promise<void> {
+  const client = neo4j;
+  if (!client || !isCurrentClient(client)) return;
   try {
-    const e = event as Record<string, unknown>;
-    const payload = e.payload as {
-      bubbleId: string;
-      links: Array<{ targetBubbleId: string; confidence: number; relationshipType: string }>;
-    };
-
+    const { payload } = event as { payload: { bubbleId: string; links: SuggestedLink[] } };
     for (const link of payload.links) {
-      const sourceBubble = await getBubbleDomains(payload.bubbleId);
-      const targetBubble = await getBubbleDomains(link.targetBubbleId);
-
-      // Skip if either has no domains classified
-      if (sourceBubble.domains.length === 0 || targetBubble.domains.length === 0) {
-        continue;
-      }
-
-      // Same-domain: skip (AC 6 — existing behavior preserved)
-      if (haveDomainOverlap(sourceBubble.domains, targetBubble.domains)) {
-        continue;
-      }
-
-      // Check threshold (per-pair adaptive, fallback to env/default)
-      const domainPair = makeDomainPairKey(sourceBubble.domains, targetBubble.domains);
-      const threshold = getAdaptiveThreshold(domainPair);
-
-      if (link.confidence < threshold) {
-        log.debug(
-          `Cross-domain link ${sourceBubble.id}→${targetBubble.id} below threshold (${link.confidence} < ${threshold})`,
-        );
-        continue;
-      }
-
-      eventBus.emit({
-        id: generateId(),
-        timestamp: Date.now(),
-        source: SUITE_PROACTIVE_INTELLIGENCE,
-        type: 'knowledge:insight:cross-domain',
-        payload: {
-          sourceBubble: {
-            id: sourceBubble.id,
-            title: sourceBubble.title,
-            domains: sourceBubble.domains,
-          },
-          targetBubble: {
-            id: targetBubble.id,
-            title: targetBubble.title,
-            domains: targetBubble.domains,
-          },
-          confidence: link.confidence,
-          relationshipType: link.relationshipType,
-        },
-      });
-
-      log.info(
-        `Cross-domain insight: ${sourceBubble.title} (${sourceBubble.domains.join(',')}) → ${targetBubble.title} (${targetBubble.domains.join(',')}) [${link.confidence}]`,
-      );
+      if (!isCurrentClient(client)) return;
+      await processLink(client, payload.bubbleId, link);
     }
   } catch (err) {
-    log.error(`Cross-domain detection failed: ${err instanceof Error ? err.message : String(err)}`);
+    log.error(`Cross-domain detection failed: ${err}`);
   }
 }
 
 const service: RavenService = {
   async start(context: ServiceContext): Promise<void> {
+    await service.stop();
     eventBus = context.eventBus;
     db = context.db;
 
@@ -131,24 +137,23 @@ const service: RavenService = {
       if (!isNaN(parsed)) confidenceThreshold = parsed;
     }
 
-    neo4j = createNeo4jClient({
-      uri: process.env.NEO4J_URI ?? 'bolt://localhost:7687',
-      user: process.env.NEO4J_USER ?? 'neo4j',
-      password: process.env.NEO4J_PASSWORD ?? 'ravenpassword',
-    });
-
-    // Knowledge deps (Neo4j) are optional system-wide — probe reachability
-    // once at start rather than letting every future event log a fresh
-    // connection error. Unreachable → degraded (no-op): don't subscribe.
+    const graph = GraphConfigSchema.parse(context.config.neo4j);
+    if (!graph.enabled) return;
+    let client: Neo4jClient | undefined;
     try {
-      await neo4j.query('RETURN 1');
+      client = createNeo4jClient(graph);
+      neo4j = client;
+      await client.query('RETURN 1');
     } catch (err) {
-      degraded = true;
-      log.warn(
-        `Neo4j unreachable — cross-domain detector running in degraded (no-op) mode: ${err instanceof Error ? err.message : String(err)}`,
-      );
+      if (neo4j === client) neo4j = undefined;
+      await client
+        ?.close()
+        .catch((closeErr: unknown) => log.warn(`Graph cleanup failed: ${closeErr}`));
+      log.warn(`Cross-domain graph unavailable: ${err}`);
       return;
     }
+    // A concurrent stop owns disposal and prevents late subscription.
+    if (neo4j !== client) return;
 
     degraded = false;
     eventBus.on('knowledge:links:suggested', handleLinksSuggested);
@@ -156,10 +161,11 @@ const service: RavenService = {
   },
 
   async stop(): Promise<void> {
-    if (!degraded) {
-      eventBus.off('knowledge:links:suggested', handleLinksSuggested);
-    }
-    await neo4j.close();
+    const client = neo4j;
+    neo4j = undefined;
+    degraded = true;
+    eventBus?.off('knowledge:links:suggested', handleLinksSuggested);
+    await client?.close();
     log.info('Cross-domain detector stopped');
   },
 };

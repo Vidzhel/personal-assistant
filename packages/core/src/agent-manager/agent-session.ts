@@ -15,6 +15,7 @@ import { createSdkBackend } from './sdk-backend.ts';
 import { createRavenMcp, type RavenMcpDeps, type ScopeContext } from '../mcp-server/index.ts';
 import type { MemoryStore } from '../agent-memory/memory-store.ts';
 import { createMemoryMcp } from '../mcp-server/memory-mcp.ts';
+import { getAvailableKnowledgeTools } from '../mcp-server/tools/knowledge.ts';
 import { formatMemoryBlock } from '../agent-memory/memory-store.ts';
 
 const log = createLogger('agent-session');
@@ -309,15 +310,17 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
     // Per-agent identity used for memory MCP and system prompt injection.
     const memoryAgentName = task.namedAgentId;
 
+    const scope: ScopeContext = {
+      role: resolveAgentRole(task),
+      projectId: task.projectId,
+      sessionId: task.sessionId,
+      treeId: task.treeId,
+      taskId: task.executionTaskId,
+    };
+
     // Add Raven MCP (in-process, scoped to this task)
     if (opts.ravenMcpDeps) {
-      const ravenMcp = createRavenMcp(opts.ravenMcpDeps, {
-        role: resolveAgentRole(task),
-        projectId: task.projectId,
-        sessionId: task.sessionId,
-        treeId: task.treeId,
-        taskId: task.executionTaskId,
-      });
+      const ravenMcp = createRavenMcp(opts.ravenMcpDeps, scope);
       sdkMcpServers['raven'] = ravenMcp;
     }
 
@@ -330,7 +333,11 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       });
     }
 
-    let systemPrompt = buildSystemPrompt(task);
+    let systemPrompt = buildSystemPrompt(task, undefined, {
+      chatMcpAvailable: Boolean(opts.ravenMcpDeps) && scope.role === 'chat',
+      hasSubAgents: Object.keys(agentDefinitions).length > 0,
+      knowledgeTools: opts.ravenMcpDeps ? getAvailableKnowledgeTools(opts.ravenMcpDeps, scope) : [],
+    });
     if (opts.memoryStore && memoryAgentName) {
       const memoryIndex = await opts.memoryStore.readIndex(memoryAgentName);
       if (memoryIndex) {

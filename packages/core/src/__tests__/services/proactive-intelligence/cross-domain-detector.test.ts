@@ -1,5 +1,5 @@
 import type * as RavenShared from '@raven/shared';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('@raven/shared', async (importOriginal) => {
   const actual = await importOriginal<typeof RavenShared>();
@@ -16,23 +16,33 @@ vi.mock('@raven/shared', async (importOriginal) => {
 });
 
 const mockNeo4jQuery = vi.fn();
+const mockClose = vi.fn(async () => {});
 
 vi.mock('../../../knowledge-engine/neo4j-client.ts', () => ({
   createNeo4jClient: vi.fn(() => ({
     query: (...args: any[]) => mockNeo4jQuery(...args),
-    close: vi.fn(),
+    close: (...args: []) => mockClose(...args),
   })),
 }));
 
+import { createNeo4jClient } from '../../../knowledge-engine/neo4j-client.ts';
+import type { ServiceContext } from '../../../services/types.ts';
 import service from '../../../services/proactive-intelligence/cross-domain-detector.ts';
 
 describe('cross-domain-detector', () => {
   let mockEventBus: any;
   let mockDb: any;
+  let context: ServiceContext;
   let handleLinksSuggested: (event: unknown) => void;
 
+  afterEach(async () => {
+    await service.stop();
+  });
+
   beforeEach(async () => {
+    await service.stop();
     vi.clearAllMocks();
+    mockNeo4jQuery.mockReset().mockResolvedValue([]);
 
     mockEventBus = {
       emit: vi.fn(),
@@ -46,15 +56,23 @@ describe('cross-domain-detector', () => {
       run: vi.fn(),
     };
 
-    await service.start({
+    context = {
       eventBus: mockEventBus,
       db: mockDb,
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as any,
-      config: {},
+      config: {
+        neo4j: {
+          enabled: true,
+          uri: 'bolt://configured.invalid',
+          user: 'configured-user',
+          password: 'fake-configured-password',
+        },
+      },
       projectRoot: '/tmp',
       integrationsConfig: {} as any,
       jobRegistry: {} as any,
-    });
+    };
+    await service.start(context);
 
     const onCall = mockEventBus.on.mock.calls.find(
       (c: any) => c[0] === 'knowledge:links:suggested',
@@ -222,7 +240,14 @@ describe('cross-domain-detector', () => {
       eventBus: mockEventBus,
       db: mockDb,
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as any,
-      config: {},
+      config: {
+        neo4j: {
+          enabled: true,
+          uri: 'bolt://configured.invalid',
+          user: 'configured-user',
+          password: 'fake-configured-password',
+        },
+      },
       projectRoot: '/tmp',
       integrationsConfig: {} as any,
       jobRegistry: {} as any,
@@ -273,5 +298,71 @@ describe('cross-domain-detector', () => {
     // Titles come from Neo4j query — should be present even if empty string
     expect(crossDomainEmit[0].payload.sourceBubble).toHaveProperty('title');
     expect(crossDomainEmit[0].payload.targetBubble).toHaveProperty('title');
+  });
+  it('does not create a client when graph is explicitly disabled', async () => {
+    await service.stop();
+    vi.mocked(createNeo4jClient).mockClear();
+    mockEventBus.on.mockClear();
+    await service.start({
+      ...context,
+      config: { neo4j: { ...(context.config.neo4j as object), enabled: false } },
+    });
+    expect(createNeo4jClient).not.toHaveBeenCalled();
+    expect(mockEventBus.on).not.toHaveBeenCalled();
+  });
+
+  it('uses threaded credentials and disposes a client after a failed probe', async () => {
+    expect(createNeo4jClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        uri: 'bolt://configured.invalid',
+        user: 'configured-user',
+        password: 'fake-configured-password',
+      }),
+    );
+    await service.stop();
+    mockClose.mockClear();
+    mockEventBus.on.mockClear();
+    mockNeo4jQuery.mockRejectedValueOnce(new Error('probe unavailable'));
+    await service.start(context);
+    expect(mockClose).toHaveBeenCalledTimes(1);
+    expect(mockEventBus.on).not.toHaveBeenCalled();
+    await service.stop();
+    expect(mockClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores an in-flight query result after stop', async () => {
+    let release!: (value: Array<{ title: string; name: string }>) => void;
+    mockNeo4jQuery.mockReturnValueOnce(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+    const pending = handleLinksSuggested(
+      makeLinkEvent('one', [{ targetBubbleId: 'two', confidence: 1, relationshipType: 'related' }]),
+    );
+    await service.stop();
+    const queries = mockNeo4jQuery.mock.calls.length;
+    release([{ title: 'One', name: 'technology' }]);
+    await pending;
+    expect(mockNeo4jQuery).toHaveBeenCalledTimes(queries);
+    expect(mockEventBus.emit).not.toHaveBeenCalled();
+  });
+
+  it('does not subscribe if stopped while the startup probe is pending', async () => {
+    await service.stop();
+    let release!: (value: unknown[]) => void;
+    mockNeo4jQuery.mockReturnValueOnce(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+    mockEventBus.on.mockClear();
+    const starting = service.start(context);
+    await Promise.resolve();
+    await Promise.resolve();
+    await service.stop();
+    release([]);
+    await starting;
+    expect(mockEventBus.on).not.toHaveBeenCalled();
   });
 });
