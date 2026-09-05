@@ -21,6 +21,7 @@ import {
   type TranscriptionLifetime,
   type TranscriptionRequest,
 } from './transcription-lifetime.ts';
+import type { GeminiUploadCleanup } from './upload-cleanup.ts';
 
 const log = createLogger('voice-transcriber');
 const TRANSCRIPTION_TIMEOUT_MS = 30_000;
@@ -78,52 +79,101 @@ function createTranscriber(): {
   };
 }
 
-async function uploadAndAwaitProcessing(
-  fileManager: GoogleAIFileManager,
-  data: { filePath: string; mimeType: string },
-  request: TranscriptionRequest,
-): Promise<FileMetadataResponse> {
+async function uploadAndAwaitProcessing(input: {
+  fileManager: GoogleAIFileManager;
+  data: { filePath: string; mimeType: string };
+  request: TranscriptionRequest;
+  uploadCleanup: GeminiUploadCleanup;
+  cleanupId: string;
+}): Promise<FileMetadataResponse> {
+  const { fileManager, data, request, uploadCleanup, cleanupId } = input;
   const { filePath, mimeType } = data;
   log.info(`Uploading file for transcription: ${filePath}`);
-  const uploadResult = await request.wait(() =>
-    fileManager.uploadFile(filePath, { mimeType, displayName: basename(filePath) }),
-  );
+  const uploadResult = await request.wait(() => {
+    const uploadPromise = fileManager.uploadFile(filePath, {
+      mimeType,
+      displayName: basename(filePath),
+    });
+    return uploadCleanup.observeUpload(cleanupId, uploadPromise);
+  });
 
-  let file = uploadResult.file;
+  const uploaded = readProviderFile(uploadResult?.file);
+  if (!uploaded) {
+    throw new Error('Upload response missing valid remote file metadata');
+  }
+  const remoteName = uploaded.name;
+  return awaitFileProcessing({ fileManager, file: uploaded, remoteName, request });
+}
+
+async function awaitFileProcessing(input: {
+  fileManager: GoogleAIFileManager;
+  file: FileMetadataResponse;
+  remoteName: string;
+  request: TranscriptionRequest;
+}): Promise<FileMetadataResponse> {
+  const { fileManager, remoteName, request } = input;
+  let file = input.file;
   while (file.state === 'PROCESSING') {
-    log.info(`Waiting for file processing: ${file.name} (state: ${file.state})`);
+    log.info(`Waiting for file processing: ${remoteName} (state: ${file.state})`);
     await request.delay(FILE_PROCESSING_POLL_INTERVAL_MS);
-    file = await request.wait(() => fileManager.getFile(file.name, { signal: request.signal }));
+    const polled = await request.wait(() =>
+      fileManager.getFile(remoteName, { signal: request.signal }),
+    );
+    const nextFile = readProviderFile(polled);
+    if (!nextFile) {
+      throw new Error(`Provider file metadata invalid for ${remoteName}`);
+    }
+    if (nextFile.name !== remoteName) {
+      throw new Error(`Provider file identity changed for ${remoteName}`);
+    }
+    file = nextFile;
   }
 
   if (file.state === 'FAILED') {
-    await deleteUploadedFile(fileManager, file.name, request);
-    throw new Error(`File processing failed: ${file.name}`);
+    throw new Error(`File processing failed: ${remoteName}`);
+  }
+  if (file.state !== 'ACTIVE' || !isNonEmptyString(file.mimeType) || !isNonEmptyString(file.uri)) {
+    throw new Error(`Provider file metadata is not ready for ${remoteName}`);
   }
 
   return file;
 }
 
-async function deleteUploadedFile(
-  fileManager: GoogleAIFileManager,
-  name: string,
-  request: TranscriptionRequest,
-): Promise<void> {
-  if (request.signal.aborted) return;
-  try {
-    await request.wait(() => fileManager.deleteFile(name));
-  } catch {
-    if (!request.signal.aborted) log.warn(`Failed to delete remote file: ${name}`);
-  }
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
 }
 
-async function transcribeFile(
-  filePath: string,
-  mimeType: string,
-  request: TranscriptionRequest,
-): Promise<string> {
+function isValidRemoteName(value: unknown): value is string {
+  return typeof value === 'string' && /^(?:files\/)?[A-Za-z0-9_-]+$/.test(value);
+}
+
+function readProviderFile(value: unknown): FileMetadataResponse | null {
+  if (!value || typeof value !== 'object') return null;
+  const file = value as Partial<FileMetadataResponse>;
+  if (!isValidRemoteName(file.name)) return null;
+  if (
+    file.state !== 'STATE_UNSPECIFIED' &&
+    file.state !== 'PROCESSING' &&
+    file.state !== 'ACTIVE' &&
+    file.state !== 'FAILED'
+  ) {
+    return null;
+  }
+  return file as FileMetadataResponse;
+}
+
+async function transcribeFile(input: {
+  filePath: string;
+  mimeType: string;
+  request: TranscriptionRequest;
+  uploadCleanup: GeminiUploadCleanup | undefined;
+  correlationId: string;
+  projectId: string | undefined;
+}): Promise<string> {
+  const { filePath, mimeType, request, uploadCleanup, correlationId, projectId } = input;
   const apiKey = process.env.GOOGLE_API_KEY;
   if (!apiKey) throw new Error('GOOGLE_API_KEY is not set');
+  if (!uploadCleanup) throw new Error('Gemini upload cleanup coordinator is unavailable');
 
   // The installed SDK forwards these options to upload, get and delete fetches.
   // Own the deadline locally: the SDK's timeout option leaves its timer behind.
@@ -132,33 +182,50 @@ async function transcribeFile(
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
 
-  const file = await uploadAndAwaitProcessing(fileManager, { filePath, mimeType }, request);
-
-  log.info(`File ready, starting transcription: ${file.name}`);
+  const cleanupId = uploadCleanup.begin({ correlationId, projectId, sourceFilePath: filePath });
   try {
-    const result = await request.wait(() =>
-      model.generateContent(
-        {
-          contents: [
-            {
-              role: 'user',
-              parts: [
-                { fileData: { mimeType: file.mimeType, fileUri: file.uri } },
-                {
-                  text: 'Transcribe this audio/video accurately. Return only the transcribed text with natural paragraph breaks. Preserve speaker changes if detectable.',
-                },
-              ],
-            },
-          ],
-        },
-        { signal: request.signal },
-      ),
-    );
+    const file = await uploadAndAwaitProcessing({
+      fileManager,
+      data: { filePath, mimeType },
+      request,
+      uploadCleanup,
+      cleanupId,
+    });
 
-    return result.response.text();
+    log.info(`File ready, starting transcription: ${file.name}`);
+    return await inferFile(model, file, request);
   } finally {
-    await deleteUploadedFile(fileManager, file.name, request);
+    // finish() durably records the outcome and owns its independent bounded
+    // deletion attempt; it must not delay transcription cancellation.
+    uploadCleanup.finish(cleanupId);
   }
+}
+
+async function inferFile(
+  model: ReturnType<GoogleGenerativeAI['getGenerativeModel']>,
+  file: FileMetadataResponse,
+  request: TranscriptionRequest,
+): Promise<string> {
+  const result = await request.wait(() =>
+    model.generateContent(
+      {
+        contents: [
+          {
+            role: 'user',
+            parts: [
+              { fileData: { mimeType: file.mimeType, fileUri: file.uri } },
+              {
+                text: 'Transcribe this audio/video accurately. Return only the transcribed text with natural paragraph breaks. Preserve speaker changes if detectable.',
+              },
+            ],
+          },
+        ],
+      },
+      { signal: request.signal },
+    ),
+  );
+
+  return result.response.text();
 }
 
 function saveTranscript(outputDir: string, filePath: string, transcript: string): string {
@@ -312,16 +379,26 @@ function emitTranscriptionSuccess(
   });
 }
 
-async function processTranscriptionRequest(
-  context: { bus: TranscriptionLifetime; outputDir: string },
-  data: TranscriptionRequestEvent['payload'],
-  request: TranscriptionRequest,
-): Promise<void> {
+async function processTranscriptionRequest(input: {
+  context: { bus: TranscriptionLifetime; outputDir: string };
+  data: TranscriptionRequestEvent['payload'];
+  request: TranscriptionRequest;
+  uploadCleanup: GeminiUploadCleanup | undefined;
+  correlationId: string;
+}): Promise<void> {
+  const { context, data, request, uploadCleanup, correlationId } = input;
   const { bus, outputDir } = context;
   const { filePath, mimeType, projectId } = data;
 
   try {
-    const transcript = await transcribeFile(filePath, mimeType, request);
+    const transcript = await transcribeFile({
+      filePath,
+      mimeType,
+      request,
+      uploadCleanup,
+      correlationId,
+      projectId,
+    });
     request.signal.throwIfAborted();
     const transcriptPath = saveTranscript(outputDir, filePath, transcript);
 
@@ -343,6 +420,7 @@ async function processTranscriptionRequest(
 function createTranscriptionRequestHandler(
   bus: TranscriptionLifetime,
   outputDir: string,
+  uploadCleanup: GeminiUploadCleanup | undefined,
 ): (event: unknown) => void {
   return (event: unknown): void => {
     if (!bus.isActive()) return;
@@ -354,9 +432,18 @@ function createTranscriptionRequestHandler(
       return;
     }
 
+    const eventId = (event as { id?: unknown }).id;
+    const correlationId = isNonEmptyString(eventId) ? eventId : generateId();
+
     void bus
       .run(FILE_TRANSCRIPTION_TIMEOUT_MS, (request) =>
-        processTranscriptionRequest({ bus, outputDir }, parsed.data, request),
+        processTranscriptionRequest({
+          context: { bus, outputDir },
+          data: parsed.data,
+          request,
+          uploadCleanup,
+          correlationId,
+        }),
       )
       .catch((err: unknown) => {
         if (bus.isActive()) log.error(`Unhandled error in transcription handler: ${err}`);
@@ -388,6 +475,7 @@ const service: RavenService = {
 
     const transcriber = createTranscriber();
     const lifetime = createTranscriptionLifetime(context.eventBus);
+    const uploadCleanup = context.geminiUploadCleanup;
 
     const voiceHandler = (event: unknown): void => {
       const voiceEvent = event as VoiceReceivedEvent;
@@ -403,6 +491,7 @@ const service: RavenService = {
     const transcriptionHandler = createTranscriptionRequestHandler(
       lifetime,
       resolve(context.projectRoot, 'data/files/transcripts'),
+      uploadCleanup,
     );
     activeService = { bus: context.eventBus, lifetime, voiceHandler, transcriptionHandler };
     context.eventBus.on('voice:received', voiceHandler);

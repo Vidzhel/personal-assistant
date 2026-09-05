@@ -25,7 +25,7 @@ import { AgentManager } from './agent-manager/agent-manager.ts';
 import { SessionManager } from './session-manager/session-manager.ts';
 import { Orchestrator } from './orchestrator/orchestrator.ts';
 import { createMessageStore } from './session-manager/message-store.ts';
-import { createApiServer } from './api/server.ts';
+import { createApiServer, type ApiDeps } from './api/server.ts';
 import { createPermissionEngine } from './permission-engine/permission-engine.ts';
 import { createAuditLog } from './permission-engine/audit-log.ts';
 import { createPendingApprovals } from './permission-engine/pending-approvals.ts';
@@ -66,6 +66,7 @@ import { createSchedulePrefs } from './scheduler/schedule-prefs.ts';
 import { createScheduleFireLog } from './scheduler/schedule-fire-log.ts';
 import { createIntentStore } from './intents/intent-store.ts';
 import { createHeartbeat } from './services/system/heartbeat.ts';
+import { createGeminiUploadCleanup } from './services/gemini-transcription/upload-cleanup.ts';
 
 const log = createLogger('raven');
 
@@ -149,6 +150,8 @@ export async function createRaven(
   // 3. Init database
   initDatabase(dbPath);
   const dbInterface = createDbInterface();
+  const geminiUploadCleanup = createGeminiUploadCleanup({ db: dbInterface });
+  geminiUploadCleanup.recoverInterrupted();
   const modelBudget = createModelBudget({
     db: getDb(),
     dailyLimitUsd: config.RAVEN_MAX_BUDGET_USD_PER_DAY,
@@ -320,6 +323,7 @@ export async function createRaven(
     },
     db: dbInterface,
     executionLogger,
+    geminiUploadCleanup,
     logger: log,
     config: {
       intentStore,
@@ -687,55 +691,57 @@ export async function createRaven(
   // back to callers (tests) before the port is actually listening.
   let server: Awaited<ReturnType<typeof createApiServer>> | undefined;
 
+  const apiDeps: ApiDeps = {
+    eventBus,
+    capabilityLibrary,
+    sessionManager,
+    scheduleEngine,
+    agentManager,
+    auditLog,
+    pendingApprovals,
+    permissionEngine,
+    executionLogger,
+    modelBudget,
+    geminiUploadCleanup,
+    messageStore,
+    knowledgeStore,
+    reindexKnowledge: knowledge?.reindex,
+    ingestionProcessor,
+    embeddingEngine,
+    clusteringEngine,
+    chunkingEngine,
+    retrievalEngine,
+    neo4jClient,
+    knowledgeLifecycle,
+    retrospective,
+    db: dbInterface,
+    taskStore,
+    namedAgentStore,
+    memoryStore,
+    serviceRunner,
+    configuredServiceCount,
+    unsnoozableCategories: [...UNSNOOZABLE_CATEGORIES],
+    sessionRetrospective,
+    dataDir,
+    projectRegistry,
+    agentYamlStore,
+    projectsDir,
+    executionEngine,
+    templateRegistry,
+    templateScheduler,
+    scaffoldingApi,
+    scaffoldAndActivate,
+    intentStore,
+  };
+
   async function start(): Promise<void> {
-    server = await createApiServer(
-      {
-        eventBus,
-        capabilityLibrary,
-        sessionManager,
-        scheduleEngine,
-        agentManager,
-        auditLog,
-        pendingApprovals,
-        permissionEngine,
-        executionLogger,
-        modelBudget,
-        messageStore,
-        knowledgeStore,
-        reindexKnowledge: knowledge?.reindex,
-        ingestionProcessor,
-        embeddingEngine,
-        clusteringEngine,
-        chunkingEngine,
-        retrievalEngine,
-        neo4jClient,
-        knowledgeLifecycle,
-        retrospective,
-        db: dbInterface,
-        taskStore,
-        namedAgentStore,
-        memoryStore,
-        serviceRunner,
-        configuredServiceCount,
-        unsnoozableCategories: [...UNSNOOZABLE_CATEGORIES],
-        sessionRetrospective,
-        dataDir,
-        projectRegistry,
-        agentYamlStore,
-        projectsDir,
-        executionEngine,
-        templateRegistry,
-        templateScheduler,
-        scaffoldingApi,
-        scaffoldAndActivate,
-        intentStore,
-      },
-      config.RAVEN_PORT,
-      overrides.apiHost,
-    );
+    server = await createApiServer(apiDeps, config.RAVEN_PORT, overrides.apiHost);
 
     const address = server.addresses()[0];
     boundPort = address?.port ?? config.RAVEN_PORT;
+    void geminiUploadCleanup.retryPending().catch((error: unknown) => {
+      log.warn(`Provider upload cleanup remains pending: ${String(error)}`);
+    });
     log.info(`Raven is ready! API: http://localhost:${boundPort}`);
   }
 
@@ -763,28 +769,22 @@ export async function createRaven(
     // Stop admission now; keep completion consumers/stores alive until local tasks settle.
     executionEngine.stopAdmission();
     templateScheduler.stop();
-    const orchestratorStopped = cleanup(() => _orchestrator.stop());
-    const retrospectiveStopped = cleanup(() => sessionRetrospective.stop());
-    const agentsStopped = cleanup(() => agentManager.stop());
-    const heartbeatStopped = cleanup(() => heartbeat.stop());
-    const memoryStopped = cleanup(() => memoryConsolidation.stop());
-    // Scheduled knowledge jobs own direct model/graph work. Abort their
-    // processors before waiting for schedule drain; keep shared stores open.
-    const consolidationStopped = cleanup(() => knowledgeConsolidation?.stop());
-    const knowledgeRetrospectiveStopped = cleanup(() => retrospective?.stop());
-    const servicesStopped = cleanup(() => serviceRunner.stopAll());
-    const schedulesStopped = cleanup(() => scheduleEngine.stop());
-    await Promise.all([
-      orchestratorStopped,
-      retrospectiveStopped,
-      agentsStopped,
-      heartbeatStopped,
-      memoryStopped,
-      consolidationStopped,
-      knowledgeRetrospectiveStopped,
-      servicesStopped,
-      schedulesStopped,
-    ]);
+    // Cancel all job owners before schedule drain. Shared graph/SQLite stores
+    // remain available until these local tasks and the HTTP requests settle.
+    await Promise.all(
+      [
+        () => _orchestrator.stop(),
+        () => sessionRetrospective.stop(),
+        () => agentManager.stop(),
+        () => heartbeat.stop(),
+        () => memoryConsolidation.stop(),
+        () => geminiUploadCleanup.stop(),
+        () => knowledgeConsolidation?.stop(),
+        () => retrospective?.stop(),
+        () => serviceRunner.stopAll(),
+        () => scheduleEngine.stop(),
+      ].map(cleanup),
+    );
     await cleanup(() => idleDetector.stop());
     await cleanup(() => executionBridge.stop());
     await cleanup(() => executionEngine.stop());

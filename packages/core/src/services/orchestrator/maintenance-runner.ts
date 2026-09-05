@@ -13,6 +13,10 @@ import { checkResources } from './resource-monitor.ts';
 import { auditConventions } from './convention-auditor.ts';
 import { buildMaintenancePrompt } from './maintenance-agent.ts';
 import { compileReport, emitReportEvent, sendReportNotification } from './maintenance-report.ts';
+import type {
+  GeminiCleanupReport,
+  GeminiUploadCleanup,
+} from '../gemini-transcription/upload-cleanup.ts';
 
 const log = createLogger('maintenance-runner');
 
@@ -24,8 +28,10 @@ let projectsDir: string;
 let libraryDir: string;
 let getPort: () => number;
 let maintainKnowledge: ServiceContext['maintainKnowledge'];
+let geminiUploadCleanup: GeminiUploadCleanup | undefined;
 let lifetime: AbortController | undefined;
 let requestHandler: ((event: unknown) => void) | undefined;
+let releaseJob: (() => void) | undefined;
 let activeRun: Promise<void> | undefined;
 let port: number;
 let running = false;
@@ -40,6 +46,7 @@ const service: RavenService = {
     port = (context.config.RAVEN_PORT as number) ?? DEFAULT_PORT;
     getPort = context.getApiPort ?? (() => port);
     maintainKnowledge = context.maintainKnowledge;
+    geminiUploadCleanup = context.geminiUploadCleanup;
     lifetime = new AbortController();
     const current = lifetime;
     running = false;
@@ -73,7 +80,7 @@ const service: RavenService = {
       }
     };
 
-    context.jobRegistry.register('system-maintenance', async () => {
+    releaseJob = context.jobRegistry.register('system-maintenance', async () => {
       await startRun(generateId(), current.signal);
       return { summary: 'System maintenance complete' };
     });
@@ -83,6 +90,8 @@ const service: RavenService = {
   },
 
   async stop(): Promise<void> {
+    releaseJob?.();
+    releaseJob = undefined;
     lifetime?.abort(new Error('Maintenance stopped'));
     if (requestHandler) eventBus.off('agent:task:request', requestHandler);
     requestHandler = undefined;
@@ -108,6 +117,8 @@ interface GatheredMaintenanceData {
   conventionAuditReport: Awaited<ReturnType<typeof auditConventions>>;
   knowledgeMaintenance?: Awaited<ReturnType<NonNullable<ServiceContext['maintainKnowledge']>>>;
   knowledgeMaintenanceError?: string;
+  geminiUploadCleanup?: GeminiCleanupReport;
+  geminiUploadCleanupError?: string;
 }
 
 /** Let a scheduled run settle when its service lifetime ends while observing
@@ -132,7 +143,10 @@ async function awaitWithAbort<T>(operation: Promise<T>, signal: AbortSignal): Pr
   }
 }
 
-async function gatherMaintenanceData(signal: AbortSignal): Promise<GatheredMaintenanceData> {
+async function gatherMaintenanceData(
+  signal: AbortSignal,
+  cleanup: GeminiUploadCleanup | undefined,
+): Promise<GatheredMaintenanceData> {
   const logDir = getLogDir() ?? resolve(projectRoot, 'data/logs');
   const dataDir = resolve(projectRoot, 'data');
   const healthUrl = `http://localhost:${String(getPort())}/api/health`;
@@ -147,12 +161,15 @@ async function gatherMaintenanceData(signal: AbortSignal): Promise<GatheredMaint
   signal.throwIfAborted();
   let knowledgeMaintenance;
   let knowledgeMaintenanceError;
+  const cleanupResult = cleanup ? retryGeminiCleanup(cleanup) : undefined;
   try {
     knowledgeMaintenance = await maintainKnowledge?.();
   } catch (error) {
     signal.throwIfAborted();
     knowledgeMaintenanceError = String(error);
   }
+  const cleanupStatus = cleanupResult ? await cleanupResult : undefined;
+  signal.throwIfAborted();
   return {
     knowledgeMaintenance,
     knowledgeMaintenanceError,
@@ -160,7 +177,24 @@ async function gatherMaintenanceData(signal: AbortSignal): Promise<GatheredMaint
     dependencyReport,
     resourceReport,
     conventionAuditReport,
+    geminiUploadCleanup: cleanupStatus?.report,
+    geminiUploadCleanupError: cleanupStatus?.error,
   };
+}
+
+async function retryGeminiCleanup(
+  cleanup: GeminiUploadCleanup,
+): Promise<{ report?: GeminiCleanupReport; error?: string }> {
+  try {
+    return { report: await cleanup.retryPending() };
+  } catch (error) {
+    const message = String(error);
+    try {
+      return { report: cleanup.getReport(), error: message };
+    } catch (statusError) {
+      return { error: `${message}; unable to read cleanup status: ${String(statusError)}` };
+    }
+  }
 }
 
 // Spawns a Claude sub-agent for analysis via agent:task:request and awaits its result.
@@ -201,11 +235,18 @@ function startRun(taskId: string, signal: AbortSignal): Promise<void> {
   if (signal.aborted || signal !== lifetime?.signal)
     return Promise.reject(new Error('Maintenance stopped'));
   if (running) return Promise.reject(new Error('Maintenance already running'));
-  activeRun = runMaintenance(taskId, signal);
+  // Capture the coordinator belonging to this service lifetime. A restart may
+  // install another coordinator while an old provider cleanup pass is still
+  // settling; the old run must never switch to the replacement.
+  activeRun = runMaintenance(taskId, signal, geminiUploadCleanup);
   return activeRun;
 }
 
-async function runMaintenance(taskId: string, signal: AbortSignal): Promise<void> {
+async function runMaintenance(
+  taskId: string,
+  signal: AbortSignal,
+  cleanup: GeminiUploadCleanup | undefined,
+): Promise<void> {
   if (running) {
     log.warn('Maintenance already running, skipping');
     return;
@@ -217,7 +258,7 @@ async function runMaintenance(taskId: string, signal: AbortSignal): Promise<void
 
   try {
     // Phase 1: Gather data from all modules in parallel
-    const data = await awaitWithAbort(gatherMaintenanceData(signal), signal);
+    const data = await awaitWithAbort(gatherMaintenanceData(signal, cleanup), signal);
     signal.throwIfAborted();
     log.info('Data gathering complete, building agent prompt');
 

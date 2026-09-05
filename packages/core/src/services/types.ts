@@ -8,6 +8,7 @@ import type { KnowledgeRefreshReport } from '../knowledge-engine/knowledge-refre
 import type { KnowledgeReconciliationReport } from '../knowledge-engine/knowledge-reconciliation.ts';
 import type { JobRegistry } from '../scheduler/job-registry.ts';
 import type { ExecutionLogger } from '../agent-manager/execution-logger.ts';
+import type { GeminiUploadCleanup } from './gemini-transcription/upload-cleanup.ts';
 
 /**
  * Runtime dependencies handed to every background service's `start()`.
@@ -19,6 +20,8 @@ export interface ServiceContext {
   db: DatabaseInterface;
   /** Optional for services that do not consume agent-run history. */
   executionLogger?: ExecutionLogger;
+  /** Shared durable upload ownership; required by file transcription. */
+  geminiUploadCleanup?: GeminiUploadCleanup;
   logger: LoggerInterface;
   config: Record<string, unknown>;
   projectRoot: string;

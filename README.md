@@ -121,6 +121,12 @@ configured timezone's calendar day. SDK estimates include nested query agents;
 they are not subscription charges or a hard billing ceiling. A query can overshoot
 its cap during a work step. Gemini and external commands are outside this budget.
 
+Uploaded Gemini files have durable cleanup records. Known file IDs are retried at
+startup and during system maintenance if deletion fails or a request is cancelled.
+`GET /api/provider-uploads` reports pending cleanup and unknown upload outcomes.
+An unknown outcome means Raven did not capture a usable remote ID; cancellation
+alone does not confirm remote deletion or stop remote inference.
+
 ## Development with Claude or Codex
 
 Use the declared npm version for installation: npm 11.7 was observed ignoring a

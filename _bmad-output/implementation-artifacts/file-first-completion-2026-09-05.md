@@ -22,7 +22,7 @@ external repositories.
 | F5 | File/graph reconciliation and changed-content derived-index refresh | Complete; 2,138 default / 132 graph tests, 14 browser journeys |
 | F6 | Enforced global daily budget through existing execution paths | Complete; 2,176 tests, 14 browser journeys and packaged restart |
 | F7 | Ordinary schedule absence/staleness detection | Complete; 2,200 tests, 14 browser journeys and packaged restart |
-| F8 | Durable provider upload cleanup/retry after cancellation and restart | Pending |
+| F8 | Durable provider upload cleanup/retry after cancellation and restart | Complete; 2,223 tests, 14 browser journeys and packaged restart |
 | F9 | Remove obsolete storage compatibility/schema paths, reconcile docs, full/browser/compiled/container verification | Pending |
 | W1 | Review dissertation/teaching and implement flexible repository workspaces with browser artifact access | Authorized after F1–F9 |
 
@@ -83,7 +83,12 @@ F7 evidence and calendar/shutdown limits are in
 health, ordinary absence/staleness checks and graceful scheduled-work cancellation
 are complete. Required checks, 211 files / 2,200 tests (six live skips), fresh core
 build, fourteen browser journeys and two clean packaged process exits passed.
-F8 provider upload cleanup is next.
+F8 evidence and remote-outcome limits are in
+[tech-spec-f8-provider-upload-cleanup.md](tech-spec-f8-provider-upload-cleanup.md).
+Durable upload ownership, exact-file cleanup, bounded fair retries and truthful
+maintenance/HTTP reports are complete. Required checks, 213 files / 2,223 tests
+(six live skips), fresh core build, fourteen browser journeys and two clean
+packaged process exits passed. F9 storage/runtime cleanup is next.
 
 Implementation remains ordered, with parent review and a tested commit/push for
 each checkpoint.

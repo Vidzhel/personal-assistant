@@ -65,6 +65,7 @@ import { registerScaffoldingRoutes } from '../scaffolding/scaffolding-routes.ts'
 import type { ModelBudget } from '../agent-manager/model-budget.ts';
 import type { IntentStore } from '../intents/intent-store.ts';
 import { registerIntentRoutes } from './routes/intents.ts';
+import type { GeminiUploadCleanup } from '../services/gemini-transcription/upload-cleanup.ts';
 
 const log = createLogger('api');
 
@@ -79,6 +80,7 @@ export interface ApiDeps {
   permissionEngine?: PermissionEngine;
   executionLogger: ExecutionLogger;
   modelBudget?: ModelBudget;
+  geminiUploadCleanup?: GeminiUploadCleanup;
   messageStore: MessageStore;
   knowledgeStore?: KnowledgeStore;
   reindexKnowledge?: () => Promise<KnowledgeRefreshReport>;
@@ -133,6 +135,11 @@ export async function createApiServer(
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE'],
   });
   await app.register(websocket);
+
+  if (deps.geminiUploadCleanup) {
+    const uploads = deps.geminiUploadCleanup;
+    app.get('/api/provider-uploads', async () => uploads.getReport());
+  }
 
   // REST routes
   registerHealthRoute(app, deps);

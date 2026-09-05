@@ -1,10 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentTaskRequestEvent, RavenEvent } from '@raven/shared';
 import { EventBus } from '../../../event-bus/event-bus.ts';
 import { createJobRegistry } from '../../../scheduler/job-registry.ts';
+import type { GeminiUploadCleanup } from '../../../services/gemini-transcription/upload-cleanup.ts';
+import type { ServiceContext } from '../../../services/types.ts';
 import service from '../../../services/orchestrator/maintenance-runner.ts';
 
 const mocks = vi.hoisted(() => ({
@@ -37,6 +39,11 @@ vi.mock('../../../services/orchestrator/maintenance-report.ts', () => ({
 let root: string;
 let bus: EventBus;
 let jobs: ReturnType<typeof createJobRegistry>;
+let serviceContext: ServiceContext;
+let cleanup: GeminiUploadCleanup & {
+  retryPending: Mock<GeminiUploadCleanup['retryPending']>;
+  getReport: Mock<GeminiUploadCleanup['getReport']>;
+};
 beforeEach(async () => {
   vi.useFakeTimers();
   root = mkdtempSync(join(tmpdir(), 'raven-maintenance-lifetime-'));
@@ -47,7 +54,40 @@ beforeEach(async () => {
   mocks.resources.mockResolvedValue({});
   mocks.audit.mockResolvedValue({});
   mocks.report.mockResolvedValue({ filePath: join(root, 'report.md') });
-  await service.start({
+  cleanup = {
+    begin: () => {
+      throw new Error('Maintenance cannot begin uploads');
+    },
+    observeUpload: () => {
+      throw new Error('Maintenance cannot observe uploads');
+    },
+    finish: () => {
+      throw new Error('Maintenance cannot finish uploads');
+    },
+    recoverInterrupted: () => {
+      throw new Error('Maintenance cannot recover startup state');
+    },
+    stop: async () => {
+      throw new Error('Maintenance does not own coordinator shutdown');
+    },
+    retryPending: vi.fn().mockResolvedValue({
+      counts: { uploading: 0, active: 0, pending_delete: 1, unknown: 1, deleted: 2 },
+      unresolved: [
+        {
+          id: 'attempt-1',
+          status: 'pending_delete',
+          correlationId: 'event-1',
+          sourceFilePath: join(root, 'fixture.ogg'),
+          remoteFileName: 'files/remote-1',
+          attemptCount: 2,
+          lastError: 'provider unavailable',
+        },
+      ],
+      truncated: false,
+    }),
+    getReport: vi.fn(),
+  };
+  serviceContext = {
     eventBus: {
       on: (type, handler) => bus.on(type as RavenEvent['type'], handler),
       off: (type, handler) => bus.off(type as RavenEvent['type'], handler),
@@ -63,7 +103,9 @@ beforeEach(async () => {
     maintainKnowledge: mocks.knowledge,
     integrationsConfig: { ynab: { planId: '' }, accounts: [] },
     jobRegistry: jobs,
-  });
+    geminiUploadCleanup: cleanup,
+  };
+  await service.start(serviceContext);
 });
 afterEach(async () => {
   await service.stop();
@@ -131,6 +173,80 @@ describe('maintenance lifetime', () => {
       expect.any(String),
       expect.any(AbortSignal),
     );
+    expect(cleanup.retryPending).toHaveBeenCalledOnce();
+  });
+
+  it('runs provider cleanup with knowledge and passes its report through', async () => {
+    bus.on<AgentTaskRequestEvent>('agent:task:request', (event) => {
+      bus.emit({
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        source: 'fixture',
+        type: 'agent:task:complete',
+        payload: {
+          taskId: event.payload.taskId,
+          result: 'Summary',
+          durationMs: 0,
+          success: true,
+        },
+      });
+    });
+
+    await run();
+
+    expect(cleanup.retryPending).toHaveBeenCalledOnce();
+    expect(mocks.report).toHaveBeenCalledWith(
+      expect.objectContaining({
+        geminiUploadCleanup: expect.objectContaining({
+          counts: expect.objectContaining({ pending_delete: 1 }),
+        }),
+      }),
+      expect.any(String),
+      expect.any(AbortSignal),
+    );
+  });
+
+  it('keeps a maintenance run bound to its service lifetime cleanup coordinator', async () => {
+    let release!: (report: {
+      counts: {
+        uploading: number;
+        active: number;
+        pending_delete: number;
+        unknown: number;
+        deleted: number;
+      };
+      unresolved: [];
+      truncated: boolean;
+    }) => void;
+    const oldRetry = new Promise<Parameters<typeof release>[0]>((resolve) => {
+      release = resolve;
+    });
+    cleanup.retryPending.mockReturnValue(oldRetry);
+
+    const oldRun = run();
+    await vi.advanceTimersByTimeAsync(0);
+    await service.stop();
+    await expect(oldRun).rejects.toThrow('Maintenance stopped');
+
+    const replacement = {
+      ...cleanup,
+      retryPending: vi.fn().mockResolvedValue({
+        counts: { uploading: 0, active: 0, pending_delete: 0, unknown: 0, deleted: 1 },
+        unresolved: [],
+        truncated: false,
+      }),
+      getReport: vi.fn(),
+    };
+    serviceContext = { ...serviceContext, geminiUploadCleanup: replacement };
+    await service.start(serviceContext);
+
+    release({
+      counts: { uploading: 0, active: 0, pending_delete: 1, unknown: 0, deleted: 0 },
+      unresolved: [],
+      truncated: false,
+    });
+    await Promise.resolve();
+    expect(replacement.retryPending).not.toHaveBeenCalled();
   });
 
   it('removes completion waits on stop and does not write a fallback report', async () => {

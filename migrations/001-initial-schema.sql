@@ -79,3 +79,18 @@ CREATE TABLE IF NOT EXISTS model_budget_leases (
 );
 CREATE INDEX IF NOT EXISTS idx_model_budget_leases_day_status
   ON model_budget_leases(bucket_day, status);
+
+CREATE TABLE IF NOT EXISTS gemini_uploads (
+  id TEXT PRIMARY KEY,
+  correlation_id TEXT NOT NULL,
+  project_id TEXT,
+  source_file_path TEXT NOT NULL,
+  remote_name TEXT,
+  status TEXT NOT NULL CHECK (status IN ('uploading', 'active', 'pending_delete', 'unknown', 'deleted')),
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+  last_error TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_gemini_uploads_status_created
+  ON gemini_uploads(status, created_at);

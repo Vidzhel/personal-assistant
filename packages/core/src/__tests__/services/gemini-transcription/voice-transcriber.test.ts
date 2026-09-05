@@ -1,5 +1,13 @@
 import type * as NodeFs from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { closeDatabase, createDbInterface, initDatabase } from '../../../db/database.ts';
+import {
+  createGeminiUploadCleanup,
+  type GeminiUploadCleanup,
+} from '../../../services/gemini-transcription/upload-cleanup.ts';
 
 const mockGenerateContent = vi.fn();
 
@@ -61,6 +69,9 @@ describe('voice-transcriber service', () => {
   let mockEventBus: any;
   let mockLogger: any;
   let eventHandlers: Record<string, Array<(event: any) => void>>;
+  let root: string;
+  let database: ReturnType<typeof createDbInterface>;
+  let uploadCleanup: GeminiUploadCleanup;
 
   beforeEach(() => {
     process.env = { ...originalEnv };
@@ -82,10 +93,20 @@ describe('voice-transcriber service', () => {
       error: vi.fn(),
       debug: vi.fn(),
     };
+    root = mkdtempSync(join(tmpdir(), 'raven-voice-test-'));
+    initDatabase(join(root, 'raven.db'));
+    database = createDbInterface();
+    uploadCleanup = createGeminiUploadCleanup({
+      db: database,
+      deleteFile: async () => {},
+    });
   });
 
   afterEach(async () => {
     await service?.stop();
+    await uploadCleanup.stop();
+    closeDatabase();
+    rmSync(root, { recursive: true, force: true });
     process.env = { ...originalEnv };
     vi.resetModules();
   });
@@ -100,9 +121,10 @@ describe('voice-transcriber service', () => {
     return {
       eventBus: mockEventBus,
       logger: mockLogger,
-      db: {},
+      db: database,
       config: {},
       projectRoot: '/tmp/unused-transcription-test',
+      geminiUploadCleanup: uploadCleanup,
     };
   }
 

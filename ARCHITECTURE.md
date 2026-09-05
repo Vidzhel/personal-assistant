@@ -364,6 +364,18 @@ the normal concurrency limit is one. Cancellation does not roll back a committed
 local mutation or prove remote provider completion/cleanup; those external limits
 remain recorded in the ledger.
 
+File transcription persists upload attempts in operational SQLite `gemini_uploads`
+before calling Google. Raven shares one cleanup coordinator across transcription,
+maintenance and shutdown. It captures exact remote IDs before inference, observes
+late upload responses while alive, and retains pending/unknown outcomes across
+restart. Active files are excluded from cleanup. Deletion has an independent
+bounded signal; startup and maintenance retry only known pending IDs. Successful
+deletion or an exact provider 404 records completion. No remote ID is inferred
+from a source filename, and cancellation cannot prove remote inference stopped.
+`GET /api/provider-uploads` exposes bounded diagnostics; maintenance appends them
+even when its analysis comes from a model. Coordinator stop persists outstanding
+outcomes and drains local deletion waits before SQLite closes.
+
 ## API Layer
 
 - **Fastify** HTTP server on port 4001

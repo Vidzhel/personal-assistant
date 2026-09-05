@@ -128,6 +128,14 @@ versions; do not copy versions from historical planning documents.
   grants startup/completion grace and distinguishes current in-flight work from
   missing, stale, failed or unregistered schedules; old activations cannot satisfy
   current health. Croner defines calendar behavior, including its tested DST edges.
+- File transcription records a Gemini upload attempt before dispatch in
+  operational SQLite. The Raven-owned cleanup coordinator captures exact returned
+  IDs, keeps active files out of cleanup, retries known pending deletions at startup
+  and maintenance, and records unknown outcomes without guessing IDs. Local cleanup
+  has its own bounded signal. Stop closes coordinator admission and local waits
+  before SQLite disposal; late callbacks cannot write. The read-only
+  `/api/provider-uploads` report and deterministic maintenance section expose
+  unresolved attempts. Client cancellation does not prove remote inference stopped.
 - Learning uses interactive retrospectives, candidate files and consolidation.
   Rejected, failed or partial consolidation must retain pending candidates; archive
   only after successful application and index generation. Heartbeat is disabled

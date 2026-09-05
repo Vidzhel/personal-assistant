@@ -27,4 +27,26 @@ describe('JobRegistry', () => {
   it('returns undefined for unknown jobs', () => {
     expect(createJobRegistry().get('ghost')).toBeUndefined();
   });
+
+  it('releases admission without cancelling a running handler or removing its replacement', async () => {
+    const registry = createJobRegistry();
+    let complete!: () => void;
+    const handler = async () => {
+      await new Promise<void>((resolve) => {
+        complete = resolve;
+      });
+      return { summary: 'admitted work completed' };
+    };
+    const release = registry.register('restarted', handler);
+    const admitted = registry.get('restarted')!({ scheduleName: 'fixture', params: {} });
+    release();
+    expect(registry.get('restarted')).toBeUndefined();
+    const replacement = registry.register('restarted', handler);
+    release();
+    expect(registry.get('restarted')).toBe(handler);
+    complete();
+    expect(await admitted).toEqual({ summary: 'admitted work completed' });
+    replacement();
+    expect(registry.list()).toEqual([]);
+  });
 });

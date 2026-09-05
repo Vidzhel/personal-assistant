@@ -399,6 +399,79 @@ describe('maintenance-report', () => {
     expect(result.markdown).toBe(agentReport);
   });
 
+  it.each([true, false])(
+    'appends provider cleanup status without inventing success (available=%s)',
+    async (available) => {
+      const { compileReport } =
+        await import('../../../services/orchestrator/maintenance-report.ts');
+
+      const result = await compileReport(
+        {
+          logAnalysis: {
+            recurringErrors: [],
+            silentFailures: [],
+            totalErrors: 0,
+            totalWarnings: 0,
+          },
+          dependencyReport: {
+            outdated: [],
+            vulnerabilities: [],
+            checkedAt: new Date().toISOString(),
+          },
+          resourceReport: {
+            dbSizeMB: 0,
+            logSizeMB: 0,
+            sessionSizeMB: 0,
+            healthStatus: null,
+            concerns: [],
+            checkedAt: new Date().toISOString(),
+          },
+          agentAnalysis: '# Agent analysis',
+          geminiUploadCleanup: available
+            ? {
+                counts: { uploading: 0, active: 0, pending_delete: 1, unknown: 1, deleted: 4 },
+                unresolved: [
+                  {
+                    id: 'attempt-1',
+                    status: 'pending_delete',
+                    correlationId: 'correlation-1',
+                    sourceFilePath: '/tmp/known-audio.ogg',
+                    remoteFileName: 'files/remote-1',
+                    attemptCount: 3,
+                    lastError: 'timeout',
+                  },
+                  {
+                    id: 'attempt-2',
+                    status: 'unknown',
+                    correlationId: 'correlation-2',
+                    sourceFilePath: '/tmp/unknown-audio.ogg',
+                    attemptCount: 0,
+                  },
+                ],
+                truncated: true,
+              }
+            : undefined,
+          geminiUploadCleanupError: available ? undefined : 'cleanup database unreadable',
+        },
+        join(tmpDir, 'reports'),
+      );
+
+      expect(result.markdown).toContain('# Agent analysis');
+      expect(result.markdown).toContain('## Gemini provider uploads');
+      if (!available) {
+        expect(result.markdown).toContain('Upload status is unavailable.');
+        expect(result.markdown).toContain('cleanup database unreadable');
+        expect(result.markdown).not.toContain('No unresolved uploads.');
+        return;
+      }
+      expect(result.markdown).toContain('pending_delete=1');
+      expect(result.markdown).toContain('remote=files/remote-1');
+      expect(result.markdown).toContain('correlation=correlation-1');
+      expect(result.markdown).toContain('Raven cannot retry deletion without an ID.');
+      expect(result.markdown).toContain('Unresolved upload list truncated at 100 records.');
+    },
+  );
+
   it('should emit report event with correct shape', async () => {
     const { emitReportEvent } =
       await import('../../../services/orchestrator/maintenance-report.ts');

@@ -7,6 +7,7 @@ import type { LogAnalysisResult } from './log-analyzer.ts';
 import type { DependencyReport } from './dependency-checker.ts';
 import type { ResourceReport } from './resource-monitor.ts';
 import type { ConventionAuditReport } from './convention-auditor.ts';
+import type { GeminiCleanupReport } from '../gemini-transcription/upload-cleanup.ts';
 
 const log = createLogger('maintenance-report');
 
@@ -18,6 +19,8 @@ export interface MaintenanceReportData {
   agentAnalysis?: string;
   knowledgeMaintenance?: Awaited<ReturnType<NonNullable<ServiceContext['maintainKnowledge']>>>;
   knowledgeMaintenanceError?: string;
+  geminiUploadCleanup?: GeminiCleanupReport;
+  geminiUploadCleanupError?: string;
 }
 
 export interface CompiledReport {
@@ -34,7 +37,10 @@ export async function compileReport(
   log.info('Compiling maintenance report');
 
   const date = new Date().toISOString().split('T')[0];
-  const markdown = (data.agentAnalysis ?? buildFallbackReport(data, date)) + knowledgeSection(data);
+  const markdown =
+    (data.agentAnalysis ?? buildFallbackReport(data, date)) +
+    knowledgeSection(data) +
+    geminiUploadCleanupSection(data);
   const filePath = join(reportsDir, `${date}.md`);
 
   signal?.throwIfAborted();
@@ -201,4 +207,49 @@ function knowledgeSection(data: MaintenanceReportData): string {
   ];
   if (reconciliation.issues.length === 0) lines.push('No file/graph disagreements found.');
   return lines.join('\n');
+}
+
+function geminiUploadCleanupSection(data: MaintenanceReportData): string {
+  const report = data.geminiUploadCleanup;
+  if (!report && !data.geminiUploadCleanupError) return '';
+
+  const lines = ['\n\n## Gemini provider uploads', ''];
+  lines.push(cleanupStatusLine(report));
+  if (data.geminiUploadCleanupError)
+    lines.push(
+      `Retry pass failed: ${data.geminiUploadCleanupError}. Retry maintenance after repairing the reported problem.`,
+    );
+  lines.push(...cleanupUnresolvedLines(report));
+  if (report?.truncated) {
+    lines.push(
+      'Unresolved upload list truncated at 100 records. Retry maintenance for current status.',
+    );
+  }
+  return lines.join('\n');
+}
+
+function cleanupStatusLine(report?: GeminiCleanupReport): string {
+  if (!report) return 'Upload status is unavailable.';
+  const statuses = ['uploading', 'active', 'pending_delete', 'unknown', 'deleted'] as const;
+  return `Status counts: ${statuses.map((status) => `${status}=${String(report.counts[status])}`).join(', ')}.`;
+}
+
+function cleanupUnresolvedLines(report?: GeminiCleanupReport): string[] {
+  if (!report) return [];
+  if (report.unresolved.length === 0) return ['No unresolved uploads.'];
+  return [
+    'Unresolved uploads:',
+    ...report.unresolved.map((entry) => {
+      const state = ` state=${entry.status}`;
+      const remote = entry.remoteFileName ? ` remote=${entry.remoteFileName}` : ' remote=unknown';
+      const correlation = entry.correlationId
+        ? ` correlation=${entry.correlationId}`
+        : ' correlation=unknown';
+      const error = entry.lastError ? ` last_error=${entry.lastError}` : '';
+      const repair = entry.remoteFileName
+        ? 'Retry maintenance to retry deletion when the provider is available.'
+        : 'The remote outcome requires provider inspection; Raven cannot retry deletion without an ID.';
+      return `- attempt=${entry.id}${state}${remote}${correlation} attempts=${String(entry.attemptCount)}${error}. ${repair}`;
+    }),
+  ];
 }

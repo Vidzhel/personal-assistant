@@ -3,8 +3,13 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as GeminiServer from '@google/generative-ai/server';
-import type { RavenEvent } from '@raven/shared';
+import type { DatabaseInterface, RavenEvent } from '@raven/shared';
 import type { ServiceContext } from '../../../services/types.ts';
+import { closeDatabase, createDbInterface, initDatabase } from '../../../db/database.ts';
+import {
+  createGeminiUploadCleanup,
+  type GeminiUploadCleanup,
+} from '../../../services/gemini-transcription/upload-cleanup.ts';
 import service from '../../../services/gemini-transcription/voice-transcriber.ts';
 
 const gemini = vi.hoisted(() => ({
@@ -45,6 +50,9 @@ describe('voice request shutdown and deadlines', () => {
   let events: RavenEvent[];
   let handlers: Map<string, (event: unknown) => void>;
   let fileSignal: AbortSignal;
+  let uploadCleanup: GeminiUploadCleanup;
+  let cleanupDelete: ReturnType<typeof vi.fn<(name: string, signal: AbortSignal) => Promise<void>>>;
+  let database: DatabaseInterface;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -52,8 +60,17 @@ describe('voice request shutdown and deadlines', () => {
     root = mkdtempSync(join(tmpdir(), 'raven-voice-lifecycle-'));
     inputPath = join(root, 'lecture.mp3');
     writeFileSync(inputPath, 'Fake audio for isolated SDK transport');
+    initDatabase(join(root, 'raven.db'));
+    database = createDbInterface();
     events = [];
     handlers = new Map();
+    cleanupDelete = vi
+      .fn<(name: string, signal: AbortSignal) => Promise<void>>()
+      .mockResolvedValue(undefined);
+    uploadCleanup = createGeminiUploadCleanup({
+      db: database,
+      deleteFile: cleanupDelete,
+    });
     gemini.generateContent.mockReset().mockResolvedValue(transcript('Fresh transcript'));
     gemini.uploadFile.mockReset().mockResolvedValue({ file: readyFile });
     gemini.getFile.mockReset().mockResolvedValue(readyFile);
@@ -66,6 +83,8 @@ describe('voice request shutdown and deadlines', () => {
 
   afterEach(async () => {
     await service.stop();
+    await uploadCleanup.stop();
+    closeDatabase();
     vi.useRealTimers();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
@@ -82,9 +101,10 @@ describe('voice request shutdown and deadlines', () => {
         },
       },
       projectRoot,
-      db: { run: vi.fn(), get: () => undefined, all: () => [] },
+      db: createDbInterface(),
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
       config: {},
+      geminiUploadCleanup: uploadCleanup,
       integrationsConfig: {} as ServiceContext['integrationsConfig'],
       jobRegistry: {} as ServiceContext['jobRegistry'],
     };
@@ -99,8 +119,9 @@ describe('voice request shutdown and deadlines', () => {
       },
     });
   }
-  function dispatchFile() {
+  function dispatchFile(id?: string) {
     handlers.get('transcription:request')!({
+      ...(id ? { id } : {}),
       payload: {
         filePath: inputPath,
         mimeType: 'audio/mp3',
@@ -197,19 +218,35 @@ describe('voice request shutdown and deadlines', () => {
   it.each(['inference', 'cleanup'])(
     'suppresses file and event output after stop during %s',
     async (phase) => {
-      const late = deferred<ReturnType<typeof transcript> | undefined>();
-      if (phase === 'inference') gemini.generateContent.mockReturnValue(late.promise);
-      else gemini.deleteFile.mockReturnValue(late.promise);
+      const lateInference = deferred<ReturnType<typeof transcript>>();
+      const lateDelete = deferred<undefined>();
+      if (phase === 'inference') gemini.generateContent.mockReturnValue(lateInference.promise);
+      else cleanupDelete.mockReturnValue(lateDelete.promise);
       await service.start(context());
       dispatchFile();
       await settle();
       expect(gemini.generateContent).toHaveBeenCalledTimes(1);
-      if (phase === 'cleanup') expect(gemini.deleteFile).toHaveBeenCalledTimes(1);
       await service.stop();
-      expect(fileSignal.aborted).toBe(true);
-      late.resolve(phase === 'inference' ? transcript('Stale file') : undefined);
-      await settle();
-      expectStopped();
+      if (phase === 'cleanup') {
+        await settle();
+        expect(cleanupDelete).toHaveBeenCalledTimes(1);
+        expect(cleanupDelete.mock.calls[0][1].aborted).toBe(false);
+      } else {
+        expect(fileSignal.aborted).toBe(true);
+      }
+      if (phase === 'cleanup') {
+        await uploadCleanup.stop();
+        expect(cleanupDelete.mock.calls[0][1].aborted).toBe(true);
+        lateDelete.resolve(undefined);
+        await settle();
+        expect(handlers.size).toBe(0);
+        expect(vi.getTimerCount()).toBe(0);
+      } else {
+        lateInference.resolve(transcript('Stale file'));
+        await settle();
+        await uploadCleanup.stop();
+        expectStopped();
+      }
     },
   );
 
@@ -250,7 +287,7 @@ describe('voice request shutdown and deadlines', () => {
     await service.start(context());
     dispatchFile();
     await settle();
-    expect(gemini.deleteFile).toHaveBeenCalledExactlyOnceWith('fixture');
+    expect(cleanupDelete).toHaveBeenCalledExactlyOnceWith('fixture', expect.any(AbortSignal));
     expect(gemini.generateContent).not.toHaveBeenCalled();
     expect(events).toEqual([
       expect.objectContaining({
@@ -260,6 +297,91 @@ describe('voice request shutdown and deadlines', () => {
     ]);
     expect(vi.getTimerCount()).toBe(0);
     expect(existsSync(join(root, 'data/files/transcripts'))).toBe(false);
+  });
+
+  it('records the upload before dispatch, observes the raw promise, and finishes it', async () => {
+    await service.start(context());
+    dispatchFile('voice-event-1');
+    await vi.waitFor(() => expect(gemini.generateContent).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() =>
+      expect(
+        database.get<{ status: string }>('SELECT status FROM gemini_uploads LIMIT 1')?.status,
+      ).toBe('deleted'),
+    );
+
+    const rows = database.all<{
+      correlation_id: string;
+      source_file_path: string;
+      status: string;
+    }>('SELECT correlation_id, source_file_path, status FROM gemini_uploads');
+    expect(rows).toEqual([
+      expect.objectContaining({
+        correlation_id: 'voice-event-1',
+        source_file_path: inputPath,
+        status: 'deleted',
+      }),
+    ]);
+    expect(cleanupDelete).toHaveBeenCalledExactlyOnceWith('fixture', expect.any(AbortSignal));
+  });
+
+  it('keeps observing a late upload result after local cancellation', async () => {
+    const late = deferred<{ file: typeof readyFile }>();
+    gemini.uploadFile.mockReturnValue(late.promise);
+    await service.start(context());
+    dispatchFile('late-upload-event');
+    await settle();
+
+    await service.stop();
+    expect(uploadCleanup.getReport().counts.unknown).toBe(1);
+    late.resolve({ file: readyFile });
+    await vi.waitFor(() => expect(cleanupDelete).toHaveBeenCalledTimes(1));
+
+    expect(gemini.getFile).not.toHaveBeenCalled();
+    expect(gemini.generateContent).not.toHaveBeenCalled();
+    expect(cleanupDelete).toHaveBeenCalledExactlyOnceWith('fixture', expect.any(AbortSignal));
+  });
+
+  it('rejects invalid provider names before inference while still finishing cleanup', async () => {
+    gemini.uploadFile.mockResolvedValue({
+      file: { ...readyFile, name: 'files/provider/name' },
+    });
+    await service.start(context());
+    dispatchFile('invalid-name-event');
+    await settle();
+
+    expect(gemini.generateContent).not.toHaveBeenCalled();
+    expect(uploadCleanup.getReport().counts.unknown).toBe(1);
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'transcription:failed',
+        payload: expect.objectContaining({
+          error: 'Provider returned no valid file name',
+        }),
+      }),
+    ]);
+  });
+
+  it('uses the original upload name for polling and durable deletion', async () => {
+    gemini.uploadFile.mockResolvedValue({
+      file: { ...readyFile, name: 'files/original-upload', state: 'PROCESSING' },
+    });
+    gemini.getFile.mockResolvedValue({
+      ...readyFile,
+      name: 'files/different-polled-name',
+      state: 'ACTIVE',
+    });
+    await service.start(context());
+    dispatchFile('identity-event');
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.waitFor(() => expect(cleanupDelete).toHaveBeenCalledTimes(1));
+
+    expect(gemini.getFile).toHaveBeenCalledExactlyOnceWith('files/original-upload', {
+      signal: fileSignal,
+    });
+    expect(cleanupDelete).toHaveBeenCalledExactlyOnceWith(
+      'files/original-upload',
+      expect.any(AbortSignal),
+    );
   });
 
   it('stops further output when an event listener synchronously stops the service', async () => {
@@ -285,6 +407,13 @@ describe('voice request shutdown and deadlines', () => {
       gemini.fileManager.mockImplementation(
         (key, options) => new actual.GoogleAIFileManager(key, options),
       );
+      if (phase === 'delete') {
+        cleanupDelete.mockImplementation((name: string, signal: AbortSignal) =>
+          new actual.GoogleAIFileManager('fake-cleanup-key', {
+            signal,
+          } as GeminiServer.SingleRequestOptions).deleteFile(name),
+        );
+      }
       let transportSignal: AbortSignal | undefined;
       const fetch = vi.fn((_url: unknown, options: RequestInit) => {
         if (phase === 'delete' && options.method === 'POST') {
@@ -304,8 +433,9 @@ describe('voice request shutdown and deadlines', () => {
       expect(fetch).toHaveBeenCalledTimes(phase === 'upload' ? 1 : 2);
       expect(transportSignal?.aborted).toBe(false);
       await service.stop();
+      await uploadCleanup.stop();
       expect(transportSignal?.aborted).toBe(true);
-      expectStopped();
+      if (phase === 'upload') expectStopped();
     },
   );
 });

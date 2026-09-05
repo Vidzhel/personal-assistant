@@ -2,8 +2,13 @@ import { mkdtempSync, mkdirSync, readFileSync, existsSync, rmSync, writeFileSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { TranscriptionCompleteEvent, RavenEvent } from '@raven/shared';
+import type { DatabaseInterface, TranscriptionCompleteEvent, RavenEvent } from '@raven/shared';
 import type { ServiceContext } from '../../../services/types.ts';
+import { closeDatabase, createDbInterface, initDatabase } from '../../../db/database.ts';
+import {
+  createGeminiUploadCleanup,
+  type GeminiUploadCleanup,
+} from '../../../services/gemini-transcription/upload-cleanup.ts';
 import service from '../../../services/gemini-transcription/voice-transcriber.ts';
 
 const gemini = vi.hoisted(() => ({ generateContent: vi.fn() }));
@@ -32,6 +37,8 @@ describe('voice transcript runtime paths', () => {
   let inputPath: string;
   let events: RavenEvent[];
   let handlers: Map<string, (event: unknown) => void>;
+  let database: DatabaseInterface;
+  let uploadCleanup: GeminiUploadCleanup;
 
   beforeEach(() => {
     originalCwd = process.cwd();
@@ -41,6 +48,12 @@ describe('voice transcript runtime paths', () => {
     process.chdir(workingDir);
     inputPath = join(root, 'lecture.mp3');
     writeFileSync(inputPath, 'Fixture audio; Gemini execution is mocked');
+    initDatabase(join(root, 'raven.db'));
+    database = createDbInterface();
+    uploadCleanup = createGeminiUploadCleanup({
+      db: database,
+      deleteFile: async () => {},
+    });
     vi.stubEnv('GOOGLE_API_KEY', 'fake-transcription-key');
     gemini.generateContent.mockReset().mockResolvedValue({
       response: { text: () => 'Fixture transcript' },
@@ -52,6 +65,8 @@ describe('voice transcript runtime paths', () => {
   afterEach(async () => {
     try {
       await service.stop();
+      await uploadCleanup.stop();
+      closeDatabase();
     } finally {
       process.chdir(originalCwd);
       vi.unstubAllEnvs();
@@ -69,9 +84,10 @@ describe('voice transcript runtime paths', () => {
         },
       },
       projectRoot,
-      db: { run: vi.fn(), get: () => undefined, all: () => [] },
+      db: database,
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
       config: {},
+      geminiUploadCleanup: uploadCleanup,
       integrationsConfig: {} as ServiceContext['integrationsConfig'],
       jobRegistry: {} as ServiceContext['jobRegistry'],
     };
