@@ -67,6 +67,33 @@ describe('config', () => {
     exitSpy.mockRestore();
   });
 
+  it.each([
+    ['RAVEN_MAX_BUDGET_USD_PER_DAY', '-1'],
+    ['RAVEN_MAX_BUDGET_USD_PER_DAY', 'Infinity'],
+    ['RAVEN_MAX_BUDGET_USD_PER_DAY', 'NaN'],
+    ['RAVEN_MAX_CONCURRENT_AGENTS', '0'],
+    ['RAVEN_MAX_CONCURRENT_AGENTS', '1.5'],
+    ['RAVEN_TIMEZONE', 'Not/AZone'],
+  ])('rejects invalid budget configuration %s=%s', async (key, value) => {
+    process.env[key] = value;
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('process.exit called');
+    });
+    try {
+      const { loadConfig } = await import('../config.ts');
+      expect(() => loadConfig()).toThrow('process.exit called');
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    } finally {
+      exitSpy.mockRestore();
+    }
+  });
+
+  it('accepts a zero daily budget to stop model admission', async () => {
+    process.env.RAVEN_MAX_BUDGET_USD_PER_DAY = '0';
+    const { loadConfig } = await import('../config.ts');
+    expect(loadConfig().RAVEN_MAX_BUDGET_USD_PER_DAY).toBe(0);
+  });
+
   it('getConfig throws if loadConfig not called', async () => {
     const { getConfig } = await import('../config.ts');
     expect(() => getConfig()).toThrow('Config not loaded');

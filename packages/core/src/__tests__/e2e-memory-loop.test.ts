@@ -53,7 +53,9 @@ describe('e2e: memory loop closed (retrospective -> candidate -> consolidation)'
   });
 
   it('interactive chat -> retrospective candidate -> consolidation -> MEMORY.md + archive', async () => {
+    const calls: BackendOptions[] = [];
     const fakeBackend: AgentBackend = async (opts: BackendOptions) => {
+      calls.push(opts);
       if (opts.prompt.includes('session retrospective agent')) {
         const result = JSON.stringify({
           summary: 'Discussed favorite color.',
@@ -65,7 +67,7 @@ describe('e2e: memory loop closed (retrospective -> candidate -> consolidation)'
             { title: 'Favorite color', content: "The owner's favorite color is teal." },
           ],
         });
-        return { result, success: true, errors: [] };
+        return { result, success: true, errors: [], estimatedCostUsd: 0.01 };
       }
       if (opts.prompt.includes('memory consolidation agent')) {
         const result = JSON.stringify({
@@ -77,13 +79,19 @@ describe('e2e: memory loop closed (retrospective -> candidate -> consolidation)'
             },
           ],
         });
-        return { result, success: true, errors: [] };
+        return { result, success: true, errors: [], estimatedCostUsd: 0.01 };
       }
       // Chat turn.
       opts.onSessionId?.('sdk-1');
       const replyText = 'Got it, noted your favorite color.';
       opts.onAssistantMessage(replyText);
-      return { sessionId: 'sdk-1', result: replyText, success: true, errors: [] };
+      return {
+        sessionId: 'sdk-1',
+        result: replyText,
+        success: true,
+        errors: [],
+        estimatedCostUsd: 0.01,
+      };
     };
 
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-e2e-memory-loop-'));
@@ -175,6 +183,16 @@ describe('e2e: memory loop closed (retrospective -> candidate -> consolidation)'
     const archived = readdirSync(join(candidatesDir, 'archive'));
     expect(archived).toEqual(candidateFiles);
 
+    expect(calls).toHaveLength(3);
+    expect(calls.every((call) => call.maxBudgetUsd! > 0 && call.taskId)).toBe(true);
+    const budgetResponse = await fetch(`${baseUrl}/api/budget`);
+    expect(budgetResponse.status).toBe(200);
+    expect(await budgetResponse.json()).toMatchObject({
+      knownUsd: 0.03,
+      reservedUsd: 0,
+      unknownUsd: 0,
+      counts: { known: 3, reserved: 0, unknown: 0 },
+    });
     await raven.stop();
     raven = undefined;
   }, 15000);

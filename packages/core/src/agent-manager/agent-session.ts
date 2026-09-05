@@ -13,6 +13,8 @@ import { getConfig, projectRoot } from '../config.ts';
 import type { AgentBackend, ToolUseMeta } from './agent-backend.ts';
 import { runCancellableBackend } from './agent-backend.ts';
 import { createSdkBackend } from './sdk-backend.ts';
+import { createBudgetedBackend } from './budgeted-backend.ts';
+import type { ModelBudget } from './model-budget.ts';
 import { createRavenMcp, type RavenMcpDeps, type ScopeContext } from '../mcp-server/index.ts';
 import type { MemoryStore } from '../agent-memory/memory-store.ts';
 import { createMemoryMcp } from '../mcp-server/memory-mcp.ts';
@@ -33,8 +35,8 @@ let activeBackend: AgentBackend | null = null;
  * ANTHROPIC_API_KEY, when set, simply flows through as an env var rather
  * than selecting a different code path — there is no more CLI/SDK split.
  */
-export function initializeBackend(): void {
-  activeBackend = createSdkBackend();
+export function initializeBackend(budget?: ModelBudget): void {
+  activeBackend = wrapBackend(createSdkBackend(), budget);
   log.info('Agent backend: SDK');
 }
 
@@ -43,9 +45,15 @@ export function initializeBackend(): void {
  * selection in initializeBackend(). Used by createRaven's `agentBackend`
  * override so tests never spawn a real subprocess.
  */
-export function setActiveBackend(backend: AgentBackend): void {
-  activeBackend = backend;
+export function setActiveBackend(backend: AgentBackend, budget?: ModelBudget): void {
+  activeBackend = wrapBackend(backend, budget);
   log.info('Agent backend: injected (override)');
+}
+
+function wrapBackend(backend: AgentBackend, budget?: ModelBudget): AgentBackend {
+  return budget
+    ? createBudgetedBackend({ backend, budget })
+    : (options) => runCancellableBackend(backend, options);
 }
 
 function getActiveBackend(): AgentBackend {
@@ -420,7 +428,8 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
         : undefined;
 
     const backend = getActiveBackend();
-    const backendResult = await runCancellableBackend(backend, {
+    const backendResult = await backend({
+      taskId: task.id,
       prompt,
       resume,
       systemPrompt,

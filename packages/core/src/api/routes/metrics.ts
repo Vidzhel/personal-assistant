@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { HTTP_STATUS } from '@raven/shared';
+import type { ModelBudget } from '../../agent-manager/model-budget.ts';
 import type { ExecutionLogger } from '../../agent-manager/execution-logger.ts';
 
 const PERIOD_MS: Record<string, number> = {
@@ -16,8 +17,13 @@ export function registerMetricsRoute(
   app: FastifyInstance,
   deps: {
     executionLogger: ExecutionLogger;
+    modelBudget?: ModelBudget;
   },
 ): void {
+  if (deps.modelBudget) {
+    const budget = deps.modelBudget;
+    app.get('/api/budget', async () => budget.getSummary());
+  }
   app.get<{ Querystring: { period?: string } }>('/api/metrics', async (req, reply) => {
     const period = req.query.period ?? DEFAULT_PERIOD;
     const sinceMs = PERIOD_MS[period];

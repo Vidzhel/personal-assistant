@@ -108,6 +108,16 @@ describe('SDK backend contract (real subprocess spawn via fake executable)', () 
     expect(entry.argv).toContain('--resume=fake-123');
   });
 
+  it('passes maxBudgetUsd through to the subprocess', async () => {
+    const backend = createSdkBackend();
+    await backend(baseOpts({ maxBudgetUsd: 0.23 }));
+
+    const [entry] = readLogEntries(argvLogPath);
+    const budgetIndex = entry.argv.indexOf('--max-budget-usd');
+    expect(budgetIndex).toBeGreaterThanOrEqual(0);
+    expect(entry.argv[budgetIndex + 1]).toBe('0.23');
+  });
+
   it('strips CLAUDECODE from the subprocess env (nesting guard)', async () => {
     // Simulate running inside an outer Claude Code session, which is where
     // the nesting-guard problem actually shows up in production.

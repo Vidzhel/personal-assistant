@@ -1,5 +1,6 @@
 import { createProcessorLifecycle } from './processor-lifecycle.ts';
 import { createLogger, generateId } from '@raven/shared';
+import type { AgentTask } from '@raven/shared';
 import { z } from 'zod';
 import type { Neo4jClient } from './neo4j-client.ts';
 import type { EventBus } from '../event-bus/event-bus.ts';
@@ -42,6 +43,7 @@ interface ConsolidationDeps {
   neo4j: Neo4jClient;
   eventBus: EventBus;
   config: AppConfig;
+  signal?: AbortSignal;
 }
 
 const CONSOLIDATION_PROMPT = `You are a knowledge consolidation agent. Analyze the following auto-generated knowledge bubbles and produce a JSON response:
@@ -118,6 +120,19 @@ interface ProjectConsolidationResult {
   digestCreated: boolean;
 }
 
+function buildConsolidationTask(projectId: string, bubbleList: string[]): AgentTask {
+  return {
+    id: generateId(),
+    skillName: 'knowledge-consolidation',
+    prompt: `${CONSOLIDATION_PROMPT}\n\n---\n\nBubbles for project ${projectId}:\n\n${bubbleList.join('\n---\n')}`,
+    status: 'queued' as const,
+    priority: 'low' as const,
+    mcpServers: {},
+    agentDefinitions: {},
+    createdAt: Date.now(),
+  };
+}
+
 async function consolidateProjectBubbles(
   deps: ConsolidationDeps,
   projectId: string,
@@ -131,18 +146,22 @@ async function consolidateProjectBubbles(
     )
     .join('\n---\n');
 
-  const task = {
-    id: generateId(),
-    skillName: 'knowledge-consolidation',
-    prompt: `${CONSOLIDATION_PROMPT}\n\n---\n\nBubbles for project ${projectId}:\n\n${bubbleList}`,
-    status: 'queued' as const,
-    priority: 'low' as const,
+  const task = buildConsolidationTask(projectId, [bubbleList]);
+
+  const result = await runAgentTask({
+    task,
+    eventBus,
     mcpServers: {},
     agentDefinitions: {},
-    createdAt: Date.now(),
-  };
+    signal: deps.signal,
+  });
 
-  const result = await runAgentTask({ task, eventBus, mcpServers: {}, agentDefinitions: {} });
+  if (deps.signal?.aborted) throw new Error('Knowledge consolidation stopped');
+  if (!result.success) {
+    throw new Error(
+      `Knowledge consolidation failed for project ${projectId}: ${result.errors?.join('; ') ?? 'unsuccessful result'}`,
+    );
+  }
 
   const parseResult = ConsolidationResultSchema.safeParse(JSON.parse(result.result));
   if (!parseResult.success) {
@@ -166,6 +185,7 @@ async function consolidateProjectBubbles(
 export function createKnowledgeConsolidation(deps: ConsolidationDeps): KnowledgeConsolidation {
   const lifetime = createProcessorLifecycle(deps.eventBus, 'knowledge-consolidation');
   const neo4j = lifetime.guard(deps.neo4j);
+  const consolidationDeps = { ...deps, neo4j, signal: lifetime.signal };
 
   async function runConsolidation(projectId?: string): Promise<ConsolidationResult> {
     log.info(`Running knowledge consolidation${projectId ? ` for project ${projectId}` : ''}`);
@@ -191,11 +211,7 @@ export function createKnowledgeConsolidation(deps: ConsolidationDeps): Knowledge
 
     for (const [pid, projectBubbles] of byProject) {
       lifetime.assertActive();
-      const projectResult = await consolidateProjectBubbles(
-        { ...deps, neo4j },
-        pid,
-        projectBubbles,
-      );
+      const projectResult = await consolidateProjectBubbles(consolidationDeps, pid, projectBubbles);
       totalMerged += projectResult.merged;
       totalPruned += projectResult.pruned;
       if (projectResult.digestCreated) digestCreated = true;

@@ -11,19 +11,22 @@ export async function runCancellableBackend(
   backend: AgentBackend,
   options: BackendOptions,
 ): Promise<BackendResult> {
-  const cancelled: BackendResult = { result: '', success: false, errors: ['cancelled'] };
-  if (options.signal?.aborted) return cancelled;
+  const cancelled = (estimatedCostUsd?: number): BackendResult =>
+    estimatedCostUsd === undefined
+      ? { result: '', success: false, errors: ['cancelled'] }
+      : { result: '', success: false, errors: ['cancelled'], estimatedCostUsd };
+  if (options.signal?.aborted) return cancelled();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let onAbort: (() => void) | undefined;
   const cancellation = new Promise<BackendResult>((resolve) => {
     onAbort = () => {
-      timer = setTimeout(() => resolve(cancelled), CANCEL_DRAIN_MS);
+      timer = setTimeout(() => resolve(cancelled()), CANCEL_DRAIN_MS);
     };
     options.signal?.addEventListener('abort', onAbort, { once: true });
   });
   try {
     const result = await Promise.race([backend(options), cancellation]);
-    return options.signal?.aborted ? cancelled : result;
+    return options.signal?.aborted ? cancelled(result.estimatedCostUsd) : result;
   } finally {
     clearTimeout(timer);
     if (onAbort) options.signal?.removeEventListener('abort', onAbort);
@@ -41,6 +44,8 @@ export interface BackendOptions {
   allowedTools: string[];
   model: string;
   maxTurns: number;
+  taskId?: string;
+  maxBudgetUsd?: number;
   mcpServers: Record<string, unknown>;
   agents: Record<string, SubAgentDefinition>;
   plugins?: Array<{ type: 'local'; path: string }>;
@@ -53,13 +58,9 @@ export interface BackendOptions {
     meta?: ToolUseMeta;
   }) => void;
   onRawMessage?: (rawJson: string) => void;
-  /** Called with the SDK-assigned session id as soon as it's known (the
-   * `system`/`init` message), independent of whether the query eventually
-   * succeeds, fails, or throws mid-stream. BackendResult.sessionId only
-   * carries the id on a clean return — a mid-stream throw skips that
-   * `return` entirely, so this callback is the only way the caller can
-   * still observe (and link) a session id from a query that errored out
-   * after establishing one. See agent-session.ts's runAgentTask. */
+  /** Reports the SDK session id as soon as init arrives, so callers can link
+   * the session before the query finishes or is cancelled. The final result
+   * also retains any observed id when SDK iteration fails. */
   onSessionId?: (id: string) => void;
   signal?: AbortSignal;
   onStderr: (data: string) => void;
@@ -83,4 +84,5 @@ export interface BackendResult {
   result: string;
   success: boolean;
   errors: string[];
+  estimatedCostUsd?: number;
 }

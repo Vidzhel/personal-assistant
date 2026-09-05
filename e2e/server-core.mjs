@@ -100,11 +100,11 @@ const agentBackend = async (options) => {
       else options.signal.addEventListener('abort', resolveCall, { once: true });
     });
     call.aborted = true;
-    return { sessionId, result: '', success: false, errors: ['cancelled'] };
+    return { sessionId, result: '', success: false, errors: ['cancelled'], estimatedCostUsd: 0 };
   }
   const result = `Browser reply ${number}`;
   options.onAssistantMessage(result);
-  return { sessionId, result, success: true, errors: [] };
+  return { sessionId, result, success: true, errors: [], estimatedCostUsd: 0 };
 };
 const raven = await createRaven(
   {

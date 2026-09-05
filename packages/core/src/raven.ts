@@ -32,6 +32,7 @@ import { createPendingApprovals } from './permission-engine/pending-approvals.ts
 import { createExecutionLogger } from './agent-manager/execution-logger.ts';
 import { initializeBackend, setActiveBackend } from './agent-manager/agent-session.ts';
 import type { AgentBackend } from './agent-manager/agent-backend.ts';
+import { createModelBudget } from './agent-manager/model-budget.ts';
 import { createTaskStore } from './task-manager/task-store.ts';
 import { createYamlNamedAgentStore } from './agent-registry/yaml-named-agent-store.ts';
 import { createAgentResolver } from './agent-registry/agent-resolver.ts';
@@ -136,16 +137,6 @@ export async function createRaven(
 
   log.info(`Config loaded (model: ${config.CLAUDE_MODEL}, port: ${config.RAVEN_PORT})`);
 
-  // Initialize agent backend: injected override (tests) or the SDK backend.
-  // One backend now — the SDK drives the same `claude` binary under CLI/MAX
-  // auth. config.ANTHROPIC_API_KEY, if set, flows through as an env var
-  // rather than selecting a different code path (see agent-session.ts).
-  if (overrides.agentBackend) {
-    setActiveBackend(overrides.agentBackend);
-  } else {
-    initializeBackend();
-  }
-
   // 2. Ensure data directories (resolve relative paths against dataRoot, not CWD)
   const dbPath = overrides.dbPath ?? resolve(dataRoot, config.DATABASE_PATH);
   const sessionPath = resolve(dataRoot, config.SESSION_PATH);
@@ -158,6 +149,16 @@ export async function createRaven(
   // 3. Init database
   initDatabase(dbPath);
   const dbInterface = createDbInterface();
+  const modelBudget = createModelBudget({
+    db: getDb(),
+    dailyLimitUsd: config.RAVEN_MAX_BUDGET_USD_PER_DAY,
+    maxConcurrent: config.RAVEN_MAX_CONCURRENT_AGENTS,
+    timeZone: config.RAVEN_TIMEZONE,
+  });
+  modelBudget.recoverInterrupted();
+  // All Manager and direct model calls share this one budgeted backend.
+  if (overrides.agentBackend) setActiveBackend(overrides.agentBackend, modelBudget);
+  else initializeBackend(modelBudget);
 
   // 3b. Verify meta-project exists (seeded by migration 017). Throws rather
   // than process.exit(1) — this function must stay testable; the fatal exit
@@ -698,6 +699,7 @@ export async function createRaven(
         pendingApprovals,
         permissionEngine,
         executionLogger,
+        modelBudget,
         messageStore,
         knowledgeStore,
         reindexKnowledge: knowledge?.reindex,

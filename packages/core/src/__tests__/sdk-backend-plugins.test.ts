@@ -8,6 +8,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { createSdkBackend } from '../agent-manager/sdk-backend.ts';
+import { runCancellableBackend } from '../agent-manager/agent-backend.ts';
 
 const mockQuery = vi.mocked(query);
 
@@ -132,7 +133,13 @@ describe('SDK backend cancellation + session id (F2)', () => {
       started();
       try {
         await heldQuery;
-        yield { type: 'result', result: 'late success', subtype: 'success' };
+        yield {
+          type: 'result',
+          result: 'late success',
+          subtype: 'success',
+          total_cost_usd: 0.37,
+          modelUsage: {},
+        };
       } finally {
         closed = true;
       }
@@ -184,7 +191,8 @@ describe('SDK backend cancellation + session id (F2)', () => {
       onStderr: vi.fn(),
       signal: controller.signal,
     });
-    if (outcome === 'error') await expect(work).rejects.toThrow('fake query failure');
+    if (outcome === 'error')
+      expect(await work).toMatchObject({ success: false, errors: ['fake query failure'] });
     else expect(await work).toMatchObject({ success: true });
     expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0);
     controller.abort();
@@ -214,5 +222,262 @@ describe('SDK backend cancellation + session id (F2)', () => {
     });
 
     expect(onSessionId).toHaveBeenCalledWith('sdk-abc-123');
+  });
+
+  it('sums validated nested model costs from the latest cumulative result', async () => {
+    mockQuery.mockImplementation(async function* () {
+      yield {
+        type: 'result',
+        subtype: 'success',
+        result: 'first',
+        total_cost_usd: 0.1,
+        modelUsage: { sonnet: { costUSD: 0.1 } },
+      };
+      yield {
+        type: 'result',
+        subtype: 'success',
+        result: 'latest',
+        total_cost_usd: 0.3,
+        modelUsage: {
+          sonnet: { costUSD: 0.2 },
+          haiku: { costUSD: 0.15 },
+        },
+      };
+    } as unknown as typeof query);
+
+    const result = await createSdkBackend()({
+      prompt: 'test',
+      systemPrompt: 'test',
+      allowedTools: [],
+      model: 'sonnet',
+      maxTurns: 5,
+      mcpServers: {},
+      agents: {},
+      onAssistantMessage: () => {},
+      onStderr: () => {},
+    });
+
+    expect(result.estimatedCostUsd).toBeCloseTo(0.35);
+    expect(result.result).toBe('latest');
+  });
+
+  it('uses total cost only for reliable result subtypes and leaves malformed error cost unknown', async () => {
+    mockQuery.mockImplementation(async function* () {
+      yield {
+        type: 'result',
+        subtype: 'error_during_execution',
+        result: '',
+        total_cost_usd: 0,
+        modelUsage: {},
+      };
+    } as unknown as typeof query);
+
+    const result = await createSdkBackend()({
+      prompt: 'test',
+      systemPrompt: 'test',
+      allowedTools: [],
+      model: 'sonnet',
+      maxTurns: 5,
+      mcpServers: {},
+      agents: {},
+      onAssistantMessage: () => {},
+      onStderr: () => {},
+    });
+
+    expect(result).not.toHaveProperty('estimatedCostUsd');
+  });
+
+  it('falls back to a finite cumulative total when model usage is malformed', async () => {
+    mockQuery.mockImplementation(async function* () {
+      yield {
+        type: 'result',
+        subtype: 'error_max_budget_usd',
+        result: '',
+        total_cost_usd: 0.27,
+        modelUsage: { sonnet: { costUSD: 'invalid' } },
+      };
+    } as unknown as typeof query);
+
+    const result = await createSdkBackend()({
+      prompt: 'test',
+      systemPrompt: 'test',
+      allowedTools: [],
+      model: 'sonnet',
+      maxTurns: 5,
+      mcpServers: {},
+      agents: {},
+      onAssistantMessage: () => {},
+      onStderr: () => {},
+    });
+
+    expect(result.estimatedCostUsd).toBe(0.27);
+  });
+
+  it('does not trust a zeroed crash usage, but keeps a positive crash usage', async () => {
+    mockQuery.mockImplementation(async function* () {
+      yield {
+        type: 'result',
+        subtype: 'error_during_execution',
+        result: '',
+        total_cost_usd: 0,
+        modelUsage: { sonnet: { costUSD: 0 } },
+      };
+    } as unknown as typeof query);
+
+    const zeroCost = await createSdkBackend()({
+      prompt: 'test',
+      systemPrompt: 'test',
+      allowedTools: [],
+      model: 'sonnet',
+      maxTurns: 5,
+      mcpServers: {},
+      agents: {},
+      onAssistantMessage: () => {},
+      onStderr: () => {},
+    });
+    expect(zeroCost).not.toHaveProperty('estimatedCostUsd');
+
+    mockQuery.mockImplementation(async function* () {
+      yield {
+        type: 'result',
+        subtype: 'error_during_execution',
+        result: '',
+        total_cost_usd: 0,
+        modelUsage: { sonnet: { costUSD: 0.08 } },
+      };
+    } as unknown as typeof query);
+
+    const positiveCost = await createSdkBackend()({
+      prompt: 'test',
+      systemPrompt: 'test',
+      allowedTools: [],
+      model: 'sonnet',
+      maxTurns: 5,
+      mcpServers: {},
+      agents: {},
+      onAssistantMessage: () => {},
+      onStderr: () => {},
+    });
+    expect(positiveCost.estimatedCostUsd).toBe(0.08);
+  });
+
+  it('clears a prior estimate when the latest cumulative result is invalid', async () => {
+    mockQuery.mockImplementation(async function* () {
+      yield {
+        type: 'result',
+        subtype: 'success',
+        result: 'first',
+        total_cost_usd: 0.1,
+        modelUsage: { sonnet: { costUSD: 0.1 } },
+      };
+      yield {
+        type: 'result',
+        subtype: 'error_during_execution',
+        result: '',
+        total_cost_usd: Number.NaN,
+        modelUsage: { sonnet: { costUSD: 'unknown' } },
+      };
+    } as unknown as typeof query);
+
+    const result = await createSdkBackend()({
+      prompt: 'test',
+      systemPrompt: 'test',
+      allowedTools: [],
+      model: 'sonnet',
+      maxTurns: 5,
+      mcpServers: {},
+      agents: {},
+      onAssistantMessage: () => {},
+      onStderr: () => {},
+    });
+
+    expect(result).not.toHaveProperty('estimatedCostUsd');
+  });
+
+  it('retains a trusted cost when SDK iteration throws after a result', async () => {
+    mockQuery.mockImplementation(async function* () {
+      yield { type: 'system', subtype: 'init', session_id: 'sdk-failed' };
+      yield {
+        type: 'result',
+        subtype: 'error_max_turns',
+        result: 'partial',
+        total_cost_usd: 0.42,
+        modelUsage: { sonnet: { costUSD: 0.42 } },
+      };
+      throw new Error('stream disconnected');
+    } as unknown as typeof query);
+
+    const result = await createSdkBackend()({
+      prompt: 'test',
+      systemPrompt: 'test',
+      allowedTools: [],
+      model: 'sonnet',
+      maxTurns: 5,
+      mcpServers: {},
+      agents: {},
+      onAssistantMessage: () => {},
+      onStderr: () => {},
+    });
+
+    expect(result).toMatchObject({
+      sessionId: 'sdk-failed',
+      result: 'partial',
+      success: false,
+      estimatedCostUsd: 0.42,
+    });
+    expect(result.errors).toContain('stream disconnected');
+  });
+
+  it('forwards maxBudgetUsd to the SDK query', async () => {
+    const backend = createSdkBackend();
+    await backend({
+      prompt: 'test',
+      systemPrompt: 'test',
+      allowedTools: [],
+      model: 'sonnet',
+      maxTurns: 5,
+      maxBudgetUsd: 0.23,
+      mcpServers: {},
+      agents: {},
+      onAssistantMessage: () => {},
+      onStderr: () => {},
+    });
+
+    expect(mockQuery.mock.calls[0]?.[0].options?.maxBudgetUsd).toBe(0.23);
+  });
+
+  it('preserves trusted cost when cancellation forces the outer result', async () => {
+    const controller = new AbortController();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const work = runCancellableBackend(
+      async () => {
+        await held;
+        return { result: 'late', success: true, errors: [], estimatedCostUsd: 0.19 };
+      },
+      {
+        prompt: 'test',
+        systemPrompt: 'test',
+        allowedTools: [],
+        model: 'sonnet',
+        maxTurns: 5,
+        mcpServers: {},
+        agents: {},
+        onAssistantMessage: () => {},
+        onStderr: () => {},
+        signal: controller.signal,
+      },
+    );
+    controller.abort();
+    release();
+
+    await expect(work).resolves.toMatchObject({
+      result: '',
+      success: false,
+      errors: ['cancelled'],
+      estimatedCostUsd: 0.19,
+    });
   });
 });

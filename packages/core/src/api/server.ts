@@ -62,6 +62,7 @@ import type { TemplateScheduler } from '../template-engine/template-scheduler.ts
 import type { ScaffoldingApi } from '../scaffolding/scaffolding-api.ts';
 import type { ScaffoldAndActivateFn } from '../scaffolding/scaffold-and-activate.ts';
 import { registerScaffoldingRoutes } from '../scaffolding/scaffolding-routes.ts';
+import type { ModelBudget } from '../agent-manager/model-budget.ts';
 import type { IntentStore } from '../intents/intent-store.ts';
 import { registerIntentRoutes } from './routes/intents.ts';
 
@@ -77,6 +78,7 @@ export interface ApiDeps {
   pendingApprovals: PendingApprovals;
   permissionEngine?: PermissionEngine;
   executionLogger: ExecutionLogger;
+  modelBudget?: ModelBudget;
   messageStore: MessageStore;
   knowledgeStore?: KnowledgeStore;
   reindexKnowledge?: () => Promise<KnowledgeRefreshReport>;
@@ -154,6 +156,7 @@ export async function createApiServer(
   });
   registerMetricsRoute(app, {
     executionLogger: deps.executionLogger,
+    modelBudget: deps.modelBudget,
   });
   if (deps.knowledgeStore && deps.ingestionProcessor) {
     registerKnowledgeRoutes(app, {

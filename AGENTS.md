@@ -93,9 +93,15 @@ versions; do not copy versions from historical planning documents.
   AgentManager run history lives at `tasks/runs/<agentTaskId>.yaml`; admission and
   terminal writes precede model dispatch and completion events. Restart marks
   unfinalized runs failed/interrupted with an unknown prior execution outcome;
-  history never replays model work. SQLite still owns sessions, approvals and
-  intents. Direct heartbeat/learning model calls bypass Manager history; F6 must
-  enforce budgets at their shared execution boundary.
+  history never replays model work. SQLite still owns sessions, approvals,
+  intents and model-budget leases. All Raven Claude queries, including direct
+  heartbeat/learning calls that bypass Manager history, share budget admission.
+  Reserve before dispatch, settle before returning, and retain missing usage or
+  interrupted reservations as unknown. The configured local day is fixed at
+  admission. `GET /api/budget` exposes known/reserved/unknown estimates; zero
+  budget blocks queries. SDK query estimates include nested agents but are not
+  subscription billing or a strict spending cap, and exclude Gemini/external
+  commands. Keep evaluator admission headroom while its parent awaits validation.
   Knowledge bodies are Markdown; durable links and project membership still live
   in Neo4j. Routine reindexing must preserve those relationships and graph metadata.
   Reconciliation is read-only; explicit reindex and system maintenance retry stale

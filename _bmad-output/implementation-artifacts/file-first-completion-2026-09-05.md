@@ -20,7 +20,7 @@ external repositories.
 | F3 | Project-local agent-run records and replacement of remaining task SQL readers | Complete; reviewed, 2,092 tests and 14 browser journeys passed |
 | F4 | Drain admitted MCP mutations before terminal task state and store shutdown | Complete; reviewed, 2,105 tests and 14 browser journeys passed |
 | F5 | File/graph reconciliation and changed-content derived-index refresh | Complete; 2,138 default / 132 graph tests, 14 browser journeys |
-| F6 | Enforced global daily budget through existing execution paths | Pending |
+| F6 | Enforced global daily budget through existing execution paths | Complete; 2,176 tests, 14 browser journeys and packaged restart |
 | F7 | Ordinary schedule absence/staleness detection | Pending |
 | F8 | Durable provider upload cleanup/retry after cancellation and restart | Pending |
 | F9 | Remove obsolete storage compatibility/schema paths, reconcile docs, full/browser/compiled/container verification | Pending |
@@ -70,7 +70,13 @@ F5 evidence and repair limits are in
 Read-only reconciliation, recoverable file writes and revisioned derived refresh
 are complete. The default suite passed 203 files / 2,138 tests (six deliberate
 live skips), 132 disposable Neo4j tests, required checks, core build, fourteen
-browser journeys and packaged restart. F6 is the next checkpoint.
+browser journeys and packaged restart.
+F6 evidence and cost-accounting limits are in
+[tech-spec-f6-model-budget.md](tech-spec-f6-model-budget.md). Shared admission,
+known/unknown settlement and SDK query caps are complete across chat, tasks,
+heartbeat and learning. The default suite passed 207 files / 2,176 tests (six
+live skips); required checks, core build, fourteen browser journeys and packaged
+restart passed. F7 is next.
 
 Implementation remains ordered, with parent review and a tested commit/push for
 each checkpoint.

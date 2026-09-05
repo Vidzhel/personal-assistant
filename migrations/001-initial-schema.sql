@@ -63,3 +63,19 @@ CREATE TABLE IF NOT EXISTS preferences (
   value TEXT NOT NULL,
   updated_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS model_budget_leases (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  model TEXT NOT NULL,
+  bucket_day TEXT NOT NULL,
+  time_zone TEXT NOT NULL,
+  reservation_micro_usd INTEGER NOT NULL CHECK (reservation_micro_usd >= 0),
+  actual_micro_usd INTEGER CHECK (actual_micro_usd IS NULL OR actual_micro_usd >= 0),
+  status TEXT NOT NULL CHECK (status IN ('reserved', 'known', 'unknown', 'released')),
+  reason TEXT,
+  created_at INTEGER NOT NULL,
+  settled_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_model_budget_leases_day_status
+  ON model_budget_leases(bucket_day, status);

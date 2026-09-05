@@ -3,6 +3,47 @@ import type { AgentBackend, BackendOptions, BackendResult } from './agent-backen
 
 const INPUT_SUMMARY_MAX_LENGTH = 200;
 const TOOL_RESULT_MAX_LENGTH = 500;
+const COST_FALLBACK_SUBTYPES = new Set(['success', 'error_max_turns', 'error_max_budget_usd']);
+
+function readModelCost(entry: unknown): number | undefined {
+  if (entry === null || typeof entry !== 'object') return undefined;
+  const cost = (entry as { costUSD?: unknown }).costUSD;
+  return typeof cost === 'number' && Number.isFinite(cost) && cost >= 0 ? cost : undefined;
+}
+
+function readModelUsageCost(usage: unknown): number | undefined {
+  if (usage === null || typeof usage !== 'object' || Array.isArray(usage)) return undefined;
+  const entries = Object.values(usage as Record<string, unknown>);
+  if (entries.length === 0) return undefined;
+  let total = 0;
+  for (const entry of entries) {
+    const cost = readModelCost(entry);
+    if (cost === undefined) return undefined;
+    total += cost;
+  }
+  return Number.isFinite(total) ? total : undefined;
+}
+
+function readEstimatedCost(message: Record<string, unknown>): number | undefined {
+  const modelCost = readModelUsageCost(message.modelUsage);
+  if (
+    modelCost !== undefined &&
+    (COST_FALLBACK_SUBTYPES.has(String(message.subtype)) || modelCost > 0)
+  ) {
+    return modelCost;
+  }
+
+  if (
+    typeof message.subtype !== 'string' ||
+    !COST_FALLBACK_SUBTYPES.has(message.subtype) ||
+    typeof message.total_cost_usd !== 'number' ||
+    !Number.isFinite(message.total_cost_usd) ||
+    message.total_cost_usd < 0
+  ) {
+    return undefined;
+  }
+  return message.total_cost_usd;
+}
 
 // eslint-disable-next-line max-lines-per-function -- manages SDK lifecycle with streaming message parsing
 export function createSdkBackend(): AgentBackend {
@@ -12,6 +53,7 @@ export function createSdkBackend(): AgentBackend {
     let resultText = '';
     let success = false;
     const errors: string[] = [];
+    let estimatedCostUsd: number | undefined;
 
     // The owner runs MAX-plan CLI auth (ANTHROPIC_API_KEY empty in
     // production): the SDK spawns its bundled `claude` binary and inherits
@@ -62,6 +104,10 @@ export function createSdkBackend(): AgentBackend {
       abortController,
     };
 
+    if (opts.maxBudgetUsd !== undefined) {
+      queryOptions.maxBudgetUsd = opts.maxBudgetUsd;
+    }
+
     if (opts.canUseTool) {
       queryOptions.canUseTool = opts.canUseTool;
     }
@@ -92,11 +138,19 @@ export function createSdkBackend(): AgentBackend {
         prompt: opts.prompt,
         options: queryOptions as Parameters<typeof query>[0]['options'],
       })) {
+        const msg = message as Record<string, unknown>;
+        if (msg.type === 'result') {
+          // Result costs are cumulative. A later result supersedes an earlier
+          // estimate, including when its usage is unavailable; retaining an
+          // older value would under-report work done after that result.
+          estimatedCostUsd = readEstimatedCost(msg);
+        }
         if (opts.signal?.aborted) {
           errors.push('cancelled');
+          success = false;
+          resultText = '';
           break;
         }
-        const msg = message as Record<string, unknown>;
         opts.onRawMessage?.(JSON.stringify(msg));
 
         if (msg.type === 'system' && msg.subtype === 'init') {
@@ -169,9 +223,24 @@ export function createSdkBackend(): AgentBackend {
           }
         }
       }
+    } catch (error) {
+      if (opts.signal?.aborted) {
+        if (!errors.includes('cancelled')) errors.push('cancelled');
+        success = false;
+        resultText = '';
+      } else {
+        errors.push(error instanceof Error ? error.message : String(error));
+        success = false;
+      }
     } finally {
       opts.signal?.removeEventListener('abort', onAbort);
     }
-    return { sessionId, result: resultText, success, errors };
+    return {
+      sessionId,
+      result: resultText,
+      success,
+      errors,
+      ...(estimatedCostUsd === undefined ? {} : { estimatedCostUsd }),
+    };
   };
 }

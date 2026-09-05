@@ -124,15 +124,18 @@ describe('e2e: admitted local MCP calls drain before task shutdown', () => {
     root = mkdtempSync(join(tmpdir(), 'raven-e2e-mcp-drain-'));
     const paths = createRavenTestFixture(root);
     const started = deferred<BackendOptions>();
-    raven = await createRaven(buildTestConfig(), {
-      ...paths,
-      skipSuites: true,
-      apiHost: '127.0.0.1',
-      agentBackend: async (options) => {
-        started.resolve(options);
-        return backend(options);
+    raven = await createRaven(
+      { ...buildTestConfig(), RAVEN_MAX_CONCURRENT_AGENTS: 1 },
+      {
+        ...paths,
+        skipSuites: true,
+        apiHost: '127.0.0.1',
+        agentBackend: async (options) => {
+          started.resolve(options);
+          return backend(options);
+        },
       },
-    });
+    );
     await raven.start();
     const completions: AgentTaskCompleteEvent[] = [];
     raven.eventBus.on<AgentTaskCompleteEvent>('agent:task:complete', (event) => {
@@ -296,13 +299,16 @@ describe('e2e: admitted local MCP calls drain before task shutdown', () => {
   it('keeps validator admission headroom at maxConcurrent=1', async () => {
     const treeCreated = deferred<string>();
     const order: string[] = [];
+    const caps: number[] = [];
     const backend: AgentBackend = async (options) => {
+      caps.push(options.maxBudgetUsd!);
       if (options.prompt.startsWith('Evaluate this task result.')) {
         order.push('evaluator-start');
         return {
           result: JSON.stringify({ passed: true, reason: 'Evaluator approved the worker result.' }),
           success: true,
           errors: [],
+          estimatedCostUsd: 0.01,
         };
       }
       if (options.prompt.includes('validator headroom worker')) {
@@ -315,7 +321,12 @@ describe('e2e: admitted local MCP calls drain before task shutdown', () => {
         });
         expect(completion).not.toMatchObject({ isError: true });
         order.push('worker-complete');
-        return { result: 'worker backend complete', success: true, errors: [] };
+        return {
+          result: 'worker backend complete',
+          success: true,
+          errors: [],
+          estimatedCostUsd: 0.02,
+        };
       }
 
       order.push('initial-start');
@@ -354,7 +365,7 @@ describe('e2e: admitted local MCP calls drain before task shutdown', () => {
         .parse(created).content[0].text;
       treeCreated.resolve((JSON.parse(text) as { treeId: string }).treeId);
       order.push('initial-tree-created');
-      return { result: 'tree created', success: true, errors: [] };
+      return { result: 'tree created', success: true, errors: [], estimatedCostUsd: 0.03 };
     };
 
     const { started, completions, requests } = await boot(backend);
@@ -380,6 +391,17 @@ describe('e2e: admitted local MCP calls drain before task shutdown', () => {
     expect(workerRequest).toBeDefined();
     expect(evaluatorRequest).toBeDefined();
     await vi.waitFor(() => expect(completions).toHaveLength(3));
+    expect(caps).toHaveLength(3);
+    expect(caps.every((cap) => cap > 0)).toBe(true);
+    expect(caps[2]).toBeLessThan(caps[1]);
+    const budgetResponse = await fetch(`${baseUrl}/api/budget`);
+    expect(budgetResponse.status).toBe(200);
+    expect(await budgetResponse.json()).toMatchObject({
+      knownUsd: 0.06,
+      reservedUsd: 0,
+      unknownUsd: 0,
+      counts: { known: 3, reserved: 0, unknown: 0 },
+    });
     const evaluatorCompletionIndex = completions.findIndex(
       (event) => event.payload.taskId === evaluatorRequest?.payload.taskId,
     );

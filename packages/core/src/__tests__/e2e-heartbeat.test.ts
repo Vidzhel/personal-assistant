@@ -47,7 +47,7 @@ describe('e2e: heartbeat silence through the real scheduled model boundary', () 
         agentBackend: async (options) => {
           calls.push(options);
           options.onAssistantMessage(reply);
-          return { result: reply, success: true, errors: [] };
+          return { result: reply, success: true, errors: [], estimatedCostUsd: 0.03 };
         },
       },
     );
@@ -95,6 +95,15 @@ describe('e2e: heartbeat silence through the real scheduled model boundary', () 
     expect(alertResponse.status).toBe(200);
     expect(await alertResponse.json()).toEqual({ triggered: true });
     expect(calls).toHaveLength(2);
+    expect(calls.every((call) => call.maxBudgetUsd! > 0 && call.taskId)).toBe(true);
+    const budgetResponse = await fetch(`${baseUrl}/api/budget`);
+    expect(budgetResponse.status).toBe(200);
+    expect(await budgetResponse.json()).toMatchObject({
+      knownUsd: 0.06,
+      reservedUsd: 0,
+      unknownUsd: 0,
+      counts: { known: 2, reserved: 0, unknown: 0 },
+    });
     expect(notifications).toEqual([
       expect.objectContaining({
         source: 'heartbeat',

@@ -288,8 +288,18 @@ outcome; they never replay work. A write failure reports an unresolved durable
 outcome and preserves conflicting bytes. Shutdown keeps stores open until admitted
 writes settle; it cannot impose a timeout and still promise safe disposal.
 Direct heartbeat, session retrospective and memory/knowledge consolidation calls
-bypass Manager history. F6's daily budget must cover those shared model execution
-paths as well as recorded Manager attempts.
+bypass Manager history. Every Raven Claude query uses the shared budgeted backend:
+SQLite `model_budget_leases` reserves integer micro-USD before dispatch, passes a
+query cap to the SDK, and settles its estimated cost before returning. The local
+calendar day is fixed at admission. Missing usage and interrupted reservations
+consume their full reservation as unknown; startup never refunds them. Concurrent
+queries retain headroom for nested evaluator calls and fail promptly on exhaustion.
+`GET /api/budget` separates known estimates, reservations and unknown usage.
+
+This admission budget measures SDK query estimates, including query-pipeline
+subagents. It is not the subscription bill or a strict provider billing cap: the
+SDK can exceed the query cap during a work step. Gemini and arbitrary external
+commands are outside this Claude-query budget. Zero daily budget blocks queries.
 
 Managed projects store UUID identity and settings in `context.md`'s `ravenProject`
 metadata. The lifecycle writes current file metadata, preserves human context,

@@ -111,8 +111,15 @@ isolated tests supply a fake model boundary instead.
 | `RAVEN_TIMEZONE`                 | Timezone for schedules (e.g., `Europe/London`)                                            |
 | `RAVEN_DIGEST_TIME`              | Legacy unused setting; edit the morning-digest schedule definition to set its cron time   |
 | `RAVEN_MAX_CONCURRENT_AGENTS`    | Max parallel AI agents (default: `3`)                                                     |
-| `RAVEN_MAX_BUDGET_USD_PER_DAY`   | Legacy unused setting; it does not enforce a global daily spending limit                  |
+| `RAVEN_MAX_BUDGET_USD_PER_DAY`   | Daily Claude query estimate budget (default $5); zero blocks model queries                  |
 | `NEO4J_ENABLED`                  | `false` disables all graph connections; `.env.example` and default Compose start disabled |
+
+The daily model budget applies to chat, tasks, heartbeat and learning. It reserves
+capacity before each Claude query and retains unknown usage after cancellation or
+restart. `GET /api/budget` reports known, reserved and unknown estimates for the
+configured timezone's calendar day. SDK estimates include nested query agents;
+they are not subscription charges or a hard billing ceiling. A query can overshoot
+its cap during a work step. Gemini and external commands are outside this budget.
 
 ## Development with Claude or Codex
 

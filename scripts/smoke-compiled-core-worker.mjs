@@ -77,6 +77,7 @@ const agentBackend = async (options) => {
   return {
     sessionId: 'compiled-smoke-session',
     result: 'Compiled smoke response.',
+    estimatedCostUsd: 0,
     success: true,
     errors: [],
   };
