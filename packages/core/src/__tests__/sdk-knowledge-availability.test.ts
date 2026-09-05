@@ -40,6 +40,8 @@ const noSkillsAgent: NamedAgent = {
 describe('SDK knowledge availability and scope', () => {
   let root: string;
   let eventBus: EventBus;
+  let finishQuery: () => void;
+  let running: ReturnType<typeof runAgentTask> | undefined;
   const connections: Array<{ client: Client; server: McpSdkServerConfigWithInstance['instance'] }> =
     [];
 
@@ -48,13 +50,22 @@ describe('SDK knowledge availability and scope', () => {
     eventBus = new EventBus();
     setConfig(buildTestConfig());
     vi.mocked(query).mockReset();
+    running = undefined;
+    const queryGate = new Promise<void>((resolve) => {
+      finishQuery = resolve;
+    });
     vi.mocked(query).mockImplementation(async function* () {
+      await queryGate;
       yield { type: 'result', result: 'Fixture answer', subtype: 'success' };
     } as unknown as typeof query);
     setActiveBackend(createSdkBackend());
   });
 
   afterEach(async () => {
+    finishQuery();
+    if (running) {
+      expect(await running).toMatchObject({ success: true, result: 'Fixture answer' });
+    }
     for (const { client, server } of connections.splice(0)) {
       await client.close();
       await server.close();
@@ -87,15 +98,14 @@ describe('SDK knowledge availability and scope', () => {
       ...capabilities,
       ...overrides,
     };
-    const result = await runAgentTask({
+    running = runAgentTask({
       task,
       eventBus,
       ...capabilities,
       ravenMcpDeps: deps,
       memoryStore: createMemoryStore({ projectsDir: join(root, 'projects') }),
     });
-    expect(result).toMatchObject({ success: true, result: 'Fixture answer' });
-    expect(query).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(query).toHaveBeenCalledOnce());
     return vi.mocked(query).mock.calls[0][0].options!;
   }
 

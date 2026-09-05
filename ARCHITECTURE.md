@@ -330,8 +330,14 @@ Graph initialization publishes dependencies only after success and disposes
 partially started processors on failure. Shutdown stops admission, aborts local
 waits and drains tracked runtime work before disposing stores. Voice requests,
 maintenance and direct retrospective/heartbeat/consolidation work own their
-lifetimes too. Remote provider completion/cleanup and already admitted in-process
-MCP mutations have narrower cancellation guarantees, recorded in the ledger.
+lifetimes too. Each `runAgentTask` shares one admission tracker between its Raven
+and memory MCP servers. Abort or backend completion closes admission and suppresses
+late SDK callbacks; admitted local handlers drain before terminal persistence and
+store disposal. Trackers are per task, so a worker awaiting its validator does not
+hold up that validator's own cleanup. Validator admission still has headroom when
+the normal concurrency limit is one. Cancellation does not roll back a committed
+local mutation or prove remote provider completion/cleanup; those external limits
+remain recorded in the ledger.
 
 ## API Layer
 

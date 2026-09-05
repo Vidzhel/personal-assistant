@@ -18,6 +18,7 @@ import type { MemoryStore } from '../agent-memory/memory-store.ts';
 import { createMemoryMcp } from '../mcp-server/memory-mcp.ts';
 import { getAvailableKnowledgeTools } from '../mcp-server/tools/knowledge.ts';
 import { formatMemoryBlock } from '../agent-memory/memory-store.ts';
+import { createToolCallLifetime } from '../mcp-server/tool-call-lifetime.ts';
 
 const log = createLogger('agent-session');
 
@@ -291,6 +292,10 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
   let success = false;
   const errors: string[] = [];
   const stderrChunks: string[] = [];
+  const toolCalls = createToolCallLifetime();
+  const closeToolAdmission = (): void => toolCalls.close();
+  signal?.addEventListener('abort', closeToolAdmission, { once: true });
+  if (signal?.aborted) closeToolAdmission();
 
   try {
     // Build MCP config - transform our config to backend format
@@ -322,7 +327,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
 
     // Add Raven MCP (in-process, scoped to this task)
     if (opts.ravenMcpDeps) {
-      const ravenMcp = createRavenMcp(opts.ravenMcpDeps, scope, signal);
+      const ravenMcp = createRavenMcp(opts.ravenMcpDeps, scope, { signal, lifetime: toolCalls });
       sdkMcpServers['raven'] = ravenMcp;
     }
 
@@ -331,6 +336,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
     if (opts.memoryStore && memoryAgentName) {
       sdkMcpServers['memory'] = createMemoryMcp({
         signal,
+        lifetime: toolCalls,
         memoryStore: opts.memoryStore,
         agentName: memoryAgentName,
       });
@@ -426,16 +432,19 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       plugins: opts.plugins,
       canUseTool: canUseTool
         ? (...args) =>
-            signal?.aborted
-              ? Promise.resolve({ behavior: 'deny' as const, message: 'Task cancelled' })
+            !toolCalls.isOpen()
+              ? Promise.resolve({
+                  behavior: 'deny' as const,
+                  message: 'Task no longer accepts tool calls',
+                })
               : canUseTool(...args).then((result) =>
-                  signal?.aborted
-                    ? { behavior: 'deny' as const, message: 'Task cancelled' }
+                  !toolCalls.isOpen()
+                    ? { behavior: 'deny' as const, message: 'Task no longer accepts tool calls' }
                     : result,
                 )
         : undefined,
       onAssistantMessage: (text: string, meta?: ToolUseMeta) => {
-        if (signal?.aborted) return;
+        if (!toolCalls.isOpen()) return;
         const agentName = resolveAgentName(meta);
         let messageId: string | undefined;
         if (task.sessionId && messageStore) {
@@ -469,7 +478,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       // would be purely observational and redundant with that policy's own
       // audit writes.
       onToolUse: (toolName: string, toolInput: string, meta?: ToolUseMeta) => {
-        if (signal?.aborted) return;
+        if (!toolCalls.isOpen()) return;
         trackAgentToolUse(agentToolMap, { toolName, toolInput, meta });
 
         const agentName = resolveAgentName(meta);
@@ -501,7 +510,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
         });
       },
       onToolResult: (result) => {
-        if (signal?.aborted) return;
+        if (!toolCalls.isOpen()) return;
         const agentName = resolveAgentName(result.meta);
         if (task.sessionId && messageStore) {
           messageStore.appendMessage(task.sessionId, {
@@ -515,7 +524,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
         }
       },
       onRawMessage: (rawJson: string) => {
-        if (signal?.aborted) return;
+        if (!toolCalls.isOpen()) return;
         if (task.sessionId && messageStore) {
           messageStore.appendRawMessage(task.sessionId, rawJson);
         }
@@ -526,17 +535,17 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       // on a throw (backendResult.sessionId is never assigned in that case,
       // since the throw skips the backend's `return` entirely).
       onSessionId: (id: string) => {
-        if (signal?.aborted) return;
+        if (!toolCalls.isOpen()) return;
         sdkSessionId = id;
       },
       signal,
       onStderr: (data: string) => {
-        if (signal?.aborted) return;
+        if (!toolCalls.isOpen()) return;
         stderrChunks.push(data);
         log.debug(`Agent stderr: ${data.trim()}`);
       },
       cwd: projectRoot,
-    });
+    }).finally(closeToolAdmission);
 
     sdkSessionId = backendResult.sessionId ?? sdkSessionId;
     resultText = backendResult.result;
@@ -554,6 +563,14 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       errors.push(`stderr: ${stderrOutput.slice(STDERR_ERROR_TAIL_LENGTH)}`);
     }
   } finally {
+    closeToolAdmission();
+    try {
+      // Every admitted local handler retains its storage dependencies until it
+      // settles, even if the backend abandoned its wait or already returned.
+      await toolCalls.drain();
+    } finally {
+      signal?.removeEventListener('abort', closeToolAdmission);
+    }
     // Always link, even when resuming and even on a mid-stream throw: if
     // the SDK continues the same session id this is a no-op, but resume
     // can also fork to a new id, in which case the next turn must resume
@@ -568,6 +585,10 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
   }
 
   const durationMs = Date.now() - startTime;
+  if (signal?.aborted) {
+    success = false;
+    if (!errors.includes('cancelled')) errors.push('cancelled');
+  }
 
   return {
     taskId: task.id,

@@ -105,8 +105,10 @@ versions; do not copy versions from historical planning documents.
   Permission checks must be enforced in tools/runtime, not only prompt text.
 - Stop admission and own listeners, timers and in-flight local work across
   stop/restart. Use abort signals and post-await checks around side effects.
-  Client cancellation does not prove remote work stopped, and already admitted
-  MCP mutation draining remains a specific deferred task.
+  Each model task closes local MCP admission on abort/completion and drains
+  admitted Raven/memory handlers before returning. Keep stores alive during that
+  drain. Cancellation does not roll back committed mutations or prove remote work
+  stopped.
 - Learning uses interactive retrospectives, candidate files and consolidation.
   Rejected, failed or partial consolidation must retain pending candidates; archive
   only after successful application and index generation. Heartbeat is disabled

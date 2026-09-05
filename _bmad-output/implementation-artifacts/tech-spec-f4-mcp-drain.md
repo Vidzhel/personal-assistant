@@ -2,7 +2,7 @@
 title: Drain admitted local MCP calls
 type: fix
 created: '2026-09-05'
-status: planned
+status: complete
 execution_mode: plan-code-review
 ---
 
@@ -45,3 +45,38 @@ Exercise normal backend completion with an outstanding handler as well as abort.
 Retain uncooperative-backend cancellation coverage and add a single-concurrency
 tree completion/validator regression. Run required checks and the full default
 suite before parent review, commit and push.
+
+## Reviewed result and evidence
+
+The small per-task tracker closes admission synchronously, releases each admitted
+handler in `finally`, and waits for every release. Raven and memory MCP servers
+share that tracker. `runAgentTask` closes it on abort/backend settlement, suppresses
+late SDK callbacks and permission results, drains before return, and removes its
+abort listener. An abort during drain still yields cancellation. Already committed
+mutations are retained; a stuck handler keeps its task and stores open rather
+than triggering unsafe disposal.
+
+The SDK availability tests now keep their fake query open while exercising real
+MCP clients; invoking tools after the task ended is correctly refused. New tests
+hold Raven and memory handlers independently, exercise exceptions, verify an
+uncooperative backend's late callbacks, and use real MCP transports around a held
+physical memory write. Composed shutdown retains DB access and withholds terminal
+YAML/events until that write commits. The concurrency-one regression creates a
+real tree through MCP, completes the worker through MCP, and observes evaluator
+completion before worker completion without deadlock.
+
+- Full default suite: 199 files, 2,105 passed, six explicit live TickTick skips
+  (`/tmp/raven-f4-full.log`).
+- Required checks: `/tmp/raven-f4-check-final.log`. The new composed test's unknown
+  MCP response was narrowed with Zod after the first typecheck identified it;
+  the final seven session/composed tests passed (`/tmp/raven-f4-reviewed-final.log`).
+- Core production build: `/tmp/raven-f4-build-core.log`; packaged restart:
+  `/tmp/raven-f4-compiled.log` (two clean process exits and persisted history).
+- Fourteen browser journeys passed (`/tmp/raven-f4-browser.log`).
+- All 87 captured definition-file hashes remain unchanged. Owner IDE/project
+  folders and next-env bytes are preserved and excluded from the checkpoint.
+
+This protects admitted in-process MCP handlers and task-owned callbacks. It does
+not claim rollback or confirmed termination of remote provider work, external MCP
+processes or SDK subprocess filesystem operations. Future graph/file interruption
+recovery remains F5; provider upload cleanup remains F8.
