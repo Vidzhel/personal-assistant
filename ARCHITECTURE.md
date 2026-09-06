@@ -704,3 +704,14 @@ coverage, dates/timezones, exact task identity, targeted updates and read-back.
 The local Open API adapter and its competing board mirror are retired. Existing
 deployment volumes require the explicit setup/install command; rebuilding never
 silently overwrites customized capability definitions.
+
+## Google Calendar planning reads
+
+The existing `calendar` capability uses a scoped stdio MCP with two read tools,
+backed by fixed Google Workspace CLI Calendar API commands. It replaces the old
+Bash-only Calendar skill, preserving ordinary workspace permissions. Google expands
+recurrence; the adapter bounds and follows pagination, retaining partial results
+with explicit coverage. Credentials live outside Git in the Git-excluded data volume, and
+setup deliberately binds the default agent. TickTick tasks remain separate from
+Google events. See [setup](docs/google-calendar.md) and the
+[specification](_bmad-output/implementation-artifacts/tech-spec-google-calendar-planning.md).

@@ -480,3 +480,9 @@ no external viewer/CDN or server render command. Static HTML previews
 exclude scripts and external resources; generate a self-contained report in the
 repository. Office/media formats can be downloaded, or repository tools can render
 a PDF/image/HTML artifact for preview. Removing an attachment never deletes its files.
+
+### Google Calendar meetings alongside TickTick
+
+Use `./scripts/raven.sh setup-google-calendar` while Raven is stopped, then start
+it again. See [Google Calendar setup](google-calendar.md) for Google login, existing credentials,
+work/shared calendars and checking combined day-planning coverage.

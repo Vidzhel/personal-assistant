@@ -9,16 +9,19 @@ action="${1:-start}"
 if (( $# > 0 )); then shift; fi
 
 usage() {
-  echo 'Usage: ./scripts/raven.sh [start|login|setup-private-access|setup-ticktick|status|logs|stop]'
+  echo 'Usage: ./scripts/raven.sh [start|login|setup-private-access|setup-ticktick|setup-google-calendar|status|logs|stop]'
   echo 'Reads .env (or RAVEN_ENV_FILE). Start builds, checks Claude login and starts services.'
 }
 
 case "$action" in
   help|-h|--help) usage; exit 0 ;;
-  start|login|setup-private-access|setup-ticktick|status|logs|stop) ;;
+  start|login|setup-private-access|setup-ticktick|setup-google-calendar|status|logs|stop) ;;
   *) usage >&2; exit 2 ;;
 esac
 if (( $# > 0 )); then usage >&2; exit 2; fi
+if [[ "$action" == setup-google-calendar ]]; then
+  exec bash "$repo_root/scripts/setup-google-calendar.sh"
+fi
 if [[ ! -f "$env_file" ]]; then
   echo "Missing environment file: $env_file. Copy .env.example and configure it first." >&2
   exit 1

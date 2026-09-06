@@ -251,3 +251,9 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full system architecture, inclu
 - Event bus and flows
 - Capability library and compiled background services
 - Docker deployment
+
+### Google Calendar meetings alongside TickTick
+
+Use `./scripts/raven.sh setup-google-calendar` while Raven is stopped, then start
+it again. See [Google Calendar setup](docs/google-calendar.md) for Google login, existing credentials,
+work/shared calendars and checking combined day-planning coverage.

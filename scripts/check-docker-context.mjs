@@ -14,7 +14,7 @@ const allowed = [
   /^packages\/core\/scripts\/copy-build-assets\.mjs$/,
   /^migrations\/[^/]+\.sql$/,
   /^scripts\/smoke-compiled-core(?:-worker)?\.mjs$/,
-  /^deployment\/(runtime-init|entrypoint|install-ticktick)\.mjs$/,
+  /^deployment\/(runtime-init|entrypoint|install-ticktick|install-google-calendar|install-gws)\.mjs$/,
   /^deployment\/seeds\/.+$/,
 ];
 const forbidden =
@@ -41,6 +41,11 @@ try {
     'deployment/entrypoint.mjs',
     'deployment/runtime-init.mjs',
     'deployment/install-ticktick.mjs',
+    'deployment/install-google-calendar.mjs',
+    'deployment/install-gws.mjs',
+    'deployment/seeds/library/mcps/google-calendar.json',
+    'deployment/seeds/library/skills/productivity/scheduling/calendar/config.json',
+    'deployment/seeds/library/skills/productivity/scheduling/calendar/skill.md',
     'deployment/seeds/library/mcps/ticktick.json',
     'deployment/seeds/library/skills/productivity/_index.md',
     'deployment/seeds/library/skills/productivity/task-management/_index.md',

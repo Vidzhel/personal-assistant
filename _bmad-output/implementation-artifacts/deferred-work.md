@@ -132,8 +132,9 @@ lists task, habit, focus and countdown operations but does not document subscrib
 calendar event retrieval. Do not equate an empty task result with a free day or
 claim calendar coverage from the TickTick task tools.
 
-Pending input: identify the subscription source (Google Calendar, Microsoft 365,
-or an ICS feed). Read the source calendar directly if TickTick cannot expose it.
+Source confirmed: Google Calendar. Implementation and verification are tracked in
+[Google Calendar planning](tech-spec-google-calendar-planning.md). Read the source
+calendar directly because TickTick does not document subscribed-event access.
 Reuse an existing calendar capability where suitable, with verified container
 tool availability, authentication and a scoped execution grant. A Google route
 must list calendars with pagination and query every selected calendar with event
@@ -147,3 +148,23 @@ without creating duplicate TickTick tasks or modifying calendar events. Calendar
 write support is outside this read/plan request.
 
 Source: https://help.ticktick.com/articles/7438129581631995904
+
+### Google Calendar verification remaining (September 6 follow-up)
+
+The source adapter, scoped capability and setup command are implemented; see the
+linked specification for verification. Owner account validation failed with the
+safe provider category `invalid_grant`; no calendars or events were retrieved.
+Run setup and select `login` to reconnect with a fresh read-only grant. Confirm the
+actual work calendar and a known meeting in a new Planning conversation afterward.
+
+The production image build was interrupted by Docker's metadata database becoming
+read-only, then Docker Desktop WSL integration became unavailable. Restart Docker
+Desktop and restore its integration before rebuilding/deploying. No volumes were
+reset or deleted. Repeat the full image build, context allowlist check, setup and
+healthy service start; the standalone pinned CLI binary itself was already executed
+successfully inside Node 22 slim before that environment failure.
+
+Consider Google's official Calendar MCP after Developer Preview access and durable
+HTTP OAuth refresh are available and verified. Replace the read adapter in that
+change rather than keeping competing Calendar providers. Source:
+https://developers.google.com/workspace/calendar/api/guides/configure-mcp-server

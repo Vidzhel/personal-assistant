@@ -32,7 +32,7 @@
     "build:web": "npm run build -w packages/web -- --webpack",
     "test:compiled": "node scripts/smoke-compiled-core.mjs",
     "test:containers": "node scripts/smoke-containers.mjs",
-    "test:deployment": "node --experimental-strip-types --test deployment/runtime-init.test.mjs deployment/install-ticktick.test.mjs",
+    "test:deployment": "node --experimental-strip-types --test deployment/runtime-init.test.mjs deployment/install-ticktick.test.mjs deployment/install-google-calendar.test.mjs",
     "test:setup": "node --test scripts/development-scripts.test.mjs scripts/ticktick-settings.test.mjs",
     "test:docker-context": "node scripts/check-docker-context.mjs",
     "test:e2e": "npm run build:core && playwright test",

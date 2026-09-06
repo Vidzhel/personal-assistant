@@ -42,6 +42,7 @@ services:
       RAVEN_BASE_URL: '${RAVEN_BASE_URL:-}'
       RAVEN_BROWSER_ORIGINS: '${RAVEN_BROWSER_ORIGINS:-}'
       TICKTICK_MCP_TOKEN: '${TICKTICK_MCP_TOKEN:-}'
+      GOOGLE_CALENDAR_CREDENTIALS_FILE: /app/data/google-calendar/credentials.json
     restart: unless-stopped
     healthcheck:
       test:

@@ -17,6 +17,7 @@ import { afterEach, test } from 'node:test';
 import yaml from 'js-yaml';
 import { gitAutoCommit } from '../packages/shared/src/utils/git-commit.ts';
 import { initializeRuntime } from './runtime-init.mjs';
+import { installGoogleCalendar } from './install-google-calendar.mjs';
 
 // This standalone process deliberately exercises real Git, outside Vitest's
 // composition safety mock. Never inherit credentials, hooks or owner Git paths.
@@ -83,19 +84,52 @@ test('fresh capabilities are explicit and match their canonical library files', 
   );
   const toolsByTier = {
     green: [
-      'search_task', 'get_user_preference', 'get_task_by_id', 'list_undone_tasks_by_time_query',
-      'list_undone_tasks_by_date', 'list_completed_tasks_by_date', 'filter_tasks',
-      'list_projects', 'get_project_by_id', 'get_project_with_undone_tasks',
-      'get_task_in_project', 'list_columns', 'list_project_groups', 'get_comment',
-      'list_project_members', 'list_tags', 'list_habits', 'list_habit_sections', 'get_habit',
-      'get_habit_checkins', 'get_focuses_by_time', 'get_focus', 'list_countdowns',
+      'search_task',
+      'get_user_preference',
+      'get_task_by_id',
+      'list_undone_tasks_by_time_query',
+      'list_undone_tasks_by_date',
+      'list_completed_tasks_by_date',
+      'filter_tasks',
+      'list_projects',
+      'get_project_by_id',
+      'get_project_with_undone_tasks',
+      'get_task_in_project',
+      'list_columns',
+      'list_project_groups',
+      'get_comment',
+      'list_project_members',
+      'list_tags',
+      'list_habits',
+      'list_habit_sections',
+      'get_habit',
+      'get_habit_checkins',
+      'get_focuses_by_time',
+      'get_focus',
+      'list_countdowns',
     ],
     yellow: [
-      'create_project', 'update_project', 'create_column', 'update_column',
-      'create_project_group', 'update_project_group', 'create_task', 'batch_add_tasks',
-      'complete_task', 'complete_tasks_in_project', 'update_task', 'move_task',
-      'batch_update_tasks', 'add_comment', 'assign_task', 'unassign_task', 'create_tag',
-      'create_habit', 'update_habit', 'upsert_habit_checkins', 'create_focus',
+      'create_project',
+      'update_project',
+      'create_column',
+      'update_column',
+      'create_project_group',
+      'update_project_group',
+      'create_task',
+      'batch_add_tasks',
+      'complete_task',
+      'complete_tasks_in_project',
+      'update_task',
+      'move_task',
+      'batch_update_tasks',
+      'add_comment',
+      'assign_task',
+      'unassign_task',
+      'create_tag',
+      'create_habit',
+      'update_habit',
+      'upsert_habit_checkins',
+      'create_focus',
     ],
     red: ['delete_project_group', 'delete_task', 'delete_comment', 'delete_focus'],
   };
@@ -122,7 +156,7 @@ test('fresh capabilities are explicit and match their canonical library files', 
     'read the affected record',
     'inspect TickTick before retrying',
     'partial result',
-    'owner\'s configured timezone',
+    "owner's configured timezone",
   ]) {
     assert(instructions.includes(required), `TickTick workflow is missing: ${required}`);
   }
@@ -134,9 +168,12 @@ test('fresh image restart reconnects real history and preserves definitions and 
   const seededFiles = [
     'config/.gitkeep',
     'library/mcps/.gitkeep',
+    'library/mcps/google-calendar.json',
     'library/mcps/ticktick.json',
     'library/skills/_index.md',
     'library/skills/productivity/_index.md',
+    'library/skills/productivity/scheduling/calendar/config.json',
+    'library/skills/productivity/scheduling/calendar/skill.md',
     'library/skills/productivity/task-management/_index.md',
     'library/skills/productivity/task-management/ticktick/config.json',
     'library/skills/productivity/task-management/ticktick/skill.md',
@@ -289,4 +326,25 @@ test('unfinished bootstrap never overwrites a customized seed on retry', () => {
   assert.throws(() => initializeRuntime({ root }), /differs from the original seed/);
   assert.equal(readFileSync(agentPath, 'utf8'), '# Customized during recovery\n');
   assert.equal(existsSync(join(root, 'data/definition-history/raven-bootstrap.json')), true);
+});
+
+test('Calendar setup keeps refresh credentials outside runtime Git history', () => {
+  const root = fixture();
+  initializeRuntime({ root });
+  installGoogleCalendar({
+    root,
+    credentialsInput: JSON.stringify({
+      type: 'authorized_user',
+      client_id: 'fake-client',
+      client_secret: 'fake-secret',
+      refresh_token: 'fake-refresh',
+    }),
+    bindDefault: true,
+  });
+  const credentialPath = 'data/google-calendar/credentials.json';
+  assert(existsSync(join(root, credentialPath)));
+  assert.equal(git(root, 'check-ignore', credentialPath), credentialPath);
+  assert.equal(git(root, 'ls-files', credentialPath), '');
+  const agent = yaml.load(readFileSync(join(root, 'projects/agents/raven/agent.yaml'), 'utf8'));
+  assert(agent.skills.includes('calendar'));
 });

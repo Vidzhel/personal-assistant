@@ -41,6 +41,8 @@ deployment/*
 !deployment/runtime-init.mjs
 !deployment/entrypoint.mjs
 !deployment/install-ticktick.mjs
+!deployment/install-google-calendar.mjs
+!deployment/install-gws.mjs
 !deployment/seeds/
 !deployment/seeds/**
 # Tests and generated/cache files are not production source inputs.
