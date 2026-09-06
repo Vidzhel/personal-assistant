@@ -2,7 +2,7 @@
 title: Official TickTick MCP with usable runtime instructions
 type: feature
 created: 2026-09-06
-status: draft
+status: complete
 context:
   - ../../AGENTS.md
   - ../../ARCHITECTURE.md
@@ -43,31 +43,31 @@ build/deployment/test commands and documentation coherently; no legacy migration
 
 ## Code map and execution
 
-- [ ] `packages/shared/src/library/schemas.ts` and `types/events.ts`: discriminate
+- [x] `packages/shared/src/library/schemas.ts` and `types/events.ts`: discriminate
       stdio versus HTTP MCP definitions/configs. Validate endpoint/header definitions,
       disallow ambiguous transports and preserve existing stdio services.
-- [ ] `packages/core/src/capability-library/capability-library.ts`, loader/validator
+- [x] `packages/core/src/capability-library/capability-library.ts`, loader/validator
       and SDK adapter: resolve secret placeholders consistently; expose missing HTTP
       credentials as unconfigured without sending literal placeholders or empty
       Bearer credentials. A disconnected optional integration must not disable
       unrelated conversation capabilities. Forward only selected servers and no raw secret
       values to diagnostics or run-history files. Test nested scope and revisions.
-- [ ] `library/mcps/ticktick.json`: select the official HTTP service. Update shipped
+- [x] `library/mcps/ticktick.json`: select the official HTTP service. Update shipped
       seeds if this capability is supplied there. Supply a safe setup script for the
       dedicated token and wire its environment value into Compose explicitly.
-- [ ] `library/skills/productivity/task-management/ticktick/skill.md` and config:
+- [x] `library/skills/productivity/task-management/ticktick/skill.md` and config:
       replace generic three-line instructions with concrete discovery, workload,
       dates/timezone, list-ID resolution, mutation/read-back and error workflows.
       Enumerate the official tool-to-action permission mapping; unknown new tools
       retain conservative fallback behavior.
-- [ ] Task management service consumers: preserve their documented result shape
+- [x] Task management service consumers: preserve their documented result shape
       or adapt them explicitly to the selected official tools; do not imply that a
       partial task query represents the whole workload. Keep planning data in TickTick.
-- [ ] Connection readiness: a bounded tools-list check through the official MCP
+- [x] Connection readiness: a bounded tools-list check through the official MCP
       client transport, using runtime credentials without model inference or task
       writes; expose count/status and sanitized failure. Use a fake local HTTP MCP
       server for protocol, authentication failure and tool-list tests.
-- [ ] Setup/docs/config examples: give the exact token location and safe setup
+- [x] Setup/docs/config examples: give the exact token location and safe setup
       action; preserve existing unrelated environment values, reject newline/control
       input and never print the token. No manual browser-console instructions.
       Existing deployment libraries are durable and seeds do not overwrite them:
@@ -124,3 +124,46 @@ Run schema/library/policy/SDK/HTTP-protocol/script/service tests, `npm run check
 default suite and relevant production builds. A live read-only connection check
 requires the owner's configured official token; do not substitute default suite
 success for account verification. Commit and push the reviewed slice.
+
+## Implementation review decisions
+
+The official connector replaces the local package and board mirror together.
+TickTick remains the planning authority; unrelated Raven tasks remain available
+when this optional connector is unconfigured. Explicit integration work is blocked
+without its credentials. No legacy runtime data migration is introduced.
+
+Provider echoes of resolved MCP secrets are scrubbed from successful callbacks,
+raw SDK JSON, events, transcripts and run results as well as diagnostics. Static
+configuration is distinct from read-only connection/authentication/tool evidence.
+Missing expected or empty tool catalogs fail readiness; network errors do not
+claim the token was rejected.
+
+Existing TickTick consumers use strict bounded workload and mutation envelopes.
+Partial or conflicting recommendations cannot trigger a valid-looking subset of
+changes. The verification envelope is an agent report, not an independent audit
+of the provider. Live schema and account behavior remain an operator canary.
+Telegram task buttons receive a terminal result, with abort/restart guards.
+Email unknown outcomes are not blindly retried; durable restart reconciliation
+is explicitly tracked in the deferred ledger.
+
+See [review and verification evidence](p0-official-ticktick-review.md).
+
+## Completion evidence
+
+- Full default suite: 266 files, 2,671 tests passed, no skips. Retired local-adapter
+  tests and its separate live-test command are removed with that adapter.
+- Required `npm run check` passed, including TypeScript, formatting, lint,
+  dependency override verification and 268 production strip-types checks.
+- Production shared/core/web build passed; packaged-core smoke passed two clean
+  process exits, HTTP/chat, persisted definitions/memory/history and explicit resume.
+- All 25 isolated browser journeys passed, including mobile MCP authentication
+  failure/recovery, tool count and stable diagnostic rows. Two old fixtures were
+  corrected to select the global agent explicitly once project agents were added.
+- Deployment/real-Git installer suite: 18 passed. Launcher/token setup: 22 passed.
+  Library and project validators passed. No owner account was used.
+- Review defects were repaired before this checkpoint. Durable email creation
+  reconciliation remains a concrete follow-up in the deferred ledger.
+
+Docker is unavailable in this runner. Container startup and live TickTick account
+authentication remain operator verification after deliberate token setup, not
+claims established by these fake-provider tests.

@@ -33,7 +33,7 @@ export default tseslint.config(
 
   // Shared/core: Node globals
   {
-    files: ['packages/shared/src/**/*.ts', 'packages/core/src/**/*.ts', 'packages/mcp-ticktick/src/**/*.ts'],
+    files: ['packages/shared/src/**/*.ts', 'packages/core/src/**/*.ts'],
     languageOptions: {
       globals: globals.node,
     },
@@ -50,7 +50,7 @@ export default tseslint.config(
     },
   },
 
-  // Type-checked linting for shared + core (mcp-ticktick/web too heavy for typed linting)
+  // Type-checked linting for shared + core (web is too heavy for typed linting)
   {
     files: [
       'packages/shared/src/**/*.ts',
@@ -162,7 +162,7 @@ export default tseslint.config(
 
   // Disable no-deprecated for packages without type-checked linting (requires type info)
   {
-    files: ['packages/web/**/*.{ts,tsx}', 'packages/mcp-ticktick/src/**/*.ts'],
+    files: ['packages/web/**/*.{ts,tsx}'],
     rules: {
       '@typescript-eslint/no-deprecated': 'off',
     },

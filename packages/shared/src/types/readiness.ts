@@ -11,10 +11,11 @@ export interface ReadinessFinding {
 }
 
 export interface ReadinessRequirement {
-  kind: 'executable' | 'configuration' | 'authentication' | 'definition';
+  kind: 'executable' | 'configuration' | 'authentication' | 'definition' | 'tools' | 'connection';
   name: string;
   state: ReadinessState;
   correction?: string;
+  toolCount?: number;
 }
 
 export interface CapabilityReadiness {

@@ -74,7 +74,7 @@ fake providers. This is an integration addition, not a blocker for repository sc
 
 `ExecutionLogger.queryTasks({ projectId, limit })` currently enumerates run files
 across projects before filtering. Readiness intentionally avoids this path and
-reports static configuration only. Existing task/history consumers retain their
+reports configuration and bounded connector readiness only. Existing task/history consumers retain their
 behavior.
 
 Resolution: add project-local bounded run enumeration or a rebuildable derived
@@ -85,7 +85,7 @@ break it; bounds hold with large histories; terminal-status filters apply before
 limits; restart and concurrent terminal writes preserve ordering. Profile the
 existing history/metrics consumers before changing their API.
 
-## O0/A2 follow-up: explicit MCP entrypoint locations (2026-09-06)
+## O0/A2 resolved: explicit MCP entrypoint locations (2026-09-06)
 
 Legacy stdio definitions can use relative script paths such as
 `library/vendor/markdownify-mcp/dist/index.js`. SDK project execution may use an
@@ -95,3 +95,31 @@ resolution review, anchor intended Raven-owned entrypoints explicitly to the
 current library/code location, preserving per-project MCP scope. Acceptance:
 attached-repository cwd and separate runtime data roots resolve the same intended
 script; missing builds remain actionable; no command or argument is shell-expanded.
+
+A2 resolves this entrypoint issue in the shared MCP configuration path: known
+interpreter script arguments anchor to the module-derived code root or configured
+library root, while readiness checks that same path. Focused tests cover attached
+cwd, separate runtime roots and literal shell syntax.
+
+## A2 follow-up: durable email creation reconciliation (2026-09-06)
+
+The email action extractor now treats an unverified TickTick creation as unknown,
+warns the owner and does not automatically submit another create request. Its
+retained uncertain-item state is runtime-only and is cleared on service stop. A
+restart or repeated delivery of the same source email therefore has no durable
+idempotency record yet.
+
+Resolution: use Raven's existing operational store to record a bounded creation
+attempt before provider dispatch, keyed by the source email and a stable action-item
+fingerprint. Record verified task/project IDs, explicit failure, cancellation and
+unknown remote outcomes without credentials or raw provider payloads. Repeated
+email events and restart recovery must consult that record. Reconcile unknown
+outcomes with read-only account lookup before any deliberate retry; cancellation
+after dispatch is unknown and never proof that creation did not occur. Do not add
+a separate journal or automatic blind retry path.
+
+Acceptance: interruption before and after provider dispatch, process restart,
+repeated delivery of the same email, client/service cancellation and an unknown
+provider response never produce a duplicate create. A verified task retains its
+actual task/project IDs; explicit pre-dispatch failure remains safely retryable;
+ambiguous matches require owner review.

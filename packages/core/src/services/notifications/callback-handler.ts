@@ -39,6 +39,10 @@ import {
   releaseSnoozed,
 } from '../../notification-engine/notification-queue.ts';
 import { getInsightById, updateInsightStatus } from '../../insight-engine/insight-store.ts';
+import {
+  parseTickTickMutationEvidence,
+  type TickTickOperation,
+} from '../task-management/ticktick-action-result.ts';
 
 export interface CallbackAction {
   domain: 'task' | 'approval' | 'email' | 'email-reply' | 'snooze' | 'knowledge-insight';
@@ -51,6 +55,13 @@ export interface CallbackResult {
   success: boolean;
   message: string;
   updatedKeyboard?: InlineKeyboardButton[][];
+  completion?: Promise<CallbackCompletion>;
+}
+
+export interface CallbackCompletion {
+  success: boolean;
+  message: string;
+  updatedKeyboard: InlineKeyboardButton[][];
 }
 
 export interface PendingApprovalInfo {
@@ -78,7 +89,7 @@ export interface CallbackDeps {
       details?: string;
       sessionId?: string;
       preApproved?: boolean;
-    }): Promise<{ success: boolean; error?: string }>;
+    }): Promise<{ success: boolean; result?: string; error?: string }>;
   };
   auditLog: {
     insert(entry: {
@@ -175,30 +186,66 @@ export function parseCallbackData(data: string): CallbackAction | null {
 }
 
 const TASK_ACTION_PROMPTS: Record<string, (taskId: string, args: string[]) => string> = {
-  complete: (taskId) => `Complete the task with ID ${taskId} in TickTick. Mark it as done.`,
+  complete: (taskId) =>
+    `Call get_task_by_id for exact ID ${taskId}, then complete_task once and read the task back. Preserve its project ID. If the outcome is uncertain, inspect before retrying. Return ONLY {"operation":"complete-task","outcome":"verified"|"uncertain"|"failed","taskId":${JSON.stringify(taskId)},"projectId":"exact project ID","details":"optional summary"}.`,
   snooze: (taskId, args) =>
-    `Snooze the task with ID ${taskId} in TickTick for ${args[0] === '1w' ? '1 week' : '1 day'}.`,
-  drop: (taskId) => `Delete/close the task with ID ${taskId} in TickTick.`,
+    `Call get_task_by_id for exact ID ${taskId}, then update_task once to move its due date by ${args[0] === '1w' ? '1 week' : '1 day'} using the task's existing timezone and all-day semantics. Preserve unrelated fields and read it back. If uncertain, inspect before retrying. Return ONLY {"operation":"update-task","outcome":"verified"|"uncertain"|"failed","taskId":${JSON.stringify(taskId)},"projectId":"exact project ID","details":"optional summary"}.`,
+  drop: (taskId) =>
+    `Call get_task_by_id for exact ID ${taskId}, then delete_task once. Verify the exact task is absent. If the outcome is uncertain, inspect before retrying. Return ONLY {"operation":"delete-task","outcome":"verified"|"uncertain"|"failed","taskId":${JSON.stringify(taskId)},"projectId":"exact project ID","details":"optional summary"}.`,
+};
+
+const TASK_ACTION_NAMES: Record<string, string> = {
+  complete: 'ticktick:complete-task',
+  snooze: 'ticktick:update-task',
+  drop: 'ticktick:delete-task',
 };
 
 const TASK_ACTION_LABELS: Record<string, string> = {
-  complete: 'Done \u2713',
-  snooze: 'Snoozed \u2713',
-  drop: 'Dropped',
+  complete: 'Request submitted…',
+  snooze: 'Request submitted…',
+  drop: 'Request submitted…',
 };
+
+const TASK_OPERATIONS: Record<string, TickTickOperation> = {
+  complete: 'complete-task',
+  snooze: 'update-task',
+  drop: 'delete-task',
+};
+
+function callbackCompletion(
+  result: { success: boolean; result?: string; error?: string },
+  expected: { operation: TickTickOperation; taskId: string },
+): CallbackCompletion {
+  const needsApproval = /approval|queued/i.test(result.error ?? '');
+  const evidence = parseTickTickMutationEvidence(result.result, expected);
+  if (result.success && evidence?.outcome === 'verified') {
+    return completionResult(true, 'TickTick change verified');
+  }
+  if (needsApproval) return completionResult(false, 'Approval required in Raven');
+  return completionResult(false, 'Result uncertain — verify in TickTick');
+}
+
+function completionResult(success: boolean, message: string): CallbackCompletion {
+  return {
+    success,
+    message,
+    updatedKeyboard: [[{ text: message, callback_data: 'noop' }]],
+  };
+}
 
 function handleTaskAction(action: CallbackAction, deps: CallbackDeps): CallbackResult {
   const promptBuilder = TASK_ACTION_PROMPTS[action.action];
-  if (!promptBuilder) {
+  const actionName = TASK_ACTION_NAMES[action.action];
+  const operation = TASK_OPERATIONS[action.action];
+  if (!promptBuilder || !actionName || !operation) {
     return { success: false, message: `Unknown task action: ${action.action}` };
   }
 
   const prompt = promptBuilder(action.target, action.args);
 
-  // Fire-and-forget: execute via agent manager (spawns TickTick sub-agent)
-  deps.agentManager
+  const completion = deps.agentManager
     .executeAction({
-      actionName: `task:${action.action}`,
+      actionName,
       // Library skill name (library/skills/productivity/task-management/ticktick/config.json)
       // — resolves MCP servers/sub-agents via CapabilityLibrary.collectMcpServers
       // in executeAction; the pre-library suite name ('task-management')
@@ -210,9 +257,11 @@ function handleTaskAction(action: CallbackAction, deps: CallbackDeps): CallbackR
       if (!result.success) {
         deps.logger.error(`Task callback failed: ${result.error}`);
       }
+      return callbackCompletion(result, { operation, taskId: action.target });
     })
     .catch((err: unknown) => {
       deps.logger.error(`Task callback error: ${err}`);
+      return completionResult(false, 'Result uncertain — verify in TickTick');
     });
 
   const label = TASK_ACTION_LABELS[action.action] ?? 'Processing...';
@@ -220,6 +269,7 @@ function handleTaskAction(action: CallbackAction, deps: CallbackDeps): CallbackR
     success: true,
     message: `${label}`,
     updatedKeyboard: [[{ text: label, callback_data: 'noop' }]],
+    completion,
   };
 }
 

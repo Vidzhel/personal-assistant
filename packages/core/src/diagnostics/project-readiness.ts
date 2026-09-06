@@ -6,6 +6,7 @@ import {
   type AgentReadiness,
   type CapabilityReadiness,
   type NamedAgent,
+  type McpServerConfig,
   type ProjectReadinessReport,
   type ProjectWorkspace,
   type ReadinessDefinitionDiagnostic,
@@ -19,6 +20,15 @@ import type { AgentResolver } from '../agent-registry/agent-resolver.ts';
 import type { NamedAgentStore } from '../agent-registry/yaml-named-agent-store.ts';
 import type { ExecutionLogger } from '../agent-manager/execution-logger.ts';
 import type { CapabilityLibrary } from '../capability-library/capability-library.ts';
+import {
+  environmentReferences,
+  materializeMcpServerConfig,
+} from '../capability-library/mcp-config.ts';
+import {
+  probeMcpTools,
+  type McpToolsProbeInput,
+  type McpToolsProbeResult,
+} from './mcp-tools-probe.ts';
 import type { DefinitionDiagnostic } from './definition-diagnostics.ts';
 import { inspectMcpEntrypoint } from './mcp-entrypoint.ts';
 import { redactSecrets } from './redact-secrets.ts';
@@ -31,6 +41,7 @@ import type {
 } from '../project-manager/workspace-execution.ts';
 
 const MAX_SOURCES = 32;
+const MAX_REMOTE_PROBES = 4;
 const MAX_CONFIGURED_SOURCES = MAX_SOURCES - 1;
 const MAX_CONTEXT_INDEXES = 12;
 const MAX_ERROR_LENGTH = 240;
@@ -57,6 +68,7 @@ export interface ProjectReadinessDeps {
   db?: DatabaseInterface;
   env?: Readonly<Record<string, string | undefined>>;
   now?: () => Date;
+  probeHttpMcp?: (input: McpToolsProbeInput) => Promise<McpToolsProbeResult>;
 }
 
 interface ReadinessContext {
@@ -65,6 +77,8 @@ interface ReadinessContext {
   env: Readonly<Record<string, string | undefined>>;
   findings: ReadinessFinding[];
   executionCwd?: string;
+  signal?: AbortSignal;
+  probes: Map<string, Promise<McpToolsProbeResult>>;
 }
 
 function finding(input: ReadinessFinding): ReadinessFinding {
@@ -111,15 +125,17 @@ function configurationRequirement(
   configuredValue: string,
   env: Readonly<Record<string, string | undefined>>,
 ): ReadinessRequirement {
-  const match = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/.exec(configuredValue);
-  const envName = match?.[1];
+  const references = environmentReferences(configuredValue);
   const configured =
-    envName === undefined ? configuredValue.trim().length > 0 : Boolean(env[envName]?.trim());
+    references.length === 0
+      ? configuredValue.trim().length > 0
+      : references.every((name) => Boolean(env[name]?.trim()));
+  const name = references.length > 0 ? references.join(', ') : key;
   return {
     kind: 'configuration',
-    name: envName ?? key,
+    name,
     state: configured ? 'configured' : 'unavailable',
-    ...(!configured && { correction: `Set ${envName ?? key} for this integration.` }),
+    ...(!configured && { correction: `Set ${name} for this integration.` }),
   };
 }
 
@@ -164,6 +180,14 @@ function requirementFinding(
   requirement: ReadinessRequirement,
 ): ReadinessFinding | undefined {
   if (requirement.state === 'verified' || requirement.state === 'configured') return undefined;
+  if (requirement.state === 'failed')
+    return finding({
+      code: `${requirement.kind}-failed`,
+      severity: 'warning',
+      scope: `capability:${capability}`,
+      message: `${requirement.kind} check failed: ${requirement.name}`,
+      correction: requirement.correction ?? 'Check the integration configuration and retry.',
+    });
   const unavailable = requirement.state === 'unavailable';
   return finding({
     code: unavailable ? `${requirement.kind}-unavailable` : `${requirement.kind}-unverified`,
@@ -191,45 +215,151 @@ function capabilityFailure(
   });
 }
 
-function mcpRequirements(
+function sharedHttpProbe(
   context: ReadinessContext,
   mcpName: string,
-): { requirements: ReadinessRequirement[]; findings: ReadinessFinding[] } {
-  let mcp: ReturnType<CapabilityLibrary['getMcp']>;
+  config: McpServerConfig,
+): Promise<McpToolsProbeResult> | undefined {
+  const existing = context.probes.get(mcpName);
+  if (existing) return existing;
+  if (context.probes.size >= MAX_REMOTE_PROBES) return undefined;
+  const pending = Promise.resolve()
+    .then(() => {
+      const resolved = materializeMcpServerConfig(config, context.env);
+      if (resolved.type !== 'http') throw new Error('Expected an HTTP MCP definition');
+      return (context.deps.probeHttpMcp ?? probeMcpTools)({
+        url: resolved.url,
+        headers: resolved.headers ?? {},
+        signal: context.signal,
+      });
+    })
+    .catch((): McpToolsProbeResult => ({
+      state: 'failed',
+      stage: 'connection',
+      reason: 'The MCP readiness check failed. Check its configuration and retry.',
+    }));
+  context.probes.set(mcpName, pending);
+  return pending;
+}
+
+function failedHttpRequirements(
+  mcpName: string,
+  result: Extract<McpToolsProbeResult, { state: 'failed' }>,
+): ReadinessRequirement[] {
+  return [
+    {
+      kind: 'authentication',
+      name: mcpName,
+      state: result.stage === 'authentication' ? 'failed' : 'unverified',
+      correction:
+        result.stage === 'authentication'
+          ? result.reason
+          : 'Authentication could not be fully verified by this check.',
+    },
+    ...(result.stage !== 'authentication'
+      ? [
+          {
+            kind: result.stage,
+            name: mcpName,
+            state: 'failed' as const,
+            correction: result.reason,
+          },
+        ]
+      : []),
+  ];
+}
+
+async function httpRequirements(
+  context: ReadinessContext,
+  config: McpServerConfig,
+  input: { mcpName: string; configuration: ReadinessRequirement[]; expectedTools: string[] },
+): Promise<ReadinessRequirement[]> {
+  const { mcpName, configuration, expectedTools } = input;
+  if (configuration.some((item) => item.state === 'unavailable'))
+    return [authenticationRequirement(mcpName, configuration)];
+  const pending = sharedHttpProbe(context, mcpName, config);
+  if (!pending)
+    return [
+      {
+        kind: 'authentication',
+        name: mcpName,
+        state: 'unverified',
+        correction:
+          'Only four remote integrations are checked per report. Inspect remaining integrations separately.',
+      },
+    ];
+  const result = await pending;
+  if (result.state === 'failed') return failedHttpRequirements(mcpName, result);
+  const requirements: ReadinessRequirement[] = [
+    { kind: 'authentication', name: mcpName, state: 'verified' },
+  ];
+  if (result.state === 'verified') {
+    for (const requirement of configuration) requirement.state = 'verified';
+    const missing = expectedTools.filter((name) => !result.toolNames.includes(name));
+    requirements.push({
+      kind: 'tools',
+      name: mcpName,
+      state: missing.length > 0 || result.toolNames.length === 0 ? 'failed' : 'verified',
+      toolCount: result.toolNames.length,
+      ...(result.toolNames.length === 0 && {
+        correction:
+          'The MCP server exposed no tools. Check account access and provider configuration.',
+      }),
+      ...(missing.length > 0 && {
+        correction: `The server is missing ${String(missing.length)} tools required by this skill. Refresh its definition and verify the provider catalog.`,
+      }),
+    });
+  }
+  return requirements;
+}
+
+function stdioRequirements(
+  context: ReadinessContext,
+  config: Exclude<McpServerConfig, { type: 'http' }>,
+  input: { mcpName: string; configuration: ReadinessRequirement[] },
+): ReadinessRequirement[] {
+  const { mcpName, configuration } = input;
+  const requirements = [
+    executableRequirement(config.command, context),
+    ...inspectMcpEntrypoint(
+      config.command,
+      config.args,
+      context.executionCwd ?? context.deps.projectRoot,
+    ),
+  ];
+  const authentication = configuration.filter((item) => AUTH_CONFIGURATION_NAME.test(item.name));
+  if (authentication.length > 0)
+    requirements.push(authenticationRequirement(mcpName, authentication));
+  return requirements;
+}
+
+async function mcpRequirements(
+  context: ReadinessContext,
+  mcpName: string,
+  expectedTools: string[],
+): Promise<{ requirements: ReadinessRequirement[]; findings: ReadinessFinding[] }> {
   try {
-    mcp = context.deps.capabilityLibrary.getMcp(mcpName);
+    const config = context.deps.capabilityLibrary.getMcpServerConfig(mcpName);
+    if (!config) throw new Error(`MCP definition is unavailable: ${mcpName}`);
+    const configuration = Object.entries(
+      (config.type === 'http' ? config.headers : config.env) ?? {},
+    ).map(([key, value]) => configurationRequirement(key, value, context.env));
+    const requirements: ReadinessRequirement[] = [
+      { kind: 'definition', name: `MCP ${mcpName}`, state: 'verified' },
+      ...configuration,
+    ];
+    requirements.push(
+      ...(config.type === 'http'
+        ? await httpRequirements(context, config, { mcpName, configuration, expectedTools })
+        : stdioRequirements(context, config, { mcpName, configuration })),
+    );
+    return { requirements, findings: [] };
   } catch (error) {
     return {
       requirements: [{ kind: 'definition', name: mcpName, state: 'unavailable' }],
       findings: [capabilityFailure(context, mcpName, sanitizeReadinessError(error))],
     };
   }
-  if (!mcp) {
-    return {
-      requirements: [{ kind: 'definition', name: mcpName, state: 'unavailable' }],
-      findings: [capabilityFailure(context, mcpName, `MCP definition is unavailable: ${mcpName}`)],
-    };
-  }
-  const configuration = Object.entries(mcp.env).map(([key, value]) =>
-    configurationRequirement(key, value, context.env),
-  );
-  const requirements: ReadinessRequirement[] = [
-    { kind: 'definition', name: mcpName, state: 'verified' },
-    executableRequirement(mcp.command, context),
-    ...inspectMcpEntrypoint(
-      mcp.command,
-      mcp.args,
-      context.executionCwd ?? context.deps.projectRoot,
-    ),
-    ...configuration,
-  ];
-  const authenticationConfiguration = configuration.filter((item) =>
-    AUTH_CONFIGURATION_NAME.test(item.name),
-  );
-  if (authenticationConfiguration.length > 0) {
-    requirements.push(authenticationRequirement(mcpName, authenticationConfiguration));
-  }
-  return { requirements, findings: [] };
 }
 
 function unavailableCapability(
@@ -262,11 +392,11 @@ function bindingReadiness(
   }
 }
 
-function inspectCapability(input: {
+async function inspectCapability(input: {
   context: ReadinessContext;
   agent: NamedAgent;
   name: string;
-}): CapabilityReadiness {
+}): Promise<CapabilityReadiness> {
   const { context, agent, name } = input;
   let skill: ReturnType<CapabilityLibrary['getSkill']>;
   try {
@@ -283,7 +413,14 @@ function inspectCapability(input: {
   ];
   const findings: ReadinessFinding[] = [];
   for (const mcpName of skill.config.mcps) {
-    const inspected = mcpRequirements(context, mcpName);
+    const expectedTools =
+      mcpName === 'ticktick'
+        ? skill.config.actions
+            .map((action) => action.name)
+            .filter((action) => action.startsWith('ticktick:'))
+            .map((action) => action.slice('ticktick:'.length).replaceAll('-', '_'))
+        : [];
+    const inspected = await mcpRequirements(context, mcpName, expectedTools);
     requirements.push(...inspected.requirements);
     findings.push(...inspected.findings);
   }
@@ -645,25 +782,30 @@ function reportStatus(input: {
   return 'ready';
 }
 
-export function inspectProjectReadiness(
+export async function inspectProjectReadiness(
   deps: ProjectReadinessDeps,
   projectId: string,
-): ProjectReadinessReport {
+  signal?: AbortSignal,
+): Promise<ProjectReadinessReport> {
   const findings: ReadinessFinding[] = [];
   const context: ReadinessContext = {
     deps,
     projectId,
     env: deps.env ?? process.env,
     findings,
+    signal,
+    probes: new Map(),
   };
   const agent = inspectAgent(context);
   const workspace = inspectWorkspace(context, agent.agent);
-  const capabilities = (agent.agent?.skills ?? []).map((name) =>
-    inspectCapability({
-      context,
-      agent: agent.agent as NamedAgent,
-      name,
-    }),
+  const capabilities = await Promise.all(
+    (agent.agent?.skills ?? []).map((name) =>
+      inspectCapability({
+        context,
+        agent: agent.agent as NamedAgent,
+        name,
+      }),
+    ),
   );
   for (const capability of capabilities) findings.push(...capability.findings);
   const diagnostics = definitionDiagnostics(context, agent.agent);

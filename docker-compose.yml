@@ -41,6 +41,7 @@ services:
       RAVEN_TIMEZONE: '${RAVEN_TIMEZONE:-UTC}'
       RAVEN_BASE_URL: '${RAVEN_BASE_URL:-}'
       RAVEN_BROWSER_ORIGINS: '${RAVEN_BROWSER_ORIGINS:-}'
+      TICKTICK_MCP_TOKEN: '${TICKTICK_MCP_TOKEN:-}'
     restart: unless-stopped
     healthcheck:
       test:

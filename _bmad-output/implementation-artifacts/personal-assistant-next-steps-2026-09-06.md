@@ -43,7 +43,7 @@ may implement independent pieces; the parent reviews the actual diff and outcome
 | 4     | M0: next-turn model/effort controls                   | P0                                | 3–5 days                     | A0                                          | Complete; reviewed and tested                          |
 | 5     | O0: readiness and reliable phone access               | P0                                | 2–4 days                     | T0 for delivery diagnostics                 | Complete; reviewed and tested                          |
 | 6     | A1: repair skills maintenance and integration catalog | P0                                | 1–3 days                     | Capability library                          | Ready to specify                                            |
-| 7     | A2: official TickTick compatibility trial             | P0/P1                             | 2–4 days                     | A1; deliberate account setup for live phase | Official endpoint and tools verified; runtime trial pending |
+| 7     | A2: official TickTick MCP and usage workflows             | P0/P1                             | 2–4 days                     | Existing SDK/library; deliberate token setup | Complete; tested with fake providers; live setup pending |
 | 8     | C0: durable capture inbox and source links            | P1                                | 3–5 days                     | T1, O0                                      | Proposed                                                    |
 | 9     | U0: personal context and correction                   | P1                                | 3–5 days                     | C0; project memory                          | Proposed                                                    |
 | 10    | D0: Today, commitments and one daily brief            | P1                                | 3–5 days                     | T1, C0, useful account reads                | Proposed                                                    |
@@ -126,31 +126,27 @@ or long inactivity, and says advanced features remain unsupported. This is
 documentation verification, not an authenticated tool-discovery or account test.
 [Official TickTick MCP guide](https://help.ticktick.com/articles/7438129581631995904).
 
-Prefer a migration toward the official service if the compatibility trial passes:
-it offers meaningful whole-life capabilities absent from Raven's 17-tool adapter.
-Keep one selected backend per connection; a temporary rollback option must not
-send each action to both implementations.
+**A2 implementation:** the local adapter and competing TickTick-to-board mirror
+are removed in the same change. The official HTTP MCP uses the dedicated
+`TICKTICK_MCP_TOKEN`; setup installs only the shipped TickTick definitions into
+existing volumes and preserves custom definitions. All 47 actions have explicit
+permission tiers. Missing optional credentials do not remove unrelated chat
+capabilities. Runtime task/event configs retain environment references and the
+SDK boundary materializes credentials without persisting provider echoes.
 
-**A2 TickTick compatibility:** Raven's MCP definitions currently require
-`command/args/env`; its SDK supports HTTP MCP but the library schema and resolved
-types do not expose that transport. Add a discriminated transport only if the
-official service passes the trial. Credentials belong in the runtime secret store,
-not project YAML or committed MCP headers. Evaluate unattended authentication,
-refresh/expiry, rate limits, tool discovery and project scoping.
+Readiness uses a bounded read-only MCP initialize/tools-list check. Connection,
+authentication and catalog failures remain distinct; empty or incomplete required
+catalogs cannot appear usable. Workload consumers require explicit scope coverage,
+retain task identity and scheduling fields, and stop on incomplete results.
+Mutation consumers require explicit verification evidence rather than treating
+SDK completion alone as a successful account change. The old unattended
+reorganization schedule is disabled.
 
-Compare all existing operations: list projects, create/update/archive-equivalent
-behavior where available, open/completed tasks, due dates/timezones, filtering,
-move/complete/delete, pagination and error results. Local TickTick skill actions
-cover six named operations while the server exposes seventeen tools; review the
-full tool-to-permission mapping and default behavior, including newly advertised
-remote tools. Missing mappings are a compatibility issue to investigate, not
-evidence of a confirmed permission bypass.
-
-Test remote MCP with a local fake HTTP server before authenticating. For a later
-owner-authorized account canary, use a dedicated temporary list with a known
-cleanup plan, verify read-back after mutations, and record exact capabilities.
-Cut over one implementation only when parity, auth and error behavior are known;
-otherwise retain the local server and document missing official capabilities.
+See the [implementation specification](tech-spec-p0-official-ticktick.md) and
+[review record](p0-official-ticktick-review.md) for exact validation and limitations.
+No live account change is part of this delivery. After deliberate token setup,
+readiness can perform a read-only live canary. Testing provider mutations requires
+a separate owner request and a disposable list with a cleanup plan.
 
 ## Telegram and delivery slices
 

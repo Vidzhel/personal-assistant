@@ -159,6 +159,62 @@ describe('createExecutionBridge', () => {
     );
   });
 
+  it('blocks a dedicated agent whose selected MCP is unavailable before dispatch', async () => {
+    deps.namedAgentStore.getAgentByName.mockReturnValue({
+      id: 'agent-ticktick',
+      name: 'ticktick',
+      instructions: 'Use TickTick.',
+      model: 'haiku',
+      maxTurns: 6,
+      skills: ['ticktick'],
+    } as never);
+    deps.agentResolver.resolveAgentCapabilities.mockReturnValue({
+      mcpServers: {},
+      agentDefinitions: {},
+      plugins: [],
+      unavailableMcpServers: ['ticktick'],
+      unavailableSkills: ['ticktick'],
+    } as never);
+    const requests: unknown[] = [];
+    deps.eventBus.on('agent:task:request', (event) => requests.push(event));
+
+    deps.eventBus.emit(runAgentEvent({ agent: 'ticktick' }) as never);
+
+    await vi.waitFor(() => expect(deps.executionEngine.onTaskBlocked).toHaveBeenCalledOnce());
+    expect(requests).toEqual([]);
+    expect(deps.executionEngine.setAgentTaskId).not.toHaveBeenCalled();
+    expect(deps.executionEngine.onTaskFailed).not.toHaveBeenCalled();
+    expect(deps.executionEngine.onTaskBlocked).toHaveBeenCalledWith(
+      't1',
+      'task-1',
+      expect.stringMatching(/ticktick.*ticktick/),
+    );
+  });
+
+  it('dispatches a mixed default agent when an independent skill remains available', async () => {
+    deps.namedAgentStore.getDefaultAgent.mockReturnValue({
+      id: 'agent-raven',
+      name: 'raven',
+      instructions: '',
+      skills: ['repository-work', 'ticktick'],
+    } as never);
+    deps.agentResolver.resolveAgentCapabilities.mockReturnValue({
+      mcpServers: {},
+      agentDefinitions: {},
+      plugins: [],
+      unavailableMcpServers: ['ticktick'],
+      unavailableSkills: ['ticktick'],
+    } as never);
+    const requests: unknown[] = [];
+    deps.eventBus.on('agent:task:request', (event) => requests.push(event));
+
+    deps.eventBus.emit(runAgentEvent({ agent: undefined }) as never);
+
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(deps.executionEngine.onTaskBlocked).not.toHaveBeenCalled();
+    expect(deps.executionEngine.setAgentTaskId).toHaveBeenCalledOnce();
+  });
+
   it('does not dispatch an attempt the engine refused to bind', async () => {
     deps.executionEngine.setAgentTaskId.mockReturnValue(false);
     const requests: unknown[] = [];

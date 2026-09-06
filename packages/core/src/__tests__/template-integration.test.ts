@@ -20,6 +20,14 @@ describe('template integration', () => {
     const tmpl = reg.getTemplate('morning-briefing');
     expect(tmpl).toBeDefined();
     expect(tmpl!.tasks.length).toBeGreaterThan(0);
+    const taskStep = tmpl!.tasks.find((task) => task.id === 'fetch-tasks');
+    expect(taskStep?.type).toBe('agent');
+    if (taskStep?.type === 'agent') {
+      expect(taskStep.prompt).toContain('list_projects');
+      expect(taskStep.prompt).toContain('get_project_with_undone_tasks');
+      expect(taskStep.prompt).toContain('undated');
+      expect(taskStep.prompt).toContain('partial results');
+    }
   });
 
   it('instantiates research template with params', async () => {

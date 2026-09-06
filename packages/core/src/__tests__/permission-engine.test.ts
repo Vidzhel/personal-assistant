@@ -206,7 +206,8 @@ describe('PermissionEngine', () => {
       // Override works
       expect(engine.resolveTier('ticktick:delete-task')).toBe('yellow');
       // Skill default works
-      expect(engine.resolveTier('ticktick:get-tasks')).toBe('green');
+      expect(engine.resolveTier('ticktick:search-task')).toBe('green');
+      expect(engine.resolveTier('ticktick:get-tasks')).toBe('red');
       // Unknown defaults to red
       expect(engine.resolveTier('unknown:action')).toBe('red');
 

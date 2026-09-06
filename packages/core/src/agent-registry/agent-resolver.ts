@@ -17,6 +17,10 @@ export interface ResolvedCapabilities {
   mcpServers: Record<string, McpServerConfig>;
   agentDefinitions: Record<string, SubAgentDefinition>;
   plugins: Array<{ type: 'local'; path: string }>;
+  /** Selected MCP definitions omitted because their optional runtime configuration is absent. */
+  unavailableMcpServers?: string[];
+  /** Selected skills whose declared MCP integration is not fully available. */
+  unavailableSkills?: string[];
   bashAccess?: BashAccess;
 }
 
@@ -190,10 +194,29 @@ export function resolveSkillCapabilities(
   if (plugins.length !== vendors.size) {
     throw new Error(`Unresolved vendor bindings for agent skills: ${skillNames.join(', ')}`);
   }
+  const mcpServers = library.collectMcpServers(skillNames);
+  const activeMcpNames = new Set(Object.keys(mcpServers));
+  const unavailableMcpServers = [
+    ...new Set(
+      skillNames.flatMap(
+        (name) =>
+          library.getSkill(name)?.config.mcps.filter((mcpName) => !activeMcpNames.has(mcpName)) ??
+          [],
+      ),
+    ),
+  ].sort();
+  const unavailableMcpNames = new Set(unavailableMcpServers);
+  const unavailableSkills = [...new Set(skillNames)]
+    .filter((name) =>
+      library.getSkill(name)?.config.mcps.some((mcpName) => unavailableMcpNames.has(mcpName)),
+    )
+    .sort();
   return {
-    mcpServers: library.collectMcpServers(skillNames),
-    agentDefinitions: library.collectAgentDefinitions(skillNames),
+    mcpServers,
+    agentDefinitions: library.collectAgentDefinitions(skillNames, activeMcpNames),
     plugins,
+    ...(unavailableMcpServers.length > 0 && { unavailableMcpServers }),
+    ...(unavailableSkills.length > 0 && { unavailableSkills }),
   };
 }
 

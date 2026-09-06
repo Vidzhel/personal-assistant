@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventBus } from '../event-bus/event-bus.ts';
 import { runAgentTask, setActiveBackend } from '../agent-manager/agent-session.ts';
 import type { AgentBackend, BackendOptions } from '../agent-manager/agent-backend.ts';
-import type { AgentTask } from '@raven/shared';
+import type { AgentTask, McpServerConfig } from '@raven/shared';
 import type { MemoryStore, MemoryWriteResult } from '../agent-memory/memory-store.ts';
 import type { RavenMcpDeps } from '../mcp-server/types.ts';
 import type { NamedAgentStore } from '../agent-registry/yaml-named-agent-store.ts';
@@ -109,13 +109,14 @@ function baseOptions(
     task?: Partial<AgentTask>;
     messageStore?: MessageStore;
     sessionManager?: SessionManager;
+    mcpServers?: Record<string, McpServerConfig>;
   },
 ): Promise<Awaited<ReturnType<typeof runAgentTask>>> {
   setActiveBackend(backend);
   return runAgentTask({
     task: task(options.task),
     eventBus: event,
-    mcpServers: {},
+    mcpServers: options.mcpServers ?? {},
     agentDefinitions: {},
     memoryStore: options.memoryStore,
     ravenMcpDeps: options.ravenMcpDeps,
@@ -130,6 +131,7 @@ function nextImmediate(): Promise<void> {
 }
 
 afterEach(() => {
+  delete process.env['TEST_AGENT_SESSION_MCP_TOKEN'];
   vi.restoreAllMocks();
 });
 
@@ -138,6 +140,84 @@ beforeEach(() => {
 });
 
 describe('runAgentTask MCP call lifetime', () => {
+  it('materializes HTTP authorization only for the backend', async () => {
+    process.env['TEST_AGENT_SESSION_MCP_TOKEN'] = 'fake-http-secret';
+    const template = {
+      type: 'http' as const,
+      url: 'https://mcp.example.com',
+      headers: { Authorization: 'Bearer ${TEST_AGENT_SESSION_MCP_TOKEN}' },
+    };
+    const backend: AgentBackend = async (options) => {
+      expect(options.mcpServers.remote).toEqual({
+        type: 'http',
+        url: 'https://mcp.example.com',
+        headers: { Authorization: 'Bearer fake-http-secret' },
+        alwaysLoad: true,
+      });
+      return { result: 'done', success: true, errors: [] };
+    };
+
+    const result = await baseOptions(eventBus(), backend, {
+      memoryStore: memoryStore(),
+      mcpServers: { remote: template },
+      task: { mcpServers: { remote: template } },
+    });
+
+    expect(result).toMatchObject({ success: true, result: 'done' });
+    expect(JSON.stringify(template)).not.toContain('fake-http-secret');
+  });
+
+  it('redacts a materialized MCP secret from backend failures and stderr', async () => {
+    process.env['TEST_AGENT_SESSION_MCP_TOKEN'] = 'fake-http-secret';
+    const backend: AgentBackend = async (options) => {
+      options.onStderr('authorization failed for fake-http-');
+      options.onStderr('secret');
+      throw new Error('provider rejected fake-http-secret');
+    };
+    const result = await baseOptions(eventBus(), backend, {
+      memoryStore: memoryStore(),
+      mcpServers: {
+        remote: {
+          type: 'http',
+          url: 'https://mcp.example.com',
+          headers: { Authorization: 'Bearer ${TEST_AGENT_SESSION_MCP_TOKEN}' },
+        },
+      },
+    });
+
+    expect(JSON.stringify(result)).not.toContain('fake-http-secret');
+    expect(result.errors).toEqual([
+      'provider rejected [redacted]',
+      'stderr: authorization failed for [redacted]',
+    ]);
+  });
+
+  it('redacts a materialized MCP secret from a returned failure result', async () => {
+    process.env['TEST_AGENT_SESSION_MCP_TOKEN'] = 'fake-http-secret';
+    const backend: AgentBackend = async () => ({
+      result: 'authentication failed for fake-http-secret',
+      success: false,
+      errors: ['remote rejected fake-http-secret'],
+    });
+    const result = await baseOptions(eventBus(), backend, {
+      memoryStore: memoryStore(),
+      mcpServers: {
+        remote: {
+          type: 'http',
+          url: 'https://mcp.example.com',
+          headers: { Authorization: 'Bearer ${TEST_AGENT_SESSION_MCP_TOKEN}' },
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      result: 'authentication failed for [redacted]',
+      errors: ['remote rejected [redacted]'],
+    });
+    expect(JSON.stringify(result)).not.toContain('fake-http-secret');
+  });
+
   it('does not save a cold SDK lineage observed before cancellation', async () => {
     const controller = new AbortController();
     const sessions = sessionManager();

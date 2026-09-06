@@ -57,7 +57,7 @@ export interface ApprovedActionParams {
    * pending-approvals flow (api/routes/approvals.ts's resolveApproval,
    * callback-handler.ts's approval-resolution path) — NOT when a background
    * service is simply re-dispatching an action it decided on its own
-   * (autonomous-manager.ts, ticktick-sync.ts, email-triage.ts, etc.).
+   * (autonomous-manager.ts, email-triage.ts, etc.).
    * Defaults to false. Only when true does executeAction mark the synthetic
    * task's `approvedActionName`, which is what lets agent-session.ts's
    * pre-check gate and the canUseTool tool-policy skip re-resolving the
@@ -615,6 +615,19 @@ export class AgentManager {
       throw new Error(`Skill "${params.skillName}" requires a capability library`);
     }
     const capabilities = resolveSkillCapabilities(this.capabilityLibrary, [params.skillName]);
+    const skill = this.capabilityLibrary.getSkill(params.skillName);
+    const unavailableMcps =
+      skill?.config.mcps.filter((name) => capabilities.mcpServers[name] === undefined) ?? [];
+    if (unavailableMcps.length > 0) {
+      const details = unavailableMcps.map((name) => {
+        const status = this.capabilityLibrary?.getMcpConfigurationStatus(name);
+        const missing = status?.missingEnvironment ?? [];
+        return missing.length > 0 ? `${name} (missing ${missing.join(', ')})` : name;
+      });
+      throw new Error(
+        `Skill "${params.skillName}" has unconfigured MCP integration: ${details.join(', ')}`,
+      );
+    }
     return {
       id: generateId(),
       sessionId: params.sessionId,

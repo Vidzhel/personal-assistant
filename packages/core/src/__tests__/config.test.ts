@@ -130,6 +130,19 @@ describe('config', () => {
     expect(config.ANTHROPIC_API_KEY).toBe('');
   });
 
+  it('accepts only the dedicated TickTick MCP credential field', async () => {
+    process.env.TICKTICK_MCP_TOKEN = 'fake-mcp-token';
+    process.env.TICKTICK_CLIENT_ID = 'retired-client';
+    process.env.TICKTICK_CLIENT_SECRET = 'retired-secret';
+    process.env.TICKTICK_ACCESS_TOKEN = 'retired-access';
+    const { loadConfig } = await import('../config.ts');
+    const config = loadConfig();
+    expect(config.TICKTICK_MCP_TOKEN).toBe('fake-mcp-token');
+    expect(config).not.toHaveProperty('TICKTICK_CLIENT_ID');
+    expect(config).not.toHaveProperty('TICKTICK_CLIENT_SECRET');
+    expect(config).not.toHaveProperty('TICKTICK_ACCESS_TOKEN');
+  });
+
   it('Telegram group/topic env vars are optional and parsed correctly', async () => {
     process.env.TELEGRAM_GROUP_ID = '-1001234567890';
     process.env.TELEGRAM_TOPIC_GENERAL = '1';

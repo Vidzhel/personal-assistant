@@ -10,6 +10,7 @@ import {
   type EventBusInterface,
 } from '@raven/shared';
 import type { ServiceContext, RavenService } from '../types.ts';
+import { parseTickTickMutationEvidence } from '../task-management/ticktick-action-result.ts';
 
 const log = createLogger('action-extractor');
 
@@ -37,7 +38,10 @@ export type ActionItem = z.infer<typeof ActionItemSchema>;
 
 interface RetryEntry {
   emailId: string;
+  /** Known failed creations that are safe to attempt again. */
   items: ActionItem[];
+  /** Unknown remote outcomes retained for manual verification, never recreated automatically. */
+  uncertainItems?: ActionItem[];
   emailMeta: { from: string; subject: string; date: string };
   attempts: number;
   lastAttempt: number;
@@ -51,6 +55,31 @@ interface FetchedEmail {
   messageId: string;
 }
 
+interface CreatedTask {
+  item: ActionItem;
+  taskId: string;
+  projectId: string;
+}
+
+type AgentActionResult = Awaited<ReturnType<AgentManagerLike['executeAction']>>;
+
+function collectTaskCreationOutcome(
+  result: AgentActionResult,
+  item: ActionItem,
+  outcomes: { succeeded: CreatedTask[]; failed: ActionItem[]; uncertain: ActionItem[] },
+): void {
+  const evidence = parseTickTickMutationEvidence(result.result, { operation: 'create-task' });
+  if (result.success && evidence?.outcome === 'verified') {
+    outcomes.succeeded.push({ item, taskId: evidence.taskId, projectId: evidence.projectId });
+    return;
+  }
+  if (evidence?.outcome === 'failed') {
+    outcomes.failed.push(item);
+    return;
+  }
+  outcomes.uncertain.push(item);
+}
+
 let eventBus: EventBusInterface | null = null;
 let serviceConfig: Record<string, unknown> | null = null;
 const retryQueue = new Map<string, RetryEntry>();
@@ -59,7 +88,6 @@ let retryInterval: ReturnType<typeof setInterval> | null = null;
 const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_CHECK_INTERVAL_MS = 300000; // 5 minutes
 const RETRY_BACKOFF_MS = 60000; // 1 minute
-const SHORT_ID_LENGTH = 8;
 
 function getAgentManager(): AgentManagerLike | null {
   const mgr = serviceConfig?.agentManager as AgentManagerLike | undefined;
@@ -158,16 +186,25 @@ function parseActionItems(resultText: string): ActionItem[] {
 async function createTasksFromItems(
   items: ActionItem[],
   emailMeta: { from: string; subject: string; date: string },
-): Promise<{ succeeded: ActionItem[]; failed: ActionItem[] }> {
+): Promise<{ succeeded: CreatedTask[]; failed: ActionItem[]; uncertain: ActionItem[] }> {
   const agentManager = getAgentManager();
-  if (!agentManager) return { succeeded: [], failed: items };
+  if (!agentManager) return { succeeded: [], failed: [], uncertain: items };
 
-  const succeeded: ActionItem[] = [];
+  const succeeded: CreatedTask[] = [];
   const failed: ActionItem[] = [];
+  const uncertain: ActionItem[] = [];
 
   for (const item of items) {
     const dueDateStr = item.dueDate ? `, due: ${item.dueDate}` : '';
-    const prompt = `Create a task: "${item.title}"${dueDateStr}, priority: ${item.priority}. Note: From email by ${emailMeta.from} — "${emailMeta.subject}" (${emailMeta.date}). Context: ${item.context}`;
+    const prompt = [
+      'Inspect the official TickTick tool schemas before constructing arguments.',
+      'Call list_projects and resolve the intended destination list. Use Inbox when the email does not identify another exact list.',
+      `Create exactly one task: "${item.title}"${dueDateStr}, priority: ${item.priority}.`,
+      `Note: From email by ${emailMeta.from} — "${emailMeta.subject}" (${emailMeta.date}). Context: ${item.context}`,
+      'Preserve the returned task and project IDs, then call get_task_by_id to verify the requested fields.',
+      'If creation has an uncertain outcome, search for the exact task before retrying. Report success only after read-back.',
+      'Return ONLY {"operation":"create-task","outcome":"verified"|"uncertain"|"failed","taskId":"exact returned task ID","projectId":"exact destination project ID","details":"optional summary"}.',
+    ].join('\n');
 
     try {
       const result = await agentManager.executeAction({
@@ -176,20 +213,37 @@ async function createTasksFromItems(
         skillName: 'ticktick',
         details: prompt,
       });
-      if (result.success) {
-        succeeded.push(item);
-      } else {
-        failed.push(item);
-      }
+      collectTaskCreationOutcome(result, item, { succeeded, failed, uncertain });
     } catch (err) {
       log.error(
         `Failed to create task "${item.title}": ${err instanceof Error ? err.message : err}`,
       );
-      failed.push(item);
+      uncertain.push(item);
     }
   }
 
-  return { succeeded, failed };
+  return { succeeded, failed, uncertain };
+}
+
+function createdTaskIds(tasks: CreatedTask[]): string {
+  if (tasks.length === 0) return '';
+  return ` TickTick IDs: ${tasks
+    .map((task) => `${task.taskId} (project ${task.projectId})`)
+    .join(', ')}.`;
+}
+
+function reportUncertainCreations(
+  emailId: string,
+  emailMeta: { from: string; subject: string },
+  items: ActionItem[],
+): void {
+  if (items.length === 0) return;
+  const message = `${items.length} TickTick task creation outcome(s) from email ${emailId} require manual verification. Raven will not automatically retry them.`;
+  emitNotification(
+    'Task Creation Needs Verification',
+    `${message} Source: ${emailMeta.from} — "${emailMeta.subject}".`,
+  );
+  emitActionExtractFailed(emailId, message);
 }
 
 async function fetchEmailForActionItems(
@@ -298,70 +352,75 @@ async function finalizeActionItems(
 ): Promise<void> {
   const result = await createTasksFromItems(actionItems, emailMeta);
 
-  if (result.failed.length > 0) {
+  if (result.failed.length > 0 || result.uncertain.length > 0) {
     retryQueue.set(emailId, {
       emailId,
       items: result.failed,
+      uncertainItems: result.uncertain,
       emailMeta,
       attempts: 1,
       lastAttempt: Date.now(),
     });
     log.warn(
-      `${result.failed.length} task creation(s) failed for email ${emailId}, queued for retry`,
+      `${result.failed.length} task creation(s) failed for email ${emailId}; ${result.uncertain.length} outcome(s) require manual verification`,
     );
   }
+  reportUncertainCreations(emailId, emailMeta, result.uncertain);
 
   if (result.succeeded.length > 0) {
-    const pendingNote = result.failed.length > 0 ? ` (${result.failed.length} pending retry)` : '';
+    const pendingCount = result.failed.length + result.uncertain.length;
+    const pendingNote = pendingCount > 0 ? ` (${pendingCount} pending review or retry)` : '';
     emitNotification(
       'Tasks from Email',
-      `Created ${result.succeeded.length} task(s) from email: ${emailMeta.from} — "${emailMeta.subject}"${pendingNote}`,
-      [{ label: 'View Tasks', action: 't:l:' }],
+      `Created ${result.succeeded.length} task(s) from email: ${emailMeta.from} — "${emailMeta.subject}"${pendingNote}.${createdTaskIds(result.succeeded)}`,
     );
 
     emitActionExtractCompleted(
       emailId,
       result.succeeded.length,
-      result.succeeded.map((i) => i.title),
+      result.succeeded.map(({ item }) => item.title),
     );
   }
 }
 
 async function processRetryEntry(emailId: string, entry: RetryEntry, now: number): Promise<void> {
+  const retainedUncertain = entry.uncertainItems ?? [];
+  if (entry.items.length === 0) return;
+
   if (entry.attempts >= MAX_RETRY_ATTEMPTS) {
     emitNotification(
       'Task Creation Failed',
       `Failed to create tasks from email: ${entry.emailMeta.from} — "${entry.emailMeta.subject}". Please review manually.`,
-      [{ label: 'View Email', action: `e:v:${emailId.slice(0, SHORT_ID_LENGTH)}` }],
     );
     emitActionExtractFailed(emailId, `Max retry attempts (${MAX_RETRY_ATTEMPTS}) exhausted`);
-    retryQueue.delete(emailId);
+    entry.items = [];
+    if (retainedUncertain.length === 0) retryQueue.delete(emailId);
     return;
   }
 
   if (now - entry.lastAttempt < RETRY_BACKOFF_MS) return;
 
   const result = await createTasksFromItems(entry.items, entry.emailMeta);
+  entry.uncertainItems = [...retainedUncertain, ...result.uncertain];
 
-  if (result.failed.length === 0) {
+  if (result.failed.length === 0 && result.uncertain.length === 0) {
     log.info(`Retry succeeded for email ${emailId}: ${result.succeeded.length} tasks created`);
     emitNotification(
       'Tasks from Email',
-      `Created ${result.succeeded.length} task(s) from email: ${entry.emailMeta.from} — "${entry.emailMeta.subject}"`,
-      [{ label: 'View Tasks', action: 't:l:' }],
+      `Created ${result.succeeded.length} task(s) from email: ${entry.emailMeta.from} — "${entry.emailMeta.subject}".${createdTaskIds(result.succeeded)}`,
     );
     emitActionExtractCompleted(
       emailId,
       result.succeeded.length,
-      entry.items.map((i) => i.title),
+      result.succeeded.map(({ item }) => item.title),
     );
-    retryQueue.delete(emailId);
+    entry.items = [];
+    if (entry.uncertainItems.length === 0) retryQueue.delete(emailId);
   } else if (result.succeeded.length > 0) {
-    // Partial success: notify for succeeded, re-queue only failed items
+    // Partial success: notify verified creations, retry only known failures.
     emitNotification(
       'Tasks from Email',
-      `Created ${result.succeeded.length} task(s) from email: ${entry.emailMeta.from} — "${entry.emailMeta.subject}" (${result.failed.length} pending retry)`,
-      [{ label: 'View Tasks', action: 't:l:' }],
+      `Created ${result.succeeded.length} task(s) from email: ${entry.emailMeta.from} — "${entry.emailMeta.subject}" (${result.failed.length + result.uncertain.length} pending review or retry).${createdTaskIds(result.succeeded)}`,
     );
     entry.items = result.failed;
     entry.attempts++;
@@ -370,9 +429,12 @@ async function processRetryEntry(emailId: string, entry: RetryEntry, now: number
       `Retry partial: ${result.succeeded.length} succeeded, ${result.failed.length} still failing for email ${emailId}`,
     );
   } else {
+    entry.items = result.failed;
     entry.attempts++;
     entry.lastAttempt = now;
-    log.warn(`Retry attempt ${entry.attempts}/${MAX_RETRY_ATTEMPTS} failed for email ${emailId}`);
+    log.warn(
+      `Retry attempt ${entry.attempts}/${MAX_RETRY_ATTEMPTS} failed for email ${emailId}; ${result.uncertain.length} outcome(s) require manual verification`,
+    );
   }
 }
 

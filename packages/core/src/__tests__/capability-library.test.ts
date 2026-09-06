@@ -24,13 +24,33 @@ function writeJson(path: string, data: unknown): void {
   writeFileSync(path, JSON.stringify(data));
 }
 
-function validMcp(name: string, env?: Record<string, string>) {
+interface McpFixture {
+  name: string;
+  type?: 'stdio' | 'http';
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+}
+
+function validMcp(fixture: McpFixture) {
+  if (fixture.type === 'http') {
+    return {
+      name: fixture.name,
+      displayName: fixture.name,
+      type: 'http',
+      url: fixture.url ?? 'https://mcp.example.com',
+      headers: fixture.headers ?? {},
+    };
+  }
   return {
-    name,
-    displayName: name,
-    command: 'npx',
-    args: ['-y', `@test/${name}`],
-    ...(env ? { env } : {}),
+    name: fixture.name,
+    displayName: fixture.name,
+    command: fixture.command ?? 'npx',
+    args: fixture.args ?? ['-y', `@test/${fixture.name}`],
+    ...(fixture.type ? { type: fixture.type } : {}),
+    ...(fixture.env ? { env: fixture.env } : {}),
   };
 }
 
@@ -44,7 +64,7 @@ function validSkillConfig(name: string, overrides?: Record<string, unknown>) {
 }
 
 function setupTestLibrary(opts?: {
-  mcps?: Array<{ name: string; env?: Record<string, string> }>;
+  mcps?: McpFixture[];
   skills?: Array<{
     name: string;
     domain?: string;
@@ -67,7 +87,7 @@ function setupTestLibrary(opts?: {
   if (opts?.mcps?.length) {
     mkdirSync(join(dir, 'mcps'));
     for (const mcp of opts.mcps) {
-      writeJson(join(dir, 'mcps', `${mcp.name}.json`), validMcp(mcp.name, mcp.env));
+      writeJson(join(dir, 'mcps', `${mcp.name}.json`), validMcp(mcp));
     }
   }
 
@@ -136,7 +156,7 @@ describe('CapabilityLibrary', () => {
       const servers = lib.collectMcpServers(['tasks']);
 
       expect(Object.keys(servers)).toEqual(['ticktick']);
-      expect(servers['ticktick'].command).toBe('npx');
+      expect(servers['ticktick']).toMatchObject({ command: 'npx' });
     });
 
     it('returns all MCPs when no skills specified', async () => {
@@ -171,7 +191,7 @@ describe('CapabilityLibrary', () => {
       expect(Object.keys(servers)).toEqual(['shared-mcp']);
     });
 
-    it('resolves env var placeholders from process.env', async () => {
+    it('keeps stdio environment placeholders unresolved until backend dispatch', async () => {
       process.env['TEST_CAP_LIB_TOKEN'] = 'secret-123';
       const dir = setupTestLibrary({
         mcps: [
@@ -186,8 +206,106 @@ describe('CapabilityLibrary', () => {
       await lib.load(dir);
       const servers = lib.collectMcpServers();
 
-      expect(servers['authed'].env).toEqual({ API_TOKEN: 'secret-123' });
+      expect(servers['authed']).toMatchObject({
+        command: 'npx',
+        env: { API_TOKEN: '${TEST_CAP_LIB_TOKEN}' },
+      });
+      expect(JSON.stringify(servers)).not.toContain('secret-123');
       delete process.env['TEST_CAP_LIB_TOKEN'];
+    });
+
+    it('omits an unconfigured HTTP MCP and its nested-agent bindings', async () => {
+      delete process.env['TEST_CAP_LIB_HTTP_TOKEN'];
+      const dir = setupTestLibrary({
+        mcps: [
+          {
+            name: 'remote',
+            type: 'http',
+            headers: { Authorization: 'Bearer ${TEST_CAP_LIB_HTTP_TOKEN}' },
+          },
+        ],
+        skills: [
+          {
+            name: 'mixed',
+            domain: 'x',
+            mcps: ['remote'],
+            tools: ['Read', 'mcp__remote__search_task'],
+          },
+        ],
+      });
+
+      await lib.load(dir);
+      expect(lib.collectMcpServers(['mixed'])).toEqual({});
+      expect(lib.getMcpConfigurationStatus('remote')).toEqual({
+        configured: false,
+        missingEnvironment: ['TEST_CAP_LIB_HTTP_TOKEN'],
+      });
+      expect(lib.collectAgentDefinitions(['mixed'])['mixed']).toMatchObject({ tools: ['Read'] });
+      expect(lib.collectAgentDefinitions(['mixed'])['mixed'].mcpServers).toBeUndefined();
+    });
+
+    it('includes a configured HTTP MCP as a secret-free template', async () => {
+      process.env['TEST_CAP_LIB_HTTP_TOKEN'] = 'secret-456';
+      try {
+        const dir = setupTestLibrary({
+          mcps: [
+            {
+              name: 'remote',
+              type: 'http',
+              url: 'https://mcp.example.com/service',
+              headers: { Authorization: 'Bearer ${TEST_CAP_LIB_HTTP_TOKEN}' },
+            },
+          ],
+          skills: [{ name: 'remote-skill', domain: 'x', mcps: ['remote'] }],
+        });
+
+        await lib.load(dir);
+        expect(lib.collectMcpServers(['remote-skill'])).toEqual({
+          remote: {
+            type: 'http',
+            url: 'https://mcp.example.com/service',
+            headers: { Authorization: 'Bearer ${TEST_CAP_LIB_HTTP_TOKEN}' },
+          },
+        });
+        expect(JSON.stringify(lib.collectMcpServers(['remote-skill']))).not.toContain('secret-456');
+      } finally {
+        delete process.env['TEST_CAP_LIB_HTTP_TOKEN'];
+      }
+    });
+
+    it('anchors literal interpreter scripts to the configured library/runtime root', async () => {
+      const dir = setupTestLibrary({
+        mcps: [
+          {
+            name: 'vendor-tool',
+            command: 'node',
+            args: ['--experimental-strip-types', 'library/vendor/tool/index.ts'],
+          },
+          {
+            name: 'package-tool',
+            command: 'node',
+            args: ['packages/package-tool/index.ts'],
+          },
+        ],
+        skills: [
+          {
+            name: 'anchored',
+            domain: 'x',
+            mcps: ['vendor-tool', 'package-tool'],
+          },
+        ],
+      });
+
+      await lib.load(dir);
+      const servers = lib.collectMcpServers(['anchored']);
+      expect(servers['vendor-tool']).toMatchObject({
+        args: ['--experimental-strip-types', join(dir, 'vendor', 'tool', 'index.ts')],
+      });
+      expect(servers['package-tool']).toMatchObject({
+        args: [
+          join(import.meta.dirname, '..', '..', '..', '..', 'packages', 'package-tool', 'index.ts'),
+        ],
+      });
     });
   });
 
@@ -489,5 +607,63 @@ describe('capability revision', () => {
     rmSync(dir, { recursive: true });
     await expect(lib.load(dir)).rejects.toThrow();
     expect(() => lib.getRevision()).toThrow('unavailable');
+  });
+
+  it('tracks selected HTTP definitions without changing unrelated skill revisions', async () => {
+    process.env['TEST_REVISION_HTTP_TOKEN'] = 'configured';
+    try {
+      const dir = setupTestLibrary({
+        mcps: [
+          {
+            name: 'selected-http',
+            type: 'http',
+            url: 'https://mcp.example.com/one',
+            headers: { Authorization: 'Bearer ${TEST_REVISION_HTTP_TOKEN}' },
+          },
+          { name: 'unrelated' },
+        ],
+        skills: [
+          { name: 'selected', mcps: ['selected-http'] },
+          { name: 'other', mcps: ['unrelated'] },
+        ],
+      });
+      await lib.load(dir);
+      const selectedRevision = lib.getRevision(['selected']);
+      const unrelatedRevision = lib.getRevision(['other']);
+      writeJson(join(dir, 'mcps', 'selected-http.json'), {
+        name: 'selected-http',
+        displayName: 'selected-http',
+        type: 'http',
+        url: 'https://mcp.example.com/two',
+        headers: { Authorization: 'Bearer ${TEST_REVISION_HTTP_TOKEN}' },
+      });
+      await lib.load(dir);
+      expect(lib.getRevision(['selected'])).not.toBe(selectedRevision);
+      expect(lib.getRevision(['other'])).toBe(unrelatedRevision);
+    } finally {
+      delete process.env['TEST_REVISION_HTTP_TOKEN'];
+    }
+  });
+
+  it('changes selected revision when optional HTTP configuration becomes available', async () => {
+    delete process.env['TEST_REVISION_AVAILABILITY_TOKEN'];
+    const dir = setupTestLibrary({
+      mcps: [
+        {
+          name: 'optional-http',
+          type: 'http',
+          headers: { Authorization: 'Bearer ${TEST_REVISION_AVAILABILITY_TOKEN}' },
+        },
+      ],
+      skills: [{ name: 'selected', mcps: ['optional-http'] }],
+    });
+    await lib.load(dir);
+    const unavailableRevision = lib.getRevision(['selected']);
+    process.env['TEST_REVISION_AVAILABILITY_TOKEN'] = 'configured';
+    try {
+      expect(lib.getRevision(['selected'])).not.toBe(unavailableRevision);
+    } finally {
+      delete process.env['TEST_REVISION_AVAILABILITY_TOKEN'];
+    }
   });
 });

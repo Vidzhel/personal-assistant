@@ -20,7 +20,7 @@ function check(directory) {
     }
   }
 }
-for (const workspace of ['shared', 'core', 'mcp-ticktick']) {
+for (const workspace of ['shared', 'core']) {
   check(`packages/${workspace}/src`);
 }
 console.log(`strip-types compatibility passed: ${count} production files; no code executed.`);

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { resolve } from 'node:path';
 
 import { CapabilityLibrary } from '../capability-library/capability-library.ts';
@@ -8,6 +8,7 @@ import { validateLibrary } from '../capability-library/library-validator.ts';
 const LIBRARY_DIR = resolve(import.meta.dirname, '..', '..', '..', '..', 'library');
 
 describe('library integration', () => {
+  afterEach(() => vi.unstubAllEnvs());
   it('loads the real library without errors', async () => {
     const lib = new CapabilityLibrary();
     await lib.load(LIBRARY_DIR);
@@ -19,21 +20,30 @@ describe('library integration', () => {
     expect(errors).toEqual([]);
   });
 
-  it('resolves MCPs for ticktick skill', async () => {
+  it('loads TickTick as an optional HTTP MCP without materializing credentials', async () => {
     const lib = new CapabilityLibrary();
     await lib.load(LIBRARY_DIR);
-    const mcps = lib.collectMcpServers(['ticktick']);
-    expect(mcps['ticktick']).toBeDefined();
-    expect(mcps['ticktick'].command).toBe('node');
+    expect(lib.collectMcpServers(['ticktick'])).toEqual({});
+    expect(lib.getMcpServerConfig('ticktick')).toEqual({
+      type: 'http',
+      url: 'https://mcp.ticktick.com',
+      headers: { Authorization: 'Bearer ${TICKTICK_MCP_TOKEN}' },
+    });
   });
 
   it('builds agent definitions with correct tool patterns', async () => {
+    vi.stubEnv('TICKTICK_MCP_TOKEN', 'fake-library-token');
+    process.env['TICKTICK_MCP_TOKEN'] = 'fake-library-token';
     const lib = new CapabilityLibrary();
-    await lib.load(LIBRARY_DIR);
-    const agents = lib.collectAgentDefinitions(['ticktick']);
-    expect(agents['ticktick']).toBeDefined();
-    expect(agents['ticktick'].tools).toContain('mcp__ticktick__*');
-    expect(agents['ticktick'].prompt).toBeTruthy();
+    try {
+      await lib.load(LIBRARY_DIR);
+      const agents = lib.collectAgentDefinitions(['ticktick']);
+      expect(agents['ticktick']).toBeDefined();
+      expect(agents['ticktick'].tools).toContain('mcp__ticktick__*');
+      expect(agents['ticktick'].prompt).toBeTruthy();
+    } finally {
+      delete process.env['TICKTICK_MCP_TOKEN'];
+    }
   });
 
   it('collects actions from gmail skill', async () => {

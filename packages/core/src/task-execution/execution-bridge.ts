@@ -12,7 +12,7 @@ import type {
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { TaskExecutionEngine } from './task-execution-engine.ts';
 import type { NamedAgentStore } from '../agent-registry/yaml-named-agent-store.ts';
-import type { AgentResolver } from '../agent-registry/agent-resolver.ts';
+import type { AgentResolver, ResolvedCapabilities } from '../agent-registry/agent-resolver.ts';
 import { resolveAgentExecutionSettings } from '../agent-registry/agent-resolver.ts';
 import { getConfig } from '../config.ts';
 import type { ModelCatalog } from '../agent-registry/model-catalog.ts';
@@ -24,6 +24,8 @@ import { buildTaskBoardInstructions } from './task-board-protocol.ts';
 const log = createLogger('execution-bridge');
 
 const DEFAULT_RETRY_ATTEMPT = 1;
+
+class ExecutionCapabilityUnavailableError extends Error {}
 
 export interface ExecutionBridgeDeps {
   modelCatalog?: ModelCatalog;
@@ -58,6 +60,23 @@ function resolveAgent(deps: ExecutionBridgeDeps, payload: RunAgentPayload): Name
     throw new Error(`Template names unknown agent '${agentName}'`);
   }
   return named ?? deps.namedAgentStore.getDefaultAgent(projectId);
+}
+
+function assertExecutionCapabilitiesAvailable(
+  agent: NamedAgent,
+  capabilities: ResolvedCapabilities,
+): void {
+  const unavailableSkills = new Set(capabilities.unavailableSkills ?? []);
+  if (
+    !capabilities.unavailableMcpServers?.length ||
+    agent.skills.length === 0 ||
+    !agent.skills.every((name) => unavailableSkills.has(name))
+  ) {
+    return;
+  }
+  throw new ExecutionCapabilityUnavailableError(
+    `Agent "${agent.name}" has unavailable MCP integration: ${capabilities.unavailableMcpServers.join(', ')}`,
+  );
 }
 
 async function captureExecutionModels(
@@ -127,6 +146,7 @@ async function buildAgentTaskRequest(
 ): Promise<AgentTaskRequestEvent> {
   const agent = resolveAgent(deps, payload);
   const capabilities = deps.agentResolver.resolveAgentCapabilities(agent);
+  assertExecutionCapabilitiesAvailable(agent, capabilities);
   const executionSettings = resolveAgentExecutionSettings({
     model: agent.model,
     maxTurns: agent.maxTurns,
@@ -290,6 +310,14 @@ async function dispatchAgent(
   } catch (error) {
     if (!isCurrentGeneration(state, generation)) return;
     const reason = error instanceof Error ? error.message : String(error);
+    if (error instanceof ExecutionCapabilityUnavailableError) {
+      await deps.executionEngine.onTaskBlocked(
+        payload.treeId,
+        payload.taskId,
+        `Agent capability unavailable: ${reason}`,
+      );
+      return;
+    }
     await deps.executionEngine.onTaskFailed(
       payload.treeId,
       payload.taskId,

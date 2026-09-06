@@ -29,12 +29,6 @@ packages/web/*
 !packages/web/postcss.config.mjs
 !packages/web/src/
 !packages/web/src/**
-!packages/mcp-ticktick/
-packages/mcp-ticktick/*
-!packages/mcp-ticktick/package.json
-!packages/mcp-ticktick/tsconfig.json
-!packages/mcp-ticktick/src/
-!packages/mcp-ticktick/src/**
 !migrations/
 migrations/*
 !migrations/*.sql

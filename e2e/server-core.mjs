@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createWorkspaceFixture } from './workspace-fixture.mjs';
+import { createMcpFixture } from './mcp-fixture.mjs';
 
 const root = process.argv[2];
 assert(root && realpathSync(root) === process.cwd());
@@ -20,6 +21,7 @@ function write(relative, content) {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, typeof content === 'string' ? content : JSON.stringify(content));
 }
+const mcpFixture = await createMcpFixture(write);
 write('projects/course/context.md', '# Course\n\nBrowser fixture parent.\n');
 write('projects/course/one/context.md', '# Nested Course\n\nBrowser fixture only.\n');
 write('projects/course/one/project.yaml', { version: 1 });
@@ -198,7 +200,15 @@ const pending = createPendingApprovals(getDb());
 const control = createServer(async (req, res) => {
   try {
     let result;
-    if (req.method === 'GET' && req.url === '/workspace') {
+    if (req.method === 'POST' && req.url === '/mcp-reject') {
+      mcpFixture.setRejected(true);
+      result = { ok: true };
+    } else if (req.method === 'POST' && req.url === '/mcp-accept') {
+      mcpFixture.setRejected(false);
+      result = { ok: true };
+    } else if (req.method === 'GET' && req.url === '/mcp-methods') {
+      result = mcpFixture.methods;
+    } else if (req.method === 'GET' && req.url === '/workspace') {
       result = await workspaceFixture.state();
     } else if (req.method === 'POST' && req.url === '/delivery-evidence') {
       const projectId = 'course/one';
@@ -286,6 +296,7 @@ async function stop() {
   stopped = true;
   await new Promise((resolveControl) => control.close(resolveControl));
   await raven.stop();
+  await mcpFixture.stop();
 }
 process.once('SIGTERM', () => void stop());
 process.once('SIGINT', () => void stop());

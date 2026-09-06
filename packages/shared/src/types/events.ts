@@ -1242,11 +1242,22 @@ export const ConfigVersionRevertedPayloadSchema = z.object({
 
 export type Priority = 'low' | 'normal' | 'high' | 'urgent';
 
-export interface McpServerConfig {
+export interface McpStdioServerConfig {
+  type?: 'stdio';
   command: string;
   args: string[];
   env?: Record<string, string>;
 }
+
+export interface McpHttpServerConfig {
+  type: 'http';
+  url: string;
+  headers?: Record<string, string>;
+}
+
+/** Secret-free MCP configuration carried through task admission and persisted events.
+ * Environment placeholders are materialized only at the backend boundary. */
+export type McpServerConfig = McpStdioServerConfig | McpHttpServerConfig;
 
 export interface SubAgentDefinition {
   description: string;

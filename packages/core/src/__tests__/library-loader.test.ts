@@ -40,7 +40,7 @@ describe('loadLibrary', () => {
     const lib = await loadLibrary(dir);
 
     expect(lib.mcps.size).toBe(2);
-    expect(lib.mcps.get('ticktick')?.command).toBe('npx');
+    expect(lib.mcps.get('ticktick')).toMatchObject({ command: 'npx' });
     expect(lib.mcps.get('gmail')?.name).toBe('gmail');
   });
 

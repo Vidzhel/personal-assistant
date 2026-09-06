@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { createLogger, buildMcpToolPattern } from '@raven/shared';
+import { resolve } from 'node:path';
+import { createLogger, buildMcpToolPattern, MCP_TOOL_PATTERN_RE } from '@raven/shared';
 import type {
   McpDefinition,
   LoadedSkill,
@@ -11,33 +12,23 @@ import type { ActionDefinition } from '@raven/shared';
 
 import { loadLibrary } from './library-loader.ts';
 import type { DefinitionDiagnostic } from '../diagnostics/definition-diagnostics.ts';
+import {
+  createMcpServerConfig,
+  getMcpConfigurationStatus,
+  type McpConfigurationStatus,
+} from './mcp-config.ts';
 
 const log = createLogger('capability-library');
-
-/**
- * Resolves `${VAR_NAME}` placeholders in MCP env values from process.env.
- * Returns empty string for missing env vars (lenient — no throw).
- */
-function resolveEnvVars(env?: Record<string, string>): Record<string, string> | undefined {
-  if (!env) return undefined;
-  const resolved: Record<string, string> = {};
-  for (const [key, val] of Object.entries(env)) {
-    if (val.startsWith('${') && val.endsWith('}')) {
-      resolved[key] = process.env[val.slice(2, -1)] ?? '';
-    } else {
-      resolved[key] = val;
-    }
-  }
-  return resolved;
-}
 
 export class CapabilityLibrary {
   private library: (LoadedLibrary & { diagnostics?: DefinitionDiagnostic[] }) | null = null;
   private diagnostics: DefinitionDiagnostic[] = [];
+  private libraryRoot?: string;
 
   async load(libraryDir: string): Promise<void> {
     try {
       this.library = await loadLibrary(libraryDir);
+      this.libraryRoot = resolve(libraryDir);
       this.diagnostics = [...(this.library.diagnostics ?? [])];
     } catch (error) {
       this.diagnostics = [
@@ -71,9 +62,13 @@ export class CapabilityLibrary {
       if (!skill) throw new Error(`Skill is unavailable: ${name}`);
       return skill;
     });
-    const mcps = [...new Set(skills.flatMap((skill) => skill.config.mcps))]
-      .sort()
-      .map((name) => [name, lib.mcps.get(name)]);
+    const mcps = [...new Set(skills.flatMap((skill) => skill.config.mcps))].sort().map((name) => {
+      const definition = lib.mcps.get(name);
+      const config = definition ? this.createServerConfig(definition) : undefined;
+      const configured =
+        config?.type === 'http' ? getMcpConfigurationStatus(config).configured : true;
+      return [name, definition, configured];
+    });
     const vendors = [...new Set(skills.flatMap((skill) => skill.config.vendorSkills))]
       .sort()
       .map((reference) => [reference, lib.vendorPaths.get(reference.split('/')[0])]);
@@ -117,6 +112,20 @@ export class CapabilityLibrary {
     return lib.mcps.get(name);
   }
 
+  /** Return the anchored, unresolved form safe to persist in task events. */
+  getMcpServerConfig(name: string): McpServerConfig | undefined {
+    const definition = this.getMcp(name);
+    return definition ? this.createServerConfig(definition) : undefined;
+  }
+
+  getMcpConfigurationStatus(
+    name: string,
+    env: NodeJS.ProcessEnv = process.env,
+  ): McpConfigurationStatus | undefined {
+    const config = this.getMcpServerConfig(name);
+    return config ? getMcpConfigurationStatus(config, env) : undefined;
+  }
+
   getVendorPath(name: string): string | undefined {
     return this.ensureLoaded().vendorPaths.get(name);
   }
@@ -140,41 +149,52 @@ export class CapabilityLibrary {
         continue;
       }
 
-      const env = resolveEnvVars(Object.keys(mcp.env).length > 0 ? mcp.env : undefined);
-
-      result[mcpName] = {
-        command: mcp.command,
-        args: mcp.args,
-        ...(env ? { env } : {}),
-      };
+      const config = this.createServerConfig(mcp);
+      if (config.type === 'http' && !getMcpConfigurationStatus(config).configured) continue;
+      result[mcpName] = config;
     }
 
     return result;
   }
 
-  collectAgentDefinitions(skillNames?: string[]): Record<string, SubAgentDefinition> {
+  collectAgentDefinitions(
+    skillNames?: string[],
+    availableMcpNames?: ReadonlySet<string>,
+  ): Record<string, SubAgentDefinition> {
     const skills = this.resolveSkills(skillNames);
     const result: Record<string, SubAgentDefinition> = {};
+    const available = availableMcpNames ?? new Set(Object.keys(this.collectMcpServers(skillNames)));
 
     for (const skill of skills) {
-      const tools: string[] = [...skill.config.tools];
-      for (const mcpName of skill.config.mcps) {
+      const tools = skill.config.tools.filter((tool) => {
+        const match = tool.match(MCP_TOOL_PATTERN_RE);
+        return !match || available.has(match[1]);
+      });
+      const activeMcps = skill.config.mcps.filter((mcpName) => available.has(mcpName));
+      for (const mcpName of activeMcps) {
         tools.push(buildMcpToolPattern(mcpName));
       }
 
       const def: SubAgentDefinition = {
         description: skill.config.description,
         prompt: skill.skillMd,
-        tools: tools.length > 0 ? tools : undefined,
+        // An explicit empty list prevents the SDK from inheriting the parent
+        // agent's unrelated tools when every declared MCP is unavailable.
+        tools,
         model: skill.config.model,
         effort: skill.config.effort,
-        mcpServers: skill.config.mcps.length > 0 ? skill.config.mcps : undefined,
+        mcpServers: activeMcps.length > 0 ? activeMcps : undefined,
       };
 
       result[skill.config.name] = def;
     }
 
     return result;
+  }
+
+  private createServerConfig(definition: McpDefinition): McpServerConfig {
+    if (!this.libraryRoot) throw new Error('CapabilityLibrary not loaded — call load() first');
+    return createMcpServerConfig(definition, this.libraryRoot);
   }
 
   collectActions(skillNames?: string[]): ActionDefinition[] {

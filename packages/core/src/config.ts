@@ -75,9 +75,7 @@ const envSchema = z
     NEO4J_PASSWORD: z.string().default('ravenpassword'),
 
     // Optional skill-specific (loaded from .env, injected into skill configs)
-    TICKTICK_CLIENT_ID: z.string().optional(),
-    TICKTICK_CLIENT_SECRET: z.string().optional(),
-    TICKTICK_ACCESS_TOKEN: z.string().optional(),
+    TICKTICK_MCP_TOKEN: z.string().optional(),
     GMAIL_IMAP_USER: z.string().optional(),
     GMAIL_IMAP_PASSWORD: z.string().optional(),
     GMAIL_CLIENT_ID: z.string().optional(),

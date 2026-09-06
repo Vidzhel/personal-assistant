@@ -269,12 +269,14 @@ describe('handleCallback', () => {
       const result = handleCallback(action, deps);
 
       expect(result.success).toBe(true);
-      expect(result.message).toBe('Done \u2713');
-      expect(result.updatedKeyboard).toEqual([[{ text: 'Done \u2713', callback_data: 'noop' }]]);
+      expect(result.message).toBe('Request submitted…');
+      expect(result.updatedKeyboard).toEqual([
+        [{ text: 'Request submitted…', callback_data: 'noop' }],
+      ]);
       expect(deps.agentManager.executeAction).toHaveBeenCalledWith({
-        actionName: 'task:complete',
+        actionName: 'ticktick:complete-task',
         skillName: 'ticktick',
-        details: expect.stringContaining('tid1'),
+        details: expect.stringMatching(/get_task_by_id.*tid1.*complete_task.*read/s),
       });
     });
 
@@ -288,9 +290,9 @@ describe('handleCallback', () => {
       const result = handleCallback(action, deps);
 
       expect(result.success).toBe(true);
-      expect(result.message).toBe('Snoozed \u2713');
+      expect(result.message).toBe('Request submitted…');
       expect(deps.agentManager.executeAction).toHaveBeenCalledWith({
-        actionName: 'task:snooze',
+        actionName: 'ticktick:update-task',
         skillName: 'ticktick',
         details: expect.stringContaining('1 day'),
       });
@@ -306,7 +308,7 @@ describe('handleCallback', () => {
       handleCallback(action, deps);
 
       expect(deps.agentManager.executeAction).toHaveBeenCalledWith({
-        actionName: 'task:snooze',
+        actionName: 'ticktick:update-task',
         skillName: 'ticktick',
         details: expect.stringContaining('1 week'),
       });
@@ -317,11 +319,11 @@ describe('handleCallback', () => {
       const result = handleCallback(action, deps);
 
       expect(result.success).toBe(true);
-      expect(result.message).toBe('Dropped');
+      expect(result.message).toBe('Request submitted…');
       expect(deps.agentManager.executeAction).toHaveBeenCalledWith({
-        actionName: 'task:drop',
+        actionName: 'ticktick:delete-task',
         skillName: 'ticktick',
-        details: expect.stringContaining('tid4'),
+        details: expect.stringMatching(/get_task_by_id.*tid4.*delete_task.*absent/s),
       });
     });
 
@@ -337,11 +339,62 @@ describe('handleCallback', () => {
         target: 'tid5',
         args: [],
       };
-      handleCallback(action, deps);
+      const result = handleCallback(action, deps);
 
       // Wait for the async fire-and-forget
       await vi.waitFor(() => {
         expect(deps.logger.error).toHaveBeenCalledWith(expect.stringContaining('MCP timeout'));
+      });
+      await expect(result.completion).resolves.toMatchObject({
+        success: false,
+        message: 'Result uncertain — verify in TickTick',
+      });
+    });
+
+    it('reports a verified terminal result only from matching structured evidence', async () => {
+      (deps.agentManager.executeAction as ReturnType<typeof vi.fn>).mockResolvedValue({
+        success: true,
+        result: JSON.stringify({
+          operation: 'complete-task',
+          outcome: 'verified',
+          taskId: 'tid6',
+          projectId: 'p1',
+        }),
+      });
+      const result = handleCallback(
+        { domain: 'task', action: 'complete', target: 'tid6', args: [] },
+        deps,
+      );
+      await expect(result.completion).resolves.toEqual({
+        success: true,
+        message: 'TickTick change verified',
+        updatedKeyboard: [[{ text: 'TickTick change verified', callback_data: 'noop' }]],
+      });
+    });
+
+    it('keeps generic SDK success uncertain', async () => {
+      const result = handleCallback(
+        { domain: 'task', action: 'complete', target: 'tid7', args: [] },
+        deps,
+      );
+      await expect(result.completion).resolves.toMatchObject({
+        success: false,
+        message: 'Result uncertain — verify in TickTick',
+      });
+    });
+
+    it('reports a permission-queued task action as requiring approval', async () => {
+      (deps.agentManager.executeAction as ReturnType<typeof vi.fn>).mockResolvedValue({
+        success: false,
+        error: 'Action queued for approval',
+      });
+      const result = handleCallback(
+        { domain: 'task', action: 'drop', target: 'tid8', args: [] },
+        deps,
+      );
+      await expect(result.completion).resolves.toMatchObject({
+        success: false,
+        message: 'Approval required in Raven',
       });
     });
   });

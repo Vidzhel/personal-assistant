@@ -2189,6 +2189,118 @@ describe('telegram-bot service', () => {
       expect(mockConfig.pendingApprovals.resolve).toHaveBeenCalledWith('ap1', 'approved');
     });
 
+    it('replaces submitted task state with terminal verified evidence', async () => {
+      mockConfig.agentManager.executeAction.mockResolvedValue({
+        success: true,
+        result: JSON.stringify({
+          operation: 'complete-task',
+          outcome: 'verified',
+          taskId: 'tid1',
+          projectId: 'p1',
+        }),
+      });
+      await loadService();
+      await service.start({
+        eventBus: mockEventBus,
+        logger: mockLogger,
+        db: {},
+        config: mockConfig,
+      });
+      const editMessageReplyMarkup = vi.fn().mockResolvedValue({});
+      const ctx = {
+        callbackQuery: {
+          data: 't:c:tid1',
+          from: { id: 123 },
+          message: { chat: { id: -1001234567890 }, message_id: 101 },
+        },
+        answerCallbackQuery: vi.fn().mockResolvedValue({}),
+        api: { editMessageReplyMarkup },
+      };
+
+      await callbackHandlers[0](ctx);
+
+      expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: 'Request submitted…' });
+      expect(editMessageReplyMarkup).toHaveBeenCalledTimes(2);
+      expect(editMessageReplyMarkup.mock.calls[1][2]).toEqual({
+        reply_markup: {
+          inline_keyboard: [[{ text: 'TickTick change verified', callback_data: 'noop' }]],
+        },
+      });
+    });
+
+    it('abandons a pending task callback on stop and uses fresh dependencies after restart', async () => {
+      let resolveOld!: (value: { success: boolean; result: string }) => void;
+      const oldAction = new Promise<{ success: boolean; result: string }>((resolve) => {
+        resolveOld = resolve;
+      });
+      mockConfig.agentManager.executeAction.mockReturnValue(oldAction);
+      await loadService();
+      await service.start({
+        eventBus: mockEventBus,
+        logger: mockLogger,
+        db: {},
+        config: mockConfig,
+      });
+      const oldEdit = vi.fn().mockResolvedValue({});
+      const oldCtx = {
+        callbackQuery: {
+          data: 't:c:old-task',
+          from: { id: 123 },
+          message: { chat: { id: -1001234567890 }, message_id: 102 },
+        },
+        answerCallbackQuery: vi.fn().mockResolvedValue({}),
+        api: { editMessageReplyMarkup: oldEdit },
+      };
+      const oldInvocation = callbackHandlers[0](oldCtx);
+      await vi.waitFor(() => expect(oldEdit).toHaveBeenCalledTimes(1));
+
+      await service.stop();
+      await oldInvocation;
+      resolveOld({
+        success: true,
+        result: JSON.stringify({
+          operation: 'complete-task',
+          outcome: 'verified',
+          taskId: 'old-task',
+          projectId: 'p1',
+        }),
+      });
+      await Promise.resolve();
+      expect(oldEdit).toHaveBeenCalledTimes(1);
+
+      const newConfig = {
+        ...mockConfig,
+        agentManager: {
+          executeAction: vi.fn().mockResolvedValue({
+            success: true,
+            result: JSON.stringify({
+              operation: 'complete-task',
+              outcome: 'verified',
+              taskId: 'new-task',
+              projectId: 'p1',
+            }),
+          }),
+        },
+      };
+      await service.start({
+        eventBus: mockEventBus,
+        logger: mockLogger,
+        db: {},
+        config: newConfig,
+      });
+      const newEdit = vi.fn().mockResolvedValue({});
+      await callbackHandlers.at(-1)!({
+        callbackQuery: {
+          data: 't:c:new-task',
+          from: { id: 123 },
+          message: { chat: { id: -1001234567890 }, message_id: 103 },
+        },
+        answerCallbackQuery: vi.fn().mockResolvedValue({}),
+        api: { editMessageReplyMarkup: newEdit },
+      });
+      expect(newEdit).toHaveBeenCalledTimes(2);
+    });
+
     it('falls back to user:chat:message for unrecognized callback data', async () => {
       await loadService();
       await service.start({

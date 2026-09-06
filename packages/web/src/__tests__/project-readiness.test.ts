@@ -49,7 +49,7 @@ const report: ProjectReadinessReport = {
       name: 'calendar',
       displayName: 'Calendar',
       state: 'verified',
-      requirements: [],
+      requirements: [{ kind: 'tools', name: 'calendar', state: 'verified', toolCount: 47 }],
       findings: [],
     },
   ],
@@ -82,6 +82,8 @@ describe('project readiness presentation', () => {
     expect(html).toContain('Gmail');
     expect(html).toContain('Authentication unverified');
     expect(html).toContain('Calendar');
+    expect(html).toContain('47');
+    expect(html).toContain('tools discovered');
     expect(html).toContain('Verified locally');
     expect(html).toContain('Mount its parent folder and select the repository again.');
     expect(html).toContain('Blocked operations: native write');

@@ -485,7 +485,8 @@ test('a rejected chat preserves a recoverable draft and never reaches the model'
   await session(request, p.id, 'Rejected draft');
   await chat(page, p.id);
   const agents = await (await request.get(`${API}/agents`)).json();
-  const agent = agents.find((item) => item.isDefault);
+  const agent = agents.find((item) => item.id === 'raven' && item.isDefault);
+  expect(agent).toBeDefined();
   const previous = (await state(request)).calls.length;
   try {
     expect(
@@ -860,8 +861,11 @@ test('mobile agent memory requires a project and keeps nested project notes sepa
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/agents');
-  await expect(page.getByRole('heading', { name: 'raven', exact: true })).toBeVisible();
-  await page.getByTitle('View Memory').first().click();
+  const globalAgent = page.locator('div.rounded-lg.border')
+    .filter({ has: page.getByRole('heading', { name: 'raven', exact: true }) })
+    .filter({ hasText: 'Global agent' });
+  await expect(globalAgent).toHaveCount(1);
+  await globalAgent.getByTitle('View Memory').click();
   await expect(page.getByRole('heading', { name: 'Project memory', exact: true })).toBeVisible();
   const selector = page.getByLabel('Project', { exact: true });
   await expect(selector).toHaveValue('');
@@ -1173,4 +1177,32 @@ test('knowledge graph requires explicit project selection and keeps it when the 
   await selector.selectOption('');
   await expect(page).toHaveURL('/knowledge');
   expect(graphRequests.every(Boolean)).toBe(true);
+});
+
+
+test('mobile readiness verifies remote tools and explains revoked authentication', async ({ page, request }) => {
+  const duplicateKeyWarnings = [];
+  page.on('console', (message) => { if (message.text().includes('same key')) duplicateKeyWarnings.push(message.text()); });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(projectPath('mcp-readiness'));
+  await page.getByRole('button', { name: 'Workspace', exact: true }).click();
+  const readiness = page.getByRole('region', { name: 'Project readiness', exact: true });
+  await expect(readiness.getByText('47 tools discovered')).toBeVisible();
+  try {
+    expect((await request.post(`${CONTROL}/mcp-reject`)).ok()).toBeTruthy();
+    await readiness.getByRole('button', { name: /Refresh/i }).click();
+    await expect(readiness.getByText('The MCP server rejected authentication. Replace its API token and retry.').first()).toBeVisible();
+    await expect(readiness.getByText('47 tools discovered')).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await readiness.evaluate((element) => element.scrollIntoView({ block: 'start' }));
+    await page.screenshot({ path: '.browser-test-output/mcp-readiness-mobile.png' });
+    const methods = await (await request.get(`${CONTROL}/mcp-methods`)).json();
+    expect(methods).toContain('tools/list');
+    expect(methods.every((method) => ['initialize', 'notifications/initialized', 'tools/list'].includes(method))).toBe(true);
+  } finally {
+    await request.post(`${CONTROL}/mcp-accept`);
+  }
+  await readiness.getByRole('button', { name: /Refresh/i }).click();
+  await expect(readiness.getByText('47 tools discovered')).toBeVisible();
+  expect(duplicateKeyWarnings).toEqual([]);
 });

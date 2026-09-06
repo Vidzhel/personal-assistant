@@ -5,7 +5,6 @@ COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/shared/package.json packages/shared/
 COPY packages/core/package.json packages/core/
 COPY packages/web/package.json packages/web/
-COPY packages/mcp-ticktick/package.json packages/mcp-ticktick/
 RUN npm ci --workspace packages/shared --workspace packages/web --include-workspace-root=false
 
 COPY packages/shared/ packages/shared/

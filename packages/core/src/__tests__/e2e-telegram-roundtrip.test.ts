@@ -104,7 +104,6 @@ const DISABLED_SERVICES = [
   'insight-processor',
   'cross-domain-detector',
   'autonomous-manager',
-  'ticktick-sync',
   'intent-matcher',
 ].join(',');
 

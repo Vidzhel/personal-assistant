@@ -9,9 +9,9 @@ plan:
 tasks:
   - id: fetch-tasks
     type: agent
-    title: Gather today's tasks
+    title: Gather current TickTick workload
     agent: ticktick
-    prompt: "Get all overdue tasks and tasks due today. List each with title, due date, and priority."
+    prompt: "Inspect the official TickTick schemas. Discover lists with list_projects, query each list with get_project_with_undone_tasks, and separately check Inbox, all undated tasks, overdue tasks, and the next 14 days. Include high-priority undated work. Preserve task/list IDs, links, recurring dates, all-day values, and time zones. State every failed, truncated, or unqueried scope; never present partial results as the complete account."
     blockedBy: []
 
   - id: fetch-emails
@@ -25,7 +25,7 @@ tasks:
     type: agent
     title: Compile the digest
     agent: digest
-    prompt: "Compile a concise morning digest from the gathered tasks and email summaries. Group by urgent emails, task reminders, and a prioritized action list for the day. Then send the compiled digest to the user via Telegram."
+    prompt: "Compile a concise morning digest from the gathered task and email results. Group urgent emails, overdue/today tasks, high-priority undated work, and a prioritized action list. Include a visible TickTick coverage note whenever any list or query scope was failed, truncated, or unqueried. Then send the compiled digest to the user via Telegram."
     blockedBy:
       - fetch-tasks
       - fetch-emails

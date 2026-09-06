@@ -18,7 +18,6 @@ import dataCollector from './proactive-intelligence/data-collector.ts';
 import insightProcessor from './proactive-intelligence/insight-processor.ts';
 import crossDomainDetector from './proactive-intelligence/cross-domain-detector.ts';
 import autonomousManager from './task-management/autonomous-manager.ts';
-import ticktickSync from './task-management/ticktick-sync.ts';
 import intentMatcher from '../intents/intent-matcher.ts';
 
 /**
@@ -45,7 +44,7 @@ export interface ServiceDefinition {
 
 const GMAIL_ENV = ['GMAIL_CLIENT_ID', 'GMAIL_CLIENT_SECRET', 'GMAIL_REFRESH_TOKEN'];
 const TELEGRAM_ENV = ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID'];
-const TICKTICK_ENV = ['TICKTICK_CLIENT_ID', 'TICKTICK_CLIENT_SECRET', 'TICKTICK_ACCESS_TOKEN'];
+const TICKTICK_ENV = ['TICKTICK_MCP_TOKEN'];
 
 function fromService(def: {
   name: string;
@@ -177,12 +176,6 @@ export const SERVICE_DEFINITIONS: ServiceDefinition[] = [
     description: 'Autonomous TickTick task triage and cleanup recommendations',
     requiresEnv: TICKTICK_ENV,
     service: autonomousManager,
-  }),
-  fromService({
-    name: 'ticktick-sync',
-    description: 'Syncs TickTick tasks into the local task store',
-    requiresEnv: TICKTICK_ENV,
-    service: ticktickSync,
   }),
   fromService({
     name: 'intent-matcher',

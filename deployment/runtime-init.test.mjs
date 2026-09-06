@@ -39,7 +39,7 @@ afterEach(() => {
   for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-test('fresh native capability is explicit and matches the public repository workflow', () => {
+test('fresh capabilities are explicit and match their canonical library files', () => {
   const relative = 'library/skills/system/repository-work';
   for (const filename of ['config.json', 'skill.md']) {
     assert.equal(
@@ -53,7 +53,79 @@ test('fresh native capability is explicit and matches the public repository work
   assert.deepEqual(skill.vendorSkills, []);
   assert.deepEqual([...skill.tools].sort(), ['Bash', 'Edit', 'Glob', 'Grep', 'Read', 'Write']);
   const agent = yaml.load(readFileSync(join(seedRoot, 'projects/agents/raven/agent.yaml'), 'utf8'));
-  assert.deepEqual(agent.skills, ['repository-work']);
+  assert.deepEqual(agent.skills, ['repository-work', 'ticktick']);
+
+  const ticktickFiles = [
+    'mcps/ticktick.json',
+    'skills/productivity/task-management/ticktick/config.json',
+    'skills/productivity/task-management/ticktick/skill.md',
+  ];
+  for (const file of ticktickFiles) {
+    assert.equal(
+      readFileSync(join(seedRoot, 'library', file), 'utf8'),
+      readFileSync(new URL(`../library/${file}`, import.meta.url), 'utf8'),
+      `Public TickTick seed differs from its canonical file: ${file}`,
+    );
+  }
+  const mcp = JSON.parse(readFileSync(join(seedRoot, 'library/mcps/ticktick.json'), 'utf8'));
+  assert.deepEqual(mcp, {
+    name: 'ticktick',
+    displayName: 'TickTick',
+    type: 'http',
+    url: 'https://mcp.ticktick.com',
+    headers: { Authorization: 'Bearer ${TICKTICK_MCP_TOKEN}' },
+  });
+  const ticktick = JSON.parse(
+    readFileSync(
+      join(seedRoot, 'library/skills/productivity/task-management/ticktick/config.json'),
+      'utf8',
+    ),
+  );
+  const toolsByTier = {
+    green: [
+      'search_task', 'get_task_by_id', 'list_undone_tasks_by_time_query',
+      'list_undone_tasks_by_date', 'list_completed_tasks_by_date', 'filter_tasks',
+      'list_projects', 'get_project_by_id', 'get_project_with_undone_tasks',
+      'get_task_in_project', 'list_columns', 'list_project_groups', 'get_comment',
+      'project_member', 'list_tags', 'list_habits', 'list_habit_sections', 'get_habit',
+      'get_habit_checkins', 'get_focuses_by_time', 'get_focus', 'list_countdowns',
+    ],
+    yellow: [
+      'create_project', 'update_project', 'create_column', 'update_column',
+      'create_project_group', 'update_project_group', 'create_task', 'batch_add_tasks',
+      'complete_task', 'complete_tasks_in_project', 'update_task', 'move_task',
+      'batch_update_tasks', 'add_comment', 'assign_task', 'unassign_task', 'create_tag',
+      'create_habit', 'update_habit', 'upsert_habit_checkins', 'create_focus',
+    ],
+    red: ['delete_project_group', 'delete_task', 'delete_comment', 'delete_focus'],
+  };
+  for (const [tier, tools] of Object.entries(toolsByTier)) {
+    assert.deepEqual(
+      ticktick.actions
+        .filter((action) => action.defaultTier === tier)
+        .map((action) => action.name)
+        .sort(),
+      tools.map((tool) => `ticktick:${tool.replaceAll('_', '-')}`).sort(),
+    );
+  }
+  assert.equal(ticktick.actions.length, 47);
+  assert.equal(new Set(ticktick.actions.map((action) => action.name)).size, 47);
+  const instructions = readFileSync(
+    join(seedRoot, 'library/skills/productivity/task-management/ticktick/skill.md'),
+    'utf8',
+  );
+  for (const required of [
+    'Inspect the live tool schemas',
+    'get_project_with_undone_tasks',
+    'tasks without dates',
+    '14-day date range',
+    'read the affected record',
+    'inspect TickTick before retrying',
+    'partial result',
+    'owner\'s configured timezone',
+  ]) {
+    assert(instructions.includes(required), `TickTick workflow is missing: ${required}`);
+  }
 });
 
 test('fresh image restart reconnects real history and preserves definitions and memory', async () => {
@@ -62,7 +134,12 @@ test('fresh image restart reconnects real history and preserves definitions and 
   const seededFiles = [
     'config/.gitkeep',
     'library/mcps/.gitkeep',
+    'library/mcps/ticktick.json',
     'library/skills/_index.md',
+    'library/skills/productivity/_index.md',
+    'library/skills/productivity/task-management/_index.md',
+    'library/skills/productivity/task-management/ticktick/config.json',
+    'library/skills/productivity/task-management/ticktick/skill.md',
     'library/skills/system/repository-work/config.json',
     'library/skills/system/repository-work/skill.md',
     'projects/agents/raven/agent.yaml',

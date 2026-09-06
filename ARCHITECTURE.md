@@ -321,12 +321,11 @@ started by `runner.ts` with environment eligibility checks. The suite layer,
 SuiteRegistry, and `config/suites.json` were removed. Extend capabilities through
 the library and existing scaffold-and-activate tools; do not recreate suites.
 Service startup follows dependency construction and event listener registration;
-cron starts after service jobs are registered. Autonomous management, TickTick
-sync and pattern analysis retain per-start dependencies and cancellation, release
-their jobs on stop, and suppress post-stop work through stale callbacks. TickTick
-imports validate the fetched list before writes and deduplicate against complete
-local history. Remote TickTick project IDs do not select Raven project ownership;
-imports use system storage until an explicit mapping exists.
+cron starts after service jobs are registered. Services retain per-start dependencies
+and cancellation, release their jobs on stop, and suppress post-stop work through
+stale callbacks. TickTick remains authoritative for personal planning; its old
+board-mirroring service is removed. Raven board tasks track Raven execution.
+Workload analysis must disclose incomplete list, Inbox, overdue or undated coverage.
 
 ## Data Layer
 
@@ -627,9 +626,9 @@ backups and optional integrations. Node.js 22.22.0 or newer is required.
 
 Default Compose uses dedicated named volumes for data, projects, library, config
 and Claude authentication/resume files. It seeds only empty definition roots with
-a native repository-work capability explicitly bound to the default agent, without
-external MCP/vendor dependencies. The seed is checked against its canonical public
-library definition. Definition/memory Git history is persisted;
+native repository-work and optional official TickTick capabilities explicitly bound
+to the fresh default agent. TickTick stays unconfigured until its dedicated token
+is supplied. Public seeds are checked against their canonical library definitions. Definition/memory Git history is persisted;
 interrupted bootstrap uses a hash-checked journal and refuses conflicting edits.
 The image excludes owner definitions, credentials, runtime data and vendor trees.
 Install and bind optional integrations deliberately. Browser API/WS endpoints are
@@ -657,7 +656,12 @@ are recorded in the W1 specifications and deferred ledger.
 `GET /api/projects/:id/readiness` performs bounded static checks using current
 workspace grants, named-agent bindings, source/context file metadata, executable
 availability and literal MCP entrypoint paths. It neither invokes a model nor
-runs commands. Credentials present means configured, not authenticated. It avoids
+runs commands. Configured HTTP MCPs additionally receive a cancellable five-second
+initialize/tools-list check, bounded to four integrations per report, four pages
+and 200 tools per integration. No provider tool is invoked. Token presence alone
+remains unverified; successful discovery reports authentication and tool count,
+while missing expected tools keep that capability degraded. Provider failures
+return fixed diagnostics, never raw response bodies or resolved headers. It avoids
 execution-history scans; source and capability findings remain independent.
 Unavailable managed definitions can be diagnosed through cache ID/path evidence
 only while that path is currently invalid in the registry.
@@ -677,3 +681,20 @@ validates a prospective Compose environment, then atomically replaces the select
 `.env`. It does not enroll Tailscale or activate the live assistant. Browser file
 routes retain current project/source identity checks. Telegram omits unusable
 fallback links when no canonical URL is configured.
+
+### Official TickTick transport
+
+Capability definitions support stdio and HTTP transports. Selected task/event
+configurations carry secret references; the SDK boundary materializes environment
+values and headers without persisting them. Unconfigured HTTP servers are omitted
+from top-level and nested SDK bindings, while an explicit action requiring them
+fails before dispatch. Unknown TickTick tools retain the conservative red policy.
+Literal interpreter script paths resolve against Raven code or library roots so
+attached repository cwd cannot redirect Raven-owned entrypoints.
+
+The official endpoint is `https://mcp.ticktick.com`, configured through the dedicated
+`TICKTICK_MCP_TOKEN`. Its runtime skill covers list discovery, complete workload
+coverage, dates/timezones, exact task identity, targeted updates and read-back.
+The local Open API adapter and its competing board mirror are retired. Existing
+deployment volumes require the explicit setup/install command; rebuilding never
+silently overwrites customized capability definitions.

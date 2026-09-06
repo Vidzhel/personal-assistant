@@ -13,8 +13,10 @@ describe('McpDefinitionSchema', () => {
   it('accepts a valid MCP definition', () => {
     const result = McpDefinitionSchema.parse(validMcp);
     expect(result.name).toBe('ticktick');
-    expect(result.command).toBe('npx');
-    expect(result.args).toEqual(['-y', '@alexarevalo.ai/mcp-server-ticktick']);
+    expect(result).toMatchObject({
+      command: 'npx',
+      args: ['-y', '@alexarevalo.ai/mcp-server-ticktick'],
+    });
   });
 
   it('applies defaults for optional fields', () => {
@@ -23,8 +25,88 @@ describe('McpDefinitionSchema', () => {
       displayName: 'My MCP',
       command: 'node',
     });
-    expect(result.args).toEqual([]);
-    expect(result.env).toEqual({});
+    expect(result).toMatchObject({ args: [], env: {} });
+  });
+
+  it('accepts an HTTP definition with environment-backed authorization', () => {
+    expect(
+      McpDefinitionSchema.parse({
+        name: 'ticktick',
+        displayName: 'TickTick',
+        type: 'http',
+        url: 'https://mcp.ticktick.com',
+        headers: { Authorization: 'Bearer ${TICKTICK_MCP_TOKEN}' },
+      }),
+    ).toMatchObject({
+      type: 'http',
+      url: 'https://mcp.ticktick.com',
+      headers: { Authorization: 'Bearer ${TICKTICK_MCP_TOKEN}' },
+    });
+  });
+
+  it.each([
+    {
+      name: 'mixed transports',
+      value: { ...validMcp, type: 'http', url: 'https://mcp.example.com' },
+    },
+    {
+      name: 'embedded URL credentials',
+      value: {
+        name: 'remote',
+        displayName: 'Remote',
+        type: 'http',
+        url: 'https://secret@example.com/mcp',
+      },
+    },
+    {
+      name: 'plaintext remote endpoint',
+      value: {
+        name: 'remote',
+        displayName: 'Remote',
+        type: 'http',
+        url: 'http://mcp.example.com/mcp',
+      },
+    },
+    {
+      name: 'literal authorization secret',
+      value: {
+        name: 'remote',
+        displayName: 'Remote',
+        type: 'http',
+        url: 'https://example.com/mcp',
+        headers: { Authorization: 'Bearer committed-secret' },
+      },
+    },
+    {
+      name: 'control characters in headers',
+      value: {
+        name: 'remote',
+        displayName: 'Remote',
+        type: 'http',
+        url: 'https://example.com/mcp',
+        headers: { 'X-Client': 'raven\nInjected: true' },
+      },
+    },
+    {
+      name: 'literal stdio secret',
+      value: {
+        name: 'local',
+        displayName: 'Local',
+        command: 'local-mcp',
+        env: { API_TOKEN: 'committed-secret' },
+      },
+    },
+    {
+      name: 'partially malformed environment template',
+      value: {
+        name: 'local',
+        displayName: 'Local',
+        command: 'local-mcp',
+        env: { API_TOKEN: '${VALID_TOKEN}:${not-valid}' },
+      },
+    },
+  ])('rejects $name', ({ value }) => {
+    expect(() => McpDefinitionSchema.parse(value)).toThrow();
   });
 
   it('rejects MCP without command', () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { initDatabase, getDb } from '../db/database.ts';
@@ -278,6 +278,45 @@ describe('createToolPolicy', () => {
       expect(blockedEvents).toHaveLength(1);
       const payload = (blockedEvents[0] as { payload: Record<string, unknown> }).payload;
       expect(payload.approvalId).toBe(approval?.id);
+    });
+
+    it('maps all 47 official TickTick tools to their declared action tiers', async () => {
+      const skill = JSON.parse(
+        readFileSync(
+          new URL(
+            '../../../../library/skills/productivity/task-management/ticktick/config.json',
+            import.meta.url,
+          ),
+          'utf8',
+        ),
+      ) as { actions: Array<{ name: string; defaultTier: PermissionTier }> };
+      expect(skill.actions).toHaveLength(47);
+      const tiers = Object.fromEntries(
+        skill.actions.map((action) => [action.name, action.defaultTier]),
+      ) as Record<string, PermissionTier>;
+      const deps = baseDeps({ permissionEngine: makeFakePermissionEngine(tiers) });
+      const sessionId = 'sess-official-ticktick-catalog';
+      const policy = createToolPolicy(deps, baseTask({ skillName: 'ticktick', sessionId }));
+
+      for (const action of skill.actions) {
+        const tool = action.name.slice('ticktick:'.length).replaceAll('-', '_');
+        const result = await callPolicy(policy, `mcp__ticktick__${tool}`, {});
+        expect(result.behavior).toBe(action.defaultTier === 'red' ? 'deny' : 'allow');
+      }
+
+      const audited = auditLog.query({ sessionId });
+      expect(audited).toHaveLength(47);
+      for (const action of skill.actions) {
+        expect(audited).toContainEqual(
+          expect.objectContaining({
+            actionName: action.name,
+            permissionTier: action.defaultTier,
+            outcome: action.defaultTier === 'red' ? 'queued' : 'executed',
+          }),
+        );
+      }
+      expect(events.filter((event) => event.type === 'permission:approved')).toHaveLength(21);
+      expect(events.filter((event) => event.type === 'permission:blocked')).toHaveLength(4);
     });
   });
 

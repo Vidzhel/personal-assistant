@@ -47,6 +47,7 @@ function fixture() {
 	}
 	const envFileIndex = args.indexOf('--env-file');
 	const command = envFileIndex >= 0 ? args.slice(envFileIndex + 2) : [];
+	if (command[0] === 'ps' && command.includes('--status') && process.env.RAVEN_TEST_RUNNING === '1') console.log('raven-core');
 	if (command[0] === 'config' && command[1] === '--quiet' && process.env.RAVEN_TEST_FAIL === 'config') process.exit(1);
 	if (command[0] === 'config' && command[1] === '--services') {
 	  const services = [];
@@ -250,7 +251,72 @@ test('setup-private-access rejects executable COMPOSE_FILE syntax as literal inv
   assert.equal(existsSync(composeSentinel), false);
 });
 
+test('setup-ticktick hides the token, preserves env data and installs through the stopped volume', () => {
+  const f = fixture();
+  const tokenSentinel = join(f.root, 'token-executed');
+  const token = `official-$token-$(touch ${tokenSentinel})`;
+  writeFileSync(f.envFile, `UNUSED=$(touch '${f.sentinel}')\nKEEP_SETTING=unchanged\n`);
+  const { result, commands, dockerCommands } = run(
+    f,
+    'setup-ticktick',
+    {},
+    `${token}\n${token}\n`,
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const updated = readFileSync(f.envFile, 'utf8');
+  assert(updated.includes(`UNUSED=$(touch '${f.sentinel}')`));
+  assert(updated.includes('KEEP_SETTING=unchanged'));
+  assert(updated.includes(`TICKTICK_MCP_TOKEN='${token}'`));
+  assert.equal(result.stdout.includes(token), false);
+  assert.equal(result.stderr.includes(token), false);
+  assert.equal(JSON.stringify(dockerCommands).includes(token), false);
+  assert.equal(existsSync(tokenSentinel), false);
+  assert.deepEqual(commands, [
+    ['ps', '--status', 'running', '--services'],
+    ['build', 'raven-core'],
+    ['run', '--rm', '--no-deps', '--entrypoint', 'node', 'raven-core', 'deployment/install-ticktick.mjs', '--check'],
+    ['config', '--quiet'],
+    ['run', '--rm', '--no-deps', 'raven-core', 'node', 'deployment/install-ticktick.mjs'],
+  ]);
+});
+
+test('setup-ticktick refuses a running stack before reading or changing the token', () => {
+  const f = fixture();
+  const before = readFileSync(f.envFile, 'utf8');
+  const { result, commands } = run(f, 'setup-ticktick', { RAVEN_TEST_RUNNING: '1' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Stop Raven before installing/);
+  assert.equal(readFileSync(f.envFile, 'utf8'), before);
+  assert.deepEqual(commands, [['ps', '--status', 'running', '--services']]);
+});
+
+test('setup-ticktick rejects mismatched input or candidate config without changing env', () => {
+  for (const scenario of [
+    { input: 'first-token\nsecond-token\n', settings: {} },
+    { input: 'valid-token\nvalid-token\n', settings: { RAVEN_TEST_FAIL: 'config' } },
+    {
+      input: 'valid-token\nvalid-token\n',
+      settings: { TICKTICK_MCP_TOKEN: 'exported-token' },
+    },
+    {
+      input: 'valid-token\nvalid-token\n',
+      settings: { COMPOSE_FILE: 'docker-compose.yml' },
+    },
+  ]) {
+    const f = fixture();
+    const before = readFileSync(f.envFile, 'utf8');
+    const { result } = run(f, 'setup-ticktick', scenario.settings, scenario.input);
+    assert.notEqual(result.status, 0);
+    assert.equal(readFileSync(f.envFile, 'utf8'), before);
+  }
+});
+
 test('private Compose and Caddy configuration expose one authenticated loopback gateway', () => {
+  const baseCompose = yaml.load(readFileSync(join(repository, 'docker-compose.yml'), 'utf8'));
+  assert.equal(
+    baseCompose.services['raven-core'].environment.TICKTICK_MCP_TOKEN,
+    '${TICKTICK_MCP_TOKEN:-}',
+  );
   const compose = yaml.load(readFileSync(join(repository, 'docker-compose.private.yml'), 'utf8'));
   const gateway = compose.services['raven-gateway'];
   assert.equal(gateway.image, 'caddy:2.11.4-alpine');
@@ -314,7 +380,7 @@ function syntaxFixture(source) {
     join(repository, 'scripts/check-strip-types.sh'),
     join(root, 'scripts/check-strip-types.sh'),
   );
-  for (const name of ['core', 'shared', 'mcp-ticktick'])
+  for (const name of ['core', 'shared'])
     mkdirSync(join(root, 'packages', name, 'src'), { recursive: true });
   writeFileSync(join(root, 'packages/core/src/index.ts'), source);
   const result = spawnSync('bash', [join(root, 'scripts/check-strip-types.sh')], {

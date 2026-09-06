@@ -286,7 +286,10 @@ describe('AgentResolver', () => {
 
       const caps = resolver.resolveAgentCapabilities(agent);
       expect(library.collectMcpServers).toHaveBeenCalledWith(['ticktick', 'gmail']);
-      expect(library.collectAgentDefinitions).toHaveBeenCalledWith(['ticktick', 'gmail']);
+      expect(library.collectAgentDefinitions).toHaveBeenCalledWith(
+        ['ticktick', 'gmail'],
+        new Set(['ticktick', 'gmail']),
+      );
       expect(library.resolveVendorPlugins).toHaveBeenCalledWith(['ticktick', 'gmail']);
       expect(Object.keys(caps.mcpServers).length).toBe(2);
       expect(Object.keys(caps.agentDefinitions).length).toBe(2);
@@ -301,6 +304,19 @@ describe('AgentResolver', () => {
       expect(library.collectMcpServers).toHaveBeenCalledWith(['ticktick']);
       expect(Object.keys(caps.mcpServers)).toEqual(['ticktick']);
       expect(Object.keys(caps.agentDefinitions)).toEqual(['ticktick']);
+    });
+
+    it('reports selected MCPs omitted for missing optional configuration', () => {
+      const library = makeMockCapabilityLibrary();
+      library.collectMcpServers.mockReturnValue({});
+      const resolver = createAgentResolver({ capabilityLibrary: library });
+
+      const caps = resolver.resolveAgentCapabilities(makeAgent({ skills: ['ticktick'] }));
+
+      expect(caps.mcpServers).toEqual({});
+      expect(caps.unavailableMcpServers).toEqual(['ticktick']);
+      expect(caps.unavailableSkills).toEqual(['ticktick']);
+      expect(library.collectAgentDefinitions).toHaveBeenCalledWith(['ticktick'], new Set());
     });
 
     it('resolves NOTHING for a default agent with empty skills (empty skills means none)', () => {

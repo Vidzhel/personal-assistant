@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   rmSync,
+  readFileSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -98,7 +99,10 @@ async function makeFixture(
   input: {
     skills?: Array<{ name: string; systemDeps?: string[]; mcps?: string[] }>;
     agentSkills?: string[];
-    mcp?: { name: string; command: string; args?: string[]; env?: Record<string, string> };
+    mcp?:
+      | { name: string; command: string; args?: string[]; env?: Record<string, string> }
+      | { name: string; type: 'http'; url: string; headers: Record<string, string> };
+    probeHttpMcp?: ProjectReadinessDeps['probeHttpMcp'];
     env?: Record<string, string | undefined>;
   } = {},
 ): Promise<Fixture> {
@@ -113,11 +117,8 @@ async function makeFixture(
   for (const skill of input.skills ?? []) writeSkill(libraryDir, skill);
   if (input.mcp) {
     writeJson(join(libraryDir, 'mcps', `${input.mcp.name}.json`), {
-      name: input.mcp.name,
       displayName: input.mcp.name.toUpperCase(),
-      command: input.mcp.command,
-      args: input.mcp.args ?? [],
-      env: input.mcp.env ?? {},
+      ...input.mcp,
     });
   }
   const registry = new ProjectRegistry();
@@ -153,6 +154,7 @@ async function makeFixture(
       projectRegistry: registry,
       projectRoot: root,
       env: input.env ?? {},
+      probeHttpMcp: input.probeHttpMcp,
       now: () => new Date('2026-09-06T12:00:00.000Z'),
     },
   };
@@ -163,6 +165,210 @@ afterEach(() => {
 });
 
 describe('project readiness', () => {
+  it('checks configured HTTP authentication once for shared capability bindings', async () => {
+    const probe = vi
+      .fn()
+      .mockResolvedValue({ state: 'verified', toolNames: ['list_projects', 'search_task'] });
+    const fixture = await makeFixture({
+      skills: [
+        { name: 'planning', mcps: ['ticktick'] },
+        { name: 'review', mcps: ['ticktick'] },
+      ],
+      mcp: {
+        name: 'ticktick',
+        type: 'http',
+        url: 'https://mcp.ticktick.com',
+        headers: { Authorization: 'Bearer ${TICKTICK_MCP_TOKEN}' },
+      },
+      env: { TICKTICK_MCP_TOKEN: 'fake-local-token' },
+      probeHttpMcp: probe,
+    });
+    const report = await inspectProjectReadiness(fixture.deps, 'alpha');
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(report.capabilities.every((capability) => capability.state === 'verified')).toBe(true);
+    expect(probe).toHaveBeenCalledWith({
+      url: 'https://mcp.ticktick.com',
+      headers: { Authorization: 'Bearer fake-local-token' },
+      signal: undefined,
+    });
+    expect(report.capabilities[0]?.requirements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'authentication', state: 'verified' }),
+        expect.objectContaining({ kind: 'tools', state: 'verified', toolCount: 2 }),
+      ]),
+    );
+    expect(JSON.stringify(report)).not.toContain('fake-local-token');
+  });
+
+  it('does not call an empty remote capability usable after initialization alone', async () => {
+    const fixture = await makeFixture({
+      skills: [{ name: 'planning', mcps: ['remote'] }],
+      mcp: { name: 'remote', type: 'http', url: 'https://example.com/mcp', headers: {} },
+      probeHttpMcp: async () => ({ state: 'verified', toolNames: [] }),
+    });
+    const report = await inspectProjectReadiness(fixture.deps, 'alpha');
+    expect(report.capabilities[0]?.state).toBe('failed');
+    expect(report.capabilities[0]?.requirements).toContainEqual(
+      expect.objectContaining({
+        kind: 'tools',
+        state: 'failed',
+        toolCount: 0,
+        correction: expect.stringContaining('no tools'),
+      }),
+    );
+  });
+
+  it('reports missing required tools even when authentication succeeded', async () => {
+    const fixture = await makeFixture({
+      skills: [{ name: 'ticktick', mcps: ['ticktick'] }],
+      mcp: {
+        name: 'ticktick',
+        type: 'http',
+        url: 'https://mcp.ticktick.com',
+        headers: { Authorization: 'Bearer ${TICKTICK_MCP_TOKEN}' },
+      },
+      env: { TICKTICK_MCP_TOKEN: 'fake-local-token' },
+      probeHttpMcp: async () => ({
+        state: 'verified',
+        toolNames: ['list_projects', 'new_unmapped_tool'],
+      }),
+    });
+    const configPath = join(fixture.root, 'library/skills/test/ticktick/config.json');
+    const config = JSON.parse(readFileSync(configPath, 'utf8'));
+    config.actions = [
+      {
+        name: 'ticktick:search-task',
+        description: 'Search',
+        defaultTier: 'green',
+        reversible: true,
+      },
+    ];
+    writeJson(configPath, config);
+    await fixture.library.load(join(fixture.root, 'library'));
+    const report = await inspectProjectReadiness(fixture.deps, 'alpha');
+    expect(report.capabilities[0]?.state).toBe('failed');
+    expect(report.capabilities[0]?.requirements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'authentication', state: 'verified' }),
+        expect.objectContaining({
+          kind: 'tools',
+          state: 'failed',
+          toolCount: 2,
+          correction: expect.stringContaining('missing 1 tools'),
+        }),
+      ]),
+    );
+  });
+
+  it('omits remote checks with missing credentials and preserves unrelated capabilities', async () => {
+    const probe = vi.fn();
+    const fixture = await makeFixture({
+      skills: [{ name: 'planning', mcps: ['ticktick'] }, { name: 'writing' }],
+      mcp: {
+        name: 'ticktick',
+        type: 'http',
+        url: 'https://mcp.ticktick.com',
+        headers: { Authorization: 'Bearer ${TICKTICK_MCP_TOKEN}' },
+      },
+      probeHttpMcp: probe,
+    });
+    const report = await inspectProjectReadiness(fixture.deps, 'alpha');
+    expect(probe).not.toHaveBeenCalled();
+    expect(report.capabilities[0]?.state).toBe('unavailable');
+    expect(report.capabilities[1]?.state).toBe('verified');
+    expect(report.capabilities[0]?.requirements).toContainEqual(
+      expect.objectContaining({
+        name: 'TICKTICK_MCP_TOKEN',
+        correction: expect.stringContaining('Set TICKTICK_MCP_TOKEN'),
+      }),
+    );
+  });
+
+  it('cancels in-flight remote readiness work before closing the API', async () => {
+    let began: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      began = resolve;
+    });
+    let cancelled = false;
+    const fixture = await makeFixture({
+      skills: [{ name: 'planning', mcps: ['ticktick'] }],
+      mcp: {
+        name: 'ticktick',
+        type: 'http',
+        url: 'https://mcp.ticktick.com',
+        headers: { Authorization: 'Bearer ${TICKTICK_MCP_TOKEN}' },
+      },
+      env: { TICKTICK_MCP_TOKEN: 'fake-local-token' },
+      probeHttpMcp: async ({ signal }) =>
+        new Promise((resolve) => {
+          signal?.addEventListener(
+            'abort',
+            () => {
+              cancelled = true;
+              resolve({ state: 'failed', stage: 'connection', reason: 'Cancelled' });
+            },
+            { once: true },
+          );
+          began();
+        }),
+    });
+    const app = Fastify();
+    registerProjectReadinessRoute(app, fixture.deps);
+    const request = app.inject('/api/projects/alpha/readiness');
+    await started;
+    await app.close();
+    await request;
+    expect(cancelled).toBe(true);
+  });
+
+  it.each(['connection', 'tools'] as const)(
+    'does not mislabel %s failure as rejected credentials',
+    async (stage) => {
+      const fixture = await makeFixture({
+        skills: [{ name: 'planning', mcps: ['remote'] }],
+        mcp: { name: 'remote', type: 'http', url: 'https://example.com/mcp', headers: {} },
+        probeHttpMcp: async () => ({
+          state: 'failed',
+          stage,
+          reason: 'The provider check failed.',
+        }),
+      });
+      const report = await inspectProjectReadiness(fixture.deps, 'alpha');
+      expect(report.capabilities[0]?.requirements).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ kind: 'authentication', state: 'unverified' }),
+          expect.objectContaining({ kind: stage, state: 'failed' }),
+        ]),
+      );
+      expect(report.findings.some((item) => item.code === 'authentication-failed')).toBe(false);
+    },
+  );
+
+  it('discloses a rejected remote connection without changing workspace readiness', async () => {
+    const fixture = await makeFixture({
+      skills: [{ name: 'planning', mcps: ['ticktick'] }],
+      mcp: {
+        name: 'ticktick',
+        type: 'http',
+        url: 'https://mcp.ticktick.com',
+        headers: { Authorization: 'Bearer ${TICKTICK_MCP_TOKEN}' },
+      },
+      env: { TICKTICK_MCP_TOKEN: 'fake-local-token' },
+      probeHttpMcp: async () => ({
+        state: 'failed',
+        stage: 'authentication',
+        reason: 'Authentication rejected. Replace the API token.',
+      }),
+    });
+    const report = await inspectProjectReadiness(fixture.deps, 'alpha');
+    expect(report.status).toBe('degraded');
+    expect(report.workspace.state).toBe('verified');
+    expect(report.capabilities[0]?.state).toBe('failed');
+    expect(report.findings).toContainEqual(
+      expect.objectContaining({ code: 'authentication-failed', severity: 'warning' }),
+    );
+  });
+
   it('separates executable, configuration and authentication evidence', async () => {
     const root = temporaryRoot();
     const bin = join(root, 'bin');
@@ -174,7 +380,7 @@ describe('project readiness', () => {
       env: { PATH: bin, REMOTE_TOKEN: 'do-not-return-this-secret' },
     });
 
-    const report = inspectProjectReadiness(fixture.deps, 'alpha');
+    const report = await inspectProjectReadiness(fixture.deps, 'alpha');
 
     expect(report).toMatchObject({
       checkedAt: '2026-09-06T12:00:00.000Z',
@@ -199,7 +405,7 @@ describe('project readiness', () => {
       skills: [{ name: 'available' }, { name: 'renderer', systemDeps: ['missing-renderer'] }],
     });
 
-    const report = inspectProjectReadiness(fixture.deps, 'alpha');
+    const report = await inspectProjectReadiness(fixture.deps, 'alpha');
 
     expect(report.status).toBe('degraded');
     expect(report.workspace.state).toBe('verified');
@@ -217,19 +423,19 @@ describe('project readiness', () => {
     );
   });
 
-  it('checks a literal MCP script entrypoint from the effective execution directory', async () => {
+  it('checks an anchored literal MCP script entrypoint', async () => {
     const fixture = await makeFixture({
       skills: [{ name: 'renderer', mcps: ['renderer'] }],
       mcp: { name: 'renderer', command: 'node', args: ['missing-renderer.js'] },
       env: { PATH: process.env.PATH },
     });
 
-    const report = inspectProjectReadiness(fixture.deps, 'alpha');
+    const report = await inspectProjectReadiness(fixture.deps, 'alpha');
 
     expect(report.capabilities[0]).toMatchObject({ name: 'renderer', state: 'unavailable' });
     expect(report.capabilities[0]?.requirements).toContainEqual(
       expect.objectContaining({
-        name: 'MCP entrypoint: missing-renderer.js',
+        name: expect.stringMatching(/MCP entrypoint: .*\/missing-renderer\.js$/),
         state: 'unavailable',
       }),
     );
@@ -249,7 +455,7 @@ describe('project readiness', () => {
     });
     rmSync(attached, { recursive: true });
 
-    const report = inspectProjectReadiness(fixture.deps, 'alpha');
+    const report = await inspectProjectReadiness(fixture.deps, 'alpha');
 
     expect(report.status).toBe('blocked');
     expect(report.workspace).toMatchObject({
@@ -280,7 +486,7 @@ describe('project readiness', () => {
       contextFiles: ['README.md', 'missing.md', 'directory.md'],
     });
 
-    const report = inspectProjectReadiness(fixture.deps, 'alpha');
+    const report = await inspectProjectReadiness(fixture.deps, 'alpha');
 
     expect(report.workspace.sources).toContainEqual(
       expect.objectContaining({
@@ -309,7 +515,7 @@ describe('project readiness', () => {
     });
     rmSync(attached, { recursive: true });
 
-    const report = inspectProjectReadiness(fixture.deps, 'alpha');
+    const report = await inspectProjectReadiness(fixture.deps, 'alpha');
 
     expect(report.status).toBe('blocked');
     expect(report.workspace.state).toBe('unavailable');
@@ -329,7 +535,7 @@ describe('project readiness', () => {
       label: 'Remote source',
       sourceType: 'url',
     });
-    const remoteReport = inspectProjectReadiness(remoteFixture.deps, 'alpha');
+    const remoteReport = await inspectProjectReadiness(remoteFixture.deps, 'alpha');
     expect(remoteReport.status).toBe('degraded');
     expect(remoteReport.workspace.state).toBe('verified');
     expect(remoteReport.capabilities).toEqual([
@@ -360,7 +566,7 @@ describe('project readiness', () => {
     });
     fixture.deps.executionLogger = { queryTasks } as unknown as ExecutionLogger;
 
-    const report = inspectProjectReadiness(fixture.deps, 'alpha');
+    const report = await inspectProjectReadiness(fixture.deps, 'alpha');
     const serialized = JSON.stringify(report);
 
     expect(report.recentFailures).toEqual([]);

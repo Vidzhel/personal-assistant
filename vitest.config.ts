@@ -3,7 +3,6 @@ import { defineConfig } from 'vitest/config';
 const projects = [
   'packages/shared/vitest.config.ts',
   'packages/core/vitest.config.ts',
-  'packages/mcp-ticktick/vitest.config.ts',
   'packages/web/vitest.config.ts',
 ];
 

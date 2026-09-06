@@ -1930,12 +1930,34 @@ async function updateCallbackKeyboard(
   if (!ctx.callbackQuery.message) return;
   try {
     const targetChat = operatingMode === 'group' ? groupId : chatId;
-    await ctx.api.editMessageReplyMarkup(targetChat, ctx.callbackQuery.message.message_id, {
-      reply_markup: { inline_keyboard: updatedKeyboard },
-    });
+    await ctx.api.editMessageReplyMarkup(
+      targetChat,
+      ctx.callbackQuery.message.message_id,
+      { reply_markup: { inline_keyboard: updatedKeyboard } },
+      telegramRequestSignal(),
+    );
   } catch (editErr) {
     logger.warn(`Failed to edit message keyboard: ${editErr}`);
   }
+}
+
+function callbackCompletionBeforeAbort<T>(
+  operation: Promise<T>,
+  signal: AbortSignal,
+): Promise<T | undefined> {
+  return new Promise((resolve) => {
+    const finish = (value: T | undefined): void => {
+      signal.removeEventListener('abort', onAbort);
+      resolve(value);
+    };
+    const onAbort = (): void => finish(undefined);
+    signal.addEventListener('abort', onAbort, { once: true });
+    void operation.then(
+      (value) => finish(value),
+      () => finish(undefined),
+    );
+    if (signal.aborted) onAbort();
+  });
 }
 
 async function respondToParsedCallback(
@@ -1955,6 +1977,17 @@ async function respondToParsedCallback(
   // Edit message keyboard on success
   if (result.updatedKeyboard && ctx.callbackQuery.message) {
     await updateCallbackKeyboard(ctx, result.updatedKeyboard);
+  }
+
+  const completionPromise = result.completion;
+  if (completionPromise) {
+    const signal = telegramAbortController.signal;
+    await runOwnedWork(async () => {
+      const completion = await callbackCompletionBeforeAbort(completionPromise, signal);
+      if (!completion) return;
+      if (!canDispatchProvider()) return;
+      await updateCallbackKeyboard(ctx, completion.updatedKeyboard);
+    });
   }
 
   // For approval details, send as a reply message instead of editing

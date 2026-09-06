@@ -64,6 +64,14 @@ const MULTI_ACTION_ITEMS: ActionItem[] = [
   },
 ];
 
+function tickTickEvidence(
+  outcome: 'verified' | 'uncertain' | 'failed',
+  taskId = 'ticktick-task-1',
+  projectId = 'ticktick-project-1',
+): string {
+  return JSON.stringify({ operation: 'create-task', outcome, taskId, projectId });
+}
+
 describe('action-extractor service', () => {
   let mockEventBus: any;
   let mockAgentManager: any;
@@ -269,7 +277,10 @@ describe('action-extractor service', () => {
         { title: 'Real task', dueDate: null, priority: 'medium', context: 'valid' },
       ]);
       // Third call for ticktick:create-task
-      mockAgentManager.executeAction.mockResolvedValueOnce({ success: true });
+      mockAgentManager.executeAction.mockResolvedValueOnce({
+        success: true,
+        result: tickTickEvidence('verified'),
+      });
 
       await startService();
       await emitEventAsync('email:triage:action-items', { emailId: 'msg-001' });
@@ -320,7 +331,10 @@ describe('action-extractor service', () => {
   describe('Task 4: create TickTick tasks', () => {
     it('creates one task for single action item (AC #1)', async () => {
       setupEmailFetchAndExtraction(FULL_EMAIL_JSON, SINGLE_ACTION_ITEMS);
-      mockAgentManager.executeAction.mockResolvedValueOnce({ success: true }); // ticktick
+      mockAgentManager.executeAction.mockResolvedValueOnce({
+        success: true,
+        result: tickTickEvidence('verified'),
+      }); // ticktick
 
       await startService();
       await emitEventAsync('email:triage:action-items', { emailId: 'msg-001' });
@@ -329,8 +343,17 @@ describe('action-extractor service', () => {
         expect.objectContaining({
           actionName: 'ticktick:create-task',
           skillName: 'ticktick',
-          details: expect.stringContaining('Send the Q1 report'),
+          details: expect.stringMatching(
+            /list_projects.*Send the Q1 report.*get_task_by_id.*read-back/s,
+          ),
         }),
+      );
+      const ticktickCall = mockAgentManager.executeAction.mock.calls.find(
+        (call: unknown[]) =>
+          (call[0] as { actionName: string }).actionName === 'ticktick:create-task',
+      );
+      expect(ticktickCall[0].details).toContain(
+        'Return ONLY {"operation":"create-task","outcome":"verified"|"uncertain"|"failed"',
       );
     });
 
@@ -338,9 +361,9 @@ describe('action-extractor service', () => {
       setupEmailFetchAndExtraction(FULL_EMAIL_JSON, MULTI_ACTION_ITEMS);
       // 3 task creation calls
       mockAgentManager.executeAction
-        .mockResolvedValueOnce({ success: true })
-        .mockResolvedValueOnce({ success: true })
-        .mockResolvedValueOnce({ success: true });
+        .mockResolvedValueOnce({ success: true, result: tickTickEvidence('verified', 'task-1') })
+        .mockResolvedValueOnce({ success: true, result: tickTickEvidence('verified', 'task-2') })
+        .mockResolvedValueOnce({ success: true, result: tickTickEvidence('verified', 'task-3') });
 
       await startService();
       await emitEventAsync('email:triage:action-items', { emailId: 'msg-001' });
@@ -355,6 +378,7 @@ describe('action-extractor service', () => {
       setupEmailFetchAndExtraction(FULL_EMAIL_JSON, SINGLE_ACTION_ITEMS);
       mockAgentManager.executeAction.mockResolvedValueOnce({
         success: false,
+        result: tickTickEvidence('failed'),
         error: 'TickTick unavailable',
       });
 
@@ -372,13 +396,62 @@ describe('action-extractor service', () => {
       });
     });
 
+    it.each([
+      ['generic success', { success: true, result: 'Task created' }],
+      ['empty success', { success: true, result: '' }],
+      ['explicit uncertain evidence', { success: true, result: tickTickEvidence('uncertain') }],
+      [
+        'verified evidence from a failed backend',
+        { success: false, result: tickTickEvidence('verified') },
+      ],
+    ])(
+      'retains %s without claiming or automatically repeating creation',
+      async (_name, outcome) => {
+        setupEmailFetchAndExtraction(FULL_EMAIL_JSON, SINGLE_ACTION_ITEMS);
+        mockAgentManager.executeAction.mockResolvedValueOnce(outcome);
+
+        await startService();
+        await emitEventAsync('email:triage:action-items', { emailId: 'msg-uncertain' });
+
+        const entry = retryQueue.get('msg-uncertain');
+        expect(entry?.items).toEqual([]);
+        expect(entry?.uncertainItems).toEqual(SINGLE_ACTION_ITEMS);
+        expect(getEmittedEvents('notification')).toContainEqual(
+          expect.objectContaining({
+            payload: expect.objectContaining({
+              title: 'Task Creation Needs Verification',
+              body: expect.stringMatching(
+                /msg-uncertain.*will not automatically retry.*boss@company\.com.*Q1 Report/s,
+              ),
+              actions: undefined,
+            }),
+          }),
+        );
+        expect(getEmittedEvents('email:action-extract:completed')).toHaveLength(0);
+        expect(getEmittedEvents('email:action-extract:failed')).toContainEqual(
+          expect.objectContaining({
+            payload: {
+              emailId: 'msg-uncertain',
+              error: expect.stringMatching(/manual verification.*not automatically retry/s),
+            },
+          }),
+        );
+
+        const callCount = mockAgentManager.executeAction.mock.calls.length;
+        entry!.lastAttempt = 0;
+        await processRetryQueue();
+        expect(mockAgentManager.executeAction).toHaveBeenCalledTimes(callCount);
+        expect(retryQueue.has('msg-uncertain')).toBe(true);
+      },
+    );
+
     it('queues only failed items on partial failure (H1 fix)', async () => {
       setupEmailFetchAndExtraction(FULL_EMAIL_JSON, MULTI_ACTION_ITEMS);
       // First task succeeds, second fails, third succeeds
       mockAgentManager.executeAction
-        .mockResolvedValueOnce({ success: true })
-        .mockResolvedValueOnce({ success: false })
-        .mockResolvedValueOnce({ success: true });
+        .mockResolvedValueOnce({ success: true, result: tickTickEvidence('verified', 'task-1') })
+        .mockResolvedValueOnce({ success: false, result: tickTickEvidence('failed', 'task-2') })
+        .mockResolvedValueOnce({ success: true, result: tickTickEvidence('verified', 'task-3') });
 
       await startService();
       await emitEventAsync('email:triage:action-items', { emailId: 'msg-001' });
@@ -416,7 +489,10 @@ describe('action-extractor service', () => {
 
     it('includes email reference in task creation prompt', async () => {
       setupEmailFetchAndExtraction(FULL_EMAIL_JSON, SINGLE_ACTION_ITEMS);
-      mockAgentManager.executeAction.mockResolvedValueOnce({ success: true });
+      mockAgentManager.executeAction.mockResolvedValueOnce({
+        success: true,
+        result: tickTickEvidence('verified'),
+      });
 
       await startService();
       await emitEventAsync('email:triage:action-items', { emailId: 'msg-001' });
@@ -434,7 +510,10 @@ describe('action-extractor service', () => {
   describe('Task 5: success notification via Telegram (AC #3)', () => {
     it('emits notification after successful task creation', async () => {
       setupEmailFetchAndExtraction(FULL_EMAIL_JSON, SINGLE_ACTION_ITEMS);
-      mockAgentManager.executeAction.mockResolvedValueOnce({ success: true });
+      mockAgentManager.executeAction.mockResolvedValueOnce({
+        success: true,
+        result: tickTickEvidence('verified', 'created-task', 'actual-project'),
+      });
 
       await startService();
       await emitEventAsync('email:triage:action-items', { emailId: 'msg-001' });
@@ -448,17 +527,21 @@ describe('action-extractor service', () => {
             title: 'Tasks from Email',
             body: expect.stringContaining('Created 1 task(s)'),
             topicName: 'general',
-            actions: expect.arrayContaining([
-              expect.objectContaining({ label: 'View Tasks', action: 't:l:' }),
-            ]),
+            actions: undefined,
           }),
         }),
+      );
+      expect((notifications[0] as { payload: { body: string } }).payload.body).toContain(
+        'created-task (project actual-project)',
       );
     });
 
     it('includes sender and subject in notification body', async () => {
       setupEmailFetchAndExtraction(FULL_EMAIL_JSON, SINGLE_ACTION_ITEMS);
-      mockAgentManager.executeAction.mockResolvedValueOnce({ success: true });
+      mockAgentManager.executeAction.mockResolvedValueOnce({
+        success: true,
+        result: tickTickEvidence('verified'),
+      });
 
       await startService();
       await emitEventAsync('email:triage:action-items', { emailId: 'msg-001' });
@@ -472,9 +555,9 @@ describe('action-extractor service', () => {
     it('emits email:action-extract:completed event with correct payload', async () => {
       setupEmailFetchAndExtraction(FULL_EMAIL_JSON, MULTI_ACTION_ITEMS);
       mockAgentManager.executeAction
-        .mockResolvedValueOnce({ success: true })
-        .mockResolvedValueOnce({ success: true })
-        .mockResolvedValueOnce({ success: true });
+        .mockResolvedValueOnce({ success: true, result: tickTickEvidence('verified', 'task-1') })
+        .mockResolvedValueOnce({ success: true, result: tickTickEvidence('verified', 'task-2') })
+        .mockResolvedValueOnce({ success: true, result: tickTickEvidence('verified', 'task-3') });
 
       await startService();
       await emitEventAsync('email:triage:action-items', { emailId: 'msg-001' });
@@ -498,7 +581,10 @@ describe('action-extractor service', () => {
 
     it('does NOT emit notification when all tasks fail (queued for retry)', async () => {
       setupEmailFetchAndExtraction(FULL_EMAIL_JSON, SINGLE_ACTION_ITEMS);
-      mockAgentManager.executeAction.mockResolvedValueOnce({ success: false });
+      mockAgentManager.executeAction.mockResolvedValueOnce({
+        success: false,
+        result: tickTickEvidence('failed'),
+      });
 
       await startService();
       await emitEventAsync('email:triage:action-items', { emailId: 'msg-001' });
@@ -522,7 +608,10 @@ describe('action-extractor service', () => {
         lastAttempt: Date.now() - 120_000, // 2 min ago, past 60s backoff
       });
 
-      mockAgentManager.executeAction.mockResolvedValueOnce({ success: true });
+      mockAgentManager.executeAction.mockResolvedValueOnce({
+        success: true,
+        result: tickTickEvidence('verified'),
+      });
       await processRetryQueue();
 
       expect(retryQueue.has('msg-retry')).toBe(false);
@@ -558,7 +647,10 @@ describe('action-extractor service', () => {
         lastAttempt: Date.now() - 120_000,
       });
 
-      mockAgentManager.executeAction.mockResolvedValueOnce({ success: false });
+      mockAgentManager.executeAction.mockResolvedValueOnce({
+        success: false,
+        result: tickTickEvidence('failed'),
+      });
       await processRetryQueue();
 
       expect(retryQueue.get('msg-fail')!.attempts).toBe(2);
@@ -613,7 +705,10 @@ describe('action-extractor service', () => {
         lastAttempt: Date.now() - 120_000,
       });
 
-      mockAgentManager.executeAction.mockResolvedValueOnce({ success: true });
+      mockAgentManager.executeAction.mockResolvedValueOnce({
+        success: true,
+        result: tickTickEvidence('verified'),
+      });
       await processRetryQueue();
 
       expect(retryQueue.has('msg-success')).toBe(false);

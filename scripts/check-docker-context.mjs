@@ -8,8 +8,8 @@ const repoRoot = resolve(import.meta.dirname, '..');
 const output = mkdtempSync(join(tmpdir(), 'raven-build-context-'));
 const allowed = [
   /^(package(?:-lock)?\.json|tsconfig\.base\.json)$/,
-  /^packages\/(shared|core|web|mcp-ticktick)\/(package\.json|tsconfig\.json)$/,
-  /^packages\/(shared|core|web|mcp-ticktick)\/src\/.+$/,
+  /^packages\/(shared|core|web)\/(package\.json|tsconfig\.json)$/,
+  /^packages\/(shared|core|web)\/src\/.+$/,
   /^packages\/web\/(next\.config\.ts|postcss\.config\.mjs)$/,
   /^packages\/core\/scripts\/copy-build-assets\.mjs$/,
   /^migrations\/[^/]+\.sql$/,

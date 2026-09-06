@@ -73,7 +73,9 @@ assert.equal(config.NEO4J_ENABLED, false);
 let backendCalls = 0;
 const agentBackend = async (options) => {
   backendCalls++;
-  assert.deepEqual(Object.keys(options.agents), ['repository-work']);
+  assert.deepEqual(Object.keys(options.agents).sort(), ['repository-work', 'ticktick']);
+  assert.equal(options.agents.ticktick.mcpServers, undefined);
+  assert.deepEqual([...options.agents.ticktick.tools].sort(), ['Grep', 'Read']);
   assert.deepEqual([...options.agents['repository-work'].tools].sort(), [
     'Bash',
     'Edit',

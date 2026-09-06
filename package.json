@@ -7,8 +7,7 @@
   "workspaces": [
     "packages/shared",
     "packages/core",
-    "packages/web",
-    "packages/mcp-ticktick"
+    "packages/web"
   ],
   "scripts": {
     "build": "npm run build:core && npm run build:web",
@@ -25,21 +24,18 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:mcp": "vitest run --project mcp-ticktick",
-    "test:mcp:watch": "vitest --project mcp-ticktick",
     "test:knowledge": "RAVEN_TEST_KNOWLEDGE=1 vitest run --project knowledge-neo4j",
     "validate:library": "node --experimental-strip-types scripts/validate-library.ts",
     "validate:projects": "node --experimental-strip-types scripts/validate-projects.ts",
-    "test:ticktick": "node --experimental-strip-types scripts/test-ticktick-manual.ts",
     "update:gws": "bash scripts/update-gws-skills.sh",
-    "build:core": "npm run build -w packages/shared && npm run build -w packages/core && npm run build -w packages/mcp-ticktick",
+    "build:core": "npm run build -w packages/shared && npm run build -w packages/core",
     "build:web": "npm run build -w packages/web -- --webpack",
     "test:compiled": "node scripts/smoke-compiled-core.mjs",
     "test:containers": "node scripts/smoke-containers.mjs",
-    "test:deployment": "node --experimental-strip-types --test deployment/runtime-init.test.mjs",
+    "test:deployment": "node --experimental-strip-types --test deployment/runtime-init.test.mjs deployment/install-ticktick.test.mjs",
+    "test:setup": "node --test scripts/development-scripts.test.mjs scripts/ticktick-settings.test.mjs",
     "test:docker-context": "node scripts/check-docker-context.mjs",
     "test:e2e": "npm run build:core && playwright test",
-    "test:mcp:live": "RAVEN_TEST_TICKTICK=1 vitest run --project mcp-ticktick",
     "test:embeddings:download": "npm run build:core && node scripts/smoke-embeddings.mjs",
     "check:dependencies": "node scripts/check-dependencies.mjs",
     "test:private-gateway": "node --test scripts/test-private-gateway.mjs"

@@ -9,13 +9,13 @@ action="${1:-start}"
 if (( $# > 0 )); then shift; fi
 
 usage() {
-  echo 'Usage: ./scripts/raven.sh [start|login|setup-private-access|status|logs|stop]'
+  echo 'Usage: ./scripts/raven.sh [start|login|setup-private-access|setup-ticktick|status|logs|stop]'
   echo 'Reads .env (or RAVEN_ENV_FILE). Start builds, checks Claude login and starts services.'
 }
 
 case "$action" in
   help|-h|--help) usage; exit 0 ;;
-  start|login|setup-private-access|status|logs|stop) ;;
+  start|login|setup-private-access|setup-ticktick|status|logs|stop) ;;
   *) usage >&2; exit 2 ;;
 esac
 if (( $# > 0 )); then usage >&2; exit 2; fi
@@ -142,8 +142,71 @@ setup_private_access() {
   echo 'Tailscale account login, ACLs and Serve enrollment remain explicit operator steps.'
 }
 
+setup_ticktick() {
+  local running_services token confirmation
+  set +x
+  if [[ -n "${TICKTICK_MCP_TOKEN:-}" ]]; then
+    echo 'Unset the exported TICKTICK_MCP_TOKEN environment variable before configuring TickTick.' >&2
+    return 1
+  fi
+  if [[ -n "${COMPOSE_FILE:-}" ]]; then
+    echo 'Unset the exported COMPOSE_FILE environment variable before configuring TickTick.' >&2
+    return 1
+  fi
+  if ! command -v node >/dev/null 2>&1; then
+    echo 'Node.js 22 or newer is required to update TickTick settings.' >&2
+    return 1
+  fi
+  running_services="$(compose ps --status running --services)"
+  if [[ -n "$running_services" ]]; then
+    echo 'Stop Raven before installing the TickTick capability: ./scripts/raven.sh stop' >&2
+    return 1
+  fi
+  compose build raven-core
+  compose run --rm --no-deps --entrypoint node raven-core deployment/install-ticktick.mjs --check
+
+  printf 'Dedicated TickTick MCP token: '
+  if ! IFS= read -r -s token; then
+    echo >&2
+    echo 'Could not read the TickTick MCP token.' >&2
+    return 1
+  fi
+  echo
+  printf 'Confirm TickTick MCP token: '
+  if ! IFS= read -r -s confirmation; then
+    unset token
+    echo >&2
+    echo 'Could not read the TickTick MCP token confirmation.' >&2
+    return 1
+  fi
+  echo
+  if [[ "$token" != "$confirmation" ]]; then
+    unset token confirmation
+    echo 'TickTick MCP tokens do not match; the environment file was not changed.' >&2
+    return 1
+  fi
+  unset confirmation
+  if (( ${#token} < 1 || ${#token} > 4096 )); then
+    unset token
+    echo 'TickTick MCP token must contain 1-4096 characters.' >&2
+    return 1
+  fi
+  if ! printf '%s' "$token" | node "$repo_root/scripts/ticktick-settings.mjs" "$env_file"; then
+    unset token
+    return 1
+  fi
+  unset token
+  compose run --rm --no-deps raven-core node deployment/install-ticktick.mjs
+  echo 'Official TickTick capability and token are configured. Start Raven when ready.'
+}
+
 if [[ "$action" == setup-private-access ]]; then
   setup_private_access
+  exit 0
+fi
+
+if [[ "$action" == setup-ticktick ]]; then
+  setup_ticktick
   exit 0
 fi
 

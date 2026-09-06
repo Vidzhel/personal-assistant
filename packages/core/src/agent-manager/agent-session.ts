@@ -32,11 +32,48 @@ import {
 import { withModelHandoff } from '../session-manager/model-handoff.ts';
 import { createSessionToolGuard } from './session-tool-guard.ts';
 import { createToolCallLifetime } from '../mcp-server/tool-call-lifetime.ts';
+import {
+  materializeMcpServerConfig,
+  mcpEnvironmentReferences,
+} from '../capability-library/mcp-config.ts';
+import { redactSecrets } from '../diagnostics/redact-secrets.ts';
 
 const log = createLogger('agent-session');
 
 const STDERR_LOG_TAIL_LENGTH = -2000;
 const STDERR_ERROR_TAIL_LENGTH = -500;
+
+function redactExactValues(text: string, values: ReadonlySet<string>): string {
+  let sanitized = text;
+  for (const value of [...values].sort((left, right) => right.length - left.length)) {
+    sanitized = sanitized.split(value).join('[redacted]');
+  }
+  return sanitized;
+}
+
+function redactStructuredExactValues(value: unknown, values: ReadonlySet<string>): unknown {
+  if (typeof value === 'string') return redactExactValues(value, values);
+  if (Array.isArray(value)) {
+    return value.map((entry) => redactStructuredExactValues(entry, values));
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        redactExactValues(key, values),
+        redactStructuredExactValues(entry, values),
+      ]),
+    );
+  }
+  return value;
+}
+
+function redactSerializedExactValues(serialized: string, values: ReadonlySet<string>): string {
+  try {
+    return JSON.stringify(redactStructuredExactValues(JSON.parse(serialized), values));
+  } catch {
+    return redactExactValues(serialized, values);
+  }
+}
 
 let activeBackend: AgentBackend | null = null;
 
@@ -312,6 +349,12 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
   let success = false;
   const errors: string[] = [];
   const stderrChunks: string[] = [];
+  const mcpSecretValues = new Set<string>();
+  const sanitizeMcpOutput = (value: string): string => redactExactValues(value, mcpSecretValues);
+  const sanitizeMcpDiagnostic = (value: unknown): string => {
+    const text = value instanceof Error ? value.message : String(value);
+    return redactSecrets(sanitizeMcpOutput(text));
+  };
   let workspace: WorkspaceExecution | undefined;
   const assertCurrent = (): void => {
     if (!workspace || !opts.workspaceExecution) return;
@@ -334,19 +377,18 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       workspace = resolveTaskWorkspace(task, opts.workspaceExecution);
       assertCurrent();
     }
-    // Build MCP config - transform our config to backend format
+    // Materialize environment-backed secrets only at the backend boundary.
+    // Task events and run-history keep the unresolved templates.
     const sdkMcpServers: Record<string, unknown> = {};
     for (const [name, cfg] of Object.entries(mcpServers)) {
-      sdkMcpServers[name] = {
-        command: cfg.command,
-        args: cfg.args,
-        env: cfg.env,
-        // SDK 0.3.x connects external MCPs non-blocking by default, which can
-        // let turn 1 start before a task's tools register. Raven only hands a
-        // task an MCP it needs, so block until connected (5s cap) — restores
-        // the pre-0.3.x turn-1 availability the system was built against.
-        alwaysLoad: true,
-      };
+      // SDK 0.3.x connects external MCPs non-blocking by default, which can
+      // let turn 1 start before a task's tools register. Raven only hands a
+      // task an MCP it needs, so block until connected (5s cap).
+      sdkMcpServers[name] = materializeMcpServerConfig(cfg);
+      for (const environmentName of mcpEnvironmentReferences(cfg)) {
+        const value = process.env[environmentName];
+        if (value) mcpSecretValues.add(value);
+      }
     }
 
     // Named project agents share project memory; auxiliary validators have no memory tools.
@@ -492,12 +534,13 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       settingSources: workspace?.settingSources ?? [],
       onAssistantMessage: (text: string, meta?: ToolUseMeta) => {
         if (!toolCalls.isOpen()) return;
+        const sanitizedText = sanitizeMcpOutput(text);
         const agentName = resolveAgentName(meta);
         let messageId: string | undefined;
         if (task.sessionId && messageStore) {
           messageId = messageStore.appendMessage(task.sessionId, {
             role: 'assistant',
-            content: text,
+            content: sanitizedText,
             taskId: task.id,
             agentName,
           });
@@ -512,7 +555,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
             taskId: task.id,
             sessionId: task.sessionId,
             messageType: 'assistant',
-            content: text,
+            content: sanitizedText,
             messageId,
             agentName,
             transportOrigin: task.transportOrigin,
@@ -527,17 +570,23 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       // audit writes.
       onToolUse: (toolName: string, toolInput: string, meta?: ToolUseMeta) => {
         if (!toolCalls.isOpen()) return;
-        trackAgentToolUse(agentToolMap, { toolName, toolInput, meta });
+        const sanitizedToolName = sanitizeMcpOutput(toolName);
+        const sanitizedToolInput = redactSerializedExactValues(toolInput, mcpSecretValues);
+        trackAgentToolUse(agentToolMap, {
+          toolName: sanitizedToolName,
+          toolInput: sanitizedToolInput,
+          meta,
+        });
 
         const agentName = resolveAgentName(meta);
         let messageId: string | undefined;
         if (task.sessionId && messageStore) {
           messageId = messageStore.appendMessage(task.sessionId, {
             role: 'action',
-            content: `${toolName}: ${toolInput}`,
+            content: `${sanitizedToolName}: ${sanitizedToolInput}`,
             taskId: task.id,
-            toolName,
-            toolSummary: toolInput,
+            toolName: sanitizedToolName,
+            toolSummary: sanitizedToolInput,
             agentName,
           });
         }
@@ -551,7 +600,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
             taskId: task.id,
             sessionId: task.sessionId,
             messageType: 'tool_use',
-            content: `${toolName}: ${toolInput}`,
+            content: `${sanitizedToolName}: ${sanitizedToolInput}`,
             messageId,
             agentName,
             transportOrigin: task.transportOrigin,
@@ -564,9 +613,9 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
         if (task.sessionId && messageStore) {
           messageStore.appendMessage(task.sessionId, {
             role: 'tool-result',
-            content: result.output,
+            content: sanitizeMcpOutput(result.output),
             taskId: task.id,
-            toolName: result.toolUseId,
+            toolName: sanitizeMcpOutput(result.toolUseId),
             toolSummary: result.isError ? 'error' : 'success',
             agentName,
           });
@@ -575,7 +624,10 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       onRawMessage: (rawJson: string) => {
         if (!toolCalls.isOpen()) return;
         if (task.sessionId && messageStore) {
-          messageStore.appendRawMessage(task.sessionId, rawJson);
+          messageStore.appendRawMessage(
+            task.sessionId,
+            redactSerializedExactValues(rawJson, mcpSecretValues),
+          );
         }
       },
       // Captured as soon as the backend observes the SDK's `system`/`init`
@@ -590,20 +642,23 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       signal,
       onStderr: (data: string) => {
         if (!toolCalls.isOpen()) return;
+        // Buffer until the outcome is known so credentials split across SDK
+        // chunks can be redacted as one diagnostic before any logging.
         stderrChunks.push(data);
-        log.debug(`Agent stderr: ${data.trim()}`);
       },
       cwd: workspace?.cwd ?? projectRoot,
     }).finally(closeToolAdmission);
 
     sdkSessionId = backendResult.sessionId ?? sdkSessionId;
-    resultText = backendResult.result;
+    resultText = backendResult.success
+      ? sanitizeMcpOutput(backendResult.result)
+      : sanitizeMcpDiagnostic(backendResult.result);
     assertCurrent();
     success = backendResult.success;
-    errors.push(...backendResult.errors);
+    errors.push(...backendResult.errors.map(sanitizeMcpDiagnostic));
   } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    const stderrOutput = stderrChunks.join('');
+    const errMsg = sanitizeMcpDiagnostic(err);
+    const stderrOutput = sanitizeMcpDiagnostic(stderrChunks.join(''));
     log.error(`Agent task ${task.id} failed: ${errMsg}`);
     if (stderrOutput) {
       log.error(`Agent stderr output: ${stderrOutput.slice(STDERR_LOG_TAIL_LENGTH)}`);

@@ -1,787 +1,297 @@
 import type * as RavenShared from '@raven/shared';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import {
-  parseRecommendations,
-  buildAnalysisPrompt,
-} from '../../../services/task-management/autonomous-manager.ts';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createJobRegistry } from '../../../scheduler/job-registry.ts';
+import {
+  buildActionPrompt,
+  buildAnalysisPrompt,
+  parseRecommendations,
+} from '../../../services/task-management/autonomous-manager.ts';
 
 vi.mock('@raven/shared', async (importOriginal) => {
   const actual = await importOriginal<typeof RavenShared>();
   return {
     ...actual,
-    generateId: vi.fn(() => 'test-uuid-1234'),
-    createLogger: vi.fn(() => ({
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-      debug: vi.fn(),
-    })),
+    generateId: vi.fn(() => 'test-id'),
+    createLogger: vi.fn(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() })),
   };
 });
 
 import service from '../../../services/task-management/autonomous-manager.ts';
 
-const TASK_LIST_JSON = JSON.stringify([
-  {
-    id: 'task-1',
-    projectId: 'proj-1',
-    title: 'Buy groceries',
-    content: '',
-    priority: 1,
-    dueDate: '2026-03-10T00:00:00Z',
-    tags: [],
-    status: 0,
-  },
-  {
-    id: 'task-2',
-    projectId: 'proj-1',
-    title: 'Prepare presentation',
-    content: '',
-    priority: 3,
-    dueDate: '2026-03-20T00:00:00Z',
-    tags: [],
-    status: 0,
-  },
-]);
+interface ActionCall {
+  actionName: string;
+  skillName: string;
+  details: string;
+}
 
-const RECOMMENDATIONS_JSON = JSON.stringify([
-  {
-    action: 'update-task',
-    taskId: 'task-1',
-    projectId: 'proj-1',
-    taskTitle: 'Buy groceries',
-    reason: 'Overdue task — increasing priority',
-    confidence: 'high',
-    changes: { priority: 5 },
-  },
-  {
-    action: 'complete-task',
-    taskId: 'task-2',
-    projectId: 'proj-1',
-    taskTitle: 'Prepare presentation',
-    reason: 'Task title indicates done',
-    confidence: 'medium',
-  },
-  {
-    action: 'delete-task',
-    taskId: 'task-3',
-    projectId: 'proj-1',
-    taskTitle: 'Old duplicate',
-    reason: 'Exact duplicate of task-1',
-    confidence: 'low',
-  },
-]);
+interface ActionResult {
+  success: boolean;
+  result?: string;
+  error?: string;
+}
+
+interface EmittedEvent {
+  type: string;
+  payload: Record<string, unknown>;
+}
+
+const PROJECTS = [{ id: 'p1', name: 'Work' }];
+const TASK = { id: 't1', projectId: 'p1', title: 'Prepare report', priority: 1 };
+const RECOMMENDATION = {
+  action: 'update-task' as const,
+  taskId: 't1',
+  projectId: 'p1',
+  taskTitle: 'Prepare report',
+  reason: 'Raise priority',
+  confidence: 'high' as const,
+  changes: { priority: 5 },
+};
+
+function projectEnvelope(): string {
+  return JSON.stringify({ projects: PROJECTS, complete: true, nextCursor: null });
+}
+
+function taskEnvelope(tasks: unknown[] = []): string {
+  return JSON.stringify({ tasks, complete: true, nextCursor: null });
+}
 
 describe('autonomous-manager service', () => {
-  let mockEventBus: any;
-  let mockAgentManager: any;
-  let eventHandlers: Record<string, ((event: unknown) => void)[]>;
+  const handlers = new Map<string, (event: unknown) => Promise<void>>();
+  const emitted: EmittedEvent[] = [];
+  const executeAction = vi.fn<(params: ActionCall) => Promise<ActionResult>>();
   let jobRegistry: ReturnType<typeof createJobRegistry>;
 
   beforeEach(() => {
-    eventHandlers = {};
+    handlers.clear();
+    emitted.length = 0;
+    executeAction.mockReset();
     jobRegistry = createJobRegistry();
-
-    mockAgentManager = {
-      executeAction: vi.fn().mockResolvedValue({ success: true, result: '{}' }),
-    };
-
-    mockEventBus = {
-      emit: vi.fn(),
-      on: vi.fn((type: string, handler: (event: unknown) => void) => {
-        if (!eventHandlers[type]) eventHandlers[type] = [];
-        eventHandlers[type].push(handler);
-      }),
-      off: vi.fn(),
-    };
   });
 
   afterEach(async () => {
-    try {
-      await service.stop();
-    } catch {
-      // Service may not have been started
-    }
+    await service.stop();
   });
 
-  async function startService(): Promise<void> {
+  async function start(
+    agentManager: { executeAction: typeof executeAction } | null = { executeAction },
+  ): Promise<void> {
+    const eventBus = {
+      emit: vi.fn((event: EmittedEvent) => emitted.push(event)),
+      on: vi.fn((type: string, handler: (event: unknown) => Promise<void>) =>
+        handlers.set(type, handler),
+      ),
+      off: vi.fn((type: string) => handlers.delete(type)),
+    };
     await service.start({
-      eventBus: mockEventBus,
-      db: {},
-      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-      config: { agentManager: mockAgentManager },
+      eventBus,
       jobRegistry,
-    } as any);
+      config: { agentManager: agentManager ?? undefined },
+    } as never);
   }
 
-  async function runAutonomousJob(): Promise<void> {
-    const handler = jobRegistry.get('autonomous-task-management');
-    await handler!({ scheduleName: 'autonomous-task-management', params: {} });
+  async function run(): Promise<void> {
+    const job = jobRegistry.get('autonomous-task-management');
+    await job?.({ scheduleName: 'autonomous-task-management', params: {} });
   }
 
-  async function emitEventAsync(type: string, payload: unknown): Promise<void> {
-    const handlers = eventHandlers[type] ?? [];
-    for (const handler of handlers) {
-      await handler({ id: 'evt1', timestamp: Date.now(), source: 'test', type, payload });
-    }
+  function mockCompleteCoverage(tasks: unknown[] = []): void {
+    executeAction.mockImplementation(async (call) => {
+      if (call.actionName === 'ticktick:list-projects') {
+        return { success: true, result: projectEnvelope() };
+      }
+      if (call.actionName === 'ticktick:get-project-with-undone-tasks') {
+        return { success: true, result: taskEnvelope(tasks) };
+      }
+      return { success: true, result: taskEnvelope() };
+    });
   }
 
-  function getEmittedEvents(type: string): unknown[] {
-    return mockEventBus.emit.mock.calls
-      .map((c: unknown[]) => c[0] as { type: string })
-      .filter((e: { type: string }) => e.type === type);
-  }
-
-  // ─── Task 1: Service skeleton ───
-
-  describe('Task 1: service skeleton', () => {
-    it('registers autonomous-task-management job and subscribes to manage-request on start', async () => {
-      await startService();
-      expect(jobRegistry.has('autonomous-task-management')).toBe(true);
-      expect(mockEventBus.on).toHaveBeenCalledWith(
-        'task-management:manage-request',
-        expect.any(Function),
-      );
-    });
-
-    it('unsubscribes manage-request on stop', async () => {
-      await startService();
-      await service.stop();
-      expect(mockEventBus.off).toHaveBeenCalledWith(
-        'task-management:manage-request',
-        expect.any(Function),
-      );
-    });
-
-    it('nulls out references on stop — double stop does not throw', async () => {
-      await startService();
-      await service.stop();
-      await service.stop();
-    });
+  it('registers and releases the manual job and event listener', async () => {
+    await start();
+    expect(jobRegistry.has('autonomous-task-management')).toBe(true);
+    expect(handlers.has('task-management:manage-request')).toBe(true);
+    await service.stop();
+    expect(jobRegistry.has('autonomous-task-management')).toBe(false);
+    expect(handlers.has('task-management:manage-request')).toBe(false);
   });
 
-  // ─── Task 2: Fetch and analyze tasks ───
+  it('uses every required official workload scope and no removed alias', async () => {
+    mockCompleteCoverage();
+    await start();
+    await run();
 
-  describe('Task 2: fetch and analyze tasks', () => {
-    it('fetches all open tasks via ticktick:get-tasks on job invocation', async () => {
-      mockAgentManager.executeAction
-        .mockResolvedValueOnce({ success: true, result: TASK_LIST_JSON }) // fetch
-        .mockResolvedValueOnce({ success: true, result: '[]' }); // analysis returns empty
-
-      await startService();
-      await runAutonomousJob();
-
-      expect(mockAgentManager.executeAction).toHaveBeenCalledWith(
-        expect.objectContaining({
-          actionName: 'ticktick:get-tasks',
-          skillName: 'ticktick',
-          details: expect.stringContaining('Get all open tasks'),
-        }),
-      );
-    });
-
-    it('emits failure event when task fetch fails', async () => {
-      mockAgentManager.executeAction.mockResolvedValueOnce({
-        success: false,
-        error: 'TickTick API error',
-      });
-
-      await startService();
-      await expect(runAutonomousJob()).rejects.toThrow('Autonomous task management failed');
-
-      const failedEvents = getEmittedEvents('task-management:autonomous:failed');
-      expect(failedEvents).toHaveLength(1);
-      expect(failedEvents[0]).toEqual(
-        expect.objectContaining({
-          payload: { error: expect.stringContaining('TickTick API error') },
-        }),
-      );
-    });
-
-    it('emits completion with all counts=0 when task list is empty', async () => {
-      mockAgentManager.executeAction.mockResolvedValueOnce({
-        success: true,
-        result: '[]',
-      });
-
-      await startService();
-      await runAutonomousJob();
-
-      const completedEvents = getEmittedEvents('task-management:autonomous:completed');
-      expect(completedEvents).toHaveLength(1);
-      expect(completedEvents[0]).toEqual(
-        expect.objectContaining({
-          payload: {
-            executedCount: 0,
-            queuedCount: 0,
-            failedCount: 0,
-            actions: [],
-          },
-        }),
-      );
-
-      // No notification for 0-action runs
-      const notifications = getEmittedEvents('notification');
-      expect(notifications).toHaveLength(0);
-    });
-
-    it('emits failure when AI analysis returns invalid JSON', async () => {
-      mockAgentManager.executeAction
-        .mockResolvedValueOnce({ success: true, result: TASK_LIST_JSON })
-        .mockResolvedValueOnce({ success: true, result: 'I cannot produce valid JSON' });
-
-      await startService();
-      await expect(runAutonomousJob()).rejects.toThrow('Autonomous task management failed');
-
-      // Invalid JSON → failure event emitted
-      const failedEvents = getEmittedEvents('task-management:autonomous:failed');
-      expect(failedEvents).toHaveLength(1);
-      expect(failedEvents[0]).toEqual(
-        expect.objectContaining({
-          payload: { error: expect.stringContaining('parse') },
-        }),
-      );
-    });
-
-    it('emits failure event when task fetch throws', async () => {
-      mockAgentManager.executeAction.mockRejectedValueOnce(new Error('Network timeout'));
-
-      await startService();
-      await expect(runAutonomousJob()).rejects.toThrow('Autonomous task management failed');
-
-      const failedEvents = getEmittedEvents('task-management:autonomous:failed');
-      expect(failedEvents).toHaveLength(1);
-      expect(failedEvents[0]).toEqual(
-        expect.objectContaining({
-          payload: { error: 'Network timeout' },
-        }),
-      );
-    });
+    const calls = executeAction.mock.calls.map(([call]) => call);
+    expect(calls.map((call) => call.actionName)).toEqual([
+      'ticktick:list-projects',
+      'ticktick:get-project-with-undone-tasks',
+      'ticktick:list-undone-tasks-by-date',
+      'ticktick:filter-tasks',
+      'ticktick:filter-tasks',
+      'ticktick:filter-tasks',
+    ]);
+    expect(JSON.stringify(calls)).not.toContain('get_all_tasks');
+    expect(JSON.stringify(calls)).not.toContain('ticktick:get-tasks');
+    expect(emitted).toContainEqual(
+      expect.objectContaining({
+        type: 'task-management:autonomous:completed',
+        payload: expect.objectContaining({ executedCount: 0 }),
+      }),
+    );
   });
 
-  // ─── Task 3: Execute actions through permission gates ───
+  it('makes partial coverage visible and blocks analysis and mutation', async () => {
+    executeAction.mockImplementation(async (call) => {
+      if (call.actionName === 'ticktick:list-projects') {
+        return { success: true, result: projectEnvelope() };
+      }
+      if (call.actionName === 'ticktick:get-project-with-undone-tasks') {
+        return { success: false, error: 'project unavailable' };
+      }
+      return { success: true, result: taskEnvelope() };
+    });
+    await start();
 
-  describe('Task 3: execute actions through permission gates', () => {
-    function setupFetchAndAnalysis(recommendations: string): void {
-      mockAgentManager.executeAction
-        .mockResolvedValueOnce({ success: true, result: TASK_LIST_JSON }) // fetch
-        .mockResolvedValueOnce({ success: true, result: recommendations }); // analysis
-    }
+    await expect(run()).rejects.toThrow('Autonomous task management failed');
+    expect(
+      executeAction.mock.calls.some(([call]) => call.details.startsWith('You are analyzing')),
+    ).toBe(false);
+    expect(emitted).toContainEqual(
+      expect.objectContaining({
+        type: 'task-management:autonomous:failed',
+        payload: expect.objectContaining({ error: expect.stringContaining('partial') }),
+      }),
+    );
+    expect(emitted).toContainEqual(
+      expect.objectContaining({
+        type: 'notification',
+        payload: expect.objectContaining({ title: 'TickTick coverage incomplete' }),
+      }),
+    );
+  });
 
-    it('executes yellow-tier update-task and notifies', async () => {
-      const recs = JSON.stringify([
-        {
-          action: 'update-task',
-          taskId: 'task-1',
-          projectId: 'proj-1',
-          taskTitle: 'Buy groceries',
-          reason: 'Overdue — priority bump',
-          confidence: 'high',
-          changes: { priority: 5 },
-        },
-      ]);
-      setupFetchAndAnalysis(recs);
-      mockAgentManager.executeAction.mockResolvedValueOnce({ success: true }); // update
-
-      await startService();
-      await runAutonomousJob();
-
-      // Verify ticktick:update-task was called
-      const updateCall = mockAgentManager.executeAction.mock.calls[2];
-      expect(updateCall[0]).toEqual(
-        expect.objectContaining({
-          actionName: 'ticktick:update-task',
-          skillName: 'ticktick',
-        }),
-      );
-
-      // Notification emitted
-      const notifications = getEmittedEvents('notification');
-      expect(notifications).toHaveLength(1);
-      expect(notifications[0]).toEqual(
-        expect.objectContaining({
-          payload: expect.objectContaining({
-            title: 'Autonomous Task Management',
-            body: expect.stringContaining('1 updates'),
+  it('analyzes an observed snapshot then performs an official verified mutation', async () => {
+    executeAction.mockImplementation(async (call) => {
+      if (call.actionName === 'ticktick:list-projects') {
+        return { success: true, result: projectEnvelope() };
+      }
+      if (call.actionName === 'ticktick:get-project-with-undone-tasks') {
+        return { success: true, result: taskEnvelope([TASK]) };
+      }
+      if (call.details.startsWith('You are analyzing')) {
+        return { success: true, result: JSON.stringify([RECOMMENDATION]) };
+      }
+      if (call.actionName === 'ticktick:update-task') {
+        return {
+          success: true,
+          result: JSON.stringify({
+            operation: 'update-task',
+            outcome: 'verified',
+            taskId: 't1',
+            projectId: 'p1',
           }),
-        }),
-      );
+        };
+      }
+      return { success: true, result: taskEnvelope() };
     });
+    await start();
+    await run();
 
-    it('counts red-tier delete-task as queued (not failed)', async () => {
-      const recs = JSON.stringify([
-        {
-          action: 'delete-task',
-          taskId: 'task-3',
-          projectId: 'proj-1',
-          taskTitle: 'Duplicate task',
-          reason: 'Exact duplicate',
-          confidence: 'high',
-        },
-      ]);
-      setupFetchAndAnalysis(recs);
-      // Red-tier returns success: false with "queued" in error
-      mockAgentManager.executeAction.mockResolvedValueOnce({
-        success: false,
-        error: 'Action queued-for-approval (red tier)',
-      });
-
-      await startService();
-      await runAutonomousJob();
-
-      const completedEvents = getEmittedEvents('task-management:autonomous:completed');
-      expect(completedEvents).toHaveLength(1);
-      expect(completedEvents[0]).toEqual(
-        expect.objectContaining({
-          payload: expect.objectContaining({
-            executedCount: 0,
-            queuedCount: 1,
-            failedCount: 0,
-          }),
-        }),
-      );
-
-      // Queued actions should still trigger notification
-      const notifications = getEmittedEvents('notification');
-      expect(notifications).toHaveLength(1);
-      expect(notifications[0]).toEqual(
-        expect.objectContaining({
-          payload: expect.objectContaining({
-            body: expect.stringContaining('queued for approval'),
-          }),
-        }),
-      );
-    });
-
-    it('handles partial action failure correctly', async () => {
-      const recs = JSON.stringify([
-        {
-          action: 'update-task',
-          taskId: 'task-1',
-          projectId: 'proj-1',
-          taskTitle: 'Task A',
-          reason: 'priority bump',
-          confidence: 'high',
-          changes: { priority: 5 },
-        },
-        {
-          action: 'complete-task',
-          taskId: 'task-2',
-          projectId: 'proj-1',
-          taskTitle: 'Task B',
-          reason: 'already done',
-          confidence: 'medium',
-        },
-        {
-          action: 'update-task',
-          taskId: 'task-3',
-          projectId: 'proj-1',
-          taskTitle: 'Task C',
-          reason: 'tag update',
-          confidence: 'high',
-          changes: { tags: ['urgent'] },
-        },
-      ]);
-      setupFetchAndAnalysis(recs);
-      mockAgentManager.executeAction
-        .mockResolvedValueOnce({ success: true }) // task-1 succeeds
-        .mockResolvedValueOnce({ success: false, error: 'Agent failed' }) // task-2 fails
-        .mockResolvedValueOnce({ success: true }); // task-3 succeeds
-
-      await startService();
-      await expect(runAutonomousJob()).rejects.toThrow('failed');
-
-      const completedEvents = getEmittedEvents('task-management:autonomous:completed');
-      expect(completedEvents).toHaveLength(1);
-      expect(completedEvents[0]).toEqual(
-        expect.objectContaining({
-          payload: expect.objectContaining({
-            executedCount: 2,
-            queuedCount: 0,
-            failedCount: 1,
-          }),
-        }),
-      );
-    });
-
-    it('filters out low-confidence recommendations', async () => {
-      // 3 recommendations: 1 low (filtered), 1 medium, 1 high → only 2 executed
-      setupFetchAndAnalysis(RECOMMENDATIONS_JSON);
-      mockAgentManager.executeAction
-        .mockResolvedValueOnce({ success: true }) // update-task (high)
-        .mockResolvedValueOnce({ success: true }); // complete-task (medium)
-      // delete-task (low) should be filtered out — no 3rd action call
-
-      await startService();
-      await runAutonomousJob();
-
-      // 2 fetch/analysis + 2 actions = 4 total calls (not 5)
-      expect(mockAgentManager.executeAction).toHaveBeenCalledTimes(4);
-
-      const completedEvents = getEmittedEvents('task-management:autonomous:completed');
-      expect(completedEvents[0]).toEqual(
-        expect.objectContaining({
-          payload: expect.objectContaining({
-            executedCount: 2,
-            failedCount: 0,
-          }),
-        }),
-      );
-    });
+    const mutation = executeAction.mock.calls
+      .map(([call]) => call)
+      .find((call) => call.actionName === 'ticktick:update-task');
+    expect(mutation?.details).toContain('get_task_by_id');
+    expect(mutation?.details).toContain('Action: update-task');
+    expect(mutation?.details).toContain('Read the task back');
+    expect(emitted).toContainEqual(
+      expect.objectContaining({
+        type: 'task-management:autonomous:completed',
+        payload: expect.objectContaining({ executedCount: 1, failedCount: 0 }),
+      }),
+    );
   });
 
-  // ─── Task 4: Summary notification ───
-
-  describe('Task 4: summary notification', () => {
-    it('includes View Tasks inline keyboard action', async () => {
-      const recs = JSON.stringify([
-        {
-          action: 'update-task',
-          taskId: 'task-1',
-          projectId: 'proj-1',
-          taskTitle: 'Test task',
-          reason: 'Priority bump',
-          confidence: 'high',
-          changes: { priority: 5 },
-        },
-      ]);
-      mockAgentManager.executeAction
-        .mockResolvedValueOnce({ success: true, result: TASK_LIST_JSON })
-        .mockResolvedValueOnce({ success: true, result: recs })
-        .mockResolvedValueOnce({ success: true });
-
-      await startService();
-      await runAutonomousJob();
-
-      const notifications = getEmittedEvents('notification');
-      expect(notifications).toHaveLength(1);
-      expect(notifications[0]).toEqual(
-        expect.objectContaining({
-          payload: expect.objectContaining({
-            actions: [{ label: 'View Tasks', action: 't:l:' }],
-          }),
-        }),
-      );
+  it('does not count generic SDK success as verified TickTick mutation evidence', async () => {
+    executeAction.mockImplementation(async (call) => {
+      if (call.actionName === 'ticktick:list-projects') {
+        return { success: true, result: projectEnvelope() };
+      }
+      if (call.actionName === 'ticktick:get-project-with-undone-tasks') {
+        return { success: true, result: taskEnvelope([TASK]) };
+      }
+      if (call.details.startsWith('You are analyzing')) {
+        return { success: true, result: JSON.stringify([RECOMMENDATION]) };
+      }
+      if (call.actionName === 'ticktick:update-task') return { success: true };
+      return { success: true, result: taskEnvelope() };
     });
-
-    it('skips notification when 0 actions executed or queued', async () => {
-      mockAgentManager.executeAction
-        .mockResolvedValueOnce({ success: true, result: TASK_LIST_JSON })
-        .mockResolvedValueOnce({ success: true, result: '[]' });
-
-      await startService();
-      await runAutonomousJob();
-
-      const notifications = getEmittedEvents('notification');
-      expect(notifications).toHaveLength(0);
-    });
-
-    it('emits task-management:autonomous:completed with full details', async () => {
-      const recs = JSON.stringify([
-        {
-          action: 'update-task',
-          taskId: 'task-1',
-          projectId: 'proj-1',
-          taskTitle: 'Buy groceries',
-          reason: 'Overdue',
-          confidence: 'high',
-          changes: { priority: 5 },
-        },
-      ]);
-      mockAgentManager.executeAction
-        .mockResolvedValueOnce({ success: true, result: TASK_LIST_JSON })
-        .mockResolvedValueOnce({ success: true, result: recs })
-        .mockResolvedValueOnce({ success: true });
-
-      await startService();
-      await runAutonomousJob();
-
-      const completedEvents = getEmittedEvents('task-management:autonomous:completed');
-      expect(completedEvents).toHaveLength(1);
-      const evt = completedEvents[0] as { payload: { actions: unknown[] } };
-      expect(evt.payload.actions).toHaveLength(1);
-      expect(evt.payload.actions[0]).toEqual({
-        action: 'update-task',
-        taskTitle: 'Buy groceries',
-        reason: 'Overdue',
-        outcome: 'executed',
-      });
-    });
+    await start();
+    await expect(run()).rejects.toThrow('Autonomous task management failed');
+    expect(emitted).toContainEqual(
+      expect.objectContaining({
+        type: 'task-management:autonomous:completed',
+        payload: expect.objectContaining({ executedCount: 0, failedCount: 1 }),
+      }),
+    );
   });
 
-  // ─── Concurrent run guard ───
-
-  describe('concurrent run guard', () => {
-    it('skips second trigger while already running', async () => {
-      // First call: slow fetch that takes time
-      let resolveFirst: (v: unknown) => void;
-      const slowPromise = new Promise((resolve) => {
-        resolveFirst = resolve;
-      });
-      mockAgentManager.executeAction.mockReturnValueOnce(slowPromise);
-
-      await startService();
-      const handler = jobRegistry.get('autonomous-task-management')!;
-
-      // Start first run (won't complete yet)
-      const firstRun = handler({ scheduleName: 'autonomous-task-management', params: {} });
-
-      // Immediately trigger second run
-      await expect(
-        handler({ scheduleName: 'autonomous-task-management', params: {} }),
-      ).rejects.toThrow('already running');
-
-      // Complete first run
-      resolveFirst!({ success: true, result: '[]' });
-      await firstRun;
-
-      // Only 1 call to executeAction (the first run)
-      expect(mockAgentManager.executeAction).toHaveBeenCalledTimes(1);
+  it('rejects recommendations outside the observed snapshot before any mutation', async () => {
+    const invented = { ...RECOMMENDATION, taskId: 'other' };
+    executeAction.mockImplementation(async (call) => {
+      if (call.actionName === 'ticktick:list-projects') {
+        return { success: true, result: projectEnvelope() };
+      }
+      if (call.actionName === 'ticktick:get-project-with-undone-tasks') {
+        return { success: true, result: taskEnvelope([TASK]) };
+      }
+      if (call.details.startsWith('You are analyzing')) {
+        return { success: true, result: JSON.stringify([invented]) };
+      }
+      return { success: true, result: taskEnvelope() };
     });
+    await start();
+    await expect(run()).rejects.toThrow('Autonomous task management failed');
+    expect(
+      executeAction.mock.calls.some(([call]) => call.actionName === 'ticktick:update-task'),
+    ).toBe(false);
   });
 
-  describe('service lifetime', () => {
-    it('releases the job and suppresses a late fetch after stop and restart', async () => {
-      let resolveFetch!: (value: unknown) => void;
-      const fetchPromise = new Promise((resolve) => {
-        resolveFetch = resolve;
-      });
-      mockAgentManager.executeAction.mockReturnValueOnce(fetchPromise);
-
-      await startService();
-      const oldHandler = jobRegistry.get('autonomous-task-management')!;
-      const oldRun = oldHandler({ scheduleName: 'autonomous-task-management', params: {} });
-
-      await service.stop();
-      expect(jobRegistry.has('autonomous-task-management')).toBe(false);
-      await startService();
-
-      resolveFetch({ success: true, result: TASK_LIST_JSON });
-      await expect(oldRun).rejects.toThrow('Autonomous manager stopped');
-      expect(mockAgentManager.executeAction).toHaveBeenCalledTimes(1);
-      expect(getEmittedEvents('task-management:autonomous:completed')).toHaveLength(0);
-    });
-
-    it('suppresses a late action result after stop', async () => {
-      const recs = JSON.stringify([
-        {
-          action: 'update-task',
-          taskId: 'task-1',
-          projectId: 'proj-1',
-          taskTitle: 'Buy groceries',
-          reason: 'Overdue',
-          confidence: 'high',
-          changes: { priority: 5 },
-        },
-      ]);
-      let resolveAction!: (value: unknown) => void;
-      const actionPromise = new Promise((resolve) => {
-        resolveAction = resolve;
-      });
-      mockAgentManager.executeAction
-        .mockResolvedValueOnce({ success: true, result: TASK_LIST_JSON })
-        .mockResolvedValueOnce({ success: true, result: recs })
-        .mockReturnValueOnce(actionPromise);
-
-      await startService();
-      const run = jobRegistry.get('autonomous-task-management')!({
-        scheduleName: 'autonomous-task-management',
-        params: {},
-      });
-      await vi.waitFor(() => expect(mockAgentManager.executeAction).toHaveBeenCalledTimes(3));
-
-      await service.stop();
-      resolveAction({ success: true });
-      await expect(run).rejects.toThrow('Autonomous manager stopped');
-      expect(getEmittedEvents('notification')).toHaveLength(0);
-      expect(getEmittedEvents('task-management:autonomous:completed')).toHaveLength(0);
-    });
-
-    it('observes a late action rejection after cancellation', async () => {
-      let rejectAction!: (error: unknown) => void;
-      const actionPromise = new Promise((_, reject) => {
-        rejectAction = reject;
-      });
-      mockAgentManager.executeAction.mockReturnValueOnce(actionPromise);
-
-      await startService();
-      const run = jobRegistry.get('autonomous-task-management')!({
-        scheduleName: 'autonomous-task-management',
-        params: {},
-      });
-      await vi.waitFor(() => expect(mockAgentManager.executeAction).toHaveBeenCalledTimes(1));
-
-      await service.stop();
-      rejectAction(new Error('late provider failure'));
-      await expect(run).rejects.toThrow('Autonomous manager stopped');
-      expect(getEmittedEvents('task-management:autonomous:failed')).toHaveLength(0);
-    });
+  it('manual requests use the same official coverage workflow', async () => {
+    mockCompleteCoverage();
+    await start();
+    await handlers.get('task-management:manage-request')?.({ payload: { source: 'api' } });
+    expect(executeAction).toHaveBeenCalledWith(
+      expect.objectContaining({ actionName: 'ticktick:list-projects' }),
+    );
   });
 
-  // ─── Manual trigger ───
+  it('fails without an agent manager instead of claiming an empty workload', async () => {
+    await start(null);
+    await expect(run()).rejects.toThrow('Autonomous task management failed');
+    expect(emitted).toHaveLength(0);
+  });
+});
 
-  describe('manual trigger via manage-request', () => {
-    it('runs same flow as schedule trigger', async () => {
-      mockAgentManager.executeAction.mockResolvedValueOnce({
-        success: true,
-        result: '[]',
-      });
-
-      await startService();
-      await emitEventAsync('task-management:manage-request', {
-        source: 'telegram',
-      });
-
-      expect(mockAgentManager.executeAction).toHaveBeenCalledWith(
-        expect.objectContaining({
-          actionName: 'ticktick:get-tasks',
-        }),
-      );
-    });
-
-    it('rejects invalid manage-request payload', async () => {
-      await startService();
-      await emitEventAsync('task-management:manage-request', {
-        source: 'invalid-source',
-      });
-
-      expect(mockAgentManager.executeAction).not.toHaveBeenCalled();
-    });
+describe('autonomous task prompts', () => {
+  it('rejects mixed-validity or duplicate recommendation arrays', () => {
+    expect(parseRecommendations(JSON.stringify([RECOMMENDATION, { bad: true }]))).toBeNull();
+    expect(parseRecommendations(JSON.stringify([RECOMMENDATION, RECOMMENDATION]))).toBeNull();
   });
 
-  // ─── Unit tests for parsers ───
-
-  describe('parseRecommendations', () => {
-    it('parses valid recommendation array', () => {
-      const recs = parseRecommendations(RECOMMENDATIONS_JSON);
-      expect(recs).toHaveLength(3);
-      expect(recs![0].action).toBe('update-task');
-      expect(recs![0].confidence).toBe('high');
-    });
-
-    it('extracts JSON array from surrounding text', () => {
-      const recs = parseRecommendations(
-        `Here are my recommendations: ${RECOMMENDATIONS_JSON} End.`,
-      );
-      expect(recs).toHaveLength(3);
-    });
-
-    it('returns null for unparseable text', () => {
-      expect(parseRecommendations('not json')).toBeNull();
-    });
-
-    it('returns empty array when valid JSON array is empty', () => {
-      expect(parseRecommendations('[]')).toEqual([]);
-    });
-
-    it('filters out items with missing required fields', () => {
-      const recs = parseRecommendations(
-        JSON.stringify([
-          {
-            action: 'update-task',
-            taskId: 'x',
-            projectId: 'y',
-            taskTitle: 'T',
-            reason: 'R',
-            confidence: 'high',
-          },
-          { action: 'update-task' }, // missing required fields
-        ]),
-      );
-      expect(recs).toHaveLength(1);
-    });
-
-    it('rejects items with invalid action type', () => {
-      const recs = parseRecommendations(
-        JSON.stringify([
-          {
-            action: 'move-task',
-            taskId: 'x',
-            projectId: 'y',
-            taskTitle: 'T',
-            reason: 'R',
-            confidence: 'high',
-          },
-        ]),
-      );
-      expect(recs).toHaveLength(0);
-    });
-
-    it('rejects items with invalid confidence level', () => {
-      const recs = parseRecommendations(
-        JSON.stringify([
-          {
-            action: 'update-task',
-            taskId: 'x',
-            projectId: 'y',
-            taskTitle: 'T',
-            reason: 'R',
-            confidence: 'very-high',
-          },
-        ]),
-      );
-      expect(recs).toHaveLength(0);
-    });
+  it('does not describe the supplied snapshot as the complete account', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-05T22:30:00.000Z'));
+    const prompt = buildAnalysisPrompt('{"tasks":[]}', 'Europe/Kyiv');
+    vi.useRealTimers();
+    expect(prompt).toContain('bounded TickTick workload snapshot');
+    expect(prompt).toContain('Current date: 2026-09-06');
+    expect(prompt).toContain('Do not claim this snapshot proves the whole account is complete');
   });
 
-  describe('buildAnalysisPrompt', () => {
-    it('includes task data and current date', () => {
-      const prompt = buildAnalysisPrompt('[{"id":"task-1"}]');
-      expect(prompt).toContain('[{"id":"task-1"}]');
-      expect(prompt).toContain('Current date:');
-      expect(prompt).toMatch(/\d{4}-\d{2}-\d{2}/);
-    });
-
-    it('includes action type instructions', () => {
-      const prompt = buildAnalysisPrompt('[]');
-      expect(prompt).toContain('update-task');
-      expect(prompt).toContain('complete-task');
-      expect(prompt).toContain('delete-task');
-    });
-  });
-
-  // ─── Green-tier silent read ───
-
-  describe('green-tier silent read', () => {
-    it('ticktick:get-tasks called with correct params, no notification for the read', async () => {
-      mockAgentManager.executeAction.mockResolvedValueOnce({
-        success: true,
-        result: '[]',
-      });
-
-      await startService();
-      await runAutonomousJob();
-
-      // Verify get-tasks was called
-      expect(mockAgentManager.executeAction).toHaveBeenCalledWith(
-        expect.objectContaining({
-          actionName: 'ticktick:get-tasks',
-          skillName: 'ticktick',
-        }),
-      );
-
-      // No notification event for the read itself
-      const notifications = getEmittedEvents('notification');
-      expect(notifications).toHaveLength(0);
-    });
-  });
-
-  // ─── No-op when agent manager unavailable ───
-
-  describe('agent manager unavailable', () => {
-    it('does not process when agent manager is unavailable', async () => {
-      await service.start({
-        eventBus: mockEventBus,
-        db: {},
-        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-        config: {}, // No agent manager
-        jobRegistry,
-      } as any);
-
-      await expect(runAutonomousJob()).rejects.toThrow('Autonomous task management failed');
-
-      expect(mockEventBus.emit).not.toHaveBeenCalled();
-    });
+  it('requires exact lookup, one mutation, read-back, and uncertain-outcome handling', () => {
+    const prompt = buildActionPrompt(RECOMMENDATION);
+    expect(prompt).toContain('get_task_by_id');
+    expect(prompt).toContain('official mutation tool exactly once');
+    expect(prompt).toContain('do not blindly retry');
+    expect(prompt).toContain('Report success only after the requested final state is verified');
   });
 });

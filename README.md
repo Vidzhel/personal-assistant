@@ -103,9 +103,7 @@ isolated tests supply a fake model boundary instead.
 | -------------------------------- | ----------------------------------------------------------------------------------------- |
 | `ANTHROPIC_API_KEY`              | Optional API-credit authentication; leave unset for the owner's CLI-auth setup            |
 | `CLAUDE_MODEL`                   | Optional model override; current default is defined in core configuration                 |
-| `TICKTICK_CLIENT_ID`             | TickTick OAuth app client ID                                                              |
-| `TICKTICK_CLIENT_SECRET`         | TickTick OAuth app client secret                                                          |
-| `TICKTICK_ACCESS_TOKEN`          | TickTick OAuth access token                                                               |
+| `TICKTICK_MCP_TOKEN`             | Dedicated bearer token for the official TickTick MCP                                      |
 | `GMAIL_IMAP_USER`                | Gmail address for IMAP monitoring                                                         |
 | `GMAIL_IMAP_PASSWORD`            | Gmail app password (not regular password)                                                 |
 | `GMAIL_CLIENT_ID`                | Google OAuth client ID (for Gmail MCP)                                                    |

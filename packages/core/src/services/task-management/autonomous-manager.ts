@@ -10,8 +10,20 @@ import {
   type EventBusInterface,
 } from '@raven/shared';
 import type { ServiceContext, RavenService } from '../types.ts';
+import {
+  collectTickTickWorkload,
+  type TickTickActionRequest,
+  type TickTickActionResult,
+  type TickTickWorkloadSnapshot,
+} from './ticktick-workload.ts';
+import { parseTickTickMutationEvidence, type TickTickOperation } from './ticktick-action-result.ts';
 
 const log = createLogger('autonomous-manager');
+const MAX_RECOMMENDATIONS = 20;
+const MAX_ANALYSIS_RESULT_BYTES = 65_536;
+const MAX_TASK_ID_LENGTH = 256;
+const MAX_TASK_TITLE_LENGTH = 1_024;
+const MAX_REASON_LENGTH = 4_096;
 
 interface AgentManagerLike {
   executeAction(params: {
@@ -19,13 +31,7 @@ interface AgentManagerLike {
     skillName: string;
     details?: string;
     sessionId?: string;
-  }): Promise<AgentActionResult>;
-}
-
-interface AgentActionResult {
-  success: boolean;
-  result?: string;
-  error?: string;
+  }): Promise<TickTickActionResult>;
 }
 
 interface ServiceState {
@@ -34,16 +40,17 @@ interface ServiceState {
   controller: AbortController;
   activeRuns: Set<Promise<unknown>>;
   running: boolean;
+  timeZone: string;
   releaseJob?: () => void;
   requestHandler: (event: unknown) => Promise<void>;
 }
 
 const RecommendedActionSchema = z.object({
   action: z.enum(['update-task', 'complete-task', 'delete-task']),
-  taskId: z.string().min(1),
-  projectId: z.string().min(1),
-  taskTitle: z.string().min(1),
-  reason: z.string().min(1),
+  taskId: z.string().min(1).max(MAX_TASK_ID_LENGTH),
+  projectId: z.string().min(1).max(MAX_TASK_ID_LENGTH),
+  taskTitle: z.string().min(1).max(MAX_TASK_TITLE_LENGTH),
+  reason: z.string().min(1).max(MAX_REASON_LENGTH),
   confidence: z.enum(['low', 'medium', 'high']),
   changes: z
     .object({
@@ -67,6 +74,12 @@ const ACTION_NAME_MAP: Record<string, string> = {
   'update-task': 'ticktick:update-task',
   'complete-task': 'ticktick:complete-task',
   'delete-task': 'ticktick:delete-task',
+};
+
+const ACTION_OPERATION_MAP: Record<string, TickTickOperation> = {
+  'update-task': 'update-task',
+  'complete-task': 'complete-task',
+  'delete-task': 'delete-task',
 };
 
 let currentState: ServiceState | undefined;
@@ -95,8 +108,8 @@ function awaitWithAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<
 
 async function requestAction(
   state: ServiceState,
-  params: { actionName: string; skillName: string; details: string },
-): Promise<AgentActionResult | undefined> {
+  params: TickTickActionRequest,
+): Promise<TickTickActionResult | undefined> {
   if (!state.agentManager || state.controller.signal.aborted) return undefined;
   return await awaitWithAbort(state.agentManager.executeAction(params), state.controller.signal);
 }
@@ -124,36 +137,55 @@ function emitNotification(
 }
 
 function parseRecommendations(resultText: string): RecommendedAction[] | null {
-  const firstBracket = resultText.indexOf('[');
-  if (firstBracket < 0) return null;
-  const lastBracket = resultText.lastIndexOf(']');
-  if (lastBracket <= firstBracket) return null;
-
   try {
-    const raw = JSON.parse(resultText.slice(firstBracket, lastBracket + 1));
-    if (!Array.isArray(raw)) return null;
-    const items: RecommendedAction[] = [];
-    for (const entry of raw) {
-      const result = RecommendedActionSchema.safeParse(entry);
-      if (result.success) {
-        items.push(result.data);
-      }
-    }
-    return items;
+    if (Buffer.byteLength(resultText, 'utf8') > MAX_ANALYSIS_RESULT_BYTES) return null;
+    const trimmed = resultText.trim();
+    const fenced = /^```(?:json)?\s*\n([\s\S]*?)\n```$/i.exec(trimmed);
+    const parsed = z
+      .array(RecommendedActionSchema)
+      .max(MAX_RECOMMENDATIONS)
+      .safeParse(JSON.parse(fenced?.[1] ?? trimmed));
+    if (!parsed.success) return null;
+    const ids = parsed.data.map((item) => item.taskId);
+    return new Set(ids).size === ids.length ? parsed.data : null;
   } catch {
     return null;
   }
 }
 
-function buildAnalysisPrompt(tasksJson: string): string {
-  const today = new Date().toISOString().split('T')[0];
+function recommendationsMatchSnapshot(
+  recommendations: RecommendedAction[],
+  snapshot: TickTickWorkloadSnapshot,
+): boolean {
+  const observed = new Map(snapshot.tasks.map((task) => [task.id, task]));
+  return recommendations.every((recommendation) => {
+    const task = observed.get(recommendation.taskId);
+    return (
+      task !== undefined &&
+      task.projectId === recommendation.projectId &&
+      task.title === recommendation.taskTitle
+    );
+  });
+}
+
+function localDay(timeZone: string): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+}
+
+function buildAnalysisPrompt(snapshotJson: string, timeZone = 'UTC'): string {
+  const today = localDay(timeZone);
   return [
-    "You are analyzing a user's TickTick task list for autonomous management. Review ALL tasks and recommend actions that would help the user stay organized and productive.",
+    'You are analyzing a bounded TickTick workload snapshot for task management. Review only the observed task records and recommend actions that would help the user stay organized and productive.',
     '',
     `Current date: ${today}`,
     '',
-    'Tasks:',
-    tasksJson,
+    'Observed query snapshot:',
+    snapshotJson,
     '',
     'Analyze each task and recommend actions ONLY when clearly beneficial. Return ONLY a JSON array, no other text.',
     '',
@@ -186,6 +218,8 @@ function buildAnalysisPrompt(tasksJson: string): string {
     '- If no actions recommended, return empty array []',
     '- Be conservative — user trust is earned through reliable, helpful actions',
     '- NEVER recommend deleting tasks unless they are exact duplicates',
+    '- Do not claim this snapshot proves the whole account is complete',
+    '- Preserve recurring schedules, time zones, all-day semantics, IDs, and unrelated fields',
   ].join('\n');
 }
 
@@ -194,6 +228,7 @@ function buildActionPrompt(rec: RecommendedAction): string {
     `Task: "${rec.taskTitle}" (id: ${rec.taskId}, project: ${rec.projectId})`,
     `Action: ${rec.action}`,
     `Reason: ${rec.reason}`,
+    'First call get_task_by_id and verify the exact ID, project, and title still match.',
   ];
 
   if (rec.action === 'update-task' && rec.changes) {
@@ -212,6 +247,14 @@ function buildActionPrompt(rec: RecommendedAction): string {
     parts.push('Delete this task permanently.');
   }
 
+  parts.push(
+    'Use the official mutation tool exactly once. Preserve unrelated fields.',
+    'Read the task back after an update or completion. After deletion, verify it is absent.',
+    'If the mutation outcome is uncertain, inspect the account and do not blindly retry.',
+    'Report success only after the requested final state is verified.',
+    `Return ONLY {"operation":"${rec.action}","outcome":"verified"|"uncertain"|"failed","taskId":${JSON.stringify(rec.taskId)},"projectId":${JSON.stringify(rec.projectId)},"details":"optional summary"}.`,
+  );
+
   return parts.join('\n');
 }
 
@@ -219,41 +262,31 @@ function actionResult(rec: RecommendedAction, outcome: ActionResult['outcome']):
   return { action: rec.action, taskTitle: rec.taskTitle, reason: rec.reason, outcome };
 }
 
-async function fetchOpenTasksJson(state: ServiceState): Promise<string | null> {
-  try {
-    const fetchResult = await requestAction(state, {
-      actionName: 'ticktick:get-tasks',
-      skillName: 'ticktick',
-      details:
-        'Get all open tasks across all projects. Return JSON array with fields: id, projectId, title, content, priority (0=none,1=low,3=medium,5=high), dueDate, startDate, tags, status. Use the get_all_tasks or filter_tasks MCP tool.',
-    });
-    if (!fetchResult) return null;
+function coverageError(snapshot: TickTickWorkloadSnapshot): string {
+  const scopes = snapshot.coverage.failedScopes.map((failure) => failure.scope).join(', ');
+  return `TickTick workload coverage is partial (${scopes || 'unknown scopes'}); no changes were made`;
+}
 
-    if (!fetchResult.success || !fetchResult.result) {
-      log.error(`Failed to fetch tasks: ${fetchResult.error ?? 'no result'}`);
-      emitFailureEvent(state, fetchResult.error ?? 'Task fetch failed');
+async function fetchWorkload(state: ServiceState): Promise<TickTickWorkloadSnapshot | null> {
+  try {
+    const snapshot = await collectTickTickWorkload({
+      request: (request) => requestAction(state, request),
+      signal: state.controller.signal,
+      timeZone: state.timeZone,
+    });
+    if (snapshot.coverage.status === 'partial') {
+      const error = coverageError(snapshot);
+      log.warn(error);
+      emitFailureEvent(state, error);
+      emitNotification(state, { title: 'TickTick coverage incomplete', body: error });
       return null;
     }
-    return fetchResult.result;
+    return snapshot;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log.error(`Error fetching tasks: ${msg}`);
     if (!state.controller.signal.aborted) emitFailureEvent(state, msg);
     return null;
-  }
-}
-
-function hasNoOpenTasks(tasksJson: string): boolean {
-  const firstBracket = tasksJson.indexOf('[');
-  const lastBracket = tasksJson.lastIndexOf(']');
-  if (firstBracket < 0 || lastBracket <= firstBracket) return false;
-
-  try {
-    const parsed = JSON.parse(tasksJson.slice(firstBracket, lastBracket + 1));
-    return Array.isArray(parsed) && parsed.length === 0;
-  } catch {
-    // Not parseable as array — proceed with analysis anyway
-    return false;
   }
 }
 
@@ -263,9 +296,9 @@ async function analyzeTasksForRecommendations(
 ): Promise<RecommendedAction[] | null> {
   try {
     const analysisResult = await requestAction(state, {
-      actionName: 'ticktick:get-tasks',
+      actionName: 'ticktick:filter-tasks',
       skillName: 'ticktick',
-      details: buildAnalysisPrompt(tasksJson),
+      details: buildAnalysisPrompt(tasksJson, state.timeZone),
     });
     if (!analysisResult) return null;
 
@@ -295,7 +328,8 @@ async function executeRecommendation(
   rec: RecommendedAction,
 ): Promise<ActionResult> {
   const actionName = ACTION_NAME_MAP[rec.action];
-  if (!actionName) {
+  const operation = ACTION_OPERATION_MAP[rec.action];
+  if (!actionName || !operation) {
     log.warn(`Unknown action type: ${rec.action}`);
     return actionResult(rec, 'failed');
   }
@@ -310,13 +344,7 @@ async function executeRecommendation(
       return actionResult(rec, 'failed');
     }
 
-    if (result.success) {
-      return actionResult(rec, 'executed');
-    }
-    if (result.error?.includes('queued')) {
-      return actionResult(rec, 'queued');
-    }
-    return actionResult(rec, 'failed');
+    return actionResult(rec, classifyActionOutcome(result, rec, operation));
   } catch (err) {
     if (state.controller.signal.aborted) {
       return actionResult(rec, 'failed');
@@ -326,6 +354,20 @@ async function executeRecommendation(
     );
     return actionResult(rec, 'failed');
   }
+}
+
+function classifyActionOutcome(
+  result: TickTickActionResult,
+  rec: RecommendedAction,
+  operation: TickTickOperation,
+): ActionResult['outcome'] {
+  const evidence = parseTickTickMutationEvidence(result.result, {
+    operation,
+    taskId: rec.taskId,
+    projectId: rec.projectId,
+  });
+  if (result.success && evidence?.outcome === 'verified') return 'executed';
+  return result.error?.includes('queued') ? 'queued' : 'failed';
 }
 
 async function executeRecommendations(
@@ -371,37 +413,40 @@ function emitActionSummaryNotification(
   emitNotification(state, {
     title: 'Autonomous Task Management',
     body: parts.join(' '),
-    actions: [{ label: 'View Tasks', action: 't:l:' }],
   });
 }
 
 async function runAutonomousManagement(state: ServiceState): Promise<boolean> {
   if (!state.agentManager || state.controller.signal.aborted) return false;
 
-  // Step 1: Fetch all open tasks
-  const tasksJson = await fetchOpenTasksJson(state);
-  if (tasksJson === null) {
+  const snapshot = await fetchWorkload(state);
+  if (snapshot === null) {
     state.controller.signal.throwIfAborted();
     return false;
   }
   state.controller.signal.throwIfAborted();
 
-  // Step 2: Check for empty task list
-  if (hasNoOpenTasks(tasksJson)) {
-    log.info('No open tasks found');
+  if (snapshot.tasks.length === 0) {
+    log.info('No open tasks found in the observed TickTick query scopes');
     emitCompletionEvent(state, { executed: [], queued: [], failed: [] });
     return true;
   }
 
-  // Step 3: AI analysis of tasks
-  const recommendations = await analyzeTasksForRecommendations(state, tasksJson);
+  const recommendations = await analyzeTasksForRecommendations(state, JSON.stringify(snapshot));
   if (recommendations === null) {
     state.controller.signal.throwIfAborted();
     return false;
   }
   state.controller.signal.throwIfAborted();
 
-  // Step 4: Filter low-confidence recommendations
+  if (!recommendationsMatchSnapshot(recommendations, snapshot)) {
+    emitFailureEvent(
+      state,
+      'Task analysis referenced records outside the observed TickTick snapshot',
+    );
+    return false;
+  }
+
   const actionable = recommendations.filter((r) => r.confidence !== 'low');
 
   if (actionable.length === 0) {
@@ -410,16 +455,13 @@ async function runAutonomousManagement(state: ServiceState): Promise<boolean> {
     return true;
   }
 
-  // Step 5: Execute each recommendation through permission gates
   const summary = await executeRecommendations(state, actionable);
   state.controller.signal.throwIfAborted();
 
-  // Step 6: Summary notification (only if at least 1 action executed or queued)
   if (summary.executed.length > 0 || summary.queued.length > 0) {
     emitActionSummaryNotification(state, summary);
   }
 
-  // Step 7: Emit completion event
   emitCompletionEvent(state, summary);
   return summary.failed.length === 0;
 }
@@ -504,6 +546,8 @@ const service: RavenService = {
       controller: new AbortController(),
       activeRuns: new Set<Promise<unknown>>(),
       running: false,
+      timeZone:
+        typeof context.config.RAVEN_TIMEZONE === 'string' ? context.config.RAVEN_TIMEZONE : 'UTC',
     } as ServiceState;
     state.requestHandler = (event: unknown) => handleManageRequest(state, event);
     state.releaseJob = context.jobRegistry.register('autonomous-task-management', async () => {

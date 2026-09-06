@@ -45,7 +45,7 @@ Keep the custom runtime small; use the existing agent SDK for model execution.
 
 This is an npm workspaces monorepo: `packages/shared` (types, built first),
 `packages/core` (Fastify, orchestration, agents, services), `packages/web`
-(Next.js), and `packages/mcp-ticktick` (in-repo MCP server).
+(Next.js). TickTick uses its official HTTP MCP; there is no local adapter workspace.
 Use Node.js 22.22.0 or newer and npm 10.9.8. Package manifests and the lockfile specify dependency
 versions; do not copy versions from historical planning documents.
 
@@ -86,6 +86,11 @@ versions; do not copy versions from historical planning documents.
   a current-message cutoff and completed predecessor answers; never include later
   queued input or save a cancelled cold SDK lineage. Telegram `/model` requires an
   existing owned conversation and revalidates routing after discovery awaits.
+- MCP task/event configurations retain environment references, never materialized
+  credentials. Resolve HTTP headers and stdio environment only at the backend boundary.
+  An unconfigured optional HTTP MCP is omitted from top-level and nested bindings;
+  an explicit action requiring it fails before model admission. Interpreter script
+  paths anchor to Raven code or configured library roots, never attached repository cwd.
 - Raven MCP tools are filtered by role and available dependencies. Nested SDK
   agents receive scoped capabilities and the same permission boundaries.
   Knowledge tools and instructions must reflect actual graph availability.
@@ -198,10 +203,12 @@ versions; do not copy versions from historical planning documents.
   descriptor-based paths; never introduce an arbitrary host-path serving route.
   File artifacts persist their source ID and relative path after regular-file
   verification. Graph views require explicit current project membership filtering.
-- Project readiness is static and bounded: inspect current grants, bindings,
+- Project readiness is bounded: inspect current grants, bindings,
   source/index metadata and declared executable/script requirements without model
   calls, command execution or cross-project run-history scans. Configuration is not
-  authenticated provider evidence. Use the shared bounded secret redactor for
+  authenticated provider evidence. Configured HTTP MCPs may receive a bounded,
+  cancellable initialize/tools-list check (no model or task mutation); missing tools
+  remain a failed requirement even when authentication succeeds. Use the shared bounded secret redactor for
   diagnostic projections. Cached project IDs are diagnostic evidence only when
   their paths are currently invalid; never reactivate archived definitions.
 - Private browser access uses the optional authenticated Caddy gateway plus
@@ -256,7 +263,7 @@ npm run validate:library
 npm run validate:projects
 ```
 
-`npm run build` builds shared/core, the TickTick workspace and the production
+`npm run build` builds shared/core and the production
 dashboard. The dev commands start the actual assistant; choose configuration
 deliberately rather than using them as test isolation.
 
@@ -280,8 +287,8 @@ Use `npm run test:e2e` for the isolated Playwright journeys, `npm run test:compi
 after `npm run build:core` for packaged-core restart verification, and
 `npm run test:deployment` for real Git initializer tests. See
 [docs/deployment.md](docs/deployment.md) for offline container checks and setup.
-Live TickTick tests require `npm run test:mcp:live` plus deliberate credentials;
-they are separate from default verification. Local socket failures in a restricted
+TickTick readiness uses the official HTTP endpoint only after deliberate token setup.
+Default protocol tests use fake local servers; do not substitute owner credentials. Local socket failures in a restricted
 runner are environment limitations, not passing tests. Do not claim account
 delivery or remote cancellation from a fake backend or emitted notification.
 

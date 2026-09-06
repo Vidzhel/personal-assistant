@@ -27,7 +27,7 @@ vi.mock('../config.ts', () => {
   };
 });
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { query } from '@anthropic-ai/claude-agent-sdk';
@@ -679,6 +679,7 @@ describe('AgentManager', () => {
     });
 
     afterEach(async () => {
+      delete process.env['TEST_AGENT_MANAGER_MCP_TOKEN'];
       await amWithPermissions.stop();
       localEventBus.removeAllListeners();
       try {
@@ -805,6 +806,41 @@ describe('AgentManager', () => {
         expect(pendingApprovals.query()).toEqual([]);
       },
     );
+
+    it('rejects an explicit action when its optional HTTP MCP is unconfigured', async () => {
+      const skillPath = join(tmpDir, 'library', 'skills', 'email', 'gmail', 'config.json');
+      const skill = JSON.parse(readFileSync(skillPath, 'utf8')) as Record<string, unknown>;
+      skill.mcps = ['remote-mail'];
+      writeFileSync(skillPath, JSON.stringify(skill));
+      const mcpDir = join(tmpDir, 'library', 'mcps');
+      mkdirSync(mcpDir, { recursive: true });
+      writeFileSync(
+        join(mcpDir, 'remote-mail.json'),
+        JSON.stringify({
+          name: 'remote-mail',
+          displayName: 'Remote mail',
+          type: 'http',
+          url: 'https://mcp.example.com',
+          headers: { Authorization: 'Bearer ${TEST_AGENT_MANAGER_MCP_TOKEN}' },
+        }),
+      );
+      await capabilityLibrary.load(join(tmpDir, 'library'));
+
+      const result = await amWithPermissions.executeAction({
+        actionName: 'gmail:send-email',
+        skillName: 'gmail',
+        sessionId: actionSessionId,
+        preApproved: true,
+      });
+
+      expect(result).toEqual({
+        success: false,
+        error:
+          'Skill "gmail" has unconfigured MCP integration: remote-mail (missing TEST_AGENT_MANAGER_MCP_TOKEN)',
+      });
+      expect(mockQuery).not.toHaveBeenCalled();
+      expect(amWithPermissions.getActiveTasks()).toEqual({ running: [], queued: [] });
+    });
 
     it.each([undefined, new CapabilityLibrary()])(
       'rejects unavailable capability libraries before dispatch',

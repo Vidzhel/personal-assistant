@@ -2,7 +2,8 @@
 
 Raven runs as a core service and a Next.js dashboard. The default Compose setup
 starts with graph knowledge disabled and a Raven agent explicitly bound to the
-credential-free `repository-work` skill.
+credential-free `repository-work` skill and the official TickTick skill. TickTick
+remains unavailable until its dedicated MCP token is configured.
 The dashboard, project definitions and local memory work without external
 integrations; model responses require deliberate Claude authentication.
 
@@ -60,8 +61,7 @@ Open `http://localhost:4000`; core health is at
 Core's health response reports graph availability separately from service health.
 
 The core image builds shared/core from the lockfile and includes the compiled
-services and the current SQL schema. It also includes the in-repo TickTick server source,
-which runs using Node's `--experimental-strip-types`. Its native baseline includes
+services and the current SQL schema. Its native baseline includes
 Bash, Git/SSH, curl, Python/venv, make/g++, ripgrep, jq, file, unzip, Pandoc,
 Poppler and FFmpeg. It supports shell work, repository commits and common document
 pipelines; repository-specific packages and render engines remain separately
@@ -85,11 +85,11 @@ Compose creates named volumes; it does not mount the checkout's working data.
 On first startup, the entrypoint copies only the explicit
 [`deployment/seeds`](../deployment/seeds) into each **empty** projects/library/config
 root. A nonempty root is left intact; seed files are never merged into existing
-definitions. A nonempty library does not receive newly added starter skills; review
-the public seed and copy/bind it deliberately if wanted. The native starter has no
-external MCP/vendor dependencies or schedules and makes no
-automatic vendor downloads. Definitions authored in a development checkout are
-not included in the build context.
+definitions. A nonempty library does not receive newly added starter skills; use the
+explicit TickTick setup action below to install that shipped capability into an
+existing volume. The starter makes no automatic vendor downloads and does not probe
+external accounts during initialization. Definitions authored in a development
+checkout are not included in the build context.
 
 If first startup is interrupted, a small pending-seed journal in
 `data/definition-history/raven-bootstrap.json` lets the next startup finish only
@@ -181,10 +181,52 @@ private Compose override with an explicit service `env_file`; Compose's
 `--env-file` alone only supplies values for interpolation and does not pass every
 variable into core. Never copy credentials into an image or capability definition.
 
+## Configure the official TickTick MCP
+
+In TickTick on the web, open **Settings → Account → API Token** and create a
+dedicated MCP token. This token is separate from the retired Open API client and
+access-token credentials. Stop Raven, then run the setup action and enter the same
+token twice at its hidden prompts:
+
+```sh
+./scripts/raven.sh stop
+./scripts/raven.sh setup-ticktick
+./scripts/raven.sh start
+```
+
+The setup action refuses to change the durable capability volume while any Compose
+service is running. It builds the current core image, checks that the bundled files
+can replace only an absent or exact previously shipped TickTick definition, and
+then atomically updates only `TICKTICK_MCP_TOKEN` in the selected environment file.
+The token travels to the settings helper over standard input and is never placed in
+a process argument or success message. Unrelated environment lines and file mode
+are preserved, and a prospective Compose configuration must pass before replacement.
+
+The final one-shot container installs the official MCP definition and standalone
+usage skill into `raven_library`. Existing owner index files and every unrelated
+library file are preserved. A customized TickTick definition produces a conflict
+instead of being overwritten. Each target file is replaced atomically and a retry
+accepts files already at the official version; the several file replacements are
+not one filesystem transaction. If installation fails after the environment update,
+leave Raven stopped, resolve the reported definition conflict, and repeat
+`setup-ticktick`. A configured but unused token does not contact TickTick.
+
+The official service uses Streamable HTTP at `https://mcp.ticktick.com`. Raven
+keeps one active TickTick backend and does not fall back to the retired local
+adapter. Automated tests use a fake local MCP server and never authenticate to the
+owner's account. After startup, check project readiness and deliberately verify a
+harmless account read before relying on the integration. Do not treat configured
+credentials or a fake-server test as proof of live access.
+
+Fresh deployments include the TickTick skill in the default Raven agent. The
+installer does not rewrite existing owner project or agent definitions; if an older
+deployment's selected agent does not already list `ticktick`, add that skill through
+the existing agent update flow after installation.
+
 ## Add capabilities
 
-Fresh installations bind `repository-work` for native repository tools and start
-with no external skill bindings. Add definitions under
+Fresh installations bind `repository-work` and the configured official TickTick
+capability. Add other definitions under
 `/app/library/skills/<path>/config.json` and `skill.md`, and MCP definitions under
 `/app/library/mcps/`, using Raven's existing scaffold-and-activate tools where
 appropriate. Add each intended skill name to the agent's explicit `skills` list.
@@ -210,10 +252,8 @@ context. Populate the deployment's library volume separately with the selected
 plugin files if you intend to bind those skills there.
 
 External binaries such as Google Workspace tooling require your own extended
-image or an explicit executable mount. For the packaged TickTick server, use
-`node --experimental-strip-types /app/packages/mcp-ticktick/src/index.ts` in its
-MCP definition and supply its credentials separately. Installing these optional
-integrations is an operator action; startup does not download or enable them.
+image or an explicit executable mount. Installing optional integrations is an
+operator action; startup does not download or enable them.
 
 ## Enable graph knowledge
 

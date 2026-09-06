@@ -90,6 +90,9 @@ function RequirementItem({ requirement }: { requirement: ReadinessRequirement })
         </span>
         <StatePill state={requirement.state} kind={requirement.kind} />
       </div>
+      {requirement.toolCount !== undefined && (
+        <p className="text-sm">{requirement.toolCount} tools discovered</p>
+      )}
       <Correction>{requirement.correction}</Correction>
     </li>
   );
@@ -109,9 +112,9 @@ function CapabilityCard({ capability }: { capability: CapabilityReadiness }) {
       </div>
       {capability.requirements.length > 0 && (
         <ul className="mt-3 space-y-2">
-          {capability.requirements.map((requirement) => (
+          {capability.requirements.map((requirement, index) => (
             <RequirementItem
-              key={`${requirement.kind}-${requirement.name}`}
+              key={`${requirement.kind}-${requirement.name}-${String(index)}`}
               requirement={requirement}
             />
           ))}
@@ -119,8 +122,11 @@ function CapabilityCard({ capability }: { capability: CapabilityReadiness }) {
       )}
       {capability.findings.length > 0 && (
         <ul className="mt-3 space-y-2">
-          {capability.findings.map((finding) => (
-            <FindingItem key={`${finding.code}-${finding.scope}`} finding={finding} />
+          {capability.findings.map((finding, index) => (
+            <FindingItem
+              key={`${finding.code}-${finding.scope}-${String(index)}`}
+              finding={finding}
+            />
           ))}
         </ul>
       )}
@@ -265,20 +271,23 @@ export function ProjectReadinessReportView({ report }: { report: ProjectReadines
   return (
     <div className="space-y-4">
       <ReportHeader report={report} />
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <WorkspaceReadiness report={report} />
-        <AgentReadiness report={report} />
-      </div>
       {report.findings.length > 0 && (
         <div>
           <h3 className="mb-2 font-semibold">Corrections</h3>
           <ul className="space-y-2">
-            {report.findings.map((finding) => (
-              <FindingItem key={`${finding.code}-${finding.scope}`} finding={finding} />
+            {report.findings.map((finding, index) => (
+              <FindingItem
+                key={`${finding.code}-${finding.scope}-${String(index)}`}
+                finding={finding}
+              />
             ))}
           </ul>
         </div>
       )}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <WorkspaceReadiness report={report} />
+        <AgentReadiness report={report} />
+      </div>
       <div>
         <h3 className="mb-2 font-semibold">Capabilities</h3>
         {report.capabilities.length === 0 ? (
@@ -348,8 +357,8 @@ export function ProjectReadiness({
             Project readiness
           </h2>
           <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-            Local workspace, agent, and configuration checks. Account authentication is not tested
-            by these static checks.
+            Local workspace, agent, and configuration checks. Configured HTTP integrations also
+            receive a read-only connection and tool catalog check.
           </p>
         </div>
         <Button size="sm" onClick={readiness.refresh} disabled={readiness.loading}>
