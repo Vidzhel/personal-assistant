@@ -161,6 +161,8 @@ export async function createRaven(
   if (!existsSync(sessionPath)) mkdirSync(sessionPath, { recursive: true });
   const knowledgeDir = resolve(dataRoot, 'data/knowledge');
   if (!existsSync(knowledgeDir)) mkdirSync(knowledgeDir, { recursive: true });
+  const embeddingCacheDir = resolve(dataDir, 'models/transformers');
+  if (!existsSync(embeddingCacheDir)) mkdirSync(embeddingCacheDir, { recursive: true });
 
   // 3. Init database
   initDatabase(dbPath);
@@ -562,6 +564,7 @@ export async function createRaven(
     knowledgeDir,
     mediaDir,
     configDir,
+    embeddingCacheDir,
   });
   const {
     neo4jClient,

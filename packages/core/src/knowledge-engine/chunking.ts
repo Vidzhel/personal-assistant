@@ -170,6 +170,7 @@ interface ChunkingDeps {
   eventBus: EventBus;
   knowledgeStore: KnowledgeStore;
   knowledgeDir: string;
+  cacheDir?: string;
 }
 
 // eslint-disable-next-line max-lines-per-function -- factory function for chunking engine
@@ -184,7 +185,7 @@ export function createChunkingEngine(deps: ChunkingDeps): ChunkingEngine {
   async function embedChunkText(text: string, tags: string[]): Promise<number[]> {
     lifetime.assertActive();
     const input = BGE_DOC_PREFIX + `Tags: ${tags.join(', ')}. ` + text;
-    const pipe = await getPipeline();
+    const pipe = await getPipeline(deps.cacheDir);
     lifetime.assertActive();
     const output = await pipe(input, { pooling: 'mean', normalize: true });
     return Array.from(new Float32Array(output.data));

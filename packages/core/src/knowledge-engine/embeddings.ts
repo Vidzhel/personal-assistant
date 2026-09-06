@@ -24,11 +24,12 @@ type PipelineFunction = (
 
 let pipelineInstance: PipelineFunction | null = null;
 
-export async function getPipeline(): Promise<PipelineFunction> {
+export async function getPipeline(cacheDir?: string): Promise<PipelineFunction> {
   if (!pipelineInstance) {
     const { pipeline } = await import('@huggingface/transformers');
     const pipe = await pipeline('feature-extraction', 'Xenova/bge-small-en-v1.5', {
       dtype: 'fp32',
+      ...(cacheDir ? { cache_dir: cacheDir } : {}),
     });
     pipelineInstance = pipe as unknown as PipelineFunction;
   }
@@ -101,6 +102,7 @@ interface EmbeddingDeps {
   neo4j: Neo4jClient;
   eventBus: EventBus;
   knowledgeStore: KnowledgeStore;
+  cacheDir?: string;
 }
 
 const DEFAULT_SIMILAR_LIMIT = 10;
@@ -125,7 +127,7 @@ export function createEmbeddingEngine(deps: EmbeddingDeps): EmbeddingEngine {
 
   async function generateEmbedding(text: string): Promise<Float32Array> {
     lifetime.assertActive();
-    const pipe = await getPipeline();
+    const pipe = await getPipeline(deps.cacheDir);
     lifetime.assertActive();
     const output = await pipe(text, { pooling: 'mean', normalize: true });
     return new Float32Array(output.data);

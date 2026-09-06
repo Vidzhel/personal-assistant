@@ -42,6 +42,7 @@ interface KnowledgeStartupDeps {
   knowledgeDir: string;
   mediaDir: string;
   configDir: string;
+  embeddingCacheDir: string;
 }
 
 export interface KnowledgeRuntime {
@@ -79,12 +80,29 @@ type StartedProcessors = Pick<
 >;
 
 async function startProcessors(deps: BuildDeps): Promise<StartedProcessors> {
-  const { make, own, neo4j, eventBus, knowledgeStore, mediaDir, configDir, knowledgeDir } = deps;
+  const {
+    make,
+    own,
+    neo4j,
+    eventBus,
+    knowledgeStore,
+    mediaDir,
+    configDir,
+    knowledgeDir,
+    embeddingCacheDir,
+  } = deps;
   const ingestionProcessor = own(
     make.createIngestionProcessor({ knowledgeStore, eventBus, mediaDir }),
   );
   ingestionProcessor.start();
-  const embeddingEngine = own(make.createEmbeddingEngine({ neo4j, eventBus, knowledgeStore }));
+  const embeddingEngine = own(
+    make.createEmbeddingEngine({
+      neo4j,
+      eventBus,
+      knowledgeStore,
+      cacheDir: embeddingCacheDir,
+    }),
+  );
   embeddingEngine.start();
   const clusteringEngine = own(
     make.createClusteringEngine({
@@ -97,7 +115,13 @@ async function startProcessors(deps: BuildDeps): Promise<StartedProcessors> {
   );
   await clusteringEngine.start();
   const chunkingEngine = own(
-    make.createChunkingEngine({ neo4j, eventBus, knowledgeStore, knowledgeDir }),
+    make.createChunkingEngine({
+      neo4j,
+      eventBus,
+      knowledgeStore,
+      knowledgeDir,
+      cacheDir: embeddingCacheDir,
+    }),
   );
   chunkingEngine.start();
   return { ingestionProcessor, embeddingEngine, clusteringEngine, chunkingEngine };
@@ -107,10 +131,15 @@ async function buildKnowledge(
   deps: BuildDeps,
   stop: () => Promise<void>,
 ): Promise<Omit<KnowledgeRuntime, 'reindex'>> {
-  const { make, own, neo4j, knowledgeStore, eventBus, knowledgeDir } = deps;
+  const { make, own, neo4j, knowledgeStore, eventBus, knowledgeDir, embeddingCacheDir } = deps;
   const processors = await startProcessors(deps);
   const { embeddingEngine, chunkingEngine } = processors;
-  const retrievalEngine = make.createRetrievalEngine({ neo4j, knowledgeStore, knowledgeDir });
+  const retrievalEngine = make.createRetrievalEngine({
+    neo4j,
+    knowledgeStore,
+    knowledgeDir,
+    cacheDir: embeddingCacheDir,
+  });
   const knowledgeLifecycle = own(
     make.createKnowledgeLifecycle({
       neo4j,

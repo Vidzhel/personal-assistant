@@ -111,6 +111,7 @@ interface RetrievalDeps {
   neo4j: Neo4jClient;
   knowledgeStore: KnowledgeStore;
   knowledgeDir: string;
+  cacheDir?: string;
   maxConcurrentSearches?: number;
 }
 
@@ -121,7 +122,7 @@ export function createRetrievalEngine(deps: RetrievalDeps): RetrievalEngine {
 
   async function embedQuery(query: string): Promise<number[]> {
     const input = buildQueryEmbeddingInput(query);
-    const pipe = await getPipeline();
+    const pipe = await getPipeline(deps.cacheDir);
     const output = await pipe(input, { pooling: 'mean', normalize: true });
     return Array.from(new Float32Array(output.data));
   }

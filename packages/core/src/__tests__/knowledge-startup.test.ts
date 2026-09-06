@@ -10,6 +10,7 @@ import { createIngestionProcessor } from '../knowledge-engine/ingestion.ts';
 import { createEmbeddingEngine } from '../knowledge-engine/embeddings.ts';
 import { createClusteringEngine } from '../knowledge-engine/clustering.ts';
 import { createChunkingEngine } from '../knowledge-engine/chunking.ts';
+import { createRetrievalEngine } from '../knowledge-engine/retrieval.ts';
 import { buildTestConfig } from './fixtures/raven-fixture.ts';
 import { fakeGraph, fakeKnowledgeStore } from './fixtures/knowledge-fixture.ts';
 
@@ -36,6 +37,7 @@ describe('transactional knowledge startup', () => {
         knowledgeDir: root,
         mediaDir: root,
         configDir: root,
+        embeddingCacheDir: join(root, 'models', 'transformers'),
       },
       factories: {
         createNeo4jClient: vi.fn(() => client),
@@ -52,6 +54,29 @@ describe('transactional knowledge startup', () => {
     expect(await initializeKnowledge(f.deps, f.factories)).toBeUndefined();
     expect(f.factories.createNeo4jClient).not.toHaveBeenCalled();
     expect(f.eventBus.listenerCount()).toBe(0);
+  });
+
+  it('shares the configured embedding cache with every pipeline consumer', async () => {
+    const f = fixture();
+    const cacheDirs: Array<string | undefined> = [];
+    const runtime = await initializeKnowledge(f.deps, {
+      ...f.factories,
+      createEmbeddingEngine: (deps) => {
+        cacheDirs.push(deps.cacheDir);
+        return createEmbeddingEngine(deps);
+      },
+      createChunkingEngine: (deps) => {
+        cacheDirs.push(deps.cacheDir);
+        return createChunkingEngine(deps);
+      },
+      createRetrievalEngine: (deps) => {
+        cacheDirs.push(deps.cacheDir);
+        return createRetrievalEngine(deps);
+      },
+    });
+
+    expect(cacheDirs).toEqual(Array(3).fill(f.deps.embeddingCacheDir));
+    await runtime?.stop();
   });
 
   it.each([
