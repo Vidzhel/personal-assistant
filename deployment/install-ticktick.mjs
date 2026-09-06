@@ -17,18 +17,24 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const DEFAULT_SEEDS = fileURLToPath(new URL('./seeds/library/', import.meta.url));
 const MAX_FILE_BYTES = 64 * 1024;
-const LEGACY_HASHES = new Map([
-  ['mcps/ticktick.json', 'dae6d5ebade3ab00731bfbf69ff1d9d1432941910e694b27b55aaa3579952dbf'],
+const PREVIOUS_SHIPPED_HASHES = new Map([
+  ['mcps/ticktick.json', new Set(['dae6d5ebade3ab00731bfbf69ff1d9d1432941910e694b27b55aaa3579952dbf'])],
   [
     'skills/productivity/task-management/ticktick/config.json',
-    '1511f6e1aefa5f16f940779c5a27fc99787a56d2d2894e788024199e83e643fc',
+    new Set([
+      '1511f6e1aefa5f16f940779c5a27fc99787a56d2d2894e788024199e83e643fc',
+      '8f259e3b1c24ffb428521d5a55f15ec14177b8925b7bb50a5e7f2d9d522c5a5f',
+    ]),
   ],
   [
     'skills/productivity/task-management/ticktick/skill.md',
-    '89274aae1261613f2f71354dac24bf72707597b71c8710e762573efc5d3df0ee',
+    new Set([
+      '89274aae1261613f2f71354dac24bf72707597b71c8710e762573efc5d3df0ee',
+      '77067cbdd9bca00a0eb8a87b16396720f4acad455c1e62575e40c4829a55ce97',
+    ]),
   ],
 ]);
-const DEFINITION_PATHS = [...LEGACY_HASHES.keys()];
+const DEFINITION_PATHS = [...PREVIOUS_SHIPPED_HASHES.keys()];
 const INDEX_PATHS = [
   'skills/productivity/_index.md',
   'skills/productivity/task-management/_index.md',
@@ -39,7 +45,7 @@ const TOOLS_BY_TIER = {
     'list_undone_tasks_by_date', 'list_completed_tasks_by_date', 'filter_tasks',
     'list_projects', 'get_project_by_id', 'get_project_with_undone_tasks',
     'get_task_in_project', 'list_columns', 'list_project_groups', 'get_comment',
-    'project_member', 'list_tags', 'list_habits', 'list_habit_sections', 'get_habit',
+    'list_project_members', 'list_tags', 'list_habits', 'list_habit_sections', 'get_habit',
     'get_habit_checkins', 'get_focuses_by_time', 'get_focus', 'list_countdowns',
   ],
   yellow: [
@@ -231,8 +237,8 @@ function planInstall(libraryRoot, seedDir) {
       plan.push({ relativePath, source, sourceHash, current, operation: 'unchanged' });
       continue;
     }
-    const legacyHash = LEGACY_HASHES.get(relativePath);
-    if (current.hash !== null && current.hash !== legacyHash) {
+    const previousShippedHashes = PREVIOUS_SHIPPED_HASHES.get(relativePath);
+    if (current.hash !== null && !previousShippedHashes?.has(current.hash)) {
       throw new Error(
         `Refusing to overwrite customized TickTick definition: library/${relativePath}`,
       );

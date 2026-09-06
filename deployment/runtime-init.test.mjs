@@ -87,7 +87,7 @@ test('fresh capabilities are explicit and match their canonical library files', 
       'list_undone_tasks_by_date', 'list_completed_tasks_by_date', 'filter_tasks',
       'list_projects', 'get_project_by_id', 'get_project_with_undone_tasks',
       'get_task_in_project', 'list_columns', 'list_project_groups', 'get_comment',
-      'project_member', 'list_tags', 'list_habits', 'list_habit_sections', 'get_habit',
+      'list_project_members', 'list_tags', 'list_habits', 'list_habit_sections', 'get_habit',
       'get_habit_checkins', 'get_focuses_by_time', 'get_focus', 'list_countdowns',
     ],
     yellow: [

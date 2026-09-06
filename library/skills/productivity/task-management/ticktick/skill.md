@@ -4,7 +4,7 @@ Use the official TickTick MCP as the authoritative source for the owner's person
 
 ## Find the right records
 
-Begin with `list_projects` when the relevant project or list is not already identified. Use `get_project_with_undone_tasks` for every relevant list to understand its open workload, and inspect Inbox or otherwise unassigned tasks explicitly rather than assuming every task belongs to a returned project. Use `search_task`, `filter_tasks`, `get_task_by_id`, or `get_task_in_project` to resolve exact records. Preserve returned task, project, column, tag, habit, focus, countdown, comment, and member IDs and authoritative links.
+Begin with `list_projects` when the relevant project or list is not already identified. Use `get_project_with_undone_tasks` for every relevant list to understand its open workload, and inspect Inbox or otherwise unassigned tasks explicitly rather than assuming every task belongs to a returned project. Use `list_project_members` when membership or assignment context matters. Use `search_task`, `filter_tasks`, `get_task_by_id`, or `get_task_in_project` to resolve exact records. Preserve returned task, project, column, tag, habit, focus, countdown, comment, and member IDs and authoritative links.
 
 Do not treat Today as the whole workload. A useful account-wide review covers every relevant project, Inbox or unassigned work, overdue work, and tasks without dates. Both `list_undone_tasks_by_time_query` and `list_undone_tasks_by_date` are limited to a 14-day date range, so split longer requested periods into bounded queries and state what was covered. Never describe a partial page, date window, project subset, or failed list read as a complete account result.
 

@@ -119,6 +119,82 @@ Be concise and return structured data.
   for (const path of definitions) assert.equal(readFileSync(join(libraryRoot, path), 'utf8'), seed(path));
 });
 
+test('upgrades the previously shipped official TickTick definitions but preserves custom edits', () => {
+  const previousOfficial = {
+    'mcps/ticktick.json': seed('mcps/ticktick.json'),
+    'skills/productivity/task-management/ticktick/config.json': seed(
+      'skills/productivity/task-management/ticktick/config.json',
+    ).replace(
+      '{ "name": "ticktick:list-project-members", "description": "List project members", "defaultTier": "green", "reversible": true }',
+      '{ "name": "ticktick:project-member", "description": "Read project membership", "defaultTier": "green", "reversible": true }',
+    ),
+    'skills/productivity/task-management/ticktick/skill.md': seed(
+      'skills/productivity/task-management/ticktick/skill.md',
+    ).replace(' Use `list_project_members` when membership or assignment context matters.', ''),
+  };
+
+  const upgrade = fixture();
+  for (const [path, content] of Object.entries(previousOfficial)) {
+    write(upgrade.libraryRoot, path, content);
+  }
+  const checked = installTicktick({
+    root: upgrade.root,
+    libraryRoot: upgrade.libraryRoot,
+    seedDir,
+    checkOnly: true,
+  });
+  assert.equal(checked.checked, true);
+  assert.equal(
+    readFileSync(
+      join(upgrade.libraryRoot, 'skills/productivity/task-management/ticktick/config.json'),
+      'utf8',
+    ),
+    previousOfficial['skills/productivity/task-management/ticktick/config.json'],
+  );
+  const result = installTicktick({
+    root: upgrade.root,
+    libraryRoot: upgrade.libraryRoot,
+    seedDir,
+    commitFiles: () => {},
+  });
+  assert.deepEqual(result.installed.sort(), [
+    'skills/productivity/task-management/ticktick/config.json',
+    'skills/productivity/task-management/ticktick/skill.md',
+    'skills/productivity/_index.md',
+    'skills/productivity/task-management/_index.md',
+  ].sort());
+  for (const path of definitions) {
+    assert.equal(readFileSync(join(upgrade.libraryRoot, path), 'utf8'), seed(path));
+  }
+
+  const customized = fixture();
+  for (const [path, content] of Object.entries(previousOfficial)) {
+    write(customized.libraryRoot, path, content);
+  }
+  write(
+    customized.libraryRoot,
+    'skills/productivity/task-management/ticktick/skill.md',
+    `${previousOfficial['skills/productivity/task-management/ticktick/skill.md']}\nOwner instruction.\n`,
+  );
+  assert.throws(
+    () =>
+      installTicktick({
+        root: customized.root,
+        libraryRoot: customized.libraryRoot,
+        seedDir,
+        commitFiles: () => {},
+      }),
+    /Refusing to overwrite customized TickTick definition/,
+  );
+  assert.match(
+    readFileSync(
+      join(customized.libraryRoot, 'skills/productivity/task-management/ticktick/skill.md'),
+      'utf8',
+    ),
+    /Owner instruction/,
+  );
+});
+
 test('a customized TickTick definition prevents every write', () => {
   const { root, libraryRoot } = fixture();
   write(libraryRoot, definitions[0], '{"owner":"custom"}\n');

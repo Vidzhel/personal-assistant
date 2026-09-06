@@ -98,3 +98,21 @@ Docker became accessible for this follow-up: the actual 409-file context export,
 core image build, and network-disabled installer check as the image's non-root
 user passed. All 22 setup tests passed. These checks use no owner mounts or
 credentials and do not establish live TickTick authentication.
+
+### Live setup follow-up
+
+The existing default agent predated the TickTick seed and still bound only
+`repository-work`. Enabled its installed `ticktick` skill through the validated
+agent update API; setup now explicitly reminds owners to bind existing agents.
+The live readiness probe verified authentication but exposed the provider rename
+from `project_member` to `list_project_members`. Updated both definition copies
+and the installer catalog. Exact previous official config/instruction hashes are
+accepted for this update; customized files still conflict before writes.
+
+Independent review confirmed the hashes against prior committed bytes. All 19
+deployment tests, 22 setup tests, and the required check passed; the combined
+default suite passed 2,676 tests. The rebuilt image installed the two corrected
+definition files in the stopped runtime without changing its token or other
+definitions. Live verification here uses protocol discovery, not a task mutation.
+After restart, the Planning readiness endpoint returned `ready`, with TickTick
+authentication and tools verified, 50 discovered tools, and no findings.

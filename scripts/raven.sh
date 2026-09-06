@@ -198,6 +198,8 @@ setup_ticktick() {
   unset token
   compose run --rm --no-deps raven-core node deployment/install-ticktick.mjs
   echo 'Official TickTick capability and token are configured. Start Raven when ready.'
+  echo 'Existing agents keep their skills: enable ticktick in the agent settings if it is missing.'
+  echo 'After startup, check the project Workspace readiness report to verify the connection.'
 }
 
 if [[ "$action" == setup-private-access ]]; then

@@ -21,7 +21,7 @@
     { "name": "ticktick:list-columns", "description": "List project columns", "defaultTier": "green", "reversible": true },
     { "name": "ticktick:list-project-groups", "description": "List project groups", "defaultTier": "green", "reversible": true },
     { "name": "ticktick:get-comment", "description": "Read a comment", "defaultTier": "green", "reversible": true },
-    { "name": "ticktick:project-member", "description": "Read project membership", "defaultTier": "green", "reversible": true },
+    { "name": "ticktick:list-project-members", "description": "List project members", "defaultTier": "green", "reversible": true },
     { "name": "ticktick:list-tags", "description": "List tags", "defaultTier": "green", "reversible": true },
     { "name": "ticktick:list-habits", "description": "List habits", "defaultTier": "green", "reversible": true },
     { "name": "ticktick:list-habit-sections", "description": "List habit sections", "defaultTier": "green", "reversible": true },
