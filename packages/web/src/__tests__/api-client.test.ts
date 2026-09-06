@@ -87,4 +87,15 @@ describe('API success/error and project identity contracts', () => {
     ).rejects.toThrow('invalid JSON');
     expect(fetcher.mock.calls[0][1].headers.get('X-Fixture')).toBe('value');
   });
+
+  it('requires and encodes the selected project for graph requests', async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(Response.json({ nodes: [], edges: [], view: 'links' }));
+    vi.stubGlobal('fetch', fetcher);
+    await api.getKnowledgeGraph({ projectId: 'parent/child', view: 'tags' });
+    expect(fetcher.mock.calls[0][0]).toContain(
+      '/knowledge/graph?projectId=parent%2Fchild&view=tags',
+    );
+  });
 });

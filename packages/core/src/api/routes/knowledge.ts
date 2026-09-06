@@ -15,6 +15,7 @@ import {
   SnoozeSchema,
   MergeBubblesSchema,
   GraphQuerySchema,
+  META_PROJECT_ID,
 } from '@raven/shared';
 import type { GraphNode, GraphEdge, GraphData } from '@raven/shared';
 import type { EventBus } from '../../event-bus/event-bus.ts';
@@ -27,6 +28,8 @@ import type { RetrievalEngine } from '../../knowledge-engine/retrieval.ts';
 import type { Neo4jClient } from '../../knowledge-engine/neo4j-client.ts';
 import type { KnowledgeLifecycle } from '../../knowledge-engine/knowledge-lifecycle.ts';
 import type { Retrospective } from '../../knowledge-engine/retrospective.ts';
+import type { ProjectRegistry } from '../../project-registry/project-registry.ts';
+import type { ProjectWorkspaceStore } from '../../project-manager/project-workspace.ts';
 import {
   reindexKnowledge,
   type KnowledgeRefreshReport,
@@ -44,6 +47,26 @@ export interface KnowledgeRouteDeps {
   knowledgeLifecycle?: KnowledgeLifecycle;
   retrospective?: Retrospective;
   reindexKnowledge?: () => Promise<KnowledgeRefreshReport>;
+  projectRegistry?: ProjectRegistry;
+  workspaceStore?: ProjectWorkspaceStore;
+}
+
+function isCurrentGraphProject(
+  registry: ProjectRegistry | undefined,
+  workspaceStore: ProjectWorkspaceStore | undefined,
+  projectId: string,
+): boolean {
+  if (!registry || !workspaceStore) return false;
+  try {
+    registry.assertHealthy();
+    workspaceStore.getWorkspace(projectId);
+  } catch {
+    return false;
+  }
+  return registry.listProjects().some((node) => {
+    const identity = node.isMeta ? META_PROJECT_ID : (node.metadata?.id ?? node.id);
+    return identity === projectId;
+  });
 }
 
 function emitKnowledgeEvent(
@@ -145,9 +168,15 @@ function buildDomainEdges(nodes: GraphNode[], nodeIds: Set<string>): GraphEdge[]
 // eslint-disable-next-line max-lines-per-function -- composite graph query
 async function buildGraphData(
   neo: Neo4jClient,
-  params: { view: GraphData['view']; tag?: string; domain?: string; permanence?: string },
+  params: {
+    projectId: string;
+    view: GraphData['view'];
+    tag?: string;
+    domain?: string;
+    permanence?: string;
+  },
 ): Promise<GraphData> {
-  const { view, tag, domain, permanence } = params;
+  const { projectId, view, tag, domain, permanence } = params;
 
   const filterClauses: string[] = [];
   const filterParams: Record<string, unknown> = {};
@@ -177,15 +206,15 @@ async function buildGraphData(
     lastAccessedAt: string | null;
     degree: number;
   }>(
-    `MATCH (b:Bubble) ${whereClause}
-     OPTIONAL MATCH (b)-[r:LINKED_TO]-()
+    `MATCH (b:Bubble)-[:BELONGS_TO_PROJECT]->(:Project {id: $projectId}) ${whereClause}
+     OPTIONAL MATCH (b)-[r:LINKED_TO]-(linked:Bubble)-[:BELONGS_TO_PROJECT]->(:Project {id: $projectId})
      OPTIONAL MATCH (b)-[:HAS_TAG]->(tag:Tag)
      WITH b, count(DISTINCT r) as degree, collect(DISTINCT tag.name) as tagNames
      RETURN b.id as id, b.title as title, b.permanence as permanence,
             tagNames as tags, b.domains as domains, b.clusterLabel as clusterLabel,
             b.createdAt as createdAt, b.updatedAt as updatedAt,
             b.lastAccessedAt as lastAccessedAt, degree`,
-    filterParams,
+    { ...filterParams, projectId },
   );
 
   const nodes: GraphNode[] = nodeRows.map((r) => ({
@@ -212,8 +241,11 @@ async function buildGraphData(
       confidence: number | null;
     }>(
       `MATCH (b1:Bubble)-[r:LINKED_TO]->(b2:Bubble)
+       MATCH (b1)-[:BELONGS_TO_PROJECT]->(:Project {id: $projectId})
+       MATCH (b2)-[:BELONGS_TO_PROJECT]->(:Project {id: $projectId})
        RETURN b1.id as source, b2.id as target,
               r.type as relationshipType, r.confidence as confidence`,
+      { projectId },
     );
     edges = edgeRows.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
   } else if (view === 'tags') {
@@ -484,7 +516,14 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: KnowledgeRou
     if (!deps.neo4j) {
       return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Neo4j not available' });
     }
-    return buildGraphData(deps.neo4j, parsed.data);
+    if (!isCurrentGraphProject(deps.projectRegistry, deps.workspaceStore, parsed.data.projectId)) {
+      return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
+    }
+    const graph = await buildGraphData(deps.neo4j, parsed.data);
+    if (!isCurrentGraphProject(deps.projectRegistry, deps.workspaceStore, parsed.data.projectId)) {
+      return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
+    }
+    return graph;
   });
 
   // --- New routes: permanence ---

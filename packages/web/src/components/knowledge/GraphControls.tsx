@@ -7,7 +7,7 @@ import {
 } from '@/stores/knowledge-store';
 import { FilterPanel } from './FilterPanel';
 import { ColorLegend } from './ColorLegend';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api-client';
 
 const VIEW_MODES: { value: GraphViewMode; label: string }[] = [
@@ -24,31 +24,78 @@ const COLOR_DIMS: { value: ColorDimension; label: string }[] = [
   { value: 'connectionDegree', label: 'Connections' },
   { value: 'recency', label: 'Recency' },
   { value: 'cluster', label: 'Cluster' },
+  { value: 'relevance', label: 'Search relevance' },
 ];
 
 // eslint-disable-next-line max-lines-per-function -- toolbar with view modes, color, search, filters
-export function GraphControls({ onRefetch }: { onRefetch: () => void }) {
+export function GraphControls({
+  projectId,
+  onRefetch,
+}: {
+  projectId?: string;
+  onRefetch: () => void;
+}) {
   const { viewMode, setViewMode, colorDimension, setColorDimension, setSearchResults } =
     useKnowledgeStore();
   const [searchText, setSearchText] = useState('');
   const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const searchGeneration = useRef(0);
+  const projectRef = useRef(projectId);
+  if (projectRef.current !== projectId) {
+    projectRef.current = projectId;
+    searchGeneration.current++;
+  }
+
+  useEffect(() => {
+    searchGeneration.current++;
+    setSearchText('');
+    setSearchError(null);
+    setSearching(false);
+    setSearchResults([]);
+    setColorDimension('domain');
+    return () => {
+      searchGeneration.current++;
+    };
+  }, [projectId, setColorDimension, setSearchResults]);
 
   async function handleSearch() {
-    if (!searchText.trim()) {
+    const requestGeneration = ++searchGeneration.current;
+    const graphVersion = useKnowledgeStore.getState().graphVersion;
+    if (!projectId || !searchText.trim()) {
       setSearchResults([]);
+      setSearchError(null);
       return;
     }
+    setSearchError(null);
     setSearching(true);
     try {
       const result = await api.searchKnowledge(searchText);
-      setSearchResults(result.results.map((r) => ({ bubbleId: r.bubbleId, score: r.score })));
+      const current = useKnowledgeStore.getState();
+      if (requestGeneration !== searchGeneration.current || current.graphVersion !== graphVersion) {
+        return;
+      }
+      const visibleIds = new Set(current.nodes.map((node) => node.id));
+      setSearchResults(
+        result.results
+          .filter((resultItem) => visibleIds.has(resultItem.bubbleId))
+          .map((resultItem) => ({ bubbleId: resultItem.bubbleId, score: resultItem.score })),
+      );
       setColorDimension('relevance');
+    } catch (cause) {
+      if (requestGeneration === searchGeneration.current) {
+        setSearchResults([]);
+        setSearchError(cause instanceof Error ? cause.message : 'Could not search knowledge.');
+      }
     } finally {
-      setSearching(false);
+      if (requestGeneration === searchGeneration.current) setSearching(false);
     }
   }
 
   function clearSearch() {
+    searchGeneration.current++;
+    setSearching(false);
+    setSearchError(null);
     setSearchText('');
     setSearchResults([]);
     setColorDimension('domain');
@@ -89,6 +136,7 @@ export function GraphControls({ onRefetch }: { onRefetch: () => void }) {
             Color:
           </span>
           <select
+            aria-label="Graph color"
             value={colorDimension}
             onChange={(e) => setColorDimension(e.target.value as ColorDimension)}
             className="text-xs px-2 py-1 rounded"
@@ -110,6 +158,7 @@ export function GraphControls({ onRefetch }: { onRefetch: () => void }) {
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+            disabled={!projectId}
             className="text-xs px-2 py-1 rounded w-48"
             style={{
               background: 'var(--bg-card)',
@@ -119,7 +168,7 @@ export function GraphControls({ onRefetch }: { onRefetch: () => void }) {
           />
           <button
             onClick={handleSearch}
-            disabled={searching}
+            disabled={searching || !projectId}
             className="px-2 py-1 text-xs rounded"
             style={{ background: 'var(--accent)', color: '#fff' }}
           >
@@ -137,10 +186,15 @@ export function GraphControls({ onRefetch }: { onRefetch: () => void }) {
         </div>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <FilterPanel />
         <ColorLegend />
       </div>
+      {searchError && (
+        <p role="alert" className="text-xs" style={{ color: 'var(--error)' }}>
+          {searchError}
+        </p>
+      )}
     </div>
   );
 }

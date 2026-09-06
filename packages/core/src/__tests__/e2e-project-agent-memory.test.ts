@@ -115,7 +115,7 @@ describe('e2e: project agent and memory ownership', () => {
     await boot();
     expect(await (await request('/projects/alpha/memory')).json()).toEqual(notes);
     expect((await request('/projects/missing/memory')).status).toBe(404);
-    expect((await request('/agents/raven/memory')).status).toBe(403);
+    expect((await request('/agents/raven/memory')).status).toBe(404);
     const agentResponse = await request('/agents', {
       name: 'scribe',
       skills: [],

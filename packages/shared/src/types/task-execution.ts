@@ -16,11 +16,18 @@ export const TaskArtifactSchema = z
     type: z.enum(['file', 'data', 'reference']),
     label: z.string().min(1),
     filePath: z.string().min(1).optional(),
+    sourceId: z
+      .string()
+      .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/)
+      .optional(),
     data: z.record(z.string(), z.unknown()).optional(),
     referenceId: z.string().min(1).optional(),
   })
   .strict()
   .superRefine((artifact, ctx) => {
+    if (artifact.sourceId !== undefined && artifact.type !== 'file') {
+      ctx.addIssue({ code: 'custom', message: 'Only file artifacts have a sourceId' });
+    }
     const hasPayload =
       (artifact.type === 'file' && artifact.filePath !== undefined) ||
       (artifact.type === 'data' && artifact.data !== undefined) ||

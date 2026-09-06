@@ -45,6 +45,7 @@ interface KnowledgeState {
   selectedNodeIds: string[];
   multiSelectEnabled: boolean;
   highlightedNodeIds: string[];
+  graphVersion: number;
   loading: boolean;
 
   setGraphData: (nodes: GraphNode[], edges: GraphEdge[]) => void;
@@ -56,6 +57,7 @@ interface KnowledgeState {
   toggleMultiSelect: (id: string) => void;
   clearSelection: () => void;
   setHighlightedNodeIds: (ids: string[]) => void;
+  clearProjectState: () => void;
   setLoading: (loading: boolean) => void;
 }
 
@@ -106,9 +108,11 @@ export const useKnowledgeStore = create<KnowledgeState>((set) => ({
   selectedNodeIds: [],
   multiSelectEnabled: false,
   highlightedNodeIds: [],
+  graphVersion: 0,
   loading: false,
 
-  setGraphData: (nodes, edges) => set({ nodes, edges }),
+  setGraphData: (nodes, edges) =>
+    set((state) => ({ nodes, edges, graphVersion: state.graphVersion + 1 })),
   setViewMode: (viewMode) => set({ viewMode }),
   setColorDimension: (colorDimension) => set({ colorDimension }),
   setFilters: (filters) => set({ filters }),
@@ -123,5 +127,15 @@ export const useKnowledgeStore = create<KnowledgeState>((set) => ({
     })),
   clearSelection: () => set({ selectedNodeIds: [], multiSelectEnabled: false }),
   setHighlightedNodeIds: (highlightedNodeIds) => set({ highlightedNodeIds }),
+  clearProjectState: () =>
+    set((state) => ({
+      nodes: [],
+      edges: [],
+      graphVersion: state.graphVersion + 1,
+      searchResults: [],
+      selectedNodeIds: [],
+      multiSelectEnabled: false,
+      highlightedNodeIds: [],
+    })),
   setLoading: (loading) => set({ loading }),
 }));

@@ -5,6 +5,7 @@ import { api, type ExecutionTaskRecord, type TaskTreeDetailRecord } from '@/lib/
 import { Button } from '@/components/ui/Button';
 import { StatusBadge } from '@/components/ui/Badge';
 import { usePolling } from '@/hooks/usePolling';
+import { TaskArtifactFile } from '@/components/tasks/TaskArtifactFile';
 
 const TREE_REFRESH_MS = 5_000;
 
@@ -32,7 +33,27 @@ function DetailRow({ label, value }: { label: string; value?: string }) {
   );
 }
 
-function ArtifactList({ task }: { task: ExecutionTaskRecord }) {
+function ArtifactData({ artifact }: { artifact: ExecutionTaskRecord['artifacts'][number] }) {
+  return (
+    <>
+      {artifact.referenceId && (
+        <div className="mt-0.5 break-all font-mono" style={{ color: 'var(--accent)' }}>
+          Reference: {artifact.referenceId}
+        </div>
+      )}
+      {artifact.data && (
+        <pre
+          className="mt-1 overflow-x-auto whitespace-pre-wrap"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          {JSON.stringify(artifact.data, null, 2)}
+        </pre>
+      )}
+    </>
+  );
+}
+
+function ArtifactList({ task, treeId }: { task: ExecutionTaskRecord; treeId: string }) {
   if (task.artifacts.length === 0) return null;
   return (
     <div className="mt-2 space-y-1">
@@ -50,23 +71,19 @@ function ArtifactList({ task }: { task: ExecutionTaskRecord }) {
             <span style={{ color: 'var(--text-muted)' }}>({artifact.type})</span>
           </div>
           {artifact.filePath && (
-            <div className="mt-0.5 break-all font-mono" style={{ color: 'var(--accent)' }}>
-              {artifact.filePath}
-            </div>
+            <>
+              <div className="mt-0.5 break-all font-mono" style={{ color: 'var(--accent)' }}>
+                {artifact.filePath}
+              </div>
+              <TaskArtifactFile
+                key={`${treeId}-${task.id}-${index}-${artifact.sourceId}-${artifact.filePath}`}
+                treeId={treeId}
+                taskId={task.id}
+                index={index}
+              />
+            </>
           )}
-          {artifact.referenceId && (
-            <div className="mt-0.5 break-all font-mono" style={{ color: 'var(--accent)' }}>
-              Reference: {artifact.referenceId}
-            </div>
-          )}
-          {artifact.data && (
-            <pre
-              className="mt-1 overflow-x-auto whitespace-pre-wrap"
-              style={{ color: 'var(--text-secondary)' }}
-            >
-              {JSON.stringify(artifact.data, null, 2)}
-            </pre>
-          )}
+          <ArtifactData artifact={artifact} />
         </div>
       ))}
     </div>
@@ -75,11 +92,13 @@ function ArtifactList({ task }: { task: ExecutionTaskRecord }) {
 
 function TreeTask({
   task,
+  treeId,
   treeStatus,
   disabled,
   onApprove,
 }: {
   task: ExecutionTaskRecord;
+  treeId: string;
   treeStatus: string;
   disabled: boolean;
   onApprove: () => void;
@@ -102,7 +121,7 @@ function TreeTask({
       {task.blockedBy.length > 0 && <DetailRow label="After" value={task.blockedBy.join(', ')} />}
       {task.summary && <DetailRow label="Summary" value={task.summary} />}
       {task.lastError && <DetailRow label="Error" value={task.lastError} />}
-      <ArtifactList task={task} />
+      <ArtifactList task={task} treeId={treeId} />
       {approvalPending && (
         <Button size="sm" variant="primary" onClick={onApprove} disabled={disabled}>
           Approve step
@@ -226,6 +245,7 @@ function TreePanelContent({
           <TreeTask
             key={task.id}
             task={task}
+            treeId={tree.id}
             treeStatus={tree.status}
             disabled={busy !== null}
             onApprove={() => onApproveTask(task.id)}

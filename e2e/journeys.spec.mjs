@@ -118,15 +118,19 @@ test('create project, persist instructions, and manage data sources with knowled
     page.getByRole('button', { name: 'Use concrete examples in every answer.' }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Knowledge', exact: true }).click();
-  await page.getByRole('button', { name: 'Add Data Source', exact: true }).click();
-  await page.getByPlaceholder('Label', { exact: true }).fill('Reference note');
-  await page
-    .getByPlaceholder('URI (file path, URL, or Google Drive link)')
+  await expect(page.getByText('Neo4j not available', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Workspace', exact: true }).click();
+  const workspace = page.getByRole('region', { name: 'Project workspace', exact: true });
+  await workspace.getByPlaceholder('Label', { exact: true }).fill('Reference note');
+  await workspace
+    .getByPlaceholder('Server folder path or URL')
     .fill('https://example.invalid/fixture');
-  await page.getByRole('button', { name: 'Add', exact: true }).click();
-  await expect(page.getByText('Reference note', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Remove', exact: true }).click();
-  await expect(page.getByText('Reference note', { exact: true })).toHaveCount(0);
+  await workspace.getByRole('combobox', { name: 'Source type', exact: true }).selectOption('url');
+  await workspace.getByRole('button', { name: 'Attach source', exact: true }).click();
+  await expect(workspace.getByText('Reference note', { exact: true })).toBeVisible();
+  page.once('dialog', (dialog) => dialog.accept());
+  await workspace.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(workspace.getByText('Reference note', { exact: true })).toHaveCount(0);
   const id = decodeURIComponent(new URL(page.url()).pathname.split('/').at(-1));
   const persisted = await (await request.get(`${API}/projects/${encodeURIComponent(id)}`)).json();
   expect(persisted.name).toBe('Browser Created Project');
@@ -502,6 +506,9 @@ test('knowledge chat shows a real completion instead of an enqueue acknowledgeme
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('/knowledge');
+  await page
+    .getByRole('combobox', { name: 'Knowledge project', exact: true })
+    .selectOption('course');
   await page.getByRole('button', { name: 'Chat', exact: true }).click();
   await expect(page.getByPlaceholder('Ask Raven...')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
@@ -542,6 +549,10 @@ test('interrupted execution can be reviewed and deliberately resumed from mobile
   await planCard.getByText('Resume reviewed browser work', { exact: true }).click();
   await expect(page.getByText('Earlier research is retained.', { exact: true })).toBeVisible();
   await expect(page.getByText('Research result', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'View file', exact: true }).click();
+  await expect(
+    page.getByText('# Retained browser research artifact', { exact: false }),
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Resume', exact: true }).click();
   await expect
     .poll(async () => (await (await request.get(`${API}/task-trees/${id}`)).json()).status)
@@ -639,4 +650,217 @@ test('mobile agent memory requires a project and keeps nested project notes sepa
   await card.getByTitle('View Memory').click();
   await expect(selector).toHaveValue('course/one');
   await expect(page.getByText('Nested project memory sentinel.', { exact: true })).toBeVisible();
+});
+
+test('mobile workspace runs a command, pushes real artifacts, and previews and downloads the outputs', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const fixture = await (await request.get(`${CONTROL}/workspace`)).json();
+  const created = await project(request, 'Browser repository workspace');
+  await page.goto(projectPath(created.id));
+  await page.getByRole('button', { name: 'Workspace', exact: true }).click();
+  const workspace = page.getByRole('region', { name: 'Project workspace', exact: true });
+  await expect(workspace).toBeVisible();
+  await workspace.getByPlaceholder('Label', { exact: true }).fill('Attached repository');
+  const folderInput = workspace.getByPlaceholder('Server folder path or URL');
+  await folderInput.fill(`${fixture.repository}/missing`);
+  await workspace.getByRole('button', { name: 'Attach source', exact: true }).click();
+  await expect(workspace.getByRole('alert')).toBeVisible();
+  await expect(workspace.getByPlaceholder('Label', { exact: true })).toHaveValue(
+    'Attached repository',
+  );
+  await expect(folderInput).toHaveValue(`${fixture.repository}/missing`);
+  await folderInput.fill(fixture.repository);
+  await workspace
+    .getByPlaceholder('Context files, one relative path per line')
+    .fill('AGENTS.md\nREADME.md');
+  await workspace.getByRole('button', { name: 'Attach source', exact: true }).click();
+  const sourceRow = workspace.getByRole('listitem').filter({ hasText: 'Attached repository' });
+  await expect(sourceRow).toBeVisible();
+  const config = await (await request.get(`${API}${projectPath(created.id)}/workspace`)).json();
+  const sourceId = config.sources[0].id;
+  expect(config.sources[0].contextFiles).toEqual(['AGENTS.md', 'README.md']);
+  await workspace
+    .getByRole('combobox', { name: 'Working folder', exact: true })
+    .selectOption(sourceId);
+  await workspace.getByRole('combobox', { name: 'Mode', exact: true }).selectOption('full');
+  await workspace.getByRole('button', { name: 'Save execution settings', exact: true }).click();
+  await expect
+    .poll(
+      async () =>
+        (await (await request.get(`${API}${projectPath(created.id)}/workspace`)).json()).execution,
+    )
+    .toEqual({ mode: 'full', sourceId });
+  await page.getByRole('button', { name: 'New Chat', exact: true }).click();
+  await expect(page.getByPlaceholder('Ask Raven...')).toBeVisible();
+  await send(
+    page,
+    'workspace-artifact-browser: create and verify the report, then commit and push',
+  );
+  await expect
+    .poll(async () => (await (await request.get(`${CONTROL}/workspace`)).json()).artifact)
+    .toContain('Generated by a Raven workspace command.');
+  const pushed = await (await request.get(`${CONTROL}/workspace`)).json();
+  expect(pushed.commit).toMatch(/^[a-f0-9]{40}$/);
+  await page.getByRole('button', { name: 'Workspace', exact: true }).click();
+  const files = workspace.getByRole('region', { name: 'Project files', exact: true });
+  await files.getByRole('combobox', { name: 'Source', exact: true }).selectOption(sourceId);
+  await files.getByRole('button', { name: 'Refresh', exact: true }).click();
+  const directPath = files.getByRole('textbox', { name: 'File or folder path', exact: true });
+  await directPath.fill('missing-folder');
+  await files.getByRole('button', { name: 'Open', exact: true }).click();
+  await expect(files.getByRole('alert')).toBeVisible();
+  await directPath.fill('outputs');
+  await files.getByRole('button', { name: 'Open', exact: true }).click();
+  await expect(files.getByRole('button', { name: /report # українська.md$/ })).toBeVisible();
+  await directPath.fill('outputs/report # українська.md');
+  await files.getByRole('button', { name: 'Open', exact: true }).click();
+  await expect(
+    files.getByText('Generated by a Raven workspace command.', { exact: false }),
+  ).toBeVisible();
+  const downloadEvent = page.waitForEvent('download');
+  await files.getByRole('link', { name: 'Download', exact: true }).click();
+  const download = await downloadEvent;
+  expect(download.suggestedFilename()).toBe('report # українська.md');
+  const { readFile } = await import('node:fs/promises');
+  expect(await readFile(await download.path(), 'utf8')).toBe(pushed.artifact);
+  await files.getByRole('button', { name: /chart.png$/ }).click();
+  const image = files.getByRole('img', { name: 'chart.png', exact: true });
+  await expect(image).toBeVisible();
+  await expect.poll(() => image.evaluate((element) => element.naturalWidth)).toBe(1);
+  await files.getByRole('button', { name: /report.html$/ }).click();
+  const html = files.locator('iframe[title="report.html"]');
+  await expect(html).toHaveAttribute('sandbox', '');
+  await expect(
+    page
+      .frameLocator('iframe[title="report.html"]')
+      .getByRole('heading', { name: 'Workspace HTML preview' }),
+  ).toBeVisible();
+  expect(await page.evaluate(() => window.__artifactEscape)).toBeUndefined();
+  const htmlQuery = new URLSearchParams({ sourceId, path: 'outputs/report.html' });
+  const htmlInfo = await (
+    await request.get(`${API}${projectPath(created.id)}/files/info?${htmlQuery}`)
+  ).json();
+  htmlQuery.set('revision', htmlInfo.revision);
+  const htmlResponse = await request.get(
+    `${API}${projectPath(created.id)}/files/content?${htmlQuery}`,
+  );
+  expect(htmlResponse.headers()['content-security-policy']).toContain('sandbox');
+  await files.getByRole('button', { name: /invalid.pdf$/ }).click();
+  await expect(files.getByRole('alert')).toBeVisible();
+  await files.getByRole('button', { name: /report.pdf$/ }).click();
+  const pdfCanvas = files.getByRole('img', { name: 'PDF page 1', exact: true });
+  await expect(pdfCanvas).toHaveAttribute('data-rendered', 'true');
+  expect(
+    await pdfCanvas.evaluate((canvas) => {
+      const context = canvas.getContext('2d');
+      const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      let dark = 0;
+      for (let index = 0; index < pixels.length; index += 4) {
+        if (
+          pixels[index + 3] &&
+          pixels[index] < 100 &&
+          pixels[index + 1] < 100 &&
+          pixels[index + 2] < 100
+        )
+          dark++;
+      }
+      return dark;
+    }),
+  ).toBeGreaterThan(100);
+  await pdfCanvas.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: '.browser-test-output/workspace-pdf-mobile.png' });
+  await files.getByRole('button', { name: 'Next PDF page', exact: true }).click();
+  await expect(files.getByRole('img', { name: 'PDF page 2', exact: true })).toHaveAttribute(
+    'data-rendered',
+    'true',
+  );
+  await expect(files.getByText('Page 2 of 2', { exact: true })).toBeVisible();
+  await files.getByText('Page text', { exact: true }).click();
+  await expect(files.getByText('Second page verified', { exact: true })).toBeVisible();
+  await files.getByRole('button', { name: 'Previous PDF page', exact: true }).click();
+  await expect(pdfCanvas).toHaveAttribute('data-rendered', 'true');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.reload();
+  await page.getByRole('button', { name: 'Workspace', exact: true }).click();
+  await expect(workspace.getByRole('combobox', { name: 'Mode', exact: true })).toHaveValue('full');
+  await expect(
+    workspace.getByRole('combobox', { name: 'Working folder', exact: true }),
+  ).toHaveValue(sourceId);
+  page.once('dialog', (dialog) => dialog.accept());
+  await sourceRow.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(sourceRow).toHaveCount(0);
+  expect(
+    (await request.get(`${API}${projectPath(created.id)}/files/content?${htmlQuery}`)).status(),
+  ).toBe(404);
+  expect((await (await request.get(`${CONTROL}/workspace`)).json()).artifact).toBe(pushed.artifact);
+});
+
+test('knowledge graph requires explicit project selection and keeps it when the project list reorders', async ({
+  page,
+  request,
+}) => {
+  const projects = await (await request.get(`${API}/projects`)).json();
+  const selected = projects.filter((item) => ['course', 'course/one'].includes(item.id));
+  expect(selected).toHaveLength(2);
+  let reverse = false;
+  const graphRequests = [];
+  await page.route(`${API}/projects`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(reverse ? [...selected].reverse() : selected),
+    }),
+  );
+  await page.route(`${API}/knowledge/graph?**`, (route) => {
+    graphRequests.push(new URL(route.request().url()).searchParams.get('projectId'));
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ nodes: [], edges: [], view: 'links' }),
+    });
+  });
+  await page.goto('/knowledge');
+  const selector = page.getByRole('combobox', { name: 'Knowledge project', exact: true });
+  await expect(selector).toHaveValue('');
+  await expect(selector.locator('option')).toHaveCount(3);
+  expect(graphRequests).toEqual([]);
+  await selector.selectOption('course');
+  await expect.poll(() => graphRequests.at(-1)).toBe('course');
+  await expect(page).toHaveURL(/projectId=course$/);
+  reverse = true;
+  await page.reload();
+  await expect(selector).toHaveValue('course');
+  let delayedSearch;
+  await page.route(`${API}/knowledge/search`, (route) => {
+    delayedSearch = route;
+  });
+  await page.getByPlaceholder('Search knowledge...').fill('delayed project search');
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  await expect.poll(() => Boolean(delayedSearch)).toBe(true);
+  await selector.selectOption('course/one');
+  await expect.poll(() => graphRequests.at(-1)).toBe('course/one');
+  const delayedResponse = page.waitForResponse(`${API}/knowledge/search`);
+  await delayedSearch.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ results: [{ bubbleId: 'previous-project', score: 1 }] }),
+  });
+  await (await delayedResponse).finished();
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  await expect(page.getByPlaceholder('Search knowledge...')).toHaveValue('');
+  await expect(page.getByRole('combobox', { name: 'Graph color', exact: true })).toHaveValue(
+    'domain',
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await expect(page).toHaveURL(/projectId=course%2Fone$/);
+  await selector.selectOption('');
+  await expect(page).toHaveURL('/knowledge');
+  expect(graphRequests.every(Boolean)).toBe(true);
 });

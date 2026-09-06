@@ -367,6 +367,7 @@ export type GraphViewMode = 'links' | 'tags' | 'timeline' | 'clusters' | 'domain
 export const GraphViewModeSchema = z.enum(['links', 'tags', 'timeline', 'clusters', 'domains']);
 
 export const GraphQuerySchema = z.object({
+  projectId: z.string().min(1),
   view: GraphViewModeSchema.default('links'),
   tag: z.string().optional(),
   domain: z.string().optional(),

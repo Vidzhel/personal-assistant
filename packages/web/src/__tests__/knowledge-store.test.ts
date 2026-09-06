@@ -160,4 +160,22 @@ describe('Knowledge Store', () => {
     expect(useKnowledgeStore.getState().searchResults).toHaveLength(1);
     expect(useKnowledgeStore.getState().searchResults[0].score).toBe(0.9);
   });
+
+  it('clears graph state when switching projects', () => {
+    const first = makeNode();
+    const second = makeNode();
+    useKnowledgeStore.getState().setGraphData([first, second], [makeEdge(first.id, second.id)]);
+    useKnowledgeStore.getState().selectNode(first.id);
+    useKnowledgeStore.getState().setHighlightedNodeIds([second.id]);
+    useKnowledgeStore.getState().setSearchResults([{ bubbleId: first.id, score: 1 }]);
+
+    useKnowledgeStore.getState().clearProjectState();
+
+    const state = useKnowledgeStore.getState();
+    expect(state.nodes).toEqual([]);
+    expect(state.edges).toEqual([]);
+    expect(state.selectedNodeIds).toEqual([]);
+    expect(state.highlightedNodeIds).toEqual([]);
+    expect(state.searchResults).toEqual([]);
+  });
 });

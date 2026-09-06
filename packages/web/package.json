@@ -10,6 +10,7 @@
   "dependencies": {
     "@raven/shared": "*",
     "next": "^16.1.6",
+    "pdfjs-dist": "6.3.289",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-force-graph-2d": "^1.29.1",

@@ -6,6 +6,7 @@ import type { ExecutionTask, TaskTree } from '@raven/shared';
 import type { RavenMcpDeps } from '../types.ts';
 import type { ScopeContext } from '../scope.ts';
 import type { TaskExecutionEngine } from '../../task-execution/task-execution-engine.ts';
+import { registerTaskArtifacts } from '../../project-manager/task-artifact-files.ts';
 
 const MAX_PROGRESS = 100;
 
@@ -163,12 +164,22 @@ function buildCompleteTask(
     async (args) => {
       const attempt = currentAttempt(deps, scope);
       if (typeof attempt === 'string') return err(attempt);
+      let artifacts;
+      try {
+        artifacts = registerTaskArtifacts({
+          projectId: scope.projectId,
+          artifacts: args.artifacts ?? [],
+          workspaceStore: deps.workspaceStore,
+        });
+      } catch (error) {
+        return err(error instanceof Error ? error.message : 'Artifact registration failed');
+      }
       await attempt.engine.onTaskCompleted({
         treeId: attempt.treeId,
         taskId: attempt.taskId,
         agentTaskId: scope.agentTaskId,
         summary: args.summary,
-        artifacts: args.artifacts ?? [],
+        artifacts,
       });
       return ok({ ack: true });
     },

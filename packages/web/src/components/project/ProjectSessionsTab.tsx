@@ -25,6 +25,7 @@ export function ProjectSessionsTab({
   const [sessionLoadFailed, setSessionLoadFailed] = useState(false);
   const [creating, setCreating] = useState(false);
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [showSessionList, setShowSessionList] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showDebug, setShowDebug] = useState(false);
@@ -37,6 +38,7 @@ export function ProjectSessionsTab({
   const currentSession = useRef(activeSessionId);
   currentSession.current = activeSessionId;
   useEffect(() => {
+    setShowSessionList(false);
     setRetroResult(null);
     setRetroLoading(false);
     setCopied(false);
@@ -148,7 +150,15 @@ export function ProjectSessionsTab({
   const composerDisabled = sessionSwitchPending || creating || waitingForRequestedSession;
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full min-h-0 min-w-0 flex-col sm:flex-row">
+      <button
+        type="button"
+        className="shrink-0 border-b px-4 py-2 text-left text-sm sm:hidden"
+        aria-expanded={showSessionList}
+        onClick={() => setShowSessionList((shown) => !shown)}
+      >
+        {showSessionList ? 'Hide conversations' : 'Choose conversation'}
+      </button>
       {error && (
         <div className="p-3 space-y-2" style={{ color: 'var(--error)' }}>
           <p role="alert">{error}</p>
@@ -169,7 +179,7 @@ export function ProjectSessionsTab({
       )}
       {/* Session list sidebar */}
       <div
-        className="w-72 border-r flex flex-col shrink-0"
+        className={`${showSessionList ? 'flex' : 'hidden'} max-h-56 w-full border-r flex-col shrink-0 sm:flex sm:max-h-none sm:w-72`}
         style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}
       >
         <div className="p-3 border-b" style={{ borderColor: 'var(--border)' }}>
@@ -247,14 +257,14 @@ export function ProjectSessionsTab({
       </div>
 
       {/* Chat area — NO ProjectMemory editing here */}
-      <div className="flex-1 flex flex-col overflow-hidden">
+      <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden">
         {/* Session info bar */}
         {activeSession && (
           <div
             className="px-4 py-2 border-b text-sm"
             style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}
           >
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={() =>
                   void handleUpdateSession(activeSession.id, {
@@ -274,7 +284,7 @@ export function ProjectSessionsTab({
                   await handleUpdateSession(activeSession.id, { name });
                 }}
                 placeholder="Name this session..."
-                className="text-sm font-medium flex-1"
+                className="text-sm font-medium flex-1 min-w-0"
               />
               <span className="font-mono text-xs shrink-0" style={{ color: 'var(--text-muted)' }}>
                 {activeSession.id.slice(0, ID_DISPLAY_LENGTH)}
@@ -287,14 +297,14 @@ export function ProjectSessionsTab({
                 {copied ? 'Copied!' : 'Copy ID'}
               </button>
             </div>
-            <div className="flex items-center gap-3 mt-1">
+            <div className="flex flex-wrap items-center gap-2 mt-1">
               <InlineEditField
                 value={activeSession.description || ''}
                 onSave={async (desc) => {
                   await handleUpdateSession(activeSession.id, { description: desc });
                 }}
                 placeholder="Add description..."
-                className="text-xs flex-1"
+                className="text-xs flex-1 min-w-0"
                 style={{ color: 'var(--text-muted)' }}
               />
               <span className="text-xs shrink-0" style={{ color: 'var(--text-muted)' }}>

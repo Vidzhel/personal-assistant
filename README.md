@@ -23,8 +23,8 @@ dashboard. Claude and Codex can both develop the project using the same guide.
 Integrations require their definitions, executables and credentials to be configured
 and explicitly bound where used. A fresh Docker install starts with no external
 capability bindings or schedules. Projects support local agents, shared project
-memory and direct repository execution. Repository context links and mobile
-artifact previews remain in progress.
+memory, direct repository execution, context links and mobile file previews.
+Final workspace deployment verification remains in progress.
 
 ## Quick Start
 
@@ -164,7 +164,7 @@ override inherited agents. Project tasks run in the selected folder (or managed
 home), with default, SDK auto, or full native execution modes. Full mode grants
 trusted host access, including shell and Git operations. Current-grant checks
 and revision-bound resumes prevent stale configuration from continuing work.
-Repository context links and mobile artifact viewing follow in that plan. Project layouts may evolve around the small Raven
+Current context links, mobile workspace controls and file previews are implemented. Project layouts may evolve around the small Raven
 anchors; repository indexes link to existing instructions without embeddings.
 
 Useful verification commands:

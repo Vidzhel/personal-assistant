@@ -54,7 +54,7 @@ export function ColorLegend() {
 
   return (
     <div
-      className="flex items-center gap-3 px-3 py-1.5 rounded text-xs"
+      className="flex min-w-0 max-w-full flex-wrap items-center gap-3 px-3 py-1.5 rounded text-xs"
       style={{ background: 'var(--bg-card)', color: 'var(--text-muted)' }}
     >
       <span className="font-medium" style={{ color: 'var(--text)' }}>

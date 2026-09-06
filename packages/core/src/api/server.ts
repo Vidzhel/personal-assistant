@@ -1,4 +1,6 @@
 import type { ProjectWorkspaceStore } from '../project-manager/project-workspace.ts';
+import { registerProjectFileRoutes } from './routes/project-files.ts';
+import { registerTaskArtifactFileRoutes } from './routes/task-artifact-files.ts';
 import Fastify from 'fastify';
 import type { DefinitionDiagnostic } from '../diagnostics/definition-diagnostics.ts';
 import type { ReloadRegistriesResult } from '../scaffolding/scaffold-and-activate.ts';
@@ -187,6 +189,8 @@ export async function createApiServer(
   if (deps.knowledgeStore && deps.ingestionProcessor) {
     registerKnowledgeRoutes(app, {
       eventBus: deps.eventBus,
+      projectRegistry: deps.projectRegistry,
+      workspaceStore: deps.workspaceStore,
       knowledgeStore: deps.knowledgeStore,
       reindexKnowledge: deps.reindexKnowledge,
       ingestionProcessor: deps.ingestionProcessor,
@@ -210,6 +214,10 @@ export async function createApiServer(
   // Task execution trees
   if (deps.executionEngine) {
     registerTaskTreeRoutes(app, { executionEngine: deps.executionEngine });
+    registerTaskArtifactFileRoutes(app, {
+      executionEngine: deps.executionEngine,
+      workspaceStore: deps.workspaceStore,
+    });
   }
 
   // Template management
@@ -238,6 +246,7 @@ export async function createApiServer(
   }
 
   registerProjectMemoryRoutes(app, deps.memoryStore);
+  registerProjectFileRoutes(app, deps.workspaceStore);
 
   // Project knowledge (data sources + knowledge links)
   registerProjectKnowledgeRoutes(app, {

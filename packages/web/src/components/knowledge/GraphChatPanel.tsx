@@ -38,7 +38,7 @@ export function GraphChatPanel({
       )}
       {open !== null && (
         <div
-          className={`absolute top-0 z-20 w-80 h-full flex-col shadow-xl ${open ? 'flex' : 'hidden'} ${count === 1 ? 'right-80' : 'right-0'}`}
+          className={`absolute top-0 z-20 w-80 max-w-[calc(100vw-1rem)] h-full flex-col shadow-xl ${open ? 'flex' : 'hidden'} ${count === 1 ? 'right-0 sm:right-80' : 'right-0'}`}
           style={{ background: 'var(--bg)' }}
         >
           <GraphChatHeader count={count} onClose={() => setOpen(false)} />
@@ -51,7 +51,7 @@ export function GraphChatPanel({
               />
             ) : (
               <p role="status" className="p-3 text-sm">
-                Create a project to start a knowledge conversation.
+                Select a project to start a knowledge conversation.
               </p>
             )}
           </div>

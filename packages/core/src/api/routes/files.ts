@@ -1,78 +1,62 @@
-import { resolve, normalize } from 'node:path';
-import { existsSync, createReadStream, statSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { FastifyInstance } from 'fastify';
-import { createLogger } from '@raven/shared';
+import { HTTP_STATUS } from '@raven/shared';
+import {
+  closeOpenedFile,
+  contentDisposition,
+  createReadStreamFromFd,
+  fileLimits,
+  isInertMarkup,
+  mimeForPath,
+  openGlobalFile,
+  PAYLOAD_TOO_LARGE,
+} from '../../project-manager/project-files-access.ts';
+import { ProjectMutationError } from '../../project-manager/project-mutation.ts';
 
-const log = createLogger('file-routes');
-
-const HTTP_BAD_REQUEST = 400;
-const HTTP_FORBIDDEN = 403;
-const HTTP_NOT_FOUND = 404;
-
-const MIME_TYPES: Record<string, string> = {
-  '.txt': 'text/plain',
-  '.md': 'text/markdown',
-  '.pdf': 'application/pdf',
-  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  '.json': 'application/json',
-  '.csv': 'text/csv',
-  '.mp3': 'audio/mpeg',
-  '.mp4': 'video/mp4',
-  '.wav': 'audio/wav',
-  '.ogg': 'audio/ogg',
-  '.webm': 'video/webm',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-};
-
-function getMimeType(filePath: string): string {
-  const ext = filePath.slice(filePath.lastIndexOf('.')).toLowerCase();
-  return MIME_TYPES[ext] ?? 'application/octet-stream';
+function sendFailure(
+  error: unknown,
+  reply: { status: (code: number) => { send: (body: unknown) => unknown } },
+): unknown {
+  const cause =
+    error instanceof ProjectMutationError
+      ? error
+      : new ProjectMutationError(error instanceof Error ? error.message : String(error));
+  return reply.status(cause.statusCode).send({ error: cause.message });
 }
 
 export function registerFileRoutes(app: FastifyInstance, dataDir: string): void {
   const filesRoot = resolve(dataDir, 'files');
 
-  // Block path traversal: when Fastify normalizes /api/files/../../etc/passwd → /etc/passwd,
-  // the route won't match. We treat any unmatched route as a potential traversal attempt.
-  app.setNotFoundHandler((_request, reply) => {
-    return reply.status(HTTP_FORBIDDEN).send({ error: 'Forbidden' });
-  });
-
   app.get('/api/files/*', async (request, reply) => {
     const requestedPath = (request.params as Record<string, string>)['*'];
-    if (!requestedPath) {
-      return reply.status(HTTP_BAD_REQUEST).send({ error: 'No file path specified' });
+    if (!requestedPath)
+      return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'No file path specified' });
+    let opened: ReturnType<typeof openGlobalFile> | undefined;
+    let handedOff = false;
+    try {
+      opened = openGlobalFile(filesRoot, requestedPath);
+      if (!opened.stats.isFile()) {
+        closeOpenedFile(opened);
+        return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: 'Cannot serve directories' });
+      }
+      if (opened.stats.size > fileLimits().maxDownloadBytes) {
+        closeOpenedFile(opened);
+        return reply.status(PAYLOAD_TOO_LARGE).send({ error: 'File exceeds the download limit' });
+      }
+      const download = isInertMarkup(requestedPath);
+      const stream = createReadStreamFromFd(opened.fd, opened.stats.size);
+      handedOff = true;
+      return reply
+        .header('Content-Type', mimeForPath(requestedPath))
+        .header('X-Content-Type-Options', 'nosniff')
+        .header('Cache-Control', 'no-store')
+        .header('Referrer-Policy', 'no-referrer')
+        .header('Content-Disposition', contentDisposition(requestedPath, download))
+        .header('Content-Length', opened.stats.size)
+        .send(stream);
+    } catch (error) {
+      if (opened && !handedOff) closeOpenedFile(opened);
+      return sendFailure(error, reply);
     }
-
-    const resolvedPath = resolve(filesRoot, normalize(requestedPath));
-
-    // Path traversal protection (defense in depth)
-    if (!resolvedPath.startsWith(filesRoot)) {
-      log.warn(`Path traversal attempt blocked: ${requestedPath}`);
-      return reply.status(HTTP_FORBIDDEN).send({ error: 'Forbidden' });
-    }
-
-    if (!existsSync(resolvedPath)) {
-      return reply.status(HTTP_NOT_FOUND).send({ error: 'File not found' });
-    }
-
-    const stat = statSync(resolvedPath);
-    if (stat.isDirectory()) {
-      return reply.status(HTTP_BAD_REQUEST).send({ error: 'Cannot serve directories' });
-    }
-
-    const mimeType = getMimeType(resolvedPath);
-    const fileName = resolvedPath.slice(resolvedPath.lastIndexOf('/') + 1);
-
-    return reply
-      .header('Content-Type', mimeType)
-      .header('Content-Disposition', `inline; filename="${fileName}"`)
-      .header('Content-Length', stat.size)
-      .send(createReadStream(resolvedPath));
   });
 }

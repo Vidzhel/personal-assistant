@@ -24,7 +24,7 @@ external repositories.
 | F7    | Ordinary schedule absence/staleness detection                                                                    | Complete; 2,200 tests, 14 browser journeys and packaged restart                                                          |
 | F8    | Durable provider upload cleanup/retry after cancellation and restart                                             | Complete; 2,223 tests, 14 browser journeys and packaged restart                                                          |
 | F9    | Remove obsolete storage compatibility/schema paths, reconcile docs, full/browser/compiled/container verification | Complete; 2,342 default / 148 graph tests, 16 browser journeys, builds, packaged restart and offline containers verified |
-| W1    | Review dissertation/teaching and implement flexible repository workspaces with browser artifact access           | In progress; W1a–W1c complete; W1d browser workspace/artifacts next                                                      |
+| W1    | Review dissertation/teaching and implement flexible repository workspaces with browser artifact access           | In progress; W1a–W1d complete; W1e deployment and final verification next                                                |
 
 Legacy metadata migration and prior Neo4j restoration are closed by the owner's
 explicit decision, not by a claim that data was restored. Future runtime writes
@@ -174,3 +174,11 @@ and output conventions. Parent review, required checks, definition validation,
 2,443 default tests, 17 browser journeys, core build and compiled restart pass.
 W1d now implements browser workspace/artifact access and explicit graph project
 selection with server-side filtering.
+
+W1d is complete. [Browser workspaces and project graphs](tech-spec-w1d-browser-workspaces.md)
+records file registration/serving, mobile previews, direct navigation and explicit
+graph ownership. The actual shell→file→Git push→browser journey passes, including
+rendered PDFs and Unicode downloads. All 2,466 default tests, 19 browser journeys,
+40 disposable graph route tests, required checks, validators, production builds
+and packaged restart pass. W1e now packages mounts, runtime tools and public
+default capabilities, then verifies offline container persistence and final graphs.

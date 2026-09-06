@@ -13,8 +13,8 @@ interface KnowledgeViewProps {
   projectId?: string;
 }
 
-export function KnowledgeView({ projectId }: KnowledgeViewProps) {
-  const { viewMode, setGraphData, setLoading, selectedNodeIds } = useKnowledgeStore();
+function useGraphData(projectId: string | undefined, viewMode: string) {
+  const { setGraphData, setLoading, clearProjectState } = useKnowledgeStore();
   const fetchRef = useRef(0);
   const [error, setError] = useState<string | null>(null);
 
@@ -22,19 +22,29 @@ export function KnowledgeView({ projectId }: KnowledgeViewProps) {
     const id = ++fetchRef.current;
     setLoading(true);
     try {
-      // TODO: backend /knowledge/graph doesn't support projectId filtering yet
-      const data = await api.getKnowledgeGraph({ view: viewMode });
+      if (!projectId) {
+        clearProjectState();
+        return;
+      }
+      const data = await api.getKnowledgeGraph({ projectId, view: viewMode });
       if (id === fetchRef.current) {
         setGraphData(data.nodes, data.edges);
         setError(null);
       }
     } catch (cause) {
-      if (id === fetchRef.current)
+      if (id === fetchRef.current) {
+        clearProjectState();
         setError(cause instanceof Error ? cause.message : 'Could not load knowledge.');
+      }
     } finally {
       if (id === fetchRef.current) setLoading(false);
     }
-  }, [viewMode, setGraphData, setLoading]);
+  }, [projectId, viewMode, clearProjectState, setGraphData, setLoading]);
+
+  useEffect(() => {
+    clearProjectState();
+    setError(null);
+  }, [projectId, clearProjectState]);
 
   useEffect(() => {
     void fetchGraph();
@@ -42,6 +52,13 @@ export function KnowledgeView({ projectId }: KnowledgeViewProps) {
       fetchRef.current++;
     };
   }, [fetchGraph]);
+
+  return { fetchGraph, error };
+}
+
+export function KnowledgeView({ projectId }: KnowledgeViewProps) {
+  const { viewMode, selectedNodeIds } = useKnowledgeStore();
+  const { fetchGraph, error } = useGraphData(projectId, viewMode);
 
   const showDetail = selectedNodeIds.length === 1;
   const showBulk = selectedNodeIds.length >= 2;
@@ -53,7 +70,7 @@ export function KnowledgeView({ projectId }: KnowledgeViewProps) {
           {error}
         </p>
       )}
-      <GraphControls onRefetch={fetchGraph} />
+      <GraphControls projectId={projectId} onRefetch={fetchGraph} />
       <div className="flex-1 min-h-0 relative">
         <KnowledgeGraph />
         {showBulk && <BulkActionBar onRefetch={fetchGraph} />}

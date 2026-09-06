@@ -20,5 +20,7 @@ if (process.env.RAVEN_TEST_KNOWLEDGE === '1') {
 }
 
 export default defineConfig({
-  test: { projects },
+  // Composed runtime tests open SQLite databases and spawn subprocesses. Bound
+  // concurrency on large hosts so unrelated suites do not exhaust their deadlines.
+  test: { projects, maxWorkers: 4 },
 });

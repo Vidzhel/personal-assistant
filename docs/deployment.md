@@ -225,5 +225,14 @@ Attached repositories load their SDK project/local settings and instructions.
 Managed homes exclude filesystem settings to avoid Raven development settings.
 Ambient MCP servers and SDK automatic memory are disabled; project memory and
 explicitly bound capabilities remain Raven-owned. Revision mismatches start cold
-SDK sessions, including after restart. Browser attachment controls, repository
-context links and artifact previews remain later W1 checkpoints.
+SDK sessions, including after restart. The project's Workspace tab manages folder
+attachments, context-file links and execution settings. Browser file access uses
+Linux `/proc/self/fd` and requires regular files beneath a current managed home or
+attached folder; symlink components and special files are refused. Listings visit
+at most 500 entries; use the direct path field for a known file outside that list.
+Text previews are limited to 1 MiB, PDF previews to 32 MiB, and downloads to
+512 MiB. PDF.js and its worker are bundled with the dashboard; PDF preview needs
+no external viewer/CDN or server render command. Static HTML previews
+exclude scripts and external resources; generate a self-contained report in the
+repository. Office/media formats can be downloaded, or repository tools can render
+a PDF/image/HTML artifact for preview. Removing an attachment never deletes its files.

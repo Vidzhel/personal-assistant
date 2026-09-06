@@ -6,6 +6,7 @@ import { ProjectKnowledgeTab } from './ProjectKnowledgeTab';
 import { ProjectSessionsTab } from './ProjectSessionsTab';
 import { ProjectAgentsTab } from './ProjectAgentsTab';
 import { ProjectTemplatesTab } from './ProjectTemplatesTab';
+import { ProjectWorkspaceTab } from './ProjectWorkspaceTab';
 
 export interface ProjectTabProps {
   projectId: string;
@@ -26,6 +27,7 @@ export interface ProjectTabDef {
 const TAB_REGISTRY: Record<string, ProjectTabDef[]> = {
   default: [
     { key: 'overview', label: 'Overview', component: ProjectOverviewTab },
+    { key: 'workspace', label: 'Workspace', component: ProjectWorkspaceTab },
     { key: 'tasks', label: 'Tasks', component: ProjectTasksTab },
     { key: 'agents', label: 'Agents', component: ProjectAgentsTab },
     { key: 'templates', label: 'Templates', component: ProjectTemplatesTab },

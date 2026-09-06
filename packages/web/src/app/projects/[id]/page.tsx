@@ -101,7 +101,7 @@ function ProjectDetail({ id }: { id: string }) {
     <div className="flex flex-col h-screen">
       {/* Compact project header — persists across all tabs */}
       <div className="px-6 pt-4 pb-0 border-b" style={{ borderColor: 'var(--border)' }}>
-        <div className="flex items-start justify-between gap-4 mb-2">
+        <div className="flex flex-wrap items-start justify-between gap-4 mb-2">
           <div className="flex-1 min-w-0">
             <InlineEditField
               value={project.name}
@@ -152,12 +152,12 @@ function ProjectDetail({ id }: { id: string }) {
           </p>
         )}
         {/* Tab bar */}
-        <div className="flex gap-1">
+        <div className="flex gap-1 overflow-x-auto">
           {tabs.map((t) => (
             <button
               key={t.key}
               onClick={() => setActiveTab(t.key)}
-              className="px-4 py-2 text-sm font-medium -mb-px border-b-2 transition-colors"
+              className="shrink-0 whitespace-nowrap px-4 py-2 text-sm font-medium -mb-px border-b-2 transition-colors"
               style={{
                 borderColor: activeTab === t.key ? 'var(--accent)' : 'transparent',
                 color: activeTab === t.key ? 'var(--text-primary)' : 'var(--text-muted)',

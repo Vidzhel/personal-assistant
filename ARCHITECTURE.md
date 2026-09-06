@@ -19,7 +19,8 @@ remaining limitations and their resolution plans. The
 [W1 specification](_bmad-output/implementation-artifacts/tech-spec-w1-project-workspaces.md)
 implements the owner's flexible-layout and direct-repository requirements after
 completed F1–F9. Workspace configuration and project memory are file-owned. Direct repository
-execution and artifact viewing continue in the ordered W1 checkpoints.
+execution, browser file access and project-scoped graph views are implemented;
+W1e completes deployment packaging and final verification.
 Keep the runtime small by extending existing paths; remove a predecessor in the
 same change that replaces it.
 
@@ -299,11 +300,14 @@ explicit approval rather than replaying actions. The board opens plan details,
 shows errors and retained outputs, and offers approval, resume and cancellation.
 Runtime completion uses the exact tree/node/attempt; unrelated work by the same
 agent cannot complete a board task. `save_artifact` was removed because it never
-wrote a file. Browser file delivery is part of the authorized workspace work.
+wrote a file. File artifacts now resolve through the current project workspace.
 When task validation sets `requireArtifacts: true`, completion must include
 registered artifact metadata through `complete_task`; a summary or paths in final
 text do not satisfy that gate. System maintenance explicitly accepts a summary.
-Metadata registration alone does not verify a physical file's contents.
+File registration verifies a regular file in the managed home or a current attached
+folder, then persists its source ID and relative path. Changing cwd cannot reinterpret
+an existing artifact. Content validation still belongs to the task validator. The
+board resolves View file through the stored tree/project and current source grant.
 
 AgentManager attempts use `tasks/runs/<agentTaskId>.yaml`. Current files supply
 history, dashboard counts, heartbeat activity and retrospective summaries. Model
@@ -360,10 +364,24 @@ Malformed marked projects produce diagnostics. New project staging and recovery
 include both anchors. Workspace CRUD uses the current registry identity and atomic YAML writes;
 the previous SQL source table is removed. Folder inputs store canonical server
 paths with optional links to repository instructions/indexes. HTTP configuration
-and direct execution are available without Neo4j; browser artifacts follow in W1d. Graph views currently remain global; W1d adds explicit project
-selection and server-side filtering. Chat and task dispatch use the nearest local
+and direct execution are available without Neo4j, as are browser file APIs. Graph
+views require an explicit current project and filter durable project membership;
+edges and connection counts use only that project’s nodes. Chat and task dispatch use the nearest local
 agent/default. Local IDs include the stable project identity so namesakes remain
 separate; current YAML bytes and their source path provide a definition revision.
+
+The Workspace tab manages attachments, context links and execution settings. Its
+file browser navigates arbitrary directories or opens a source-relative path,
+previews text/raster images/PDF/static HTML and downloads other formats. File APIs
+accept project/source identifiers rather than host paths. Every read resolves the
+current project and grant; content requires a revision bound to workspace settings,
+root path and directory device/inode. Linux descriptor-based traversal rejects
+symlink components and special files, and streams the opened file rather than
+reopening a checked path. Listings visit at most 500 entries, text previews read at
+most 1 MiB, and downloads are capped at 512 MiB. A response already admitted may
+finish after a grant change. Static HTML has a script-free opaque-origin sandbox;
+HTTP requests never run render commands. The existing global generated-file route
+shares the same descriptor primitives and forces active markup to download.
 
 AgentManager captures workspace and effective dispatch revisions before queuing.
 Agent sessions revalidate current project/agent identity, capability-library and

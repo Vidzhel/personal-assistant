@@ -85,7 +85,7 @@ link to these entrypoints and use the existing SDK and orchestration paths.
       Update existing document runtime skills and add reusable repository/rendering
       instructions with project-owned output paths. Test same-name agent isolation,
       cross-agent sharing within a project, and unsuccessful consolidation retention.
-- [ ] **W1d — browser workspace and artifacts.** Extend project API/client/components
+- [x] **W1d — browser workspace and artifacts.** Extend project API/client/components
       with attachment/settings controls, file navigation, download and safe previews
       for text/Markdown, images, PDF and HTML. Add explicit project selection and
       server-side project filtering for knowledge graph views. Discover generated files directly; reuse
@@ -192,3 +192,16 @@ nested anchors preserve flexible working layouts; generic document/media workflo
 follow local scripts and project output conventions. Parent review, the required
 check, both definition validators, 2,443 default tests, 17 browser journeys,
 production core build and compiled restart pass. W1d is next.
+
+## W1d checkpoint — browser workspaces, artifacts and project graph views
+
+[W1d](tech-spec-w1d-browser-workspaces.md) is complete. The Workspace tab owns
+attachment/settings controls and bounded file navigation/previews/downloads. Task
+file artifacts must exist and persist their source identity. Mobile acceptance
+runs an actual command, commits/pushes to a local remote and displays/downloads
+the output, including rendered PDF pages. Graph selection is explicit and backed
+by current project membership. Parent review resolved descriptor races, stale
+forms/searches, blank native PDF frames and the duplicate source editor.
+2,466 default tests (six explicit skips), 40 disposable graph route tests, all 19
+browser journeys, required checks, validators, production builds and compiled
+restart pass. W1e deployment packaging and final container verification are next.

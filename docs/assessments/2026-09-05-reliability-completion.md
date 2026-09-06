@@ -111,16 +111,18 @@ stand in for missing local implementation or tests.
 
 W1 is now in progress. Read-only inspection of the actual dissertation and teaching
 repositories confirmed different, explicit agent workflows and repository-owned
-scripts. Workspace configuration, local agent selection and project-owned memory
-are implemented. The remaining plan implements flexible direct shell/file/Git
-work, linked context indexes, reusable runtime skills and mobile artifact access. The agent may evolve each repository's scripts and structure
+scripts. Workspace configuration, local agent selection, project-owned memory,
+direct shell/file/Git execution, linked context indexes, shared runtime skills and
+mobile artifact access are implemented. W1e packages deployment tools/defaults and
+repository mounts, then completes final container verification. The agent may evolve each repository's scripts and structure
 under the owner's configured autonomy. No private repository content is copied
 into Raven's public source. No repository embedding pipeline or graph replacement
 is required for this implementation.
 
 Original definition changes are limited to the explicit summary-only maintenance
-template in F9b and W1c runtime skill instructions/tools plus the shipped Raven
-agent’s repository-work binding. Unrelated owner work is preserved.
+template in F9b, W1c runtime skill instructions/tools and the shipped Raven
+agent’s repository-work binding, plus W1d’s project-owned artifact output guidance
+in the global context. Unrelated owner work is preserved.
 The owner decision waiving legacy migration/restoration is retained here as a
 scope decision, while new task, project, knowledge and provider records remain
 subject to the current persistence and recovery contracts.
@@ -142,3 +144,13 @@ without accidentally changing Raven’s project registry. Shared runtime documen
 and media skills follow repository pipelines and output conventions. Browser
 workspace/artifact controls and project graph filtering are W1d; deployment and
 final acceptance remain W1e.
+
+The W1d checkpoint adds mobile workspace configuration, actual file previews and
+source-bound task artifacts. The full 2,466-test regression suite, 19 browser
+journeys, 40 disposable graph route tests, required checks, validators, builds and
+compiled restart pass. Browser evidence includes a real temporary shell command
+and local Git push, PDF rendering/page text, Unicode downloads and source revocation.
+The graph uses explicit current project membership while preserving existing links.
+W1e completes deployment tools, default native capability bindings, mounts and
+container verification. Runtime filesystem changes remain repository-owned; no
+parallel artifact storage database or repository embedding pipeline was added.

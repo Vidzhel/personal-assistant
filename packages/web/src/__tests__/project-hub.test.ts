@@ -6,11 +6,12 @@ import {
 } from '../components/project/project-tab-registry';
 
 describe('Project Hub — Tab Registry', () => {
-  it('default tabs have 6 entries: overview, tasks, agents, templates, knowledge, sessions', () => {
+  it('default tabs include the workspace browser alongside project tools', () => {
     const tabs = getProjectTabs();
-    expect(tabs).toHaveLength(6);
+    expect(tabs).toHaveLength(7);
     expect(tabs.map((t) => t.key)).toEqual([
       'overview',
+      'workspace',
       'tasks',
       'agents',
       'templates',
@@ -29,7 +30,7 @@ describe('Project Hub — Tab Registry', () => {
 
   it('unknown project type falls back to default tabs', () => {
     const tabs = getProjectTabs('unknown-type');
-    expect(tabs).toHaveLength(6);
+    expect(tabs).toHaveLength(7);
     expect(tabs[0].key).toBe('overview');
   });
 
@@ -43,7 +44,7 @@ describe('Project Hub — Tab Registry', () => {
 
   it('registering custom type does not affect default', () => {
     registerProjectTabs('minimal', [{ key: 'x', label: 'X', component: () => null }]);
-    expect(getProjectTabs('default')).toHaveLength(6);
+    expect(getProjectTabs('default')).toHaveLength(7);
   });
 });
 
@@ -78,10 +79,11 @@ describe('Project Hub — Tab Content Mapping', () => {
 });
 
 describe('Project Hub — AC Verification', () => {
-  it('AC4: tabs available are Overview, Tasks, Agents, Templates, Knowledge, Sessions', () => {
+  it('AC4: tabs available include Workspace', () => {
     const tabs = getProjectTabs();
     expect(tabs.map((t) => t.label)).toEqual([
       'Overview',
+      'Workspace',
       'Tasks',
       'Agents',
       'Templates',

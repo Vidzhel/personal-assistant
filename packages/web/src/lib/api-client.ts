@@ -108,13 +108,15 @@ export const api = {
   getActiveTasks: () => request<ActiveTasks>('/agent-tasks/active'),
   cancelTask: (taskId: string) => request(`/agent-tasks/${taskId}/cancel`, { method: 'POST' }),
   getMetrics: (period = '24h') => request<MetricsResponse>(`/metrics?period=${period}`),
-  getKnowledgeGraph: (params?: {
+  getKnowledgeGraph: (params: {
+    projectId: string;
     view?: string;
     tag?: string;
     domain?: string;
     permanence?: string;
   }) => {
     const qs = new URLSearchParams();
+    qs.set('projectId', params.projectId);
     if (params?.view) qs.set('view', params.view);
     if (params?.tag) qs.set('tag', params.tag);
     if (params?.domain) qs.set('domain', params.domain);
@@ -710,6 +712,7 @@ export interface ExecutionTaskRecord {
     type: string;
     label: string;
     filePath?: string;
+    sourceId?: string;
     referenceId?: string;
     data?: Record<string, unknown>;
   }>;

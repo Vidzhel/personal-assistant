@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
-import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Neo4jContainer, type StartedNeo4jContainer } from '@testcontainers/neo4j';
@@ -13,6 +13,11 @@ import { registerKnowledgeRoutes } from '../api/routes/knowledge.ts';
 import { EventBus } from '../event-bus/event-bus.ts';
 import type { RavenEvent, KnowledgeDomain } from '@raven/shared';
 import type { Neo4jClient } from '../knowledge-engine/neo4j-client.ts';
+import { ProjectRegistry } from '../project-registry/project-registry.ts';
+import {
+  createProjectWorkspaceStore,
+  type ProjectWorkspaceStore,
+} from '../project-manager/project-workspace.ts';
 
 // Mock HuggingFace transformers
 vi.mock('@huggingface/transformers', () => ({
@@ -53,12 +58,25 @@ const testDomains: KnowledgeDomain[] = [
 ];
 
 describe('Knowledge API routes', () => {
+  const GRAPH_PROJECT_ID = 'graph-project';
+  const OTHER_GRAPH_PROJECT_ID = 'other-graph-project';
   let container: StartedNeo4jContainer;
   let neo4j: Neo4jClient;
   let tmpDir: string;
   let app: ReturnType<typeof Fastify>;
   let eventBus: EventBus;
+  let projectRegistry: ProjectRegistry;
+  let workspaceStore: ProjectWorkspaceStore;
   const emittedEvents: RavenEvent[] = [];
+
+  async function attachAllBubblesToGraphProject(): Promise<void> {
+    await neo4j.run(
+      `MERGE (p:Project {id: $projectId})
+       WITH p MATCH (b:Bubble)
+       MERGE (b)-[:BELONGS_TO_PROJECT]->(p)`,
+      { projectId: GRAPH_PROJECT_ID },
+    );
+  }
 
   beforeAll(async () => {
     container = await new Neo4jContainer('neo4j:5-community').withApoc().start();
@@ -72,6 +90,25 @@ describe('Knowledge API routes', () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'knowledge-api-'));
     const knowledgeDir = join(tmpDir, 'knowledge');
     mkdirSync(knowledgeDir, { recursive: true });
+    const projectsDir = join(tmpDir, 'projects');
+    for (const [path, id] of [
+      ['graph-project-path', GRAPH_PROJECT_ID],
+      ['other-graph-project-path', OTHER_GRAPH_PROJECT_ID],
+    ]) {
+      const projectDir = join(projectsDir, path);
+      mkdirSync(projectDir, { recursive: true });
+      writeFileSync(
+        join(projectDir, 'context.md'),
+        `---\nravenProject:\n  version: 1\n  id: ${id}\n---\n# ${id}\n`,
+      );
+    }
+    projectRegistry = new ProjectRegistry();
+    await projectRegistry.load(projectsDir);
+    workspaceStore = createProjectWorkspaceStore({
+      projectsDir,
+      projectRegistry,
+      projectRoot: tmpDir,
+    });
 
     eventBus = new EventBus();
     eventBus.on('*', (e) => emittedEvents.push(e));
@@ -106,6 +143,8 @@ describe('Knowledge API routes', () => {
       neo4j,
       embeddingEngine,
       clusteringEngine,
+      projectRegistry,
+      workspaceStore,
     });
     await app.ready();
   }, 120_000);
@@ -493,7 +532,11 @@ describe('Knowledge API routes', () => {
   // --- Story 6.7: Graph Visualization API ---
 
   it('GET /api/knowledge/graph returns nodes and edges with default links view', async () => {
-    const res = await app.inject({ method: 'GET', url: '/api/knowledge/graph' });
+    await attachAllBubblesToGraphProject();
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/knowledge/graph?projectId=${GRAPH_PROJECT_ID}`,
+    });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.view).toBe('links');
@@ -524,7 +567,11 @@ describe('Knowledge API routes', () => {
       payload: { title: 'Graph Tag B', content: '', tags: ['graph-test-tag'] },
     });
 
-    const res = await app.inject({ method: 'GET', url: '/api/knowledge/graph?view=tags' });
+    await attachAllBubblesToGraphProject();
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/knowledge/graph?projectId=${GRAPH_PROJECT_ID}&view=tags`,
+    });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.view).toBe('tags');
@@ -534,7 +581,11 @@ describe('Knowledge API routes', () => {
   });
 
   it('GET /api/knowledge/graph?view=timeline returns no edges', async () => {
-    const res = await app.inject({ method: 'GET', url: '/api/knowledge/graph?view=timeline' });
+    await attachAllBubblesToGraphProject();
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/knowledge/graph?projectId=${GRAPH_PROJECT_ID}&view=timeline`,
+    });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.view).toBe('timeline');
@@ -542,7 +593,11 @@ describe('Knowledge API routes', () => {
   });
 
   it('GET /api/knowledge/graph?view=clusters returns cluster edges', async () => {
-    const res = await app.inject({ method: 'GET', url: '/api/knowledge/graph?view=clusters' });
+    await attachAllBubblesToGraphProject();
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/knowledge/graph?projectId=${GRAPH_PROJECT_ID}&view=clusters`,
+    });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.view).toBe('clusters');
@@ -550,7 +605,11 @@ describe('Knowledge API routes', () => {
   });
 
   it('GET /api/knowledge/graph?view=domains returns domain edges', async () => {
-    const res = await app.inject({ method: 'GET', url: '/api/knowledge/graph?view=domains' });
+    await attachAllBubblesToGraphProject();
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/knowledge/graph?projectId=${GRAPH_PROJECT_ID}&view=domains`,
+    });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.view).toBe('domains');
@@ -560,7 +619,7 @@ describe('Knowledge API routes', () => {
   it('GET /api/knowledge/graph with filters narrows results', async () => {
     const res = await app.inject({
       method: 'GET',
-      url: '/api/knowledge/graph?tag=graph-test-tag',
+      url: `/api/knowledge/graph?projectId=${GRAPH_PROJECT_ID}&tag=graph-test-tag`,
     });
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -568,17 +627,89 @@ describe('Knowledge API routes', () => {
   });
 
   it('GET /api/knowledge/graph with invalid view returns 400', async () => {
-    const res = await app.inject({ method: 'GET', url: '/api/knowledge/graph?view=invalid' });
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/knowledge/graph?projectId=${GRAPH_PROJECT_ID}&view=invalid`,
+    });
     expect(res.statusCode).toBe(400);
   });
 
   it('GET /api/knowledge/graph edges reference valid node IDs', async () => {
-    const res = await app.inject({ method: 'GET', url: '/api/knowledge/graph' });
+    await attachAllBubblesToGraphProject();
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/knowledge/graph?projectId=${GRAPH_PROJECT_ID}`,
+    });
     const body = res.json();
     const nodeIds = new Set(body.nodes.map((n: any) => n.id));
     for (const edge of body.edges) {
       expect(nodeIds.has(edge.source)).toBe(true);
       expect(nodeIds.has(edge.target)).toBe(true);
     }
+  });
+
+  it('scopes nodes and links to the selected durable project membership', async () => {
+    const first = await app.inject({
+      method: 'POST',
+      url: '/api/knowledge',
+      payload: { title: 'Project A only', content: '', tags: [] },
+    });
+    const second = await app.inject({
+      method: 'POST',
+      url: '/api/knowledge',
+      payload: { title: 'Project B only', content: '', tags: [] },
+    });
+    await neo4j.run(
+      `MATCH (b:Bubble {id: $bubbleId})
+       OPTIONAL MATCH (b)-[old:BELONGS_TO_PROJECT]->()
+       DELETE old
+       WITH b
+       MERGE (p:Project {id: $projectId})
+       MERGE (b)-[:BELONGS_TO_PROJECT]->(p)`,
+      {
+        bubbleId: first.json().id,
+        projectId: GRAPH_PROJECT_ID,
+      },
+    );
+    await neo4j.run(
+      `MATCH (b:Bubble {id: $bubbleId})
+       OPTIONAL MATCH (b)-[old:BELONGS_TO_PROJECT]->()
+       DELETE old
+       WITH b
+       MERGE (p:Project {id: $projectId})
+       MERGE (b)-[:BELONGS_TO_PROJECT]->(p)`,
+      {
+        bubbleId: second.json().id,
+        projectId: OTHER_GRAPH_PROJECT_ID,
+      },
+    );
+    await neo4j.run(
+      `MATCH (a:Bubble {id: $first}), (b:Bubble {id: $second})
+       CREATE (a)-[:LINKED_TO {type: 'related'}]->(b)`,
+      { first: first.json().id, second: second.json().id },
+    );
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/knowledge/graph?projectId=${GRAPH_PROJECT_ID}`,
+    });
+    expect(response.statusCode).toBe(200);
+    const ids = response.json().nodes.map((node: { id: string }) => node.id);
+    expect(ids).toContain(first.json().id);
+    expect(ids).not.toContain(second.json().id);
+    for (const edge of response.json().edges) {
+      expect(ids).toContain(edge.source);
+      expect(ids).toContain(edge.target);
+    }
+  });
+
+  it('rejects graph reads without a current project selection', async () => {
+    const missing = await app.inject({ method: 'GET', url: '/api/knowledge/graph' });
+    expect(missing.statusCode).toBe(400);
+    const unknown = await app.inject({
+      method: 'GET',
+      url: '/api/knowledge/graph?projectId=missing-project',
+    });
+    expect(unknown.statusCode).toBe(404);
   });
 });

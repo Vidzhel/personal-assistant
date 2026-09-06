@@ -14,6 +14,7 @@ import type { EventBus } from '../event-bus/event-bus.ts';
 import type { DatabaseInterface } from '@raven/shared';
 import type { PendingApprovals } from '../permission-engine/pending-approvals.ts';
 import type { IntentStore } from '../intents/intent-store.ts';
+import type { ProjectWorkspaceStore } from '../project-manager/project-workspace.ts';
 
 export interface RavenMcpDeps {
   executionEngine?: TaskExecutionEngine;
@@ -23,6 +24,7 @@ export interface RavenMcpDeps {
   retrievalEngine?: RetrievalEngine;
   namedAgentStore?: NamedAgentStore;
   projectRegistry?: ProjectRegistry;
+  workspaceStore?: ProjectWorkspaceStore;
   capabilityLibrary?: CapabilityLibrary;
   /** Write -> reload registry -> git-commit for one artifact kind. Powers
    * the create_template/create_schedule/create_skill MCP tools (chat scope)

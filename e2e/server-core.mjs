@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync, realpathSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { basename, dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createWorkspaceFixture } from './workspace-fixture.mjs';
 
 const root = process.argv[2];
 assert(root && realpathSync(root) === process.cwd());
@@ -13,6 +14,7 @@ const repo = resolve(import.meta.dirname, '..');
 const compiled = (file) => import(pathToFileURL(join(repo, 'packages/core/dist', file)).href);
 const { initializeRuntime } = await import('../deployment/runtime-init.mjs');
 await initializeRuntime({ root, seedDir: join(repo, 'deployment/seeds') });
+const workspaceFixture = await createWorkspaceFixture(root);
 function write(relative, content) {
   const path = join(root, relative);
   mkdirSync(dirname(path), { recursive: true });
@@ -23,6 +25,7 @@ write('projects/course/one/context.md', '# Nested Course\n\nBrowser fixture only
 write('projects/course/one/project.yaml', { version: 1 });
 write('projects/course/memory/research/notes.md', 'Course private memory sentinel.');
 write('projects/course/one/memory/MEMORY.md', 'Nested project memory sentinel.');
+write('projects/course/one/artifacts/research.md', '# Retained browser research artifact\n');
 const treeTime = new Date().toISOString();
 write('projects/course/one/tasks/trees/browser-interrupted-tree.yaml', {
   id: 'browser-interrupted-tree',
@@ -45,7 +48,15 @@ write('projects/course/one/tasks/trees/browser-interrupted-tree.yaml', {
         blockedBy: [],
       },
       summary: 'Earlier research is retained.',
-      artifacts: [{ type: 'data', label: 'Research result', data: { value: 42 } }],
+      artifacts: [
+        { type: 'data', label: 'Research result', data: { value: 42 } },
+        {
+          type: 'file',
+          label: 'Research document',
+          sourceId: 'home',
+          filePath: 'artifacts/research.md',
+        },
+      ],
     },
     {
       id: 'resume',
@@ -97,6 +108,9 @@ const agentBackend = async (options) => {
   };
   calls.push(call);
   options.onSessionId?.(sessionId);
+  if (options.prompt.includes('workspace-artifact-browser')) {
+    await workspaceFixture.generate(options);
+  }
   if (options.prompt.includes('hold-browser')) {
     await new Promise((resolveCall) => {
       if (options.signal.aborted) resolveCall();
@@ -135,7 +149,9 @@ const pending = createPendingApprovals(getDb());
 const control = createServer(async (req, res) => {
   try {
     let result;
-    if (req.method === 'GET' && req.url === '/state') {
+    if (req.method === 'GET' && req.url === '/workspace') {
+      result = await workspaceFixture.state();
+    } else if (req.method === 'GET' && req.url === '/state') {
       result = {
         calls,
         events,

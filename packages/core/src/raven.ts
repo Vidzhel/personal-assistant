@@ -492,6 +492,7 @@ export async function createRaven(
     sessionManager,
     namedAgentStore,
     projectRegistry,
+    workspaceStore,
     capabilityLibrary,
     db: dbInterface,
     pendingApprovals,

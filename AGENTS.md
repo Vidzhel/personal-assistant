@@ -172,7 +172,10 @@ versions; do not copy versions from historical planning documents.
   24 KiB without reading their bodies or recursively crawling folders. Nested
   projects require both context.md and project.yaml; unmarked working directories
   remain ordinary files. Shared runtime skills follow local pipelines and output
-  conventions. W1d adds browser artifacts and explicit graph project filtering.
+  conventions. Browser file access resolves current project/source IDs and Linux
+  descriptor-based paths; never introduce an arbitrary host-path serving route.
+  File artifacts persist their source ID and relative path after regular-file
+  verification. Graph views require explicit current project membership filtering.
 - Preserve knowledge links and project membership before changing graph storage.
   Permission checks must be enforced in tools/runtime, not only prompt text.
 - Stop admission and own listeners, timers and in-flight local work across
