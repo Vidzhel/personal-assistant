@@ -50,3 +50,10 @@ retry executed both `list_undone_tasks_by_time_query` and
 results and `executed` audit records. A separate `get_user_preference` call was
 correctly queued as an unknown action; its newly inspected official schema is a
 read-only timezone lookup and is handled in a subsequent capability update.
+
+After that capability update, a fresh Planning conversation delegated all three
+reads (`get_user_preference`, `list_undone_tasks_by_time_query`, and
+`list_undone_tasks_by_date`) and completed with zero tool errors. Core, web and
+Neo4j health checks passed. The capability update passed the required check,
+19 deployment tests, 27 permission-policy tests and library validation. Task
+contents were not copied into development logs or this record.

@@ -123,3 +123,27 @@ repeated delivery of the same email, client/service cancellation and an unknown
 provider response never produce a duplicate create. A verified task retains its
 actual task/project IDs; explicit pre-dispatch failure remains safely retryable;
 ambiguous matches require owner review.
+
+## Include subscribed calendar events in daily planning (owner request, 2026-09-06)
+
+The owner requires external work-calendar events shown inside TickTick to appear
+alongside tasks in Raven's day planning. TickTick's official MCP documentation
+lists task, habit, focus and countdown operations but does not document subscribed
+calendar event retrieval. Do not equate an empty task result with a free day or
+claim calendar coverage from the TickTick task tools.
+
+Pending input: identify the subscription source (Google Calendar, Microsoft 365,
+or an ICS feed). Read the source calendar directly if TickTick cannot expose it.
+Reuse an existing calendar capability where suitable, with verified container
+tool availability, authentication and a scoped execution grant. A Google route
+must list calendars with pagination and query every selected calendar with event
+pagination; a feed subscribed only in TickTick is not implicitly in Google.
+
+Acceptance: tomorrow's task list and timed/all-day events retain their distinct
+source and IDs; owner timezone, recurring exceptions, cancellations, pagination,
+duplicate subscriptions and failed/unavailable calendars are handled. Partial
+coverage is explicit. Verify a known subscribed work event in the combined view
+without creating duplicate TickTick tasks or modifying calendar events. Calendar
+write support is outside this read/plan request.
+
+Source: https://help.ticktick.com/articles/7438129581631995904
