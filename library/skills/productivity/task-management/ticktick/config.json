@@ -9,6 +9,7 @@
   "maxTurns": 10,
   "actions": [
     { "name": "ticktick:search-task", "description": "Search tasks", "defaultTier": "green", "reversible": true },
+    { "name": "ticktick:get-user-preference", "description": "Read the owner's TickTick preferences", "defaultTier": "green", "reversible": true },
     { "name": "ticktick:get-task-by-id", "description": "Read one task by ID", "defaultTier": "green", "reversible": true },
     { "name": "ticktick:list-undone-tasks-by-time-query", "description": "List undone tasks in a bounded time query", "defaultTier": "green", "reversible": true },
     { "name": "ticktick:list-undone-tasks-by-date", "description": "List undone tasks by date", "defaultTier": "green", "reversible": true },

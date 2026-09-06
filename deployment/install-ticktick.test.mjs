@@ -125,46 +125,63 @@ test('upgrades the previously shipped official TickTick definitions but preserve
     'skills/productivity/task-management/ticktick/config.json': seed(
       'skills/productivity/task-management/ticktick/config.json',
     ).replace(
-      '{ "name": "ticktick:list-project-members", "description": "List project members", "defaultTier": "green", "reversible": true }',
-      '{ "name": "ticktick:project-member", "description": "Read project membership", "defaultTier": "green", "reversible": true }',
+      '    { "name": "ticktick:get-user-preference", "description": "Read the owner\'s TickTick preferences", "defaultTier": "green", "reversible": true },\n',
+      '',
     ),
     'skills/productivity/task-management/ticktick/skill.md': seed(
       'skills/productivity/task-management/ticktick/skill.md',
-    ).replace(' Use `list_project_members` when membership or assignment context matters.', ''),
+    ).replace(
+      'Call `get_user_preference` without arguments when TickTick\'s timezone is needed. Use its `timeZone` when returned; if it is absent, use the owner\'s configured timezone. Follow the current tool schema',
+      'Interpret dates in the owner\'s configured timezone and follow the current tool schema',
+    ),
+  };
+  const predecessorOfficial = {
+    ...previousOfficial,
+    'skills/productivity/task-management/ticktick/config.json': previousOfficial[
+      'skills/productivity/task-management/ticktick/config.json'
+    ].replace(
+      '{ "name": "ticktick:list-project-members", "description": "List project members", "defaultTier": "green", "reversible": true }',
+      '{ "name": "ticktick:project-member", "description": "Read project membership", "defaultTier": "green", "reversible": true }',
+    ),
+    'skills/productivity/task-management/ticktick/skill.md': previousOfficial[
+      'skills/productivity/task-management/ticktick/skill.md'
+    ].replace(' Use `list_project_members` when membership or assignment context matters.', ''),
   };
 
-  const upgrade = fixture();
-  for (const [path, content] of Object.entries(previousOfficial)) {
-    write(upgrade.libraryRoot, path, content);
-  }
-  const checked = installTicktick({
-    root: upgrade.root,
-    libraryRoot: upgrade.libraryRoot,
-    seedDir,
-    checkOnly: true,
-  });
-  assert.equal(checked.checked, true);
-  assert.equal(
-    readFileSync(
-      join(upgrade.libraryRoot, 'skills/productivity/task-management/ticktick/config.json'),
-      'utf8',
-    ),
-    previousOfficial['skills/productivity/task-management/ticktick/config.json'],
-  );
-  const result = installTicktick({
-    root: upgrade.root,
-    libraryRoot: upgrade.libraryRoot,
-    seedDir,
-    commitFiles: () => {},
-  });
-  assert.deepEqual(result.installed.sort(), [
-    'skills/productivity/task-management/ticktick/config.json',
-    'skills/productivity/task-management/ticktick/skill.md',
-    'skills/productivity/_index.md',
-    'skills/productivity/task-management/_index.md',
-  ].sort());
-  for (const path of definitions) {
-    assert.equal(readFileSync(join(upgrade.libraryRoot, path), 'utf8'), seed(path));
+  for (const shipped of [previousOfficial, predecessorOfficial]) {
+    const upgrade = fixture();
+    for (const [path, content] of Object.entries(shipped)) {
+      write(upgrade.libraryRoot, path, content);
+    }
+    const checked = installTicktick({
+      root: upgrade.root,
+      libraryRoot: upgrade.libraryRoot,
+      seedDir,
+      checkOnly: true,
+    });
+    assert.equal(checked.checked, true);
+    assert.equal(
+      readFileSync(
+        join(upgrade.libraryRoot, 'skills/productivity/task-management/ticktick/config.json'),
+        'utf8',
+      ),
+      shipped['skills/productivity/task-management/ticktick/config.json'],
+    );
+    const result = installTicktick({
+      root: upgrade.root,
+      libraryRoot: upgrade.libraryRoot,
+      seedDir,
+      commitFiles: () => {},
+    });
+    assert.deepEqual(result.installed.sort(), [
+      'skills/productivity/task-management/ticktick/config.json',
+      'skills/productivity/task-management/ticktick/skill.md',
+      'skills/productivity/_index.md',
+      'skills/productivity/task-management/_index.md',
+    ].sort());
+    for (const path of definitions) {
+      assert.equal(readFileSync(join(upgrade.libraryRoot, path), 'utf8'), seed(path));
+    }
   }
 
   const customized = fixture();

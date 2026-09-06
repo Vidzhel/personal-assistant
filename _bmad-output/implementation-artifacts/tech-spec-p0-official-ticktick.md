@@ -103,7 +103,10 @@ for live changes. Confirm the live schema before constructing arguments.
 | Yellow: ordinary changes | `create_project`, `update_project`, `create_column`, `update_column`, `create_project_group`, `update_project_group`, `create_task`, `batch_add_tasks`, `complete_task`, `complete_tasks_in_project`, `update_task`, `move_task`, `batch_update_tasks`, `add_comment`, `assign_task`, `unassign_task`, `create_tag`, `create_habit`, `update_habit`, `upsert_habit_checkins`, `create_focus`                                                                       |
 | Red: destructive         | `delete_project_group`, `delete_task`, `delete_comment`, `delete_focus`                                                                                                                                                                                                                                                                                                                                                                                            |
 
-The documented catalog totals 47 tools. Tests should detect missing permission
+The original documented catalog totals 47 tools. A subsequent live schema check
+added `get_user_preference` as a green read (no arguments, optional `timeZone`
+output), bringing Raven's declared actions to 48. Unknown `search` and `fetch`
+remain conservatively classified. Tests should detect missing permission
 entries and preserve the conservative policy for an unknown newly advertised tool.
 
 ## Acceptance and verification

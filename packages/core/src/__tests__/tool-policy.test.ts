@@ -280,7 +280,7 @@ describe('createToolPolicy', () => {
       expect(payload.approvalId).toBe(approval?.id);
     });
 
-    it('maps all 47 official TickTick tools to their declared action tiers', async () => {
+    it('maps all 48 confirmed official TickTick tools to their declared action tiers', async () => {
       const skill = JSON.parse(
         readFileSync(
           new URL(
@@ -290,7 +290,7 @@ describe('createToolPolicy', () => {
           'utf8',
         ),
       ) as { actions: Array<{ name: string; defaultTier: PermissionTier }> };
-      expect(skill.actions).toHaveLength(47);
+      expect(skill.actions).toHaveLength(48);
       const tiers = Object.fromEntries(
         skill.actions.map((action) => [action.name, action.defaultTier]),
       ) as Record<string, PermissionTier>;
@@ -305,7 +305,7 @@ describe('createToolPolicy', () => {
       }
 
       const audited = auditLog.query({ sessionId });
-      expect(audited).toHaveLength(47);
+      expect(audited).toHaveLength(48);
       for (const action of skill.actions) {
         expect(audited).toContainEqual(
           expect.objectContaining({

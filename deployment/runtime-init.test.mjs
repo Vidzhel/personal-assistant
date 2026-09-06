@@ -83,7 +83,7 @@ test('fresh capabilities are explicit and match their canonical library files', 
   );
   const toolsByTier = {
     green: [
-      'search_task', 'get_task_by_id', 'list_undone_tasks_by_time_query',
+      'search_task', 'get_user_preference', 'get_task_by_id', 'list_undone_tasks_by_time_query',
       'list_undone_tasks_by_date', 'list_completed_tasks_by_date', 'filter_tasks',
       'list_projects', 'get_project_by_id', 'get_project_with_undone_tasks',
       'get_task_in_project', 'list_columns', 'list_project_groups', 'get_comment',
@@ -108,8 +108,8 @@ test('fresh capabilities are explicit and match their canonical library files', 
       tools.map((tool) => `ticktick:${tool.replaceAll('_', '-')}`).sort(),
     );
   }
-  assert.equal(ticktick.actions.length, 47);
-  assert.equal(new Set(ticktick.actions.map((action) => action.name)).size, 47);
+  assert.equal(ticktick.actions.length, 48);
+  assert.equal(new Set(ticktick.actions.map((action) => action.name)).size, 48);
   const instructions = readFileSync(
     join(seedRoot, 'library/skills/productivity/task-management/ticktick/skill.md'),
     'utf8',

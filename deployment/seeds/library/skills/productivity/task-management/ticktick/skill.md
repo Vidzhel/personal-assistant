@@ -12,7 +12,7 @@ Resolve ambiguous names before making a change. When two tasks, projects, column
 
 ## Dates and workload
 
-Interpret dates in the owner's configured timezone and follow the current tool schema for all-day values, timestamps, start dates, due dates, reminders, and recurrence. Preserve recurrence and unrelated scheduling fields unless the owner asked to change them. Explain any unsupported date or recurrence request instead of approximating it silently.
+Call `get_user_preference` without arguments when TickTick's timezone is needed. Use its `timeZone` when returned; if it is absent, use the owner's configured timezone. Follow the current tool schema for all-day values, timestamps, start dates, due dates, reminders, and recurrence. Preserve recurrence and unrelated scheduling fields unless the owner asked to change them. Explain any unsupported date or recurrence request instead of approximating it silently.
 
 Keep habit check-in queries within 90 days. Keep each focus-record time query within one calendar month. Split a longer requested period into supported windows and report any window that could not be read.
 
