@@ -1,0 +1,47 @@
+services:
+  raven-core:
+    environment:
+      RAVEN_BASE_URL: '${RAVEN_BASE_URL:?Run scripts/raven.sh setup-private-access first}'
+
+  raven-web:
+    build:
+      args:
+        NEXT_PUBLIC_CORE_API_URL: /api
+        NEXT_PUBLIC_CORE_WS_URL: ''
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+  raven-gateway:
+    image: caddy:2.11.4-alpine
+    ports:
+      - '127.0.0.1:4002:4002'
+    environment:
+      RAVEN_PRIVATE_USERNAME: '${RAVEN_PRIVATE_USERNAME:?Run scripts/raven.sh setup-private-access first}'
+      RAVEN_PRIVATE_PASSWORD_HASH: '${RAVEN_PRIVATE_PASSWORD_HASH:?Run scripts/raven.sh setup-private-access first}'
+    volumes:
+      - type: bind
+        source: ./deployment/Caddyfile.private
+        target: /etc/caddy/Caddyfile
+        read_only: true
+    depends_on:
+      raven-core:
+        condition: service_healthy
+      raven-web:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "wget -S --spider http://127.0.0.1:4002/ 2>&1 | grep -q ' 401 '"
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    restart: unless-stopped

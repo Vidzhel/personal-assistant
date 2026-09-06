@@ -237,24 +237,86 @@ Compose dependency on Neo4j and remains useful if graph initialization fails.
 Graph relationships and project memberships live in Neo4j; preserve its volume
 alongside `raven_data`. Markdown alone cannot restore those relationships.
 
-## Browser endpoints and TLS
+## Private phone access
 
-`NEXT_PUBLIC_CORE_API_URL` and `NEXT_PUBLIC_CORE_WS_URL` are **web build arguments**.
-They must be reachable by the user's browser. A Docker service hostname is not a
-browser endpoint, and changing container environment variables after building
-does not rewrite the browser bundle.
+The optional private-access Compose override adds Caddy on
+`127.0.0.1:4002`. Caddy requires the same owner HTTP Basic authentication before
+routing every path: `/api`, `/api/*` and `/ws` go to core, while the dashboard,
+`/_next/*` and all other paths go to web. Core and web retain their existing
+loopback ports. Do not publish port 4002 on a LAN interface or use its plain HTTP
+listener remotely; Tailscale Serve supplies the private HTTPS endpoint.
 
-For a remote deployment behind your authenticated TLS reverse proxy, place these
-in the explicit Compose environment file and rebuild `raven-web`:
+Install Tailscale on the host, sign in explicitly, enable HTTPS for the tailnet
+and apply owner-only ACLs. Configure persistent private serving to the gateway:
 
-```dotenv
-NEXT_PUBLIC_CORE_API_URL=https://raven.example.com/api
-NEXT_PUBLIC_CORE_WS_URL=wss://raven.example.com/ws
+```sh
+tailscale serve --bg 4002
+tailscale serve status
 ```
 
-Route `/api` and `/ws` to core on port 4001, including WebSocket upgrades; route
-the dashboard and `/_next` assets to port 4000. The Compose file does not provide
-a reverse proxy. The defaults continue to target local development ports.
+The first command reports the private `https://<device>.<tailnet>.ts.net` origin.
+It may open an operator consent page when tailnet HTTPS is not enabled. Do not use
+Tailscale Funnel, which is public. Account login, device enrollment and ACL changes
+remain operator actions; Raven never performs them.
+
+Prepare Raven with the reported origin and a separate owner password:
+
+```sh
+./scripts/raven.sh setup-private-access
+./scripts/raven.sh start
+```
+
+After private setup, use the configured Tailscale HTTPS origin to open Raven.
+The private web build routes API and WebSocket traffic through that same origin;
+the direct loopback web port is only an internal upstream in this mode.
+
+The setup action reads the origin, username, password and confirmation from
+standard input. The username is restricted to a bounded HTTP Basic identifier and
+the password must contain 12–256 characters. Password spaces and shell syntax are
+treated as data. Raven sends the password to `caddy hash-password` over stdin,
+stores only the bcrypt hash, and never places the plaintext in a URL or process
+argument. It atomically updates the selected `.env` file, preserves unrelated
+settings, and adds `docker-compose.private.yml` to `COMPOSE_FILE`. Invalid input,
+duplicate managed settings, hashing failure, or a failed prospective Compose
+validation leaves the file unchanged. Rerun the action to rotate the owner
+password.
+
+The generated settings are:
+
+```dotenv
+COMPOSE_FILE=docker-compose.yml:docker-compose.private.yml
+RAVEN_BASE_URL=https://raven-host.example.ts.net
+RAVEN_PRIVATE_USERNAME=owner
+RAVEN_PRIVATE_PASSWORD_HASH='$2a$14$...'
+```
+
+Keep the hash single-quoted so Compose does not interpolate its dollar signs. A
+workspace override may remain in the list, for example
+`docker-compose.yml:docker-compose.workspace.yml:docker-compose.private.yml`.
+The private override builds the browser with `/api` and a runtime same-origin
+WebSocket, so dashboard requests, reconnects and file previews use the one private
+origin. `RAVEN_BASE_URL` is also core's canonical browser and artifact-link origin.
+For explicit development origins, use the bounded comma-separated
+`RAVEN_BROWSER_ORIGINS`; absent Origin remains available to trusted local health
+clients and the authenticated gateway.
+
+Open the reported HTTPS URL on the enrolled phone, complete the browser's Basic
+authentication challenge, send a harmless message, then preview and download a
+project artifact. Reload once and confirm chat reconnects. Separately verify that
+an unauthorized browser receives `401` for the page, API, WebSocket and artifact
+URL. This real-device canary is the evidence for phone access; local proxy tests do
+not establish tailnet enrollment or delivery.
+
+`./scripts/raven.sh stop` stops the Compose services but deliberately leaves the
+operator-owned Tailscale configuration alone. Run `tailscale serve off` to stop
+sharing the gateway. See the current
+[Tailscale Serve command](https://tailscale.com/docs/reference/tailscale-cli/serve)
+and [Caddy Basic authentication](https://caddyserver.com/docs/caddyfile/directives/basic_auth)
+documentation when changing this setup.
+
+For ordinary source development without the private override,
+`NEXT_PUBLIC_CORE_API_URL` and `NEXT_PUBLIC_CORE_WS_URL` remain web build arguments
+and the base Compose defaults continue to target the host's loopback ports.
 
 ## Isolated verification
 

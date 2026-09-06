@@ -16,6 +16,7 @@ import {
   type WorkspaceSource,
 } from '@/lib/workspace-api';
 import { ProjectFileBrowser } from './ProjectFileBrowser';
+import { ProjectReadiness } from './ProjectReadiness';
 
 const SOURCE_TYPES: Array<WorkspaceSource['sourceType']> = [
   'folder',
@@ -929,30 +930,35 @@ function WorkspaceErrorBanner({
   );
 }
 
-export function ProjectWorkspaceTab({ projectId }: ProjectTabProps) {
-  const controller = useWorkspaceController(projectId);
-  if (controller.loading && !controller.workspace)
+function WorkspaceContent({
+  projectId,
+  controller,
+}: {
+  projectId: string;
+  controller: ReturnType<typeof useWorkspaceController>;
+}) {
+  const disabled = controller.loading || controller.saving;
+  if (controller.loading && !controller.workspace) {
     return (
-      <div className="p-4 text-sm" style={{ color: 'var(--text-muted)' }}>
+      <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
         Loading workspace…
       </div>
     );
-  if (!controller.workspace)
+  }
+  if (!controller.workspace) {
     return (
-      <div className="space-y-3 p-4" role="alert" style={{ color: 'var(--error)' }}>
+      <div className="space-y-3" role="alert" style={{ color: 'var(--error)' }}>
         <p>{controller.error ?? 'Workspace unavailable.'}</p>
-        <WorkspaceRetry
-          disabled={controller.loading || controller.saving}
-          onRetry={() => void controller.load()}
-        />
+        <WorkspaceRetry disabled={disabled} onRetry={() => void controller.load()} />
       </div>
     );
+  }
   return (
-    <div role="region" aria-label="Project workspace" className="h-full overflow-y-auto p-4 sm:p-6">
+    <>
       {controller.error && (
         <WorkspaceErrorBanner
           message={controller.error}
-          disabled={controller.loading || controller.saving}
+          disabled={disabled}
           onRetry={() => void controller.load()}
           onDismiss={controller.dismissError}
         />
@@ -964,6 +970,22 @@ export function ProjectWorkspaceTab({ projectId }: ProjectTabProps) {
         mutate={controller.mutate}
         reload={controller.load}
       />
+    </>
+  );
+}
+
+export function ProjectWorkspaceTab({ projectId }: ProjectTabProps) {
+  const controller = useWorkspaceController(projectId);
+  const readinessRefreshKey = controller.workspace
+    ? JSON.stringify({
+        execution: controller.workspace.execution,
+        sources: controller.workspace.sources,
+      })
+    : undefined;
+  return (
+    <div role="region" aria-label="Project workspace" className="h-full overflow-y-auto p-4 sm:p-6">
+      <ProjectReadiness projectId={projectId} refreshKey={readinessRefreshKey} />
+      <WorkspaceContent projectId={projectId} controller={controller} />
     </div>
   );
 }

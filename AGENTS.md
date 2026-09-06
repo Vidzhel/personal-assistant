@@ -198,6 +198,17 @@ versions; do not copy versions from historical planning documents.
   descriptor-based paths; never introduce an arbitrary host-path serving route.
   File artifacts persist their source ID and relative path after regular-file
   verification. Graph views require explicit current project membership filtering.
+- Project readiness is static and bounded: inspect current grants, bindings,
+  source/index metadata and declared executable/script requirements without model
+  calls, command execution or cross-project run-history scans. Configuration is not
+  authenticated provider evidence. Use the shared bounded secret redactor for
+  diagnostic projections. Cached project IDs are diagnostic evidence only when
+  their paths are currently invalid; never reactivate archived definitions.
+- Private browser access uses the optional authenticated Caddy gateway plus
+  Tailscale Serve. Every remote route requires gateway authentication. Core enforces
+  exact configured browser origins on REST and WebSocket; this is not authentication
+  for direct host access. Keep core/web/gateway host ports on loopback. Setup must
+  validate prospective Compose settings before replacing the owner's environment.
 - Preserve knowledge links and project membership before changing graph storage.
   Permission checks must be enforced in tools/runtime, not only prompt text.
 - Stop admission and own listeners, timers and in-flight local work across

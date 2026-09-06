@@ -992,6 +992,18 @@ test('mobile workspace runs a command, pushes real artifacts, and previews and d
     )
     .toEqual({ mode: 'full', sourceId });
   await expect(executionReminder).toHaveCount(0);
+  const readiness = page.getByRole('region', { name: 'Project readiness', exact: true });
+  await expect(readiness.getByText('full', { exact: true })).toBeVisible();
+  await expect(readiness.getByText(fixture.repository, { exact: true })).toBeVisible();
+  await expect(readiness.getByText('Blocked operations:', { exact: false })).toHaveCount(0);
+  const report = await (await request.get(`${API}${projectPath(created.id)}/readiness`)).json();
+  expect(report.workspace.state).toBe('verified');
+  expect(report.workspace.sources.find((source) => source.id === sourceId).contextIndexes)
+    .toEqual(expect.arrayContaining([{ path: 'AGENTS.md', state: 'unavailable' }]));
+  await expect(readiness.getByText('Restore the configured context file or remove it from this source.').first()).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await readiness.evaluate((element) => element.scrollIntoView({ block: 'start' }));
+  await page.screenshot({ path: '.browser-test-output/readiness-mobile.png' });
   await page.getByRole('button', { name: 'New Chat', exact: true }).click();
   await expect(page.getByPlaceholder('Ask Raven...')).toBeVisible();
   await send(

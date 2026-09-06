@@ -53,6 +53,24 @@ describe('config', () => {
     expect(config.RAVEN_MAX_CONCURRENT_AGENTS).toBe(5);
   });
 
+  it('attributes an invalid extra browser origin to its own setting', async () => {
+    process.env.RAVEN_BASE_URL = 'https://raven.example.test';
+    process.env.RAVEN_BROWSER_ORIGINS = 'https://raven.example.test/path';
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const exited = vi.spyOn(process, 'exit').mockImplementation(() => {
+      throw new Error('invalid config');
+    });
+    try {
+      const { loadConfig } = await import('../config.ts');
+      expect(() => loadConfig()).toThrow('invalid config');
+      expect(JSON.stringify(logged.mock.calls)).toContain('RAVEN_BROWSER_ORIGINS');
+      expect(JSON.stringify(logged.mock.calls)).not.toContain('RAVEN_BASE_URL');
+    } finally {
+      logged.mockRestore();
+      exited.mockRestore();
+    }
+  });
+
   it('invalid LOG_LEVEL causes exit', async () => {
     process.env.LOG_LEVEL = 'invalid_level';
 

@@ -173,6 +173,7 @@ const agentBackend = async (options) => {
 const raven = await createRaven(
   {
     ...loadConfig(),
+    RAVEN_BROWSER_ORIGINS: 'http://127.0.0.1:4420',
     DATABASE_PATH: join(root, 'data/browser.db'),
     SESSION_PATH: join(root, 'data/sessions'),
   },

@@ -1,3 +1,4 @@
+import { configuredBrowserOrigins } from './api/browser-origin.ts';
 import { createProjectWorkspaceStore } from './project-manager/project-workspace.ts';
 import {
   initializeKnowledge,
@@ -354,6 +355,7 @@ export async function createRaven(
       taskStore,
       projectRegistry,
       RAVEN_PORT: config.RAVEN_PORT,
+      RAVEN_BASE_URL: config.RAVEN_BASE_URL,
       neo4j: {
         enabled: config.NEO4J_ENABLED,
         uri: config.NEO4J_URI,
@@ -751,6 +753,18 @@ export async function createRaven(
   let server: Awaited<ReturnType<typeof createApiServer>> | undefined;
 
   const apiDeps: ApiDeps = {
+    projectReadiness: {
+      workspaceExecution,
+      workspaceStore,
+      namedAgentStore,
+      agentResolver,
+      capabilityLibrary,
+      executionLogger,
+      projectRegistry,
+      db: dbInterface,
+      projectRoot: dataRoot,
+    },
+    browserOrigins: configuredBrowserOrigins(config),
     modelCatalog,
     resolveModel,
     prepareModel,

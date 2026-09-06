@@ -1,3 +1,8 @@
+import {
+  registerProjectReadinessRoute,
+  type ProjectReadinessRouteDeps,
+} from './routes/project-readiness.ts';
+import { configuredBrowserOrigins, registerBrowserOriginPolicy } from './browser-origin.ts';
 import type { ProjectWorkspaceStore } from '../project-manager/project-workspace.ts';
 import { registerProjectFileRoutes } from './routes/project-files.ts';
 import { registerTaskArtifactFileRoutes } from './routes/task-artifact-files.ts';
@@ -84,6 +89,8 @@ import type { EffectiveModelConfigResolver, ModelConfigValidator } from './model
 const log = createLogger('api');
 
 export interface ApiDeps {
+  projectReadiness?: ProjectReadinessRouteDeps;
+  browserOrigins?: readonly string[];
   modelCatalog?: ModelCatalog;
   resolveModel?: ConversationModelResolver;
   prepareModel?: ConversationModelPreparation;
@@ -152,8 +159,10 @@ export async function createApiServer(
     return payload;
   });
 
+  const browserOrigins = deps.browserOrigins ?? configuredBrowserOrigins({});
+  registerBrowserOriginPolicy(app, browserOrigins);
   await app.register(cors, {
-    origin: true,
+    origin: [...browserOrigins],
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE'],
   });
   await app.register(websocket);
@@ -165,6 +174,7 @@ export async function createApiServer(
 
   // REST routes
   registerHealthRoute(app, deps);
+  if (deps.projectReadiness) registerProjectReadinessRoute(app, deps.projectReadiness);
   registerProjectRecoveryRoutes(app, deps);
   registerProjectRoutes(app, {
     eventBus: deps.eventBus,

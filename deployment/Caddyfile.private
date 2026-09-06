@@ -1,0 +1,16 @@
+{
+	admin off
+	auto_https off
+}
+
+:4002 {
+	bind 0.0.0.0
+
+	basic_auth {
+		{$RAVEN_PRIVATE_USERNAME} {$RAVEN_PRIVATE_PASSWORD_HASH}
+	}
+
+	@raven_core path /api /api/* /ws
+	reverse_proxy @raven_core raven-core:4001
+	reverse_proxy raven-web:4000
+}

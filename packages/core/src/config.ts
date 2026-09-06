@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { configuredBrowserOrigins } from './api/browser-origin.ts';
 import dotenv from 'dotenv';
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -39,77 +40,96 @@ function validTimeZone(timeZone: string): boolean {
   }
 }
 
-const envSchema = z.object({
-  ANTHROPIC_API_KEY: z.string().default(''), // Empty = use `claude` CLI auth (MAX plan)
-  CLAUDE_MODEL: z
-    .string()
-    .trim()
-    .min(1, 'CLAUDE_MODEL must be non-blank')
-    .default('claude-sonnet-5'),
-  RAVEN_PORT: z.coerce.number().default(DEFAULT_PORT),
-  RAVEN_TIMEZONE: z.string().min(1).refine(validTimeZone, 'Invalid timezone').default('UTC'),
-  RAVEN_DIGEST_TIME: z.string().default('08:00'),
-  RAVEN_MAX_CONCURRENT_AGENTS: z.coerce.number().int().positive().default(DEFAULT_MAX_CONCURRENT),
-  RAVEN_AGENT_MAX_TURNS: z.coerce
-    .number()
-    .int()
-    .min(1)
-    .max(MAX_AGENT_TURNS)
-    .default(DEFAULT_MAX_TURNS),
-  RAVEN_MAX_BUDGET_USD_PER_DAY: z.coerce.number().nonnegative().default(DEFAULT_BUDGET_USD),
-  DATABASE_PATH: z.string().default('./data/raven.db'),
-  SESSION_PATH: z.string().default('./data/sessions'),
-  LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+const envSchema = z
+  .object({
+    ANTHROPIC_API_KEY: z.string().default(''), // Empty = use `claude` CLI auth (MAX plan)
+    CLAUDE_MODEL: z
+      .string()
+      .trim()
+      .min(1, 'CLAUDE_MODEL must be non-blank')
+      .default('claude-sonnet-5'),
+    RAVEN_PORT: z.coerce.number().default(DEFAULT_PORT),
+    RAVEN_BASE_URL: z.string().optional(),
+    RAVEN_BROWSER_ORIGINS: z.string().optional(),
+    RAVEN_TIMEZONE: z.string().min(1).refine(validTimeZone, 'Invalid timezone').default('UTC'),
+    RAVEN_DIGEST_TIME: z.string().default('08:00'),
+    RAVEN_MAX_CONCURRENT_AGENTS: z.coerce.number().int().positive().default(DEFAULT_MAX_CONCURRENT),
+    RAVEN_AGENT_MAX_TURNS: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(MAX_AGENT_TURNS)
+      .default(DEFAULT_MAX_TURNS),
+    RAVEN_MAX_BUDGET_USD_PER_DAY: z.coerce.number().nonnegative().default(DEFAULT_BUDGET_USD),
+    DATABASE_PATH: z.string().default('./data/raven.db'),
+    SESSION_PATH: z.string().default('./data/sessions'),
+    LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 
-  // Neo4j (knowledge engine graph store; memory learning remains available when off)
-  NEO4J_ENABLED: z
-    .enum(['true', 'false'])
-    .default('true')
-    .transform((v) => v === 'true'),
-  NEO4J_URI: z.string().default('bolt://localhost:7687'),
-  NEO4J_USER: z.string().default('neo4j'),
-  NEO4J_PASSWORD: z.string().default('ravenpassword'),
+    // Neo4j (knowledge engine graph store; memory learning remains available when off)
+    NEO4J_ENABLED: z
+      .enum(['true', 'false'])
+      .default('true')
+      .transform((v) => v === 'true'),
+    NEO4J_URI: z.string().default('bolt://localhost:7687'),
+    NEO4J_USER: z.string().default('neo4j'),
+    NEO4J_PASSWORD: z.string().default('ravenpassword'),
 
-  // Optional skill-specific (loaded from .env, injected into skill configs)
-  TICKTICK_CLIENT_ID: z.string().optional(),
-  TICKTICK_CLIENT_SECRET: z.string().optional(),
-  TICKTICK_ACCESS_TOKEN: z.string().optional(),
-  GMAIL_IMAP_USER: z.string().optional(),
-  GMAIL_IMAP_PASSWORD: z.string().optional(),
-  GMAIL_CLIENT_ID: z.string().optional(),
-  GMAIL_CLIENT_SECRET: z.string().optional(),
-  GMAIL_REFRESH_TOKEN: z.string().optional(),
-  TELEGRAM_BOT_TOKEN: z.string().optional(),
-  TELEGRAM_CHAT_ID: z.string().optional(),
-  TELEGRAM_GROUP_ID: z.string().optional(),
-  TELEGRAM_TOPIC_GENERAL: z.string().optional(),
-  TELEGRAM_TOPIC_SYSTEM: z.string().optional(),
-  TELEGRAM_TOPIC_MAP: z.string().optional(),
+    // Optional skill-specific (loaded from .env, injected into skill configs)
+    TICKTICK_CLIENT_ID: z.string().optional(),
+    TICKTICK_CLIENT_SECRET: z.string().optional(),
+    TICKTICK_ACCESS_TOKEN: z.string().optional(),
+    GMAIL_IMAP_USER: z.string().optional(),
+    GMAIL_IMAP_PASSWORD: z.string().optional(),
+    GMAIL_CLIENT_ID: z.string().optional(),
+    GMAIL_CLIENT_SECRET: z.string().optional(),
+    GMAIL_REFRESH_TOKEN: z.string().optional(),
+    TELEGRAM_BOT_TOKEN: z.string().optional(),
+    TELEGRAM_CHAT_ID: z.string().optional(),
+    TELEGRAM_GROUP_ID: z.string().optional(),
+    TELEGRAM_TOPIC_GENERAL: z.string().optional(),
+    TELEGRAM_TOPIC_SYSTEM: z.string().optional(),
+    TELEGRAM_TOPIC_MAP: z.string().optional(),
 
-  // Session auto-compaction & retrospective
-  RAVEN_SESSION_IDLE_TIMEOUT_MS: z.coerce.number().default(DEFAULT_IDLE_TIMEOUT_MS),
-  RAVEN_CONSOLIDATION_CRON: z.string().default(DEFAULT_CONSOLIDATION_CRON),
-  RAVEN_AUTO_RETROSPECTIVE_ENABLED: z
-    .enum(['true', 'false'])
-    .default('true')
-    .transform((v) => v === 'true'),
+    // Session auto-compaction & retrospective
+    RAVEN_SESSION_IDLE_TIMEOUT_MS: z.coerce.number().default(DEFAULT_IDLE_TIMEOUT_MS),
+    RAVEN_CONSOLIDATION_CRON: z.string().default(DEFAULT_CONSOLIDATION_CRON),
+    RAVEN_AUTO_RETROSPECTIVE_ENABLED: z
+      .enum(['true', 'false'])
+      .default('true')
+      .transform((v) => v === 'true'),
 
-  // Heartbeat (Phase 4 Task 3): ambient check-in schedule kind, off by
-  // default (see projects/schedules/heartbeat.yaml). "HH-HH" local hours,
-  // interpreted in RAVEN_TIMEZONE — e.g. "08-22" means active 08:00-21:59.
-  // Bounded to 0-23 (F6): the old /^\d{1,2}-\d{1,2}$/ pattern admitted
-  // hour values like "25-30" that pass this regex but can never match
-  // isWithinActiveHours' 0-23 local hour — a config typo would silently
-  // mute the heartbeat forever, the exact fail-CLOSED outcome that
-  // function's own fail-open design is supposed to prevent. `.catch()`
-  // means a value that still fails this tighter regex falls back to the
-  // default rather than crashing the entire config load over one knob.
-  RAVEN_HEARTBEAT_ACTIVE_HOURS: z
-    .string()
-    .regex(/^([01]?\d|2[0-3])-([01]?\d|2[0-3])$/, 'Must be "HH-HH" with hours 0-23 (e.g. "08-22")')
-    .default('08-22')
-    .catch('08-22'),
-});
+    // Heartbeat (Phase 4 Task 3): ambient check-in schedule kind, off by
+    // default (see projects/schedules/heartbeat.yaml). "HH-HH" local hours,
+    // interpreted in RAVEN_TIMEZONE — e.g. "08-22" means active 08:00-21:59.
+    // Bounded to 0-23 (F6): the old /^\d{1,2}-\d{1,2}$/ pattern admitted
+    // hour values like "25-30" that pass this regex but can never match
+    // isWithinActiveHours' 0-23 local hour — a config typo would silently
+    // mute the heartbeat forever, the exact fail-CLOSED outcome that
+    // function's own fail-open design is supposed to prevent. `.catch()`
+    // means a value that still fails this tighter regex falls back to the
+    // default rather than crashing the entire config load over one knob.
+    RAVEN_HEARTBEAT_ACTIVE_HOURS: z
+      .string()
+      .regex(
+        /^([01]?\d|2[0-3])-([01]?\d|2[0-3])$/,
+        'Must be "HH-HH" with hours 0-23 (e.g. "08-22")',
+      )
+      .default('08-22')
+      .catch('08-22'),
+  })
+  .superRefine((value, context) => {
+    for (const key of ['RAVEN_BASE_URL', 'RAVEN_BROWSER_ORIGINS'] as const) {
+      try {
+        configuredBrowserOrigins({ [key]: value[key] });
+      } catch {
+        context.addIssue({
+          code: 'custom',
+          message: 'Expected HTTP(S) origins without credentials, paths or whitespace',
+          path: [key],
+        });
+      }
+    }
+  });
 
 export type AppConfig = z.infer<typeof envSchema>;
 

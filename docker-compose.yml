@@ -39,6 +39,8 @@ services:
       NEO4J_USER: neo4j
       NEO4J_PASSWORD: '${NEO4J_PASSWORD:-raven-local-graph}'
       RAVEN_TIMEZONE: '${RAVEN_TIMEZONE:-UTC}'
+      RAVEN_BASE_URL: '${RAVEN_BASE_URL:-}'
+      RAVEN_BROWSER_ORIGINS: '${RAVEN_BROWSER_ORIGINS:-}'
     restart: unless-stopped
     healthcheck:
       test:

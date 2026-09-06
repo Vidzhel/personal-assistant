@@ -68,3 +68,30 @@ integration is needed, expose the existing service through scoped Raven MCP, res
 input/output against current project sources, retain its cleanup/lifetime ownership,
 and test project output isolation, cancellation/restart and unresolved uploads with
 fake providers. This is an integration addition, not a blocker for repository scripts.
+
+
+## O0 follow-up: bounded project execution-history queries (2026-09-06)
+
+`ExecutionLogger.queryTasks({ projectId, limit })` currently enumerates run files
+across projects before filtering. Readiness intentionally avoids this path and
+reports static configuration only. Existing task/history consumers retain their
+behavior.
+
+Resolution: add project-local bounded run enumeration or a rebuildable derived
+index in the existing run store, preserving YAML authority and revision/error
+semantics. Do not add a replacement history subsystem. Acceptance: a scoped query
+never opens another project's run directory; a corrupt unrelated run cannot
+break it; bounds hold with large histories; terminal-status filters apply before
+limits; restart and concurrent terminal writes preserve ordering. Profile the
+existing history/metrics consumers before changing their API.
+
+## O0/A2 follow-up: explicit MCP entrypoint locations (2026-09-06)
+
+Legacy stdio definitions can use relative script paths such as
+`library/vendor/markdownify-mcp/dist/index.js`. SDK project execution may use an
+attached working directory. Readiness now flags an unavailable literal entrypoint
+instead of reporting the interpreter alone as sufficient. During A2 transport
+resolution review, anchor intended Raven-owned entrypoints explicitly to the
+current library/code location, preserving per-project MCP scope. Acceptance:
+attached-repository cwd and separate runtime data roots resolve the same intended
+script; missing builds remain actionable; no command or argument is shell-expanded.

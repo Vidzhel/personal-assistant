@@ -1,3 +1,4 @@
+import { redactSecrets } from '../diagnostics/redact-secrets.ts';
 import { query, type ModelInfo, type Query } from '@anthropic-ai/claude-agent-sdk';
 import {
   ModelEffortSchema,
@@ -287,11 +288,7 @@ function rejectWhenAborted(signal: AbortSignal): Promise<never> {
 }
 
 function sanitizeDiscoveryError(error: unknown): string {
-  return String(error)
-    .replace(/sk-ant-[a-zA-Z0-9_-]+/g, '[redacted]')
-    .replace(/(authorization|token)\s*[:=]\s*bearer\s+\S+/gi, '$1=[redacted]')
-    .replace(/(authorization|api[-_ ]?key|token)\s*[:=]\s*\S+/gi, '$1=[redacted]')
-    .slice(0, MAX_ERROR_LENGTH);
+  return redactSecrets(error, { maxOutputLength: MAX_ERROR_LENGTH });
 }
 
 function cloneSnapshot(snapshot: ModelCatalogSnapshot): ModelCatalogSnapshot {

@@ -1,5 +1,6 @@
 import type {
   ModelConfig,
+  ProjectReadinessReport,
   ProjectWorkspace,
   ProjectWorkspaceSource,
   WorkspaceUpdate,
@@ -78,6 +79,13 @@ function fileEndpoint(
 
 export function getWorkspace(projectId: string): Promise<ProjectWorkspaceResponse> {
   return apiRequest<ProjectWorkspaceResponse>(`${projectPath(projectId)}/workspace`);
+}
+
+export function getProjectReadiness(
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<ProjectReadinessReport> {
+  return apiRequest<ProjectReadinessReport>(`${projectPath(projectId)}/readiness`, { signal });
 }
 
 export function updateWorkspace(

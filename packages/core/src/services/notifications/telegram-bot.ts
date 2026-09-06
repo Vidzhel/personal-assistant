@@ -1,3 +1,4 @@
+import { notificationFileUrl } from './file-link.ts';
 import { Bot, InlineKeyboard, InputFile, type Context, type Filter } from 'grammy';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { existsSync, statSync } from 'node:fs';
@@ -2011,6 +2012,13 @@ async function handleCallbackQuery(ctx: CallbackQueryCtx): Promise<void> {
 // notification:deliver handler
 // ---------------------------------------------------------------------------
 
+function configuredDownloadOrigin(): string | undefined {
+  if (!Object.hasOwn(serviceConfig, 'RAVEN_BASE_URL')) return process.env.RAVEN_BASE_URL;
+  return typeof serviceConfig.RAVEN_BASE_URL === 'string'
+    ? serviceConfig.RAVEN_BASE_URL
+    : undefined;
+}
+
 async function sendNotificationAttachment(
   filePath: string,
   threadId: number | undefined,
@@ -2030,10 +2038,15 @@ async function sendNotificationAttachment(
     };
   }
   if (size > TELEGRAM_FILE_SEND_LIMIT_BYTES) {
-    const relativePath = filePath.replace(/^data\/files\//, '');
-    const downloadUrl = `${process.env.RAVEN_BASE_URL ?? 'http://localhost:3001'}/api/files/${relativePath}`;
+    const downloadUrl = notificationFileUrl(
+      filePath,
+      runtimeProjectRoot,
+      configuredDownloadOrigin(),
+    );
     return sendMessageWithFallback(
-      `File too large for Telegram. Download: ${downloadUrl}`,
+      downloadUrl
+        ? `File too large for Telegram. Download: ${downloadUrl}`
+        : 'File too large for Telegram. Open its artifact in Raven; a browser download link is not configured.',
       { messageThreadId: threadId },
       recorder,
     );

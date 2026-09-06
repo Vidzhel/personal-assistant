@@ -1780,7 +1780,12 @@ describe('telegram-bot service', () => {
 
       const db = await createRealDb();
       await loadService();
-      await service.start({ eventBus: mockEventBus, logger: mockLogger, db, config: {} });
+      await service.start({
+        eventBus: mockEventBus,
+        logger: mockLogger,
+        db,
+        config: { RAVEN_BASE_URL: 'https://raven.example.test' },
+      });
       const queueId = await enqueueTelegramNotification(db, {
         title: 'Large File',
         body: 'File is ready',
@@ -1801,7 +1806,7 @@ describe('telegram-bot service', () => {
       expect(mockSendDocument).not.toHaveBeenCalled();
       const downloadCall = mockSendMessage.mock.calls[1];
       expect(downloadCall[1]).toContain('File too large for Telegram');
-      expect(downloadCall[1]).toContain('/api/files/large-export.zip');
+      expect(downloadCall[1]).toContain('https://raven.example.test/api/files/large-export.zip');
     });
 
     it('does not call sendDocument when filePath is absent', async () => {

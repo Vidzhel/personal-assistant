@@ -111,6 +111,19 @@ describe('ModelCatalog', () => {
     expect(result.error).toMatch(/timed out/);
   });
 
+  it('redacts quoted credentials from discovery failure projections', async () => {
+    const catalog = new ModelCatalog({
+      discover: async () => {
+        throw new Error('{"refresh_token":"quoted-secret"} password="two secret words"');
+      },
+    });
+    const snapshot = await catalog.refresh();
+    expect(snapshot.error).not.toContain('quoted-secret');
+    expect(snapshot.error).not.toContain('two secret words');
+    expect(snapshot.error).toContain('[redacted]');
+    await catalog.stop();
+  });
+
   it('marks an otherwise healthy snapshot stale after its cache age', async () => {
     let now = new Date('2026-09-06T10:00:00Z');
     const catalog = new ModelCatalog({

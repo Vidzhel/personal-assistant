@@ -41,7 +41,8 @@
     "test:e2e": "npm run build:core && playwright test",
     "test:mcp:live": "RAVEN_TEST_TICKTICK=1 vitest run --project mcp-ticktick",
     "test:embeddings:download": "npm run build:core && node scripts/smoke-embeddings.mjs",
-    "check:dependencies": "node scripts/check-dependencies.mjs"
+    "check:dependencies": "node scripts/check-dependencies.mjs",
+    "test:private-gateway": "node --test scripts/test-private-gateway.mjs"
   },
   "engines": {
     "node": ">=22.22.0",

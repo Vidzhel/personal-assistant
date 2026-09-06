@@ -650,3 +650,30 @@ attached-file reads and standalone assets including the PDF worker. Tests use
 temporary roots and fake model boundaries; live authentication, model quality and
 account delivery remain separate canaries. Exact evidence and concrete follow-ups
 are recorded in the W1 specifications and deferred ledger.
+
+
+## Project readiness and private access
+
+`GET /api/projects/:id/readiness` performs bounded static checks using current
+workspace grants, named-agent bindings, source/context file metadata, executable
+availability and literal MCP entrypoint paths. It neither invokes a model nor
+runs commands. Credentials present means configured, not authenticated. It avoids
+execution-history scans; source and capability findings remain independent.
+Unavailable managed definitions can be diagnosed through cache ID/path evidence
+only while that path is currently invalid in the registry.
+
+The optional `docker-compose.private.yml` adds an authenticated Caddy gateway on
+host loopback port 4002. Every route, including API, WebSocket and artifacts, is
+protected by owner Basic authentication. Tailscale Serve supplies private HTTPS.
+Core validates exact browser origins from `RAVEN_BASE_URL` and optional
+`RAVEN_BROWSER_ORIGINS`; absent Origin remains allowed for trusted local clients.
+When a canonical origin is configured, implicit localhost browser origins are
+not added. Core/web direct ports remain loopback and are not public authenticated
+interfaces. Production gateway builds use same-origin API/WS; ordinary development
+retains explicit localhost defaults.
+
+`scripts/raven.sh setup-private-access` hashes the owner password via Caddy stdin,
+validates a prospective Compose environment, then atomically replaces the selected
+`.env`. It does not enroll Tailscale or activate the live assistant. Browser file
+routes retain current project/source identity checks. Telegram omits unusable
+fallback links when no canonical URL is configured.
