@@ -92,7 +92,7 @@ describe('SkillConfigSchema', () => {
         name: 'bad-skill',
         displayName: 'Bad',
         description: 'Bad model',
-        model: 'gpt4',
+        model: 'invalid model',
       }),
     ).toThrow();
   });

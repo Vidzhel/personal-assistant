@@ -44,8 +44,19 @@ import { createExecutionBridge } from '../task-execution/execution-bridge.ts';
 import { TaskExecutionEngine } from '../task-execution/task-execution-engine.ts';
 import { AgentManager } from '../agent-manager/agent-manager.ts';
 import { initDatabase, getDb } from '../db/database.ts';
+import { ModelCatalog, type DiscoveredModel } from '../agent-registry/model-catalog.ts';
 
 const mockQuery = vi.mocked(query);
+
+const discoveredHaiku: DiscoveredModel = {
+  value: 'sdk-fast',
+  resolvedModel: 'claude-haiku-4-5',
+  displayName: 'SDK Fast',
+  description: 'Fast fixture model',
+  supportsEffort: true,
+  supportedEffortLevels: ['low'],
+  supportsAdaptiveThinking: false,
+};
 
 // ── Unit-test suite: mocked engine + collaborators ────────────────────────
 
@@ -138,6 +149,7 @@ describe('createExecutionBridge', () => {
     const requests: unknown[] = [];
     deps.eventBus.on('agent:task:request', (event) => requests.push(event));
     deps.eventBus.emit(runAgentEvent({ agent: 'missing-agent' }) as never);
+    await vi.waitFor(() => expect(deps.executionEngine.onTaskFailed).toHaveBeenCalled());
     expect(requests).toEqual([]);
     expect(deps.namedAgentStore.getDefaultAgent).not.toHaveBeenCalled();
     expect(deps.executionEngine.onTaskFailed).toHaveBeenCalledWith(
@@ -152,7 +164,7 @@ describe('createExecutionBridge', () => {
     const requests: unknown[] = [];
     deps.eventBus.on('agent:task:request', (event) => requests.push(event));
     deps.eventBus.emit(runAgentEvent() as never);
-    await Promise.resolve();
+    await vi.waitFor(() => expect(deps.executionEngine.setAgentTaskId).toHaveBeenCalledOnce());
     expect(requests).toEqual([]);
   });
 
@@ -165,8 +177,7 @@ describe('createExecutionBridge', () => {
     bridge.start();
     bridge.start();
     local.eventBus.emit(runAgentEvent() as never);
-    await Promise.resolve();
-    expect(requests).toHaveLength(1);
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
     const agentTaskId = requests[0].payload.taskId;
     bridge.stop();
     bridge.stop();
@@ -200,6 +211,7 @@ describe('createExecutionBridge', () => {
     local.eventBus.on('agent:task:request', (event) => requests.push(event));
     bridge.start();
     local.eventBus.emit(runAgentEvent() as never);
+    await vi.waitFor(() => expect(local.executionEngine.setAgentTaskId).toHaveBeenCalledOnce());
     const id = local.executionEngine.setAgentTaskId.mock.calls[0][2];
     local.executionEngine.getTree.mockReturnValue({
       status: 'running',
@@ -234,7 +246,7 @@ describe('createExecutionBridge', () => {
     const requests: unknown[] = [];
     deps.eventBus.on('agent:task:request', (e) => requests.push(e));
     deps.eventBus.emit(runAgentEvent() as never);
-    await Promise.resolve();
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
     expect(deps.namedAgentStore.getAgentByName).toHaveBeenCalledWith('gmail', undefined);
     const req = requests[0] as { payload: Record<string, unknown> };
     expect(req.payload.namedAgentId).toBe('agent-gmail');
@@ -244,11 +256,162 @@ describe('createExecutionBridge', () => {
     expect(req.payload.maxTurns).toBe(6);
   });
 
+  it('captures the catalog canonical model when a named agent uses a reported alias', async () => {
+    const local = makeDeps();
+    local.namedAgentStore.getAgentByName.mockReturnValue({
+      id: 'agent-fast',
+      name: 'gmail',
+      instructions: '',
+      model: 'sdk-fast',
+      maxTurns: 6,
+      bash: {
+        access: 'scoped',
+        allowedCommands: [],
+        deniedCommands: [],
+        allowedPaths: [],
+        deniedPaths: [],
+      },
+    });
+    const discover = vi.fn().mockResolvedValue([discoveredHaiku]);
+    const modelCatalog = new ModelCatalog({ discover });
+    const bridge = createExecutionBridge({ ...local, modelCatalog } as never);
+    const requests: AgentTaskRequestEvent[] = [];
+    local.eventBus.on<AgentTaskRequestEvent>('agent:task:request', (event) => requests.push(event));
+    bridge.start();
+
+    local.eventBus.emit(runAgentEvent() as never);
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+
+    expect(discover).toHaveBeenCalledOnce();
+    expect(requests[0].payload).toMatchObject({
+      model: 'claude-haiku-4-5',
+      modelConfig: { model: 'claude-haiku-4-5' },
+    });
+    bridge.stop();
+    await modelCatalog.stop();
+  });
+
+  it('rejects an explicit named-agent model absent from a populated catalog', async () => {
+    const local = makeDeps();
+    local.namedAgentStore.getAgentByName.mockReturnValue({
+      id: 'agent-unknown',
+      name: 'gmail',
+      instructions: '',
+      model: 'claude-unknown-9',
+      maxTurns: 6,
+      bash: {
+        access: 'scoped',
+        allowedCommands: [],
+        deniedCommands: [],
+        allowedPaths: [],
+        deniedPaths: [],
+      },
+    });
+    const modelCatalog = new ModelCatalog({ discover: async () => [discoveredHaiku] });
+    await modelCatalog.refresh();
+    const bridge = createExecutionBridge({ ...local, modelCatalog } as never);
+    const requests: AgentTaskRequestEvent[] = [];
+    local.eventBus.on<AgentTaskRequestEvent>('agent:task:request', (event) => requests.push(event));
+    bridge.start();
+
+    local.eventBus.emit(runAgentEvent() as never);
+    await vi.waitFor(() => expect(local.executionEngine.onTaskFailed).toHaveBeenCalledOnce());
+
+    expect(requests).toEqual([]);
+    expect(local.executionEngine.setAgentTaskId).not.toHaveBeenCalled();
+    expect(local.executionEngine.onTaskFailed).toHaveBeenCalledWith(
+      't1',
+      'task-1',
+      expect.stringContaining('not present in catalog'),
+    );
+    bridge.stop();
+    await modelCatalog.stop();
+  });
+
+  it('rejects an unsupported nested worker effort before binding or dispatch', async () => {
+    const local = makeDeps();
+    local.agentResolver.resolveAgentCapabilities.mockReturnValue({
+      mcpServers: {},
+      agentDefinitions: {
+        expensive: {
+          description: 'Needs unsupported effort',
+          prompt: 'Work carefully',
+          model: 'haiku',
+          effort: 'high',
+        },
+      },
+      plugins: [],
+    } as never);
+    const modelCatalog = new ModelCatalog({ discover: async () => [discoveredHaiku] });
+    const bridge = createExecutionBridge({ ...local, modelCatalog } as never);
+    const requests: AgentTaskRequestEvent[] = [];
+    local.eventBus.on<AgentTaskRequestEvent>('agent:task:request', (event) => requests.push(event));
+    bridge.start();
+
+    local.eventBus.emit(runAgentEvent() as never);
+    await vi.waitFor(() => expect(local.executionEngine.onTaskFailed).toHaveBeenCalledOnce());
+
+    expect(requests).toEqual([]);
+    expect(local.executionEngine.setAgentTaskId).not.toHaveBeenCalled();
+    expect(local.executionEngine.onTaskFailed).toHaveBeenCalledWith(
+      't1',
+      'task-1',
+      expect.stringContaining('does not support effort "high"'),
+    );
+    bridge.stop();
+    await modelCatalog.stop();
+  });
+
+  it('does not bind or dispatch work when the bridge stops during catalog discovery', async () => {
+    const local = makeDeps();
+    local.namedAgentStore.getAgentByName.mockReturnValue({
+      id: 'agent-fast',
+      name: 'gmail',
+      instructions: '',
+      model: 'sdk-fast',
+      maxTurns: 6,
+      bash: {
+        access: 'scoped',
+        allowedCommands: [],
+        deniedCommands: [],
+        allowedPaths: [],
+        deniedPaths: [],
+      },
+    });
+    let releaseDiscovery!: (models: readonly DiscoveredModel[]) => void;
+    let markDiscoveryStarted!: () => void;
+    const discoveryStarted = new Promise<void>((resolve) => {
+      markDiscoveryStarted = resolve;
+    });
+    const modelCatalog = new ModelCatalog({
+      discover: async () => {
+        markDiscoveryStarted();
+        return new Promise<readonly DiscoveredModel[]>((resolve) => {
+          releaseDiscovery = resolve;
+        });
+      },
+    });
+    const bridge = createExecutionBridge({ ...local, modelCatalog } as never);
+    const requests: AgentTaskRequestEvent[] = [];
+    local.eventBus.on<AgentTaskRequestEvent>('agent:task:request', (event) => requests.push(event));
+    bridge.start();
+
+    local.eventBus.emit(runAgentEvent() as never);
+    await discoveryStarted;
+    bridge.stop();
+    releaseDiscovery([discoveredHaiku]);
+    await vi.waitFor(() => expect(modelCatalog.getSnapshot().models).toHaveLength(1));
+
+    expect(requests).toEqual([]);
+    expect(local.executionEngine.setAgentTaskId).not.toHaveBeenCalled();
+    await modelCatalog.stop();
+  });
+
   it('falls back to the default agent when no agent is named', async () => {
     const requests: unknown[] = [];
     deps.eventBus.on('agent:task:request', (e) => requests.push(e));
     deps.eventBus.emit(runAgentEvent({ agent: undefined }) as never);
-    await Promise.resolve();
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
     const req = requests[0] as { payload: Record<string, unknown> };
     expect(req.payload.namedAgentId).toBe('agent-raven');
   });
@@ -257,7 +420,7 @@ describe('createExecutionBridge', () => {
     const requests: Array<{ payload: Record<string, unknown> }> = [];
     deps.eventBus.on('agent:task:request', (e) => requests.push(e as never));
     deps.eventBus.emit(runAgentEvent() as never);
-    await Promise.resolve(); // default agent: 'gmail'
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
 
     const req = requests[0];
     expect(req.payload.prompt).toBe(
@@ -276,7 +439,7 @@ describe('createExecutionBridge', () => {
     const requests: Array<{ payload: Record<string, unknown> }> = [];
     deps.eventBus.on('agent:task:request', (e) => requests.push(e as never));
     deps.eventBus.emit(runAgentEvent() as never);
-    await Promise.resolve();
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
 
     const agentTaskId = requests[0].payload.taskId as string;
     expect(agentTaskId).not.toBe('task-1'); // the tree task id, kept separately
@@ -466,7 +629,7 @@ describe('createExecutionBridge', () => {
     deps.eventBus.on('agent:task:request', (e) => requests.push(e));
 
     deps.eventBus.emit(runAgentEvent({ agent: undefined }) as never);
-    await Promise.resolve();
+    await vi.waitFor(() => expect(deps.executionEngine.onTaskFailed).toHaveBeenCalled());
 
     expect(requests).toHaveLength(0);
     expect(deps.executionEngine.setAgentTaskId).not.toHaveBeenCalled();

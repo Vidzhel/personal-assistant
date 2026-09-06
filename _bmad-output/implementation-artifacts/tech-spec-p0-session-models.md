@@ -2,7 +2,7 @@
 title: Session model and thinking controls
 type: feature
 created: 2026-09-06
-status: draft
+status: complete
 context:
   - ../../AGENTS.md
   - ../../ARCHITECTURE.md
@@ -73,30 +73,30 @@ must not depend on a successful new paid query. Never expose account credentials
 
 ## Code map and execution
 
-- [ ] `packages/shared/src/types/agents.ts`, project/library schemas and related
+- [x] `packages/shared/src/types/agents.ts`, project/library schemas and related
       types: shared model-choice/config schemas with open IDs, effort/thinking choices,
       preset aliases and reset semantics. Remove closed-enum coupling in current
       consumers rather than updating only a UI selector.
-- [ ] `packages/core/src/agent-registry/agent-resolver.ts` and model catalog module:
+- [x] `packages/core/src/agent-registry/agent-resolver.ts` and model catalog module:
       normalize alias/resolved IDs and config, discover/cache capabilities, validate
       supported combinations and select deliberate defaults.
-- [ ] `migrations/001-initial-schema.sql`, SessionManager and session API:
+- [x] `migrations/001-initial-schema.sql`, SessionManager and session API:
       persist nullable structured model config and validate patches. Project defaults
       belong in `project.yaml` and its existing workspace update lifecycle.
-- [ ] `packages/core/src/orchestrator/orchestrator.ts`, chat API/WS contracts and
+- [x] `packages/core/src/orchestrator/orchestrator.ts`, chat API/WS contracts and
       AgentManager admission: resolve the owned
       session first, then model config; capture choices and bounded historical handoff
       without creating mutations for a rejected cross-project or invalid-model input.
-- [ ] AgentTask/event types, `workspace-task.ts`, `execution-run-records.ts`:
+- [x] AgentTask/event types, `workspace-task.ts`, `execution-run-records.ts`:
       snapshot model/effort/thinking in queued work, revision checks and run history.
-- [ ] `agent-backend.ts`, `sdk-backend.ts`, `agent-session.ts`: forward optional
+- [x] `agent-backend.ts`, `sdk-backend.ts`, `agent-session.ts`: forward optional
       effort/thinking, retain unchanged-config SDK resume, use a bounded source-linked
       historical handoff on cold continuation. Keep the canonical current prompt
       separate from synthetic history. Reject stale grants exactly as before.
-- [ ] Browser composer/session/project settings and Telegram `/model` command:
+- [x] Browser composer/session/project settings and Telegram `/model` command:
       display effective model and effort, apply settings to subsequent turns, surface
       validation failures and discovery state. Preserve the selected Raven session.
-- [ ] Regression tests across schema, resolver, sessions, queued dispatch, SDK
+- [x] Regression tests across schema, resolver, sessions, queued dispatch, SDK
       subprocess, budget/resume and browser controls; update guidance and evidence.
 
 ## Handoff design
@@ -133,3 +133,30 @@ required `npm run check`, default suite, core production build and compiled rest
 Test unsupported settings through HTTP and WS as well as pure schemas. A live
 Fable entitlement check remains separate; do not represent fake-model success as
 account availability. Parent reviews, commits and pushes the completed slice.
+
+
+## Completion evidence — 2026-09-06
+
+Parent review and independent blind, edge and acceptance reviews are recorded in
+[p0-session-models-review.md](p0-session-models-review.md). Review repairs include
+lazy restart discovery, late predecessor handoff, canonical IDs, nested worker
+validation, implicit HTTP/WS session selection and cancellation-safe SDK lineage.
+
+- Required `npm run check` passed, including 261 production strip-types files.
+- Default suite: 256 files passed; 2,593 tests passed, six explicit skips.
+- Final composed model suite: 7/7 passed, including HTTP/WS implicit sessions and
+  canonical queued budget leases. Telegram bot/helper regression: 94/94 passed.
+- Production `npm run build` passed; compiled restart smoke passed with two clean
+  process exits and persisted definitions, memory and history.
+- Full isolated browser suite: 24/24 passed during implementation. The final
+  model-control journey passed again after runtime review repairs.
+- Real SDK contract uses a fake executable; no user prompt, owner inference or
+  account entitlement test was performed. Docker is unavailable in this WSL
+  environment; no container verification is claimed.
+
+Model changes apply to subsequent admitted turns. The transport `queued` receipt
+is not admission; `user:chat:accepted` and the task queue establish the immutable
+snapshot. Agent definition authoring validates ID syntax; dispatch checks current
+capability metadata. Project/session settings validate supported combinations
+before persistence. The current initial operational schema is version 3; no
+legacy migration or reset was introduced.

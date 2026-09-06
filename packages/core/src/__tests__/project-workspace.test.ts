@@ -58,6 +58,34 @@ describe('project workspace file store', () => {
     expect(restarted.getWorkspace('alpha').execution.mode).toBe('full');
   });
 
+  it('atomically persists and resets a project model configuration', async () => {
+    const fixture = await fixtureWithProjects('alpha');
+    const store = storeFor(fixture);
+    const modelConfig = {
+      model: 'claude-sonnet-4-6',
+      effort: 'high' as const,
+      thinking: 'adaptive' as const,
+    };
+
+    const updated = await store.updateWorkspace('alpha', { execution: { modelConfig } });
+    expect(updated.execution.modelConfig).toEqual(modelConfig);
+    expect(storeFor(fixture).getWorkspace('alpha').execution.modelConfig).toEqual(modelConfig);
+
+    const beforeInvalid = readFileSync(join(fixture.projectsDir, 'alpha', 'project.yaml'), 'utf8');
+    await expect(
+      store.updateWorkspace('alpha', {
+        execution: { modelConfig: { model: 'invalid model id' } },
+      }),
+    ).rejects.toMatchObject({ statusCode: 400 });
+    expect(readFileSync(join(fixture.projectsDir, 'alpha', 'project.yaml'), 'utf8')).toBe(
+      beforeInvalid,
+    );
+
+    const reset = await store.updateWorkspace('alpha', { execution: { modelConfig: null } });
+    expect(reset.execution.modelConfig).toBeUndefined();
+    expect(storeFor(fixture).getWorkspace('alpha').execution.modelConfig).toBeUndefined();
+  });
+
   it('creates folder sources with canonical URI and persists no projectId field', async () => {
     const fixture = await fixtureWithProjects('alpha');
     mkdirSync(join(fixture.root, 'attached'));

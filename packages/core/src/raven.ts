@@ -38,6 +38,11 @@ import { createModelBudget } from './agent-manager/model-budget.ts';
 import { createTaskStore } from './task-manager/task-store.ts';
 import { createYamlNamedAgentStore } from './agent-registry/yaml-named-agent-store.ts';
 import { createAgentResolver } from './agent-registry/agent-resolver.ts';
+import { ModelCatalog, type ModelDiscovery } from './agent-registry/model-catalog.ts';
+import {
+  createConversationModelResolver,
+  createConversationModelPreparation,
+} from './agent-registry/conversation-models.ts';
 import { CapabilityLibrary } from './capability-library/capability-library.ts';
 import { ProjectRegistry } from './project-registry/project-registry.ts';
 import { createAgentYamlStore } from './project-registry/agent-yaml-store.ts';
@@ -90,6 +95,7 @@ const log = createLogger('raven');
  *   IMAP watcher, etc.) at boot.
  */
 export interface RavenOverrides {
+  modelDiscovery?: ModelDiscovery;
   agentBackend?: AgentBackend;
   dbPath?: string;
   dataDir?: string;
@@ -455,6 +461,20 @@ export async function createRaven(
   const sessionManager = new SessionManager();
   const messageStore = createMessageStore({ basePath: sessionPath });
   const workspaceStore = createProjectWorkspaceStore({ projectsDir, projectRegistry, projectRoot });
+  const modelCatalog = new ModelCatalog({ discover: overrides.modelDiscovery });
+  const resolveModel = createConversationModelResolver({
+    catalog: modelCatalog,
+    sessions: sessionManager,
+    workspaces: workspaceStore,
+    agents: namedAgentStore,
+  });
+  const prepareModel = createConversationModelPreparation({
+    catalog: modelCatalog,
+    sessions: sessionManager,
+    workspaces: workspaceStore,
+    agents: namedAgentStore,
+  });
+  Object.assign(baseContext.config, { modelCatalog, resolveModel });
   const memoryStore = createMemoryStore({ projectsDir, workspaceStore });
   const workspaceExecution = createWorkspaceExecutionResolver({
     workspaceStore,
@@ -519,6 +539,7 @@ export async function createRaven(
   // emits, and wired to agentManager.cancelTask so a cancelled tree can
   // abort in-flight agent runs.
   const executionBridge = createExecutionBridge({
+    modelCatalog,
     eventBus,
     executionEngine,
     namedAgentStore,
@@ -695,6 +716,9 @@ export async function createRaven(
 
   // 11c. Init orchestrator after capability dependencies are available
   const _orchestrator = new Orchestrator({
+    resolveModel,
+    modelCatalog,
+    prepareModel,
     eventBus,
     sessionManager,
     messageStore,
@@ -727,6 +751,18 @@ export async function createRaven(
   let server: Awaited<ReturnType<typeof createApiServer>> | undefined;
 
   const apiDeps: ApiDeps = {
+    modelCatalog,
+    resolveModel,
+    prepareModel,
+    validateModelConfig: async (modelConfig, context) => {
+      const input = {
+        ...context,
+        ...(context.sessionId ? { session: modelConfig } : { project: modelConfig }),
+      };
+      await prepareModel(input);
+      resolveModel(input);
+    },
+    resolveEffectiveModelConfig: (context) => resolveModel(context),
     workspaceStore,
     eventBus,
     capabilityLibrary,
@@ -812,6 +848,7 @@ export async function createRaven(
     await Promise.all(
       [
         () => _orchestrator.stop(),
+        () => modelCatalog.stop(),
         () => sessionRetrospective.stop(),
         () => agentManager.stop(),
         () => heartbeat.stop(),

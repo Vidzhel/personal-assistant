@@ -55,6 +55,14 @@ import {
 } from './telegram-conversation-store.ts';
 import { parseCallbackData, handleCallback } from './callback-handler.ts';
 import type { CallbackDeps, CallbackAction, CallbackResult } from './callback-handler.ts';
+import type { ModelCatalog } from '../../agent-registry/model-catalog.ts';
+import type { ConversationModelResolver } from '../../agent-registry/conversation-models.ts';
+import type { SessionManager } from '../../session-manager/session-manager.ts';
+import {
+  formatTelegramModelStatus,
+  parseTelegramModelCommand,
+  type TelegramModelCommand,
+} from './telegram-model-command.ts';
 
 type OperatingMode = 'group' | 'direct';
 
@@ -779,10 +787,247 @@ function parseProjectCommand(text: string): { matched: boolean; projectId?: stri
 }
 
 function isCommandAddressedToAnotherBot(ctx: TextMessageCtx, text: string): boolean {
-  const addressed = /^\/(?:project|new)@([a-z0-9_]+)(?:\s|$)/i.exec(text.trim());
+  const addressed = /^\/(?:project|new|model)@([a-z0-9_]+)(?:\s|$)/i.exec(text.trim());
   if (!addressed) return false;
   const currentUsername = ctx.me?.username;
   return !currentUsername || addressed[1].toLowerCase() !== currentUsername.toLowerCase();
+}
+
+interface ModelCommandRoute {
+  projectId: string;
+  sessionId?: string;
+  conversationRevision?: number;
+  replyToMessageId?: number;
+}
+
+interface TelegramModelDeps {
+  catalog: ModelCatalog;
+  resolveModel: ConversationModelResolver;
+  sessions: SessionManager;
+}
+
+function getTelegramModelDeps(): TelegramModelDeps | undefined {
+  const catalog = serviceConfig.modelCatalog as ModelCatalog | undefined;
+  const resolveModel = serviceConfig.resolveModel as ConversationModelResolver | undefined;
+  const sessions = serviceConfig.sessionManager as SessionManager | undefined;
+  return catalog && resolveModel && sessions ? { catalog, resolveModel, sessions } : undefined;
+}
+
+function sameModelCommandRoute(left: ModelCommandRoute, right: ModelCommandRoute): boolean {
+  return (
+    left.projectId === right.projectId &&
+    left.sessionId === right.sessionId &&
+    left.conversationRevision === right.conversationRevision &&
+    left.replyToMessageId === right.replyToMessageId
+  );
+}
+
+interface PreparedModelCommand {
+  deps: TelegramModelDeps;
+  route: ModelCommandRoute;
+  session: ReturnType<SessionManager['getSession']>;
+  snapshot: ReturnType<ModelCatalog['getSnapshot']>;
+  resolveCurrentRoute: () => ModelCommandRoute | undefined;
+}
+
+type ModelMutationCommand = Extract<TelegramModelCommand, { action: 'set' | 'reset' }>;
+
+async function prepareModelCommand(
+  ctx: TextMessageCtx,
+  params: {
+    route: ModelCommandRoute;
+    topicId?: number;
+    resolveCurrentRoute: () => ModelCommandRoute | undefined;
+  },
+): Promise<PreparedModelCommand | undefined> {
+  const deps = getTelegramModelDeps();
+  if (!deps) {
+    await replyInThread(
+      ctx,
+      'Raven model settings are unavailable. Try again after restart.',
+      params.topicId,
+    );
+    return undefined;
+  }
+  const generation = runtimeGeneration;
+  let snapshot = deps.catalog.getSnapshot();
+  if (catalogNeedsRefresh(snapshot)) {
+    snapshot = await deps.catalog.refresh(telegramAbortController.signal);
+  }
+  if (!isCurrentModelCommandGeneration(generation)) return undefined;
+  const currentRoute = params.resolveCurrentRoute();
+  if (modelCommandRouteChanged(params.route, currentRoute)) {
+    await replyInThread(
+      ctx,
+      'The selected Raven conversation changed while model choices were loading. Run /model again.',
+      params.topicId,
+    );
+    return undefined;
+  }
+  const session = currentRoute?.sessionId
+    ? deps.sessions.getSession(currentRoute.sessionId)
+    : undefined;
+  if (!currentRoute || modelCommandSessionIsUnavailable(currentRoute, session)) {
+    await replyInThread(ctx, 'The selected Raven session is no longer available.', params.topicId);
+    return undefined;
+  }
+  return {
+    deps,
+    route: currentRoute,
+    session,
+    snapshot,
+    resolveCurrentRoute: params.resolveCurrentRoute,
+  };
+}
+
+function catalogNeedsRefresh(snapshot: ReturnType<ModelCatalog['getSnapshot']>): boolean {
+  return snapshot.stale || snapshot.models.length === 0;
+}
+
+function modelCommandRouteChanged(
+  expected: ModelCommandRoute,
+  current: ModelCommandRoute | undefined,
+): boolean {
+  return !current || !sameModelCommandRoute(expected, current);
+}
+
+function modelCommandSessionIsUnavailable(
+  route: ModelCommandRoute,
+  session: ReturnType<SessionManager['getSession']>,
+): boolean {
+  return Boolean(route.sessionId && session?.projectId !== route.projectId);
+}
+
+function isCurrentModelCommandGeneration(generation: number): boolean {
+  return (
+    acceptingSends && !telegramAbortController.signal.aborted && generation === runtimeGeneration
+  );
+}
+
+async function showTelegramModelStatus(
+  ctx: TextMessageCtx,
+  prepared: PreparedModelCommand,
+  topicId?: number,
+): Promise<void> {
+  try {
+    const effective = prepared.deps.resolveModel({
+      projectId: prepared.route.projectId,
+      sessionId: prepared.route.sessionId,
+    });
+    await replyInThread(
+      ctx,
+      formatTelegramModelStatus({
+        sessionId: prepared.route.sessionId,
+        effective,
+        snapshot: prepared.snapshot,
+      }),
+      topicId,
+    );
+  } catch (error) {
+    const status = formatTelegramModelStatus({
+      sessionId: prepared.route.sessionId,
+      snapshot: prepared.snapshot,
+    });
+    await replyInThread(
+      ctx,
+      `Current model settings are unavailable: ${sanitizeTelegramError(error)}\n\n${status}`,
+      topicId,
+    );
+  }
+}
+
+async function updateTelegramSessionModel(
+  ctx: TextMessageCtx,
+  command: ModelMutationCommand,
+  params: { prepared: PreparedModelCommand; topicId?: number },
+): Promise<void> {
+  const { prepared, topicId } = params;
+  const target = currentModelMutationTarget(prepared);
+  if (!target.ok) {
+    await replyInThread(ctx, target.error, topicId);
+    return;
+  }
+  const { sessionId } = target;
+  const modelConfig = command.action === 'reset' ? null : command.config;
+  let effective: ReturnType<ConversationModelResolver>;
+  try {
+    effective = prepared.deps.resolveModel({
+      projectId: prepared.route.projectId,
+      sessionId,
+      session: modelConfig,
+    });
+  } catch (error) {
+    await replyInThread(ctx, `Model setting rejected: ${sanitizeTelegramError(error)}`, topicId);
+    return;
+  }
+  prepared.deps.sessions.updateSession(sessionId, { modelConfig });
+  const result =
+    command.action === 'reset'
+      ? 'Session model override cleared.'
+      : 'Session model updated for future turns.';
+  await replyInThread(
+    ctx,
+    `${result}\n\n${formatTelegramModelStatus({ sessionId, effective, snapshot: prepared.snapshot })}`,
+    topicId,
+  );
+}
+
+function currentModelMutationTarget(
+  prepared: PreparedModelCommand,
+): { ok: true; sessionId: string } | { ok: false; error: string } {
+  const sessionId = prepared.route.sessionId;
+  if (!prepared.session || !sessionId) {
+    return {
+      ok: false,
+      error:
+        'No Raven session is selected. Send a message or use /new before setting a session model.',
+    };
+  }
+  const currentRoute = prepared.resolveCurrentRoute();
+  const currentSession = currentRoute?.sessionId
+    ? prepared.deps.sessions.getSession(currentRoute.sessionId)
+    : undefined;
+  if (
+    modelCommandRouteChanged(prepared.route, currentRoute) ||
+    !currentRoute ||
+    modelCommandSessionIsUnavailable(currentRoute, currentSession)
+  ) {
+    return { ok: false, error: 'The selected Raven conversation changed. Run /model again.' };
+  }
+  return { ok: true, sessionId };
+}
+
+async function handleModelCommand(
+  ctx: TextMessageCtx,
+  params: {
+    text: string;
+    route: ModelCommandRoute;
+    topicId?: number;
+    resolveCurrentRoute: () => ModelCommandRoute | undefined;
+  },
+): Promise<boolean> {
+  const command = parseTelegramModelCommand(params.text);
+  if (!command.matched) return false;
+  if (command.action === 'invalid') {
+    await replyInThread(ctx, command.error, params.topicId);
+    return true;
+  }
+  if (command.action !== 'show' && !params.route.sessionId) {
+    await replyInThread(
+      ctx,
+      'No Raven session is selected. Send a message or use /new before setting a session model.',
+      params.topicId,
+    );
+    return true;
+  }
+  const prepared = await prepareModelCommand(ctx, params);
+  if (!prepared) return true;
+  if (command.action === 'show') {
+    await showTelegramModelStatus(ctx, prepared, params.topicId);
+    return true;
+  }
+  await updateTelegramSessionModel(ctx, command, { prepared, topicId: params.topicId });
+  return true;
 }
 
 async function handleNewConversationCommand(
@@ -883,16 +1128,24 @@ async function routeAuthorizedGroupTextMessage(ctx: TextMessageCtx): Promise<voi
     messageId: ctx.message.message_id,
     replyToMessageId,
   });
-  const replyBinding = resolveReplyBinding(groupId, topicId, replyToMessageId);
-  const projectId = resolveGroupMessageProject(replyBinding, topicId);
-  if (!projectId) {
+  const route = resolveGroupConversationRoute(topicId, replyToMessageId);
+  if (!route) {
     await rejectUnknownGroupTopic(ctx, topicId);
     return;
   }
   if (
+    await handleModelCommand(ctx, {
+      text,
+      route,
+      topicId,
+      resolveCurrentRoute: () => resolveGroupConversationRoute(topicId, replyToMessageId),
+    })
+  )
+    return;
+  if (
     await handleNewConversationCommand(ctx, {
       text,
-      projectId,
+      projectId: route.projectId,
       targetChatId: groupId,
       topicId,
       origin,
@@ -900,7 +1153,30 @@ async function routeAuthorizedGroupTextMessage(ctx: TextMessageCtx): Promise<voi
   )
     return;
 
-  await dispatchGroupChat(ctx, { origin, projectId, replyBinding, topicId, topicName });
+  await dispatchGroupChat(ctx, {
+    origin,
+    projectId: route.projectId,
+    replyBinding: route.replyBinding,
+    topicId,
+    topicName,
+  });
+}
+
+function resolveGroupConversationRoute(
+  topicId: number | undefined,
+  replyToMessageId: number | undefined,
+): (ModelCommandRoute & { replyBinding?: { projectId: string; sessionId: string } }) | undefined {
+  const replyBinding = resolveReplyBinding(groupId, topicId, replyToMessageId);
+  const projectId = resolveGroupMessageProject(replyBinding, topicId);
+  if (!projectId) return undefined;
+  const conversation = canUseStore() ? getTelegramConversation(dbRef, groupId, topicId) : undefined;
+  return {
+    projectId,
+    sessionId: replyBinding?.sessionId ?? conversation?.sessionId,
+    conversationRevision: conversation?.revision,
+    replyToMessageId,
+    replyBinding,
+  };
 }
 
 async function dispatchGroupChat(
@@ -990,6 +1266,7 @@ function getOrCreateDirectConversation(): ReturnType<typeof getTelegramConversat
 function resolveDirectConversationRoute(ctx: TextMessageCtx): {
   projectId: string;
   sessionId?: string;
+  conversationRevision?: number;
   replyToMessageId?: number;
 } {
   const conversation = getOrCreateDirectConversation();
@@ -998,6 +1275,7 @@ function resolveDirectConversationRoute(ctx: TextMessageCtx): {
   return {
     projectId: replyBinding?.projectId ?? conversation?.projectId ?? PROJECT_TELEGRAM_DEFAULT,
     sessionId: replyBinding?.sessionId ?? conversation?.sessionId,
+    conversationRevision: conversation?.revision,
     replyToMessageId,
   };
 }
@@ -1014,6 +1292,14 @@ async function routeAuthorizedDirectTextMessage(ctx: TextMessageCtx): Promise<vo
     messageId: ctx.message.message_id,
     replyToMessageId: route.replyToMessageId,
   });
+  if (
+    await handleModelCommand(ctx, {
+      text,
+      route,
+      resolveCurrentRoute: () => resolveDirectConversationRoute(ctx),
+    })
+  )
+    return;
   if (
     await handleNewConversationCommand(ctx, {
       text,

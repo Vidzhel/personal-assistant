@@ -31,7 +31,12 @@ vi.mock('../../raven.ts', async (importOriginal) => {
     ...actual,
     createRaven: async (config: AppConfig, overrides: RavenOverrides = {}) => {
       assertIsolatedComposition(config, overrides);
-      return actual.createRaven(config, overrides);
+      return actual.createRaven(config, {
+        ...overrides,
+        // Model catalog initialization is also an SDK boundary, even without
+        // inference. Tests requiring metadata must supply deliberate fixtures.
+        modelDiscovery: overrides.modelDiscovery ?? (async () => []),
+      });
     },
   };
 });

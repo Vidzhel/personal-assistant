@@ -31,6 +31,10 @@ describe('persisted SDK session resume revisions', () => {
     manager.linkSdkSession(session.id, 'sdk-session', 'workspace-v1');
 
     expect(new SessionManager().getSdkSessionId(session.id, 'workspace-v1')).toBe('sdk-session');
+    expect(new SessionManager().getSdkResumeState(session.id, 'workspace-v1')).toEqual({
+      status: 'matched',
+      sessionId: 'sdk-session',
+    });
     expect(manager.getSession(session.id)?.sdkSessionId).toBe('sdk-session');
     expect(
       getDb().prepare('SELECT sdk_resume_revision FROM sessions WHERE id = ?').get(session.id),
@@ -41,13 +45,20 @@ describe('persisted SDK session resume revisions', () => {
     const session = manager.createSession('project');
     manager.linkSdkSession(session.id, 'sdk-session', 'workspace-v1');
 
-    expect(manager.getSdkSessionId(session.id, 'workspace-v2')).toBeUndefined();
+    expect(manager.getSdkResumeState(session.id, 'workspace-v2')).toEqual({ status: 'changed' });
     expect(manager.getSdkSessionId(session.id, 'workspace-v1')).toBeUndefined();
     expect(
       getDb()
         .prepare('SELECT sdk_session_id, sdk_resume_revision FROM sessions WHERE id = ?')
         .get(session.id),
     ).toEqual({ sdk_session_id: null, sdk_resume_revision: null });
+  });
+
+  it('reports missing for unknown sessions and sessions without SDK lineage', () => {
+    const session = manager.createSession('project');
+
+    expect(manager.getSdkResumeState(session.id)).toEqual({ status: 'missing' });
+    expect(manager.getSdkResumeState('missing')).toEqual({ status: 'missing' });
   });
 
   it('treats an omitted revision as the explicit null revision', () => {

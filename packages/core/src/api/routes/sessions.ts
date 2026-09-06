@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
-import { HTTP_STATUS } from '@raven/shared';
+import { HTTP_STATUS, ModelConfigSchema, type AgentSession } from '@raven/shared';
 import type { ApiDeps } from '../server.ts';
 import type { StoredMessage } from '../../session-manager/message-store.ts';
 import { getDb } from '../../db/database.ts';
@@ -11,6 +11,7 @@ import {
   getAllReferences,
   deleteReference,
 } from '../../session-manager/session-references.ts';
+import { effectiveModelConfigProjection } from '../model-config-api.ts';
 
 const EnqueueBodySchema = z.object({
   message: z.string().min(1),
@@ -105,6 +106,19 @@ function hasProject(db: ReturnType<typeof getDb>, projectId: string): boolean {
   return Boolean(db.prepare('SELECT 1 FROM projects WHERE id = ?').get(projectId));
 }
 
+function sessionResponse(
+  session: AgentSession,
+  deps: ApiDeps,
+): AgentSession & Record<string, unknown> {
+  return {
+    ...session,
+    ...effectiveModelConfigProjection(deps.resolveEffectiveModelConfig, {
+      projectId: session.projectId,
+      sessionId: session.id,
+    }),
+  };
+}
+
 function replyIfInactiveProject(
   reply: { status: (code: number) => { send: (body: unknown) => unknown } },
   projectId: string,
@@ -159,7 +173,9 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
     if (!hasProject(getDb(), req.params.id)) {
       return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
     }
-    return deps.sessionManager.getProjectSessions(req.params.id);
+    return deps.sessionManager
+      .getProjectSessions(req.params.id)
+      .map((session) => sessionResponse(session, deps));
   });
 
   // Get or create the active session for a project
@@ -169,7 +185,7 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
     if (!hasProject(getDb(), req.params.id)) {
       return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
     }
-    return deps.sessionManager.getOrCreateSession(req.params.id);
+    return sessionResponse(deps.sessionManager.getOrCreateSession(req.params.id), deps);
   });
 
   // Force-create a new session (archives existing active sessions)
@@ -179,13 +195,13 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
     if (!hasProject(getDb(), req.params.id)) {
       return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Project not found' });
     }
-    return deps.sessionManager.createSession(req.params.id);
+    return sessionResponse(deps.sessionManager.createSession(req.params.id), deps);
   });
 
   app.get<{ Params: { id: string } }>('/api/sessions/:id', async (req, reply) => {
     const session = deps.sessionManager.getSession(req.params.id);
     if (!session) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Not found' });
-    return session;
+    return sessionResponse(session, deps);
   });
 
   // Debug: consolidated session data for investigation
@@ -235,11 +251,14 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
     const missing = replyIfInactiveProject(reply, session.projectId, deps.projectRegistry);
     if (missing) return missing;
 
-    const schema = z.object({
-      name: z.string().optional(),
-      description: z.string().optional(),
-      pinned: z.boolean().optional(),
-    });
+    const schema = z
+      .object({
+        name: z.string().optional(),
+        description: z.string().optional(),
+        pinned: z.boolean().optional(),
+        modelConfig: ModelConfigSchema.nullable().optional(),
+      })
+      .strict();
     const result = schema.safeParse(req.body);
     if (!result.success) {
       return reply
@@ -247,8 +266,23 @@ export function registerSessionRoutes(app: FastifyInstance, deps: ApiDeps): void
         .send({ error: 'Invalid body', details: result.error.issues });
     }
 
+    if (result.data.modelConfig !== undefined) {
+      try {
+        await deps.validateModelConfig?.(result.data.modelConfig, {
+          projectId: session.projectId,
+          sessionId: session.id,
+        });
+      } catch (error) {
+        return reply.status(HTTP_STATUS.BAD_REQUEST).send({
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
     deps.sessionManager.updateSession(req.params.id, result.data);
-    return deps.sessionManager.getSession(req.params.id);
+    const updated = deps.sessionManager.getSession(req.params.id);
+    if (!updated) return reply.status(HTTP_STATUS.NOT_FOUND).send({ error: 'Session not found' });
+    return sessionResponse(updated, deps);
   });
 
   // Get cross-references for a session

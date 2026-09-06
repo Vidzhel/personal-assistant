@@ -96,6 +96,48 @@ const { getDb } = await compiled('db/database.js');
 const { createPendingApprovals } = await compiled('permission-engine/pending-approvals.js');
 const calls = [];
 const events = [];
+const heldPrompts = new Set();
+const HOLD_MARKERS = [
+  'hold-browser model settings stay immutable',
+  'hold-browser in conversation A',
+  'hold-browser until connection drops',
+];
+let modelDiscoveryFailure = false;
+const discoveredModels = [
+  {
+    value: 'haiku',
+    resolvedModel: 'claude-haiku-4-5',
+    displayName: 'Haiku fixture',
+    description: 'Fast fixture model',
+    supportsEffort: true,
+    supportedEffortLevels: ['low'],
+    supportsAdaptiveThinking: false,
+  },
+  {
+    value: 'sonnet',
+    resolvedModel: 'claude-sonnet-5',
+    displayName: 'Sonnet fixture',
+    description: 'General fixture model',
+    supportsEffort: true,
+    supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+    supportsAdaptiveThinking: true,
+  },
+  {
+    value: 'claude-fable-5-1',
+    displayName: 'Fable fixture',
+    description: 'Mandatory-thinking fixture model',
+    supportsEffort: true,
+    supportedEffortLevels: ['high'],
+    supportsAdaptiveThinking: true,
+  },
+];
+const modelDiscovery = async () => {
+  if (modelDiscoveryFailure) throw new Error('Fixture model discovery unavailable');
+  return discoveredModels;
+};
+function holdMarker(prompt) {
+  return HOLD_MARKERS.find((marker) => prompt.includes(marker));
+}
 const agentBackend = async (options) => {
   const number = calls.length + 1;
   const sessionId = options.resume ?? `browser-sdk-${number}`;
@@ -105,13 +147,18 @@ const agentBackend = async (options) => {
     resume: options.resume,
     sessionId,
     aborted: false,
+    model: options.model,
+    effort: options.effort,
+    thinking: options.thinking,
   };
   calls.push(call);
   options.onSessionId?.(sessionId);
   if (options.prompt.includes('workspace-artifact-browser')) {
     await workspaceFixture.generate(options);
   }
-  if (options.prompt.includes('hold-browser')) {
+  const marker = holdMarker(options.prompt);
+  if (marker && !heldPrompts.has(marker)) {
+    heldPrompts.add(marker);
     await new Promise((resolveCall) => {
       if (options.signal.aborted) resolveCall();
       else options.signal.addEventListener('abort', resolveCall, { once: true });
@@ -136,6 +183,7 @@ const raven = await createRaven(
     libraryDir: join(root, 'library'),
     configDir: join(root, 'config'),
     agentBackend,
+    modelDiscovery,
     apiHost: '127.0.0.1',
   },
 );
@@ -185,8 +233,15 @@ const control = createServer(async (req, res) => {
       result = {
         calls,
         events,
+        modelDiscoveryFailure,
         approvals: getDb().prepare('SELECT id, resolution FROM pending_approvals').all(),
       };
+    } else if (req.method === 'POST' && req.url === '/model-discovery-failure') {
+      modelDiscoveryFailure = true;
+      result = { modelDiscoveryFailure };
+    } else if (req.method === 'POST' && req.url === '/model-discovery-success') {
+      modelDiscoveryFailure = false;
+      result = { modelDiscoveryFailure };
     } else if (req.method === 'POST' && req.url === '/invalid-definition') {
       write('projects/schedules/browser-invalid.yaml', {
         name: 'browser-invalid',

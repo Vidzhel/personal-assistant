@@ -1,5 +1,6 @@
 import { apiRequest as request } from '@/lib/api-request';
 import { projectPath } from '@/lib/url-paths';
+import type { ModelCatalogSnapshot, ModelConfig } from '@raven/shared';
 
 async function updateProject(id: string, data: object): Promise<Project> {
   await request(projectPath(id), { method: 'PUT', body: JSON.stringify(data) });
@@ -35,6 +36,10 @@ export const api = {
   deleteProject: (id: string) => request(`${projectPath(id)}`, { method: 'DELETE' }),
   getSkills: () => request<Skill[]>('/skills'),
   getSchedules: () => request<Schedule[]>('/schedules'),
+  getModels: (options?: { refresh?: boolean; signal?: AbortSignal }) =>
+    request<ModelCatalogSnapshot>(options?.refresh ? '/models?refresh=true' : '/models', {
+      signal: options?.signal,
+    }),
   setScheduleEnabled: (name: string, enabled: boolean) =>
     request<{ id: string; enabled: boolean }>(`/schedules/${encodeURIComponent(name)}`, {
       method: 'PATCH',
@@ -72,7 +77,12 @@ export const api = {
     request<SessionDebug>(`/sessions/${encodeURIComponent(sessionId)}/debug`),
   updateSession: (
     sessionId: string,
-    data: { name?: string; description?: string; pinned?: boolean },
+    data: {
+      name?: string;
+      description?: string;
+      pinned?: boolean;
+      modelConfig?: ModelConfig | null;
+    },
   ) =>
     request<Session>(`/sessions/${encodeURIComponent(sessionId)}`, {
       method: 'PATCH',
@@ -419,6 +429,9 @@ export interface Session {
   description?: string;
   pinned?: boolean;
   summary?: string;
+  modelConfig?: ModelConfig;
+  effectiveModelConfig?: ModelConfig;
+  modelConfigError?: string;
 }
 
 export interface CrossSessionReference {

@@ -232,7 +232,11 @@ interface RevisionInput {
 
 function revisionHash(input: RevisionInput): string {
   const hash = createHash('sha256');
-  hash.update(JSON.stringify(input.workspace));
+  // Model defaults affect later admission, not grants already captured by queued work.
+  // Task-level model/effort/thinking still participate in SDK resume identity.
+  const execution = { ...input.workspace.execution };
+  delete execution.modelConfig;
+  hash.update(JSON.stringify({ ...input.workspace, execution }));
   hash.update(
     '\0' +
       input.context +

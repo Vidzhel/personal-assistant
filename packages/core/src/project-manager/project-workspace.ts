@@ -365,6 +365,7 @@ function workspaceWithExecution(
 ): ProjectWorkspace {
   const execution = { ...workspace.execution, ...(patch.execution ?? {}) };
   if (execution.sourceId === null) delete execution.sourceId;
+  if (execution.modelConfig === null) delete execution.modelConfig;
   const memory = workspaceMemory(workspace, patch);
   return parseCompleteWorkspace({ ...workspace, execution, ...(memory ? { memory } : {}) });
 }

@@ -78,6 +78,14 @@ versions; do not copy versions from historical planning documents.
   Approved actions derive project ownership from their stored session, validate
   capability bindings and use global model/turn defaults. A saved approval can
   still have a failed execution; expose that failure in HTTP, UI and audit logs.
+- Conversation model settings resolve turn, session, project, named agent, then
+  installation defaults per field. Capture canonical model/effort/thinking at
+  orchestrator admission; active/queued work retains that snapshot. Discover SDK
+  model capabilities without a user prompt, lazily restore required metadata after
+  restart, and reject unsupported controls. Model switches use bounded history with
+  a current-message cutoff and completed predecessor answers; never include later
+  queued input or save a cancelled cold SDK lineage. Telegram `/model` requires an
+  existing owned conversation and revalidates routing after discovery awaits.
 - Raven MCP tools are filtered by role and available dependencies. Nested SDK
   agents receive scoped capabilities and the same permission boundaries.
   Knowledge tools and instructions must reflect actual graph availability.

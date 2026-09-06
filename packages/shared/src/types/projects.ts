@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ModelConfigSchema } from './model-config.ts';
 
 export const SystemAccessLevel = z.enum(['none', 'read', 'read-write']);
 export type SystemAccessLevel = z.infer<typeof SystemAccessLevel>;
@@ -107,6 +108,7 @@ export type ProjectMemoryBudget = z.infer<typeof ProjectMemoryBudgetSchema>;
 const WorkspaceExecutionSchema = z
   .object({
     mode: WorkspaceModeSchema,
+    modelConfig: ModelConfigSchema.optional(),
     sourceId: z
       .string()
       .regex(SOURCE_ID)
@@ -161,6 +163,7 @@ export const WorkspaceUpdateSchema = z
     execution: z
       .object({
         mode: WorkspaceModeSchema.optional(),
+        modelConfig: ModelConfigSchema.nullable().optional(),
         sourceId: z
           .string()
           .regex(SOURCE_ID)

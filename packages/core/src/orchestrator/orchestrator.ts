@@ -8,6 +8,7 @@ import {
   type UserChatMessageEvent,
   type Project,
   type SystemAccessLevel,
+  type ModelConfig,
 } from '@raven/shared';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { SessionManager } from '../session-manager/session-manager.ts';
@@ -31,6 +32,13 @@ import { validateChatTarget } from '../session-manager/chat-validation.ts';
 import { assertActiveProject } from '../project-manager/project-active.ts';
 import { createManagedProject } from '../project-manager/project-lifecycle.ts';
 import { ProjectMutationError } from '../project-manager/project-mutation.ts';
+import type {
+  ConversationModelResolver,
+  ConversationModelPreparation,
+} from '../agent-registry/conversation-models.ts';
+import { captureNestedModelSettings } from '../agent-registry/conversation-models.ts';
+import type { ModelCatalog } from '../agent-registry/model-catalog.ts';
+import { resolveModelConfig } from '../agent-registry/model-settings.ts';
 
 const log = createLogger('orchestrator');
 
@@ -50,6 +58,9 @@ export interface OrchestratorDeps {
   projectRegistry?: ProjectRegistry;
   scaffoldingApi?: ScaffoldingApi;
   projectsDir?: string;
+  resolveModel?: ConversationModelResolver;
+  prepareModel?: ConversationModelPreparation;
+  modelCatalog?: ModelCatalog;
   port: number;
 }
 
@@ -68,6 +79,9 @@ export class Orchestrator {
   private projectRegistry?: ProjectRegistry;
   private scaffoldingApi?: ScaffoldingApi;
   private projectsDir?: string;
+  private resolveModel?: ConversationModelResolver;
+  private prepareModel?: ConversationModelPreparation;
+  private modelCatalog?: ModelCatalog;
   private port: number;
   private lifetime = new AbortController();
   private pending = new Set<Promise<void>>();
@@ -89,6 +103,9 @@ export class Orchestrator {
     this.projectRegistry = deps.projectRegistry;
     this.scaffoldingApi = deps.scaffoldingApi;
     this.projectsDir = deps.projectsDir;
+    this.resolveModel = deps.resolveModel;
+    this.prepareModel = deps.prepareModel;
+    this.modelCatalog = deps.modelCatalog;
     this.port = deps.port;
     this.eventBus.on('email:new', this.emailHandler);
     this.eventBus.on('user:chat:message', this.chatHandler);
@@ -252,12 +269,73 @@ export class Orchestrator {
       this.rejectChat(event, target.error);
       return;
     }
-    const session = target.session ?? this.sessionManager.getOrCreateSession(projectId);
+    const existingSession =
+      target.session ??
+      this.sessionManager
+        .getProjectSessions(projectId)
+        .filter((candidate) => candidate.status === 'idle' || candidate.status === 'running')
+        .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
+    let modelConfig: ModelConfig & { model: string };
+    let capturedDefinitions = agentDefinitions;
+    try {
+      await this.prepareModel?.({
+        agentDefinitions,
+        projectId,
+        sessionId: existingSession?.id,
+        turn: event.payload.modelConfig,
+      });
+      if (this.lifetime.signal.aborted) {
+        this.rejectChat(event, 'Raven is stopping. Your message was not accepted.');
+        return;
+      }
+      modelConfig = this.resolveModel
+        ? this.resolveModel({
+            projectId,
+            sessionId: existingSession?.id,
+            turn: event.payload.modelConfig,
+          })
+        : resolveModelConfig(
+            {
+              turn: event.payload.modelConfig,
+              session: existingSession?.modelConfig,
+              defaults: { model: executionSettings.model },
+            },
+            { models: [], fetchedAt: null, revision: 0, stale: true, error: null },
+          );
+      modelConfig = {
+        model: modelConfig.model,
+        effort: modelConfig.effort,
+        thinking: modelConfig.thinking,
+      };
+      if (this.modelCatalog) {
+        capturedDefinitions = captureNestedModelSettings(
+          agentDefinitions,
+          modelConfig,
+          this.modelCatalog.getSnapshot(),
+        );
+      }
+    } catch (error) {
+      this.rejectChat(event, `Model settings rejected: ${String(error)}`);
+      return;
+    }
+    const session = existingSession ?? this.sessionManager.getOrCreateSession(projectId);
+    let handoffContext: string | undefined;
+    try {
+      handoffContext = this.messageStore.getModelHandoff?.(session.id);
+    } catch {
+      this.rejectChat(
+        event,
+        'Could not read the conversation history. Your message was not accepted.',
+      );
+      return;
+    }
 
+    const taskId = generateId();
     // Store the user message
     const stored = this.messageStore.appendMessage(session.id, {
       role: 'user',
       content: message,
+      taskId,
     });
     if (!stored) {
       this.rejectChat(event, 'Could not save your message. Please try again.');
@@ -307,6 +385,7 @@ export class Orchestrator {
         this.messageStore.appendMessage(session.id, {
           role: 'assistant',
           content: retrospectiveReply,
+          taskId,
         });
         if (event.payload.transportOrigin) {
           this.eventBus.emit({
@@ -406,8 +485,6 @@ export class Orchestrator {
 
     const systemAccessInstructions = resolveSystemAccessInstructions(projectForAccess);
 
-    const taskId = generateId();
-
     this.eventBus.emit({
       id: generateId(),
       timestamp: Date.now(),
@@ -419,7 +496,7 @@ export class Orchestrator {
         prompt,
         skillName: SKILL_ORCHESTRATOR,
         mcpServers,
-        agentDefinitions,
+        agentDefinitions: capturedDefinitions,
         plugins,
         namedAgentInstructions,
         systemAccessInstructions,
@@ -428,7 +505,10 @@ export class Orchestrator {
         projectId,
         namedAgentId,
         namedAgentRevision: capabilities.namedAgentRevision,
-        model: executionSettings.model,
+        model: modelConfig.model,
+        modelConfig,
+        handoffContext,
+        handoffMessageId: stored,
         maxTurns: executionSettings.maxTurns,
         bashAccess,
         transportOrigin: event.payload.transportOrigin,

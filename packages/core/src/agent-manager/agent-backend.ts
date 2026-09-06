@@ -1,4 +1,4 @@
-import type { SubAgentDefinition } from '@raven/shared';
+import type { ModelConfig, SubAgentDefinition } from '@raven/shared';
 import type { CanUseTool, Options as SdkOptions } from '@anthropic-ai/claude-agent-sdk';
 
 export type AgentBackend = (opts: BackendOptions) => Promise<BackendResult>;
@@ -43,6 +43,8 @@ export interface BackendOptions {
   systemPrompt: string;
   allowedTools: string[];
   model: string;
+  effort?: ModelConfig['effort'];
+  thinking?: ModelConfig['thinking'];
   maxTurns: number;
   taskId?: string;
   maxBudgetUsd?: number;

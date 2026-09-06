@@ -55,6 +55,29 @@ describe('Session Management (10.8)', () => {
       expect(updated.name).toBe('Named');
       expect(updated.pinned).toBe(false);
     });
+
+    it('atomically persists, replaces, and resets model configuration', () => {
+      const session = sm.createSession('proj-1');
+      sm.updateSession(session.id, {
+        modelConfig: { model: 'claude-sonnet-4-6', effort: 'high' },
+      });
+      expect(new SessionManager().getSession(session.id)?.modelConfig).toEqual({
+        model: 'claude-sonnet-4-6',
+        effort: 'high',
+      });
+
+      sm.updateSession(session.id, { modelConfig: { thinking: 'disabled' } });
+      expect(sm.getSession(session.id)?.modelConfig).toEqual({ thinking: 'disabled' });
+
+      sm.updateSession(session.id, { name: 'Preserves model config' });
+      expect(sm.getSession(session.id)?.modelConfig).toEqual({ thinking: 'disabled' });
+
+      sm.updateSession(session.id, { modelConfig: null });
+      expect(sm.getSession(session.id)?.modelConfig).toBeUndefined();
+      expect(
+        getDb().prepare('SELECT model_config_json FROM sessions WHERE id = ?').get(session.id),
+      ).toEqual({ model_config_json: null });
+    });
   });
 
   describe('SessionManager.updateSummary', () => {

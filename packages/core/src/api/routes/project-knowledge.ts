@@ -23,6 +23,7 @@ import {
 } from '../../project-manager/project-mutation.ts';
 import { isCurrentProject } from '../../project-manager/project-active.ts';
 import type { ProjectRegistry } from '../../project-registry/project-registry.ts';
+import type { EffectiveModelConfigResolver, ModelConfigValidator } from '../model-config-api.ts';
 
 export interface ProjectKnowledgeRouteDeps {
   neo4j?: Neo4jClient;
@@ -30,6 +31,8 @@ export interface ProjectKnowledgeRouteDeps {
   projectsDir?: string;
   projectRegistry?: ProjectRegistry;
   workspaceStore?: ProjectWorkspaceStore;
+  validateModelConfig?: ModelConfigValidator;
+  resolveEffectiveModelConfig?: EffectiveModelConfigResolver;
 }
 
 function assertProjectExists(projectId: string): void {
@@ -57,7 +60,10 @@ export function registerProjectKnowledgeRoutes(
   app: FastifyInstance,
   deps: ProjectKnowledgeRouteDeps,
 ): void {
-  registerProjectWorkspaceRoutes(app, deps.workspaceStore);
+  registerProjectWorkspaceRoutes(app, deps.workspaceStore, {
+    validateModelConfig: deps.validateModelConfig,
+    resolveEffectiveModelConfig: deps.resolveEffectiveModelConfig,
+  });
 
   // --- Knowledge Links (Neo4j) ---
 

@@ -1,3 +1,4 @@
+import { ModelIdSchema } from '@raven/shared';
 import { z } from 'zod';
 import { tool } from '@anthropic-ai/claude-agent-sdk';
 import type { SdkMcpToolDefinition } from '@anthropic-ai/claude-agent-sdk';
@@ -167,7 +168,7 @@ export function buildScaffoldTools(
         .array(z.string())
         .optional()
         .describe('Built-in tool names this skill needs (e.g. "Read", "Glob")'),
-      model: z.enum(['haiku', 'sonnet', 'opus']).optional(),
+      model: ModelIdSchema.optional(),
       actions: z
         .array(
           z.object({

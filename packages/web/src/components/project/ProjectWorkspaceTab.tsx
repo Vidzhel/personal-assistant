@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ProjectWorkspace, WorkspaceUpdate } from '@raven/shared';
 import { Button } from '@/components/ui/Button';
+import { ModelConfigControl } from '@/components/model-config/ModelConfigControl';
 import type { ProjectTabProps } from './project-tab-registry';
 import {
   createWorkspaceSource,
@@ -11,6 +12,7 @@ import {
   updateWorkspace,
   updateWorkspaceSource,
   type CreateWorkspaceSource,
+  type ProjectWorkspaceResponse,
   type WorkspaceSource,
 } from '@/lib/workspace-api';
 import { ProjectFileBrowser } from './ProjectFileBrowser';
@@ -131,7 +133,7 @@ function ExecutionSettings({
   disabled,
   onSave,
 }: {
-  workspace: ProjectWorkspace;
+  workspace: ProjectWorkspaceResponse;
   disabled: boolean;
   onSave: (patch: WorkspaceUpdate) => Promise<boolean>;
 }) {
@@ -164,6 +166,37 @@ function ExecutionSettings({
       >
         Save execution settings
       </Button>
+    </section>
+  );
+}
+
+function ProjectModelSettings({
+  workspace,
+  disabled,
+  onSave,
+  onCatalogLoaded,
+}: {
+  workspace: ProjectWorkspaceResponse;
+  disabled: boolean;
+  onSave: (patch: WorkspaceUpdate) => Promise<boolean>;
+  onCatalogLoaded: () => void;
+}) {
+  return (
+    <section className="space-y-3">
+      <h3 className="text-lg font-semibold">Model defaults</h3>
+      {workspace.modelConfigError && (
+        <p role="alert" className="text-sm" style={{ color: 'var(--error)' }}>
+          Effective model unavailable: {workspace.modelConfigError}
+        </p>
+      )}
+      <ModelConfigControl
+        scope="project"
+        value={workspace.execution.modelConfig}
+        effectiveValue={workspace.effectiveModelConfig}
+        disabled={disabled}
+        onSave={(modelConfig) => onSave({ execution: { modelConfig } })}
+        onCatalogLoaded={workspace.modelConfigError ? onCatalogLoaded : undefined}
+      />
     </section>
   );
 }
@@ -454,7 +487,7 @@ function SourceList({
   onSave,
   onDelete,
 }: {
-  workspace: ProjectWorkspace;
+  workspace: ProjectWorkspaceResponse;
   disabled: boolean;
   onSave: (id: string, input: Parameters<typeof updateWorkspaceSource>[2]) => Promise<boolean>;
   onDelete: (id: string) => Promise<boolean>;
@@ -799,11 +832,13 @@ function WorkspacePanels({
   workspace,
   saving,
   mutate,
+  reload,
 }: {
   projectId: string;
-  workspace: ProjectWorkspace;
+  workspace: ProjectWorkspaceResponse;
   saving: boolean;
   mutate: (operation: () => Promise<unknown>) => Promise<boolean>;
+  reload: () => Promise<boolean>;
 }) {
   return (
     <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
@@ -812,6 +847,12 @@ function WorkspacePanels({
           workspace={workspace}
           disabled={saving}
           onSave={(patch) => mutate(() => updateWorkspace(projectId, patch))}
+        />
+        <ProjectModelSettings
+          workspace={workspace}
+          disabled={saving}
+          onSave={(patch) => mutate(() => updateWorkspace(projectId, patch))}
+          onCatalogLoaded={() => void reload()}
         />
         <SourceList
           workspace={workspace}
@@ -921,6 +962,7 @@ export function ProjectWorkspaceTab({ projectId }: ProjectTabProps) {
         workspace={controller.workspace}
         saving={controller.saving}
         mutate={controller.mutate}
+        reload={controller.load}
       />
     </div>
   );

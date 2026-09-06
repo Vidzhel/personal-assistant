@@ -5,6 +5,10 @@ import type { RavenEvent, WsMessageFromClient } from '@raven/shared';
 import type { EventBus } from '../../event-bus/event-bus.ts';
 import type { SessionManager } from '../../session-manager/session-manager.ts';
 import type { ProjectRegistry } from '../../project-registry/project-registry.ts';
+import type {
+  ConversationModelResolver,
+  ConversationModelPreparation,
+} from '../../agent-registry/conversation-models.ts';
 import {
   CHAT_REQUEST_ID_MAX_LENGTH,
   ChatRequestSchema,
@@ -17,21 +21,35 @@ interface ChatDeps {
   eventBus: EventBus;
   sessionManager: SessionManager;
   projectRegistry?: ProjectRegistry;
+  resolveModel?: ConversationModelResolver;
+  prepareModel?: ConversationModelPreparation;
 }
 
-function handleChatSend(socket: WebSocket, deps: ChatDeps, msg: WsMessageFromClient): void {
+function sendChatError(
+  socket: WebSocket,
+  data: { requestId?: string; projectId?: string; sessionId?: string; error: string },
+): void {
+  socket.send(JSON.stringify({ type: 'chat:error', data }));
+}
+
+function chatRequestId(msg: WsMessageFromClient): string | undefined {
+  return 'requestId' in msg &&
+    typeof msg.requestId === 'string' &&
+    msg.requestId.length <= CHAT_REQUEST_ID_MAX_LENGTH
+    ? msg.requestId
+    : undefined;
+}
+
+async function handleChatSend(
+  socket: WebSocket,
+  deps: ChatDeps,
+  msg: WsMessageFromClient,
+): Promise<void> {
   const parsed = ChatRequestSchema.safeParse(msg);
   if (!parsed.success) {
     // Preserve a valid correlation key even when another field failed validation.
-    const requestId =
-      'requestId' in msg &&
-      typeof msg.requestId === 'string' &&
-      msg.requestId.length <= CHAT_REQUEST_ID_MAX_LENGTH
-        ? msg.requestId
-        : undefined;
-    socket.send(
-      JSON.stringify({ type: 'chat:error', data: { requestId, error: 'Invalid chat message' } }),
-    );
+    const requestId = chatRequestId(msg);
+    sendChatError(socket, { requestId, error: 'Invalid chat message' });
     return;
   }
   const { projectId, sessionId, requestId } = parsed.data;
@@ -40,12 +58,22 @@ function handleChatSend(socket: WebSocket, deps: ChatDeps, msg: WsMessageFromCli
     projectRegistry: deps.projectRegistry,
   });
   if (!target.ok) {
-    socket.send(
-      JSON.stringify({
-        type: 'chat:error',
-        data: { requestId, projectId, sessionId, error: target.error },
-      }),
-    );
+    sendChatError(socket, { requestId, projectId, sessionId, error: target.error });
+    return;
+  }
+  try {
+    await deps.prepareModel?.({
+      projectId,
+      sessionId: target.session?.id,
+      turn: parsed.data.modelConfig,
+    });
+    deps.resolveModel?.({
+      projectId,
+      sessionId: target.session?.id,
+      turn: parsed.data.modelConfig,
+    });
+  } catch (error) {
+    sendChatError(socket, { requestId, projectId, sessionId, error: String(error) });
     return;
   }
   deps.eventBus.emit({
@@ -78,7 +106,9 @@ export function registerWebSocketHandler(app: FastifyInstance, deps: ChatDeps): 
             break;
 
           case 'chat:send':
-            handleChatSend(socket, deps, msg);
+            void handleChatSend(socket, deps, msg).catch((error: unknown) =>
+              log.error(`Chat dispatch failed: ${String(error)}`),
+            );
             break;
         }
       } catch (err) {

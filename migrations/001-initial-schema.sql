@@ -2,7 +2,7 @@
 -- The migration runner owns _migrations bookkeeping.
 
 PRAGMA foreign_keys = ON;
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;
 
 CREATE TABLE projects (
   id TEXT PRIMARY KEY,
@@ -33,7 +33,8 @@ CREATE TABLE sessions (
   name TEXT,
   description TEXT,
   pinned INTEGER NOT NULL DEFAULT 0,
-  summary TEXT
+  summary TEXT,
+  model_config_json TEXT
 );
 CREATE INDEX idx_sessions_pinned ON sessions(pinned);
 

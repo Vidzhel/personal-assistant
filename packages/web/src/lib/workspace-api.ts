@@ -1,9 +1,18 @@
-import type { ProjectWorkspace, ProjectWorkspaceSource, WorkspaceUpdate } from '@raven/shared';
+import type {
+  ModelConfig,
+  ProjectWorkspace,
+  ProjectWorkspaceSource,
+  WorkspaceUpdate,
+} from '@raven/shared';
 import { CORE_API_URL } from '@/lib/core-endpoints';
 import { apiRequest } from '@/lib/api-request';
 import { projectPath } from '@/lib/url-paths';
 
 export type WorkspaceSource = ProjectWorkspaceSource & { projectId?: string };
+export type ProjectWorkspaceResponse = ProjectWorkspace & {
+  effectiveModelConfig?: ModelConfig;
+  modelConfigError?: string;
+};
 
 export interface ProjectFileEntry {
   name: string;
@@ -67,15 +76,15 @@ function fileEndpoint(
   return `${projectPath(projectId)}/files/${endpoint}?${query.toString()}`;
 }
 
-export function getWorkspace(projectId: string): Promise<ProjectWorkspace> {
-  return apiRequest<ProjectWorkspace>(`${projectPath(projectId)}/workspace`);
+export function getWorkspace(projectId: string): Promise<ProjectWorkspaceResponse> {
+  return apiRequest<ProjectWorkspaceResponse>(`${projectPath(projectId)}/workspace`);
 }
 
 export function updateWorkspace(
   projectId: string,
   patch: WorkspaceUpdate,
-): Promise<ProjectWorkspace> {
-  return apiRequest<ProjectWorkspace>(`${projectPath(projectId)}/workspace`, {
+): Promise<ProjectWorkspaceResponse> {
+  return apiRequest<ProjectWorkspaceResponse>(`${projectPath(projectId)}/workspace`, {
     method: 'PUT',
     body: JSON.stringify(patch),
   });

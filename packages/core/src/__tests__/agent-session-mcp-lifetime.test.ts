@@ -83,6 +83,7 @@ function messageStore(): MessageStore {
 function sessionManager(): SessionManager {
   return {
     getSdkSessionId: vi.fn(() => undefined),
+    getSdkResumeState: vi.fn(() => ({ status: 'missing' })),
     linkSdkSession: vi.fn(),
   } as unknown as SessionManager;
 }
@@ -137,6 +138,24 @@ beforeEach(() => {
 });
 
 describe('runAgentTask MCP call lifetime', () => {
+  it('does not save a cold SDK lineage observed before cancellation', async () => {
+    const controller = new AbortController();
+    const sessions = sessionManager();
+    const backend: AgentBackend = async (options) => {
+      options.onSessionId?.('uncertain-cold-session');
+      controller.abort();
+      return { result: '', success: false, errors: ['cancelled'] };
+    };
+    const result = await baseOptions(eventBus(), backend, {
+      memoryStore: memoryStore(),
+      sessionManager: sessions,
+      signal: controller.signal,
+      task: { sessionId: 'session-1', modelConfig: { model: 'claude-sonnet-5' } },
+    });
+    expect(result.success).toBe(false);
+    expect(sessions.linkSdkSession).not.toHaveBeenCalled();
+  });
+
   it('drains held Raven and memory handlers after normal backend completion', async () => {
     const events = eventBus();
     const memoryRelease = deferred<MemoryWriteResult>();

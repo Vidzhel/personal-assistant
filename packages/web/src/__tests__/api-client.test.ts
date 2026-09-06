@@ -98,4 +98,62 @@ describe('API success/error and project identity contracts', () => {
       '/knowledge/graph?projectId=parent%2Fchild&view=tags',
     );
   });
+
+  it('loads reported model capabilities and atomically updates or clears a session override', async () => {
+    const catalog = {
+      models: [
+        {
+          id: 'claude-example-1',
+          aliases: ['example'],
+          displayName: 'Example',
+          description: 'Fixture model',
+          supportsEffort: true,
+          supportedEffortLevels: ['low', 'high'],
+          supportsAdaptiveThinking: true,
+        },
+      ],
+      fetchedAt: '2026-09-06T12:00:00.000Z',
+      revision: 7,
+      stale: false,
+      error: null,
+    };
+    const session = {
+      id: 'session/one',
+      projectId: 'alpha',
+      status: 'idle',
+      createdAt: 1,
+      lastActiveAt: 1,
+      turnCount: 0,
+    };
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(Response.json(catalog))
+      .mockResolvedValueOnce(Response.json(catalog))
+      .mockResolvedValueOnce(
+        Response.json({
+          ...session,
+          modelConfig: { model: 'example', effort: 'high', thinking: 'adaptive' },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json(session));
+    vi.stubGlobal('fetch', fetcher);
+
+    await expect(api.getModels()).resolves.toEqual(catalog);
+    await expect(api.getModels({ refresh: true })).resolves.toEqual(catalog);
+    await api.updateSession(session.id, {
+      modelConfig: { model: 'example', effort: 'high', thinking: 'adaptive' },
+    });
+    await api.updateSession(session.id, { modelConfig: null });
+
+    expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
+      expect.stringContaining('/api/models'),
+      expect.stringContaining('/api/models?refresh=true'),
+      expect.stringContaining('/api/sessions/session%2Fone'),
+      expect.stringContaining('/api/sessions/session%2Fone'),
+    ]);
+    expect(JSON.parse(fetcher.mock.calls[2][1].body)).toEqual({
+      modelConfig: { model: 'example', effort: 'high', thinking: 'adaptive' },
+    });
+    expect(JSON.parse(fetcher.mock.calls[3][1].body)).toEqual({ modelConfig: null });
+  });
 });

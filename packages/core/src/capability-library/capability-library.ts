@@ -167,6 +167,7 @@ export class CapabilityLibrary {
         prompt: skill.skillMd,
         tools: tools.length > 0 ? tools : undefined,
         model: skill.config.model,
+        effort: skill.config.effort,
         mcpServers: skill.config.mcps.length > 0 ? skill.config.mcps : undefined,
       };
 

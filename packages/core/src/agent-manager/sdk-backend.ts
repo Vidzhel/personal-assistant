@@ -86,6 +86,8 @@ export function createSdkBackend(): AgentBackend {
       allowedTools: opts.allowedTools,
       permissionMode: opts.permissionMode ?? 'default',
       model: opts.model,
+      effort: opts.effort,
+      thinking: opts.thinking ? { type: opts.thinking } : undefined,
       maxTurns: opts.maxTurns,
       stderr: opts.onStderr,
       cwd: opts.cwd,

@@ -1,6 +1,7 @@
 import { appendFileSync, readFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createLogger, generateId } from '@raven/shared';
+import { readModelHandoff } from './model-handoff.ts';
 
 const log = createLogger('message-store');
 
@@ -27,6 +28,7 @@ export interface MessageStore {
   getMessages: (sessionId: string, opts?: { limit?: number; offset?: number }) => StoredMessage[];
   appendRawMessage: (sessionId: string, rawJson: string) => void;
   getRawMessages: (sessionId: string) => string[];
+  getModelHandoff?: (sessionId: string, beforeMessageId?: string) => string | undefined;
 }
 
 // eslint-disable-next-line max-lines-per-function -- factory function that initializes all message store methods
@@ -121,5 +123,7 @@ export function createMessageStore(options: MessageStoreOptions): MessageStore {
     getMessages,
     appendRawMessage,
     getRawMessages,
+    getModelHandoff: (sessionId, beforeMessageId) =>
+      readModelHandoff(join(basePath, sessionId, 'transcript.jsonl'), beforeMessageId),
   };
 }

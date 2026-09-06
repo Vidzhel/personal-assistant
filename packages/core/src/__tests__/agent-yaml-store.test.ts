@@ -111,7 +111,7 @@ describe('AgentYamlStore', () => {
     await store.createAgent(tmpDir, agent);
 
     await expect(
-      store.updateAgent(tmpDir, 'validate-update', { model: 'invalid-model' as any }),
+      store.updateAgent(tmpDir, 'validate-update', { model: 'invalid model' }),
     ).rejects.toThrow();
   });
 

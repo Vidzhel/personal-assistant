@@ -114,8 +114,8 @@ the packaged schema atomically; restart preserves its operational state. This
 pre-use schema cleanup does not support databases initialized by the retired
 historical migration chain: startup reports unsupported history instead of
 converting or deleting it. Use a fresh dedicated runtime database for that
-transition. The project-based Telegram release requires operational schema
-version 2, including durable conversation bindings and delivery attempts; an
+transition. The model-controls release requires operational schema
+version 3, including session model overrides, durable conversation bindings and delivery attempts; an
 earlier `001-initial-schema` database is also rejected explicitly. Startup never
 resets the owner's database. Project files and Git history remain in their volumes.
 Review future seed changes explicitly if you want to adopt them. Use one core

@@ -15,3 +15,4 @@ export * from './library.ts';
 export * from './project-fs.ts';
 export * from './templates.ts';
 export * from './transports.ts';
+export * from './model-config.ts';

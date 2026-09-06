@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ModelEffortSchema, ModelIdSchema } from '../types/model-config.ts';
 
 const KEBAB_CASE_RE = /^[a-z][a-z0-9-]*$/;
 const ACTION_NAME_RE = /^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$/;
@@ -38,7 +39,8 @@ export const SkillConfigSchema = z.object({
   vendorSkills: z.array(z.string()).default([]),
   tools: z.array(z.string()).default([]),
   systemDeps: z.array(z.string()).default([]),
-  model: z.enum(['haiku', 'sonnet', 'opus']).default('sonnet'),
+  model: ModelIdSchema.default('sonnet'),
+  effort: ModelEffortSchema.optional(),
   maxTurns: z.number().int().positive().default(DEFAULT_MAX_TURNS),
   actions: z.array(ActionSchema).default([]),
   expectedOutputs: z.array(ExpectedOutputSchema).default([]),

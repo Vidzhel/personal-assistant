@@ -34,6 +34,12 @@ import { registerHealthRoute } from './routes/health.ts';
 import { registerProjectRoutes } from './routes/projects.ts';
 import { registerProjectRecoveryRoutes } from './routes/project-recovery.ts';
 import { registerSessionRoutes } from './routes/sessions.ts';
+import { registerModelRoutes } from './routes/models.ts';
+import type { ModelCatalog } from '../agent-registry/model-catalog.ts';
+import type {
+  ConversationModelResolver,
+  ConversationModelPreparation,
+} from '../agent-registry/conversation-models.ts';
 import { registerChatRoute } from './routes/chat.ts';
 import { registerSuiteRoutes } from './routes/suites.ts';
 import { registerScheduleRoutes } from './routes/schedules.ts';
@@ -73,10 +79,14 @@ import type { ModelBudget } from '../agent-manager/model-budget.ts';
 import type { IntentStore } from '../intents/intent-store.ts';
 import { registerIntentRoutes } from './routes/intents.ts';
 import type { GeminiUploadCleanup } from '../services/gemini-transcription/upload-cleanup.ts';
+import type { EffectiveModelConfigResolver, ModelConfigValidator } from './model-config-api.ts';
 
 const log = createLogger('api');
 
 export interface ApiDeps {
+  modelCatalog?: ModelCatalog;
+  resolveModel?: ConversationModelResolver;
+  prepareModel?: ConversationModelPreparation;
   eventBus: EventBus;
   capabilityLibrary?: CapabilityLibrary;
   sessionManager: SessionManager;
@@ -120,6 +130,8 @@ export interface ApiDeps {
   scaffoldingApi?: ScaffoldingApi;
   scaffoldAndActivate?: ScaffoldAndActivateFn;
   intentStore?: IntentStore;
+  validateModelConfig?: ModelConfigValidator;
+  resolveEffectiveModelConfig?: EffectiveModelConfigResolver;
 }
 
 // eslint-disable-next-line max-lines-per-function, complexity -- server setup registers all route groups
@@ -163,6 +175,7 @@ export async function createApiServer(
     neo4jClient: deps.neo4jClient,
   });
   registerSessionRoutes(app, deps);
+  registerModelRoutes(app, deps.modelCatalog);
   registerChatRoute(app, deps);
   registerSuiteRoutes(app, deps);
   registerScheduleRoutes(app, deps);
@@ -255,6 +268,8 @@ export async function createApiServer(
     projectsDir: deps.projectsDir,
     knowledgeStore: deps.knowledgeStore,
     projectRegistry: deps.projectRegistry,
+    validateModelConfig: deps.validateModelConfig,
+    resolveEffectiveModelConfig: deps.resolveEffectiveModelConfig,
   });
 
   // File download (agents save files to data/files/ and clients download via this route)

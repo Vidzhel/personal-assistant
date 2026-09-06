@@ -1,4 +1,10 @@
-import { createLogger, generateId, type AgentSession } from '@raven/shared';
+import {
+  createLogger,
+  generateId,
+  ModelConfigSchema,
+  type AgentSession,
+  type ModelConfig,
+} from '@raven/shared';
 import { getDb } from '../db/database.ts';
 
 const log = createLogger('session-manager');
@@ -52,16 +58,15 @@ export class SessionManager {
     );
   }
 
-  /** Direct lookup used to decide whether a chat turn resumes an existing
-   * SDK session or starts cold (see agent-session.ts runAgentTask). Returns
-   * undefined for a session that has never completed a turn yet. */
-  getSdkSessionId(sessionId: string, revision?: string): string | undefined {
+  /** Distinguishes a matching SDK lineage from a missing lineage and one that
+   * was cleared because its dispatch revision changed. */
+  getSdkResumeState(sessionId: string, revision?: string): SdkResumeState {
     const db = getDb();
     const row = db
       .prepare('SELECT sdk_session_id, sdk_resume_revision FROM sessions WHERE id = ?')
       .get(sessionId) as
       { sdk_session_id: string | null; sdk_resume_revision: string | null } | undefined;
-    if (!row) return undefined;
+    if (!row || row.sdk_session_id === null) return { status: 'missing' };
     const expectedRevision = revision ?? null;
     if (row.sdk_resume_revision !== expectedRevision) {
       db.prepare(
@@ -69,9 +74,15 @@ export class SessionManager {
          SET sdk_session_id = NULL, sdk_resume_revision = NULL
          WHERE id = ? AND sdk_resume_revision IS ? AND sdk_session_id IS ?`,
       ).run(sessionId, row.sdk_resume_revision, row.sdk_session_id);
-      return undefined;
+      return { status: 'changed' };
     }
-    return row.sdk_session_id ?? undefined;
+    return { status: 'matched', sessionId: row.sdk_session_id };
+  }
+
+  /** Compatibility wrapper for callers that only need a matching SDK id. */
+  getSdkSessionId(sessionId: string, revision?: string): string | undefined {
+    const state = this.getSdkResumeState(sessionId, revision);
+    return state.status === 'matched' ? state.sessionId : undefined;
   }
 
   clearSdkSession(sessionId: string): void {
@@ -173,7 +184,12 @@ export class SessionManager {
 
   updateSession(
     sessionId: string,
-    updates: { name?: string; description?: string; pinned?: boolean },
+    updates: {
+      name?: string;
+      description?: string;
+      pinned?: boolean;
+      modelConfig?: ModelConfig | null;
+    },
   ): void {
     const db = getDb();
     const sets: string[] = [];
@@ -190,6 +206,14 @@ export class SessionManager {
     if (updates.pinned !== undefined) {
       sets.push('pinned = ?');
       values.push(updates.pinned ? 1 : 0);
+    }
+    if (updates.modelConfig !== undefined) {
+      sets.push('model_config_json = ?');
+      values.push(
+        updates.modelConfig === null
+          ? null
+          : JSON.stringify(ModelConfigSchema.parse(updates.modelConfig)),
+      );
     }
 
     if (sets.length === 0) return;
@@ -241,7 +265,11 @@ interface SessionRow {
   description: string | null;
   pinned: number;
   summary: string | null;
+  model_config_json: string | null;
 }
+
+export type SdkResumeState =
+  { status: 'matched'; sessionId: string } | { status: 'changed' | 'missing' };
 
 function rowToSession(row: SessionRow): AgentSession {
   return {
@@ -257,5 +285,9 @@ function rowToSession(row: SessionRow): AgentSession {
     description: row.description ?? undefined,
     pinned: row.pinned === 1,
     summary: row.summary ?? undefined,
+    modelConfig:
+      row.model_config_json === null
+        ? undefined
+        : ModelConfigSchema.parse(JSON.parse(row.model_config_json) as unknown),
   };
 }

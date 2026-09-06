@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, type Dirent } from 'node:fs';
 import { join } from 'node:path';
 import { parse, stringify } from 'yaml';
 import { z } from 'zod';
-import { META_PROJECT_ID, type AgentTask } from '@raven/shared';
+import { META_PROJECT_ID, ModelConfigSchema, type AgentTask } from '@raven/shared';
 import {
   assertRecordDirectory,
   atomicWrite,
@@ -52,6 +52,8 @@ export const ExecutionRunRecordSchema = z
     treeId: z.string().min(1).optional(),
     executionTaskId: z.string().min(1).optional(),
     namedAgentId: z.string().min(1).optional(),
+    model: z.string().min(1).optional(),
+    modelConfig: ModelConfigSchema.optional(),
     interrupted: z.boolean().optional(),
   })
   .strict()
@@ -120,6 +122,8 @@ export function agentTaskToRunRecord(task: AgentTask): ExecutionRunRecord {
     record,
     optionalField('sessionId', task.sessionId),
     optionalField('projectId', task.projectId),
+    optionalField('model', task.model),
+    optionalField('modelConfig', task.modelConfig),
     optionalField('actionName', task.actionName),
     optionalField('result', task.result),
     optionalField('durationMs', task.durationMs),

@@ -22,13 +22,14 @@ import { resolveTaskWorkspace } from './workspace-task.ts';
 import { validateChatTarget } from '../session-manager/chat-validation.ts';
 
 const log = createLogger('agent-manager');
+const MAX_HANDOFF_CONTEXT_BYTES = 25_600;
 
 /**
  * AgentManager owns the task queue and agent concurrency.
  * It listens for agent:task:request events and runs them using Claude Agent SDK.
  *
- * CRITICAL: The agent manager NEVER gives MCPs to the main orchestrator agent.
- * MCPs are only attached to sub-agents that are skill-specific.
+ * Every task retains its explicit capability bindings; nested workers preserve
+ * their scopes independently of the conversational model selection.
  */
 export interface AgentManagerDeps {
   eventBus: EventBus;
@@ -157,12 +158,7 @@ export class AgentManager {
   private enqueue(payload: AgentTaskRequestEvent['payload']): void {
     if (!this.accepting) return;
     this.assertNewTaskId(payload.taskId);
-    try {
-      validateResolvedAgentExecutionSettings({ model: payload.model, maxTurns: payload.maxTurns });
-    } catch (error) {
-      this.rejectTaskRequest(payload, error);
-      return;
-    }
+    if (!this.validateTaskRequest(payload)) return;
     const task: AgentTask = {
       id: payload.taskId,
       sessionId: payload.sessionId,
@@ -184,6 +180,9 @@ export class AgentManager {
       namedAgentId: payload.namedAgentId,
       namedAgentRevision: payload.namedAgentRevision,
       model: payload.model,
+      modelConfig: payload.modelConfig ? structuredClone(payload.modelConfig) : undefined,
+      handoffContext: payload.handoffContext,
+      handoffMessageId: payload.handoffMessageId,
       maxTurns: payload.maxTurns,
       bashAccess: payload.bashAccess,
       treeId: payload.treeId,
@@ -197,6 +196,27 @@ export class AgentManager {
       this.queueTask(task);
     } catch (error) {
       this.rejectTaskRequest(payload, error);
+    }
+  }
+
+  private validateTaskRequest(payload: AgentTaskRequestEvent['payload']): boolean {
+    try {
+      validateResolvedAgentExecutionSettings({
+        model: payload.model,
+        maxTurns: payload.maxTurns,
+        modelConfig: payload.modelConfig,
+      });
+      if (
+        payload.handoffContext !== undefined &&
+        (typeof payload.handoffContext !== 'string' ||
+          Buffer.byteLength(payload.handoffContext) > MAX_HANDOFF_CONTEXT_BYTES)
+      ) {
+        throw new Error('Conversation handoff exceeds its bounded context limit');
+      }
+      return true;
+    } catch (error) {
+      this.rejectTaskRequest(payload, error);
+      return false;
     }
   }
 

@@ -3,7 +3,7 @@ import { tool } from '@anthropic-ai/claude-agent-sdk';
 import type { SdkMcpToolDefinition } from '@anthropic-ai/claude-agent-sdk';
 import type { RavenMcpDeps } from '../types.ts';
 import type { ScopeContext } from '../scope.ts';
-import type { ProjectNode } from '@raven/shared';
+import { ModelIdSchema, type ProjectNode } from '@raven/shared';
 
 const MAX_TURNS = 100;
 
@@ -65,7 +65,7 @@ export function buildSystemTools(
         .describe('Agent name (kebab-case)'),
       description: z.string().optional().describe('Agent description'),
       instructions: z.string().optional().describe('System instructions for the agent'),
-      model: z.enum(['haiku', 'sonnet', 'opus']).optional().describe('Model to use'),
+      model: ModelIdSchema.optional().describe('Model to use'),
       maxTurns: z.number().int().min(1).max(MAX_TURNS).optional().describe('Max turns (1-100)'),
       skills: z
         .array(z.string())
@@ -104,7 +104,7 @@ export function buildSystemTools(
       name: z.string().optional().describe('New name (kebab-case)'),
       description: z.string().nullable().optional().describe('New description'),
       instructions: z.string().nullable().optional().describe('New instructions'),
-      model: z.enum(['haiku', 'sonnet', 'opus']).nullable().optional().describe('New model'),
+      model: ModelIdSchema.nullable().optional().describe('New model'),
       maxTurns: z
         .number()
         .int()

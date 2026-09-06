@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { HTTP_STATUS, type AgentSession } from '@raven/shared';
+import { HTTP_STATUS, ModelConfigSchema, type AgentSession } from '@raven/shared';
 import { getDb } from '../db/database.ts';
 import { isCurrentProject } from '../project-manager/project-active.ts';
 import type { ProjectRegistry } from '../project-registry/project-registry.ts';
@@ -11,6 +11,7 @@ export const ChatRequestSchema = z.object({
   requestId: z.string().min(1).max(CHAT_REQUEST_ID_MAX_LENGTH).optional(),
   projectId: z.string().min(1),
   message: z.string().min(1),
+  modelConfig: ModelConfigSchema.optional(),
   // The dashboard sends null while its initial session is loading.
   sessionId: z
     .string()
@@ -38,7 +39,13 @@ export function validateChatTarget(
   if (!isCurrentProject(db, projectId, projectRegistry)) {
     return { ok: false, statusCode: HTTP_STATUS.NOT_FOUND, error: 'Project not found' };
   }
-  if (sessionId === undefined) return { ok: true };
+  if (sessionId === undefined) {
+    const session = sessionManager
+      .getProjectSessions(projectId)
+      .filter((candidate) => candidate.status === 'idle' || candidate.status === 'running')
+      .sort((a, b) => b.lastActiveAt - a.lastActiveAt)[0];
+    return { ok: true, session };
+  }
 
   const session = sessionManager.getSession(sessionId);
   if (!session || session.projectId !== projectId) {

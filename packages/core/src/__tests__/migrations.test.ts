@@ -82,6 +82,10 @@ describe('migrations', () => {
   it('creates current permission tables without retired pipeline annotations', () => {
     const db = initDatabase(dbPath);
 
+    expect(db.pragma('user_version', { simple: true })).toBe(3);
+    const sessionCols = db.pragma('table_info(sessions)') as Array<{ name: string }>;
+    expect(sessionCols.map((column) => column.name)).toContain('model_config_json');
+
     // audit_log columns
     const auditCols = db.pragma('table_info(audit_log)') as Array<{ name: string }>;
     const auditColNames = auditCols.map((c) => c.name);
@@ -159,7 +163,7 @@ describe('migrations', () => {
     const db = new Database(dbPath);
     writeFileSync(
       join(migrationsDir, '001-initial-schema.sql'),
-      'CREATE TABLE projects (id TEXT PRIMARY KEY); INVALID SQL; PRAGMA user_version = 2;',
+      'CREATE TABLE projects (id TEXT PRIMARY KEY); INVALID SQL; PRAGMA user_version = 3;',
     );
     expect(() => runFileMigrations(db, migrationsDir)).toThrow();
     expect(db.prepare('SELECT name FROM _migrations').all()).toEqual([]);
@@ -175,7 +179,7 @@ describe('migrations', () => {
     db.exec('CREATE TABLE existing (id TEXT PRIMARY KEY);');
     writeFileSync(
       join(migrationsDir, '001-initial-schema.sql'),
-      'CREATE TABLE partial (id TEXT); ALTER TABLE existing ADD COLUMN id TEXT; PRAGMA user_version = 2;',
+      'CREATE TABLE partial (id TEXT); ALTER TABLE existing ADD COLUMN id TEXT; PRAGMA user_version = 3;',
     );
 
     expect(() => runFileMigrations(db, migrationsDir)).toThrow('duplicate column name');
@@ -191,11 +195,11 @@ describe('migrations', () => {
 
   it('does not expose a database handle after initialization fails and can retry cleanly', () => {
     const schema = join(migrationsDir, '001-initial-schema.sql');
-    writeFileSync(schema, 'CREATE TABLE partial (id TEXT); INVALID SQL; PRAGMA user_version = 2;');
+    writeFileSync(schema, 'CREATE TABLE partial (id TEXT); INVALID SQL; PRAGMA user_version = 3;');
     expect(() => initDatabase(dbPath, migrationsDir)).toThrow();
     expect(() => getDb()).toThrow('Database not initialized');
 
-    writeFileSync(schema, 'CREATE TABLE current (id TEXT PRIMARY KEY); PRAGMA user_version = 2;');
+    writeFileSync(schema, 'CREATE TABLE current (id TEXT PRIMARY KEY); PRAGMA user_version = 3;');
     const db = initDatabase(dbPath, migrationsDir);
     expect(
       db.prepare("SELECT name FROM sqlite_master WHERE name = 'partial'").get(),
@@ -221,11 +225,11 @@ describe('migrations', () => {
     `);
     writeFileSync(
       join(migrationsDir, '001-initial-schema.sql'),
-      'CREATE TABLE current (id TEXT PRIMARY KEY); PRAGMA user_version = 2;',
+      'CREATE TABLE current (id TEXT PRIMARY KEY); PRAGMA user_version = 3;',
     );
 
     expect(() => runFileMigrations(db, migrationsDir)).toThrow(
-      'Unsupported operational database schema version 1; expected 2',
+      'Unsupported operational database schema version 1; expected 3',
     );
     expect(db.prepare('SELECT value FROM owner_data').get()).toEqual({ value: 'keep' });
     expect(db.pragma('user_version', { simple: true })).toBe(1);
@@ -240,7 +244,7 @@ describe('migrations', () => {
     );
 
     expect(() => runFileMigrations(db, migrationsDir)).toThrow(
-      'Unsupported operational database schema version 0; expected 2',
+      'Unsupported operational database schema version 0; expected 3',
     );
     expect(
       db.prepare("SELECT name FROM sqlite_master WHERE name = 'should_not_exist'").get(),
@@ -253,13 +257,13 @@ describe('migrations', () => {
     const db = new Database(dbPath);
     writeFileSync(
       join(migrationsDir, '001-initial-schema.sql'),
-      `PRAGMA user_version = 2;
+      `PRAGMA user_version = 3;
        CREATE TABLE should_not_exist (id TEXT PRIMARY KEY);
        PRAGMA user_version = 1;`,
     );
 
     expect(() => runFileMigrations(db, migrationsDir)).toThrow(
-      'Unsupported operational database schema version 1; expected 2',
+      'Unsupported operational database schema version 1; expected 3',
     );
     expect(
       db.prepare("SELECT name FROM sqlite_master WHERE name = 'should_not_exist'").get(),

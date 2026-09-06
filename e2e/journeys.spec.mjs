@@ -233,6 +233,194 @@ test('chat persists replies and resumes the same backend conversation after relo
   expect(messages.filter((message) => message.role === 'assistant')).toHaveLength(2);
 });
 
+test('model controls persist layered defaults and apply edits only to the next turn', async ({
+  page,
+  request,
+}) => {
+  await request.post(`${CONTROL}/model-discovery-success`);
+  expect((await request.get(`${API}/models?refresh=true`)).ok()).toBeTruthy();
+  const p = await project(request, 'Browser Model Controls');
+  const s = await session(request, p.id, 'Model settings conversation');
+  await session(request, p.id, 'Other model conversation');
+
+  await page.goto(projectPath(p.id));
+  await page.getByRole('button', { name: 'Workspace', exact: true }).click();
+  const workspace = page.getByRole('region', { name: 'Project workspace', exact: true });
+  const projectModel = workspace.locator('details').filter({ hasText: 'Project model default' });
+  await projectModel.getByText('Project model default', { exact: true }).click();
+  await projectModel.getByRole('combobox', { name: 'Model', exact: true }).selectOption('sonnet');
+  await projectModel.getByRole('combobox', { name: 'Effort', exact: true }).selectOption('high');
+  await projectModel
+    .getByRole('combobox', { name: 'Thinking', exact: true })
+    .selectOption('adaptive');
+  await projectModel.getByRole('button', { name: 'Save for next turn', exact: true }).click();
+  await expect
+    .poll(async () => {
+      const current = await (await request.get(`${API}${projectPath(p.id)}/workspace`)).json();
+      return current.execution.modelConfig;
+    })
+    .toEqual({ model: 'sonnet', effort: 'high', thinking: 'adaptive' });
+
+  await chat(page, p.id);
+  await page.getByRole('button', { name: /Model settings conversation/ }).click();
+  const sessionModel = page.locator('details').filter({ hasText: 'Session model' });
+  await sessionModel.getByText('Session model', { exact: true }).click();
+  await sessionModel
+    .getByRole('combobox', { name: 'Model', exact: true })
+    .selectOption('claude-haiku-4-5');
+  await page.getByRole('button', { name: /Other model conversation/ }).click();
+  await sessionModel.getByText('Session model', { exact: true }).click();
+  await expect(sessionModel.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue('');
+  await page.getByRole('button', { name: /Model settings conversation/ }).click();
+  await sessionModel.getByText('Session model', { exact: true }).click();
+  await expect(sessionModel.getByRole('combobox', { name: 'Model', exact: true })).toHaveValue('');
+  await expect(sessionModel.getByText('Inherited:', { exact: false })).toBeVisible();
+  await expect(
+    sessionModel.getByText('Effective: claude-sonnet-5 · high effort · adaptive thinking'),
+  ).toBeVisible();
+  await sessionModel.getByRole('combobox', { name: 'Effort', exact: true }).selectOption('xhigh');
+  await sessionModel.getByRole('button', { name: 'Save for next turn', exact: true }).click();
+  await expect
+    .poll(async () => (await (await request.get(`${API}/sessions/${s.id}`)).json()).modelConfig)
+    .toEqual({ effort: 'xhigh' });
+
+  await page.reload();
+  await page.getByRole('button', { name: 'Sessions', exact: true }).click();
+  await expect(page.getByPlaceholder('Ask Raven...')).toBeVisible();
+  const reloadedModel = page.locator('details').filter({ hasText: 'Session model' });
+  await reloadedModel.getByText('Session model', { exact: true }).click();
+  await expect(reloadedModel.getByRole('combobox', { name: 'Effort', exact: true })).toHaveValue(
+    'xhigh',
+  );
+  await expect(
+    reloadedModel.getByText('Effective: claude-sonnet-5 · xhigh effort · adaptive thinking'),
+  ).toBeVisible();
+
+  await send(page, 'hold-browser model settings stay immutable');
+  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible();
+  expect((await state(request)).calls.at(-1)).toMatchObject({
+    model: 'claude-sonnet-5',
+    effort: 'xhigh',
+    thinking: 'adaptive',
+  });
+  await reloadedModel.getByRole('combobox', { name: 'Effort', exact: true }).selectOption('low');
+  await reloadedModel.getByRole('button', { name: 'Save for next turn', exact: true }).click();
+  await expect(
+    reloadedModel.getByText(
+      'The active response keeps its admitted settings. Changes apply to the next turn.',
+    ),
+  ).toBeVisible();
+  await expect
+    .poll(async () => (await (await request.get(`${API}/sessions/${s.id}`)).json()).modelConfig)
+    .toEqual({ effort: 'low' });
+  expect((await state(request)).calls.at(-1).effort).toBe('xhigh');
+  await page.getByRole('button', { name: 'Stop', exact: true }).click();
+  await expect(page.getByText('Stopped.', { exact: true })).toBeVisible();
+  await expect
+    .poll(async () => {
+      const current = await state(request);
+      return current.calls.find((call) =>
+        call.prompt.includes('hold-browser model settings stay immutable'),
+      )?.aborted;
+    })
+    .toBe(true);
+  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
+
+  const next = (await state(request)).calls.length + 1;
+  await send(page, 'Model settings on the next turn');
+  await expect(page.getByText(`Browser reply ${next}`, { exact: true })).toBeVisible();
+  expect((await state(request)).calls.at(-1)).toMatchObject({
+    model: 'claude-sonnet-5',
+    effort: 'low',
+    thinking: 'adaptive',
+  });
+
+  const model = reloadedModel.getByRole('combobox', { name: 'Model', exact: true });
+  const effort = reloadedModel.getByRole('combobox', { name: 'Effort', exact: true });
+  const thinking = reloadedModel.getByRole('combobox', { name: /Thinking/, exact: true });
+  await model.selectOption('claude-haiku-4-5');
+  await expect(effort.locator('option[value="high"]')).toHaveAttribute('disabled', '');
+  await expect(thinking.locator('option[value="adaptive"]')).toHaveAttribute('disabled', '');
+  await model.selectOption('claude-sonnet-5');
+  await effort.selectOption('high');
+  await thinking.selectOption('disabled');
+  await model.selectOption('claude-fable-5-1');
+  await expect(reloadedModel.getByText('Fable fixture requires thinking')).toBeVisible();
+  await expect(
+    reloadedModel.getByRole('button', { name: 'Save for next turn', exact: true }),
+  ).toBeDisabled();
+  await expect(thinking.locator('option[value="disabled"]')).toHaveAttribute('disabled', '');
+  await reloadedModel.getByRole('button', { name: 'Clear override', exact: true }).click();
+  await expect
+    .poll(async () => (await (await request.get(`${API}/sessions/${s.id}`)).json()).modelConfig)
+    .toBeUndefined();
+  await expect(
+    reloadedModel.getByText('Effective: claude-sonnet-5 · high effort · adaptive thinking'),
+  ).toBeVisible();
+
+  await page.getByRole('button', { name: 'Workspace', exact: true }).click();
+  const resetProjectModel = workspace
+    .locator('details')
+    .filter({ hasText: 'Project model default' });
+  await resetProjectModel.getByText('Project model default', { exact: true }).click();
+  await resetProjectModel.getByRole('button', { name: 'Clear override', exact: true }).click();
+  await expect
+    .poll(async () => {
+      const current = await (await request.get(`${API}${projectPath(p.id)}/workspace`)).json();
+      return current.execution.modelConfig;
+    })
+    .toBeUndefined();
+});
+
+test('model catalog and validation failures stay visible with an isolated retry', async ({
+  page,
+  request,
+}) => {
+  await request.post(`${CONTROL}/model-discovery-success`);
+  expect((await request.get(`${API}/models?refresh=true`)).ok()).toBeTruthy();
+  const p = await project(request, 'Browser Model Failure');
+  await session(request, p.id, 'Model catalog failure');
+  const catalogFailure = (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'Catalog fixture fetch failed' }),
+    });
+  await page.route('**/api/models*', catalogFailure);
+  await chat(page, p.id);
+  const modelControl = page.locator('details').filter({ hasText: 'Session model' });
+  await modelControl.getByText('Session model', { exact: true }).click();
+  await expect(
+    modelControl.getByText('Model catalog unavailable:', { exact: false }),
+  ).toContainText('Catalog fixture fetch failed');
+  await expect(
+    modelControl.getByRole('option', { name: 'Sonnet preset', exact: true }),
+  ).toHaveCount(1);
+  await modelControl.getByRole('combobox', { name: 'Model', exact: true }).selectOption('sonnet');
+  await page.unroute('**/api/models*', catalogFailure);
+  await modelControl.getByRole('button', { name: 'Refresh model catalog', exact: true }).click();
+  await expect(
+    modelControl.getByText('Reported availability is not an entitlement check.', { exact: false }),
+  ).toBeVisible();
+
+  await request.post(`${CONTROL}/model-discovery-failure`);
+  const failedRefresh = await request.get(`${API}/models?refresh=true`);
+  expect(failedRefresh.ok()).toBeTruthy();
+  expect((await failedRefresh.json()).error).toContain('Fixture model discovery unavailable');
+  await page.reload();
+  await page.getByRole('button', { name: 'Sessions', exact: true }).click();
+  const staleControl = page.locator('details').filter({ hasText: 'Session model' });
+  await staleControl.getByText('Session model', { exact: true }).click();
+  await expect(staleControl.getByText('Model catalog is stale', { exact: false })).toContainText(
+    'Fixture model discovery unavailable',
+  );
+  await request.post(`${CONTROL}/model-discovery-success`);
+  await staleControl.getByRole('button', { name: 'Refresh model catalog', exact: true }).click();
+  await expect(
+    staleControl.getByText('Reported availability is not an entitlement check.', { exact: false }),
+  ).toBeVisible();
+});
+
 test('switching sessions isolates active work, and Stop waits for a real terminal result', async ({
   page,
   request,

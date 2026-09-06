@@ -24,7 +24,12 @@ import type {
   WorkspaceExecution,
   WorkspaceExecutionResolver,
 } from '../project-manager/workspace-execution.ts';
-import { resolveTaskWorkspace, applyWorkspaceContext } from './workspace-task.ts';
+import {
+  resolveTaskWorkspace,
+  applyWorkspaceContext,
+  taskResumeRevision,
+} from './workspace-task.ts';
+import { withModelHandoff } from '../session-manager/model-handoff.ts';
 import { createSessionToolGuard } from './session-tool-guard.ts';
 import { createToolCallLifetime } from '../mcp-server/tool-call-lifetime.ts';
 
@@ -437,7 +442,6 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       assertCurrent,
       policy: canUseTool,
     });
-    const prompt = task.prompt;
 
     // Track Agent tool_use IDs → sub-agent type for attribution
     const agentToolMap = new Map<string, string>();
@@ -452,10 +456,18 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
     // .sessionId). Execution-bridge dispatches and validator tasks never set
     // it, so they always run cold — resuming session state into an unrelated
     // task/validation lineage would leak chat context across it.
-    const resume =
+    const resumeRevision = taskResumeRevision(task, workspace);
+    const resumeState =
       task.sessionId && opts.sessionManager
-        ? opts.sessionManager.getSdkSessionId(task.sessionId, workspace?.revision)
+        ? opts.sessionManager.getSdkResumeState(task.sessionId, resumeRevision)
         : undefined;
+    const resume = resumeState?.status === 'matched' ? resumeState.sessionId : undefined;
+    const history =
+      !resume && task.sessionId && task.handoffMessageId
+        ? (messageStore?.getModelHandoff?.(task.sessionId, task.handoffMessageId) ??
+          task.handoffContext)
+        : task.handoffContext;
+    const prompt = resume ? task.prompt : withModelHandoff(task.prompt, history);
 
     assertCurrent();
     const backend = getActiveBackend();
@@ -466,6 +478,8 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       systemPrompt,
       allowedTools,
       model: opts.model ?? config.CLAUDE_MODEL,
+      effort: task.modelConfig?.effort,
+      thinking: task.modelConfig?.thinking,
       maxTurns: opts.maxTurns ?? config.RAVEN_AGENT_MAX_TURNS,
       mcpServers: sdkMcpServers,
       agents: applyWorkspaceContext(agentDefinitions, workspace),
@@ -615,10 +629,14 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
     // path — means a session id observed via onSessionId above still gets
     // persisted even when the query throws right after establishing it;
     // otherwise the next turn would have no sdk session to resume at all.
-    if (task.sessionId && opts.sessionManager && sdkSessionId) {
+    if (task.sessionId && opts.sessionManager && sdkSessionId && !signal?.aborted) {
       try {
         assertCurrent();
-        opts.sessionManager.linkSdkSession(task.sessionId, sdkSessionId, workspace?.revision);
+        opts.sessionManager.linkSdkSession(
+          task.sessionId,
+          sdkSessionId,
+          taskResumeRevision(task, workspace),
+        );
       } catch (error) {
         opts.sessionManager.clearSdkSession(task.sessionId);
         success = false;

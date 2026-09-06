@@ -104,6 +104,7 @@ function makeSessionManager() {
       turnCount: 0,
     })),
     getSdkSessionId: vi.fn(() => undefined),
+    getSdkResumeState: vi.fn(() => ({ status: 'missing' })),
     linkSdkSession: vi.fn(),
     updateStatus: vi.fn(),
     incrementTurnCount: vi.fn(),

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import type { ModelConfig } from '@raven/shared';
 import { api, type Session } from '@/lib/api-client';
 import { ChatPanel } from '@/components/chat/ChatPanel';
 import { SessionDebugPanel } from '@/components/session/SessionDebugPanel';
@@ -101,7 +102,15 @@ export function ProjectSessionsTab({
   }, [activeSessionId]);
 
   const handleUpdateSession = useCallback(
-    async (sessionId: string, data: { name?: string; description?: string; pinned?: boolean }) => {
+    async (
+      sessionId: string,
+      data: {
+        name?: string;
+        description?: string;
+        pinned?: boolean;
+        modelConfig?: ModelConfig | null;
+      },
+    ) => {
       const updated = await api.updateSession(sessionId, data);
       setSessions((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
     },
@@ -125,6 +134,20 @@ export function ProjectSessionsTab({
     } finally {
       if (currentSession.current === activeSessionId) setRetroLoading(false);
     }
+  }, [activeSessionId, projectId]);
+
+  const refreshActiveSessionProjection = useCallback(() => {
+    if (!activeSessionId) return;
+    const expectedSession = activeSessionId;
+    void api
+      .getProjectSessions(projectId)
+      .then((updated) => {
+        if (currentSession.current === expectedSession) setSessions(updated);
+      })
+      .catch((cause: unknown) => {
+        if (currentSession.current !== expectedSession) return;
+        setError(cause instanceof Error ? cause.message : 'Could not refresh model settings.');
+      });
   }, [activeSessionId, projectId]);
 
   const filteredSessions = useMemo(() => {
@@ -379,7 +402,19 @@ export function ProjectSessionsTab({
         <div className="flex-1 overflow-hidden">
           {activeSessionId ? (
             <fieldset disabled={composerDisabled} className="contents">
-              <ChatPanel projectId={projectId} sessionId={activeSessionId} />
+              <ChatPanel
+                projectId={projectId}
+                sessionId={activeSessionId}
+                modelConfig={activeSession?.modelConfig}
+                effectiveModelConfig={activeSession?.effectiveModelConfig}
+                modelConfigError={activeSession?.modelConfigError}
+                onModelCatalogLoaded={
+                  activeSession?.modelConfigError ? refreshActiveSessionProjection : undefined
+                }
+                onModelConfigSave={(modelConfig) =>
+                  handleUpdateSession(activeSessionId, { modelConfig }).then(() => true)
+                }
+              />
             </fieldset>
           ) : (
             <div className="flex items-center justify-center h-full">

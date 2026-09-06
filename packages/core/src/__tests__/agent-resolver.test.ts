@@ -86,13 +86,13 @@ describe('AgentResolver', () => {
     ).toEqual({ model: 'claude-sonnet-5', maxTurns: 25 });
   });
 
-  it('rejects unsupported configured model and turn values before dispatch', () => {
+  it('rejects malformed configured model and turn values before dispatch', () => {
     expect(() =>
       resolveAgentExecutionSettings({
-        model: 'unknown',
+        model: 'invalid model',
         defaults: { model: 'configured-model', maxTurns: 25 },
       }),
-    ).toThrow(/Unsupported named-agent model/);
+    ).toThrow(/Invalid model identifier/);
     expect(() =>
       resolveAgentExecutionSettings({
         maxTurns: 101,

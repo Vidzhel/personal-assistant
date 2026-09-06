@@ -4,6 +4,7 @@ import { PermissionTierSchema } from './permissions.ts';
 import type { TaskTreeNode } from './task-execution.ts';
 import type { BashAccess } from './project-fs.ts';
 import type { ChatTransportOrigin, NotificationDestination } from './transports.ts';
+import type { ModelConfig, ModelEffort } from './model-config.ts';
 
 export interface BaseEvent {
   id: string;
@@ -59,6 +60,11 @@ export interface AgentTaskRequestEvent extends BaseEvent {
     namedAgentRevision?: string;
     /** Effective SDK model identifier selected from the named-agent tier. */
     model?: string;
+    /** Canonical model settings captured before the task entered the queue. */
+    modelConfig?: ModelConfig;
+    /** Bounded untrusted history used only for a cold continuation. */
+    handoffContext?: string;
+    handoffMessageId?: string;
     /** Validated per-dispatch turn cap from the named-agent definition. */
     maxTurns?: number;
     plugins?: Array<{ type: 'local'; path: string }>;
@@ -137,6 +143,8 @@ export interface UserChatMessageEvent extends BaseEvent {
     topicId?: number;
     topicName?: string;
     transportOrigin?: ChatTransportOrigin;
+    /** One-turn model override; it is not persisted as the session default. */
+    modelConfig?: ModelConfig;
     mediaAttachment?: {
       type: 'photo' | 'document';
       filePath: string;
@@ -1245,5 +1253,6 @@ export interface SubAgentDefinition {
   prompt: string;
   tools?: string[];
   model?: string;
+  effort?: ModelEffort;
   mcpServers?: string[];
 }

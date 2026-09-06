@@ -101,6 +101,26 @@ the YAML defaults (`sonnet`, 15 turns). Global configuration supplies dispatches
 without named overrides. Heartbeat and memory consolidation retain their explicit
 internal overrides. Missing configuration is an error.
 
+Session model settings resolve per field: one-turn override, saved session override,
+project `project.yaml` execution defaults, named agent, then installation defaults.
+`GET /api/models` discovers account metadata through an SDK initialization with no
+user prompt; it does not run inference. Discovery is bounded and restores lazily
+for explicit model IDs or capability controls after restart. Retained metadata is
+reported as cached when stale. Ordinary preset defaults can run when discovery is
+unavailable; explicit effort/thinking requires capability evidence. Fable 5.1
+always uses adaptive thinking. API, dashboard and Telegram `/model` expose the
+same resolver; unsupported choices fail before transcript or model mutations.
+
+Settings freeze at orchestrator admission (`user:chat:accepted` / task queue),
+not the earlier transport receipt. Active and queued tasks keep their admitted
+model, effort and thinking; budget and backend receive the same canonical ID.
+A changed configuration starts a fresh SDK lineage with a bounded Raven history
+handoff. At execution, that handoff includes completed answers from preceding
+queued turns while excluding later owner input. Cancelled cold starts do not save
+uncertain SDK lineage. Same-session tasks execute serially. Named execution-tree
+workers validate their own model and effort; inherited workers receive the parent
+settings. General workspace grants still revalidate independently of model changes.
+
 Approved actions validate the stored session's current project and the requested
 skill's MCP/vendor bindings before admission. Their run YAML and completion events
 retain that project ownership. Approval records have no originating named-agent

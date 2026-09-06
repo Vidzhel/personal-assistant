@@ -1,15 +1,17 @@
 import {
-  NAMED_AGENT_MODEL_TIERS,
+  ModelIdSchema,
+  ModelConfigSchema,
   type McpServerConfig,
   type SubAgentDefinition,
   type NamedAgent,
   type BashAccess,
-  type NamedAgentModelTier,
+  type ModelConfig,
 } from '@raven/shared';
 import type { NamedAgentStore } from './yaml-named-agent-store.ts';
 import type { CapabilityLibrary } from '../capability-library/capability-library.ts';
 import { realpathSync, statSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { normalizeModelId } from './model-settings.ts';
 
 export interface ResolvedCapabilities {
   mcpServers: Record<string, McpServerConfig>;
@@ -37,12 +39,6 @@ export interface ResolvedDefaultAgent extends ResolvedCapabilities {
 
 const MAX_AGENT_TURNS = 100;
 
-const NAMED_AGENT_MODEL_IDS: Record<NamedAgentModelTier, string> = {
-  haiku: 'claude-haiku-4-5',
-  sonnet: 'claude-sonnet-5',
-  opus: 'claude-opus-5',
-};
-
 export interface AgentExecutionDefaults {
   model: string;
   maxTurns: number;
@@ -51,12 +47,16 @@ export interface AgentExecutionDefaults {
 export function validateResolvedAgentExecutionSettings(input: {
   model?: string;
   maxTurns?: number;
+  modelConfig?: ModelConfig;
 }): void {
-  if (
-    input.model !== undefined &&
-    (typeof input.model !== 'string' || input.model.trim().length === 0)
-  ) {
-    throw new Error('Invalid agent model: model must be non-empty');
+  if (input.model !== undefined && !ModelIdSchema.safeParse(input.model).success) {
+    throw new Error('Invalid agent model: model must be a non-empty model identifier');
+  }
+  if (input.modelConfig !== undefined) {
+    const config = ModelConfigSchema.parse(input.modelConfig);
+    if (!config.model || config.model !== input.model) {
+      throw new Error('Captured model settings must match the admitted model');
+    }
   }
   if (
     input.maxTurns !== undefined &&
@@ -77,8 +77,8 @@ export function resolveAgentExecutionSettings(input: {
   const { model, maxTurns, defaults } = input;
   const effectiveModel =
     model === null || model === undefined
-      ? defaults.model
-      : NAMED_AGENT_MODEL_IDS[model as NamedAgentModelTier];
+      ? normalizeModelId(defaults.model)
+      : normalizeModelId(ModelIdSchema.parse(model));
   if (!effectiveModel) {
     throw new Error(`Unsupported named-agent model: ${String(model)}`);
   }
@@ -90,10 +90,7 @@ export function resolveAgentExecutionSettings(input: {
 /** Reject malformed configured values even for dispatchers that intentionally
  * use their own model/turn override (for example heartbeat). */
 export function validateNamedAgentSettings(agent: NamedAgent): void {
-  if (
-    agent.model !== null &&
-    !NAMED_AGENT_MODEL_TIERS.includes(agent.model as NamedAgentModelTier)
-  ) {
+  if (agent.model !== null && !ModelIdSchema.safeParse(agent.model).success) {
     throw new Error(`Unsupported named-agent model: ${String(agent.model)}`);
   }
   if (

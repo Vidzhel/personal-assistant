@@ -2,6 +2,8 @@ import { z } from 'zod';
 import type { McpServerConfig, SubAgentDefinition, Priority } from './events.ts';
 import type { BashAccess } from './project-fs.ts';
 import type { ChatTransportOrigin } from './transports.ts';
+import { ModelIdSchema } from './model-config.ts';
+import type { ModelConfig } from './model-config.ts';
 import { BashAccessSchema } from '../project/schemas.ts';
 
 const MAX_AGENT_TURNS = 100;
@@ -37,7 +39,7 @@ export const NamedAgentCreateInputSchema = z.object({
   description: z.string().optional(),
   instructions: z.string().optional(),
   skills: z.array(z.string()).default([]),
-  model: z.enum(NAMED_AGENT_MODEL_TIERS).optional(),
+  model: ModelIdSchema.optional(),
   maxTurns: z.number().int().min(1).max(MAX_AGENT_TURNS).optional(),
   bash: BashAccessSchema.optional(),
 });
@@ -53,7 +55,7 @@ export const NamedAgentUpdateInputSchema = z.object({
   description: z.string().nullable().optional(),
   instructions: z.string().nullable().optional(),
   skills: z.array(z.string()).optional(),
-  model: z.enum(NAMED_AGENT_MODEL_TIERS).nullable().optional(),
+  model: ModelIdSchema.nullable().optional(),
   maxTurns: z.number().int().min(1).max(MAX_AGENT_TURNS).nullable().optional(),
   bash: BashAccessSchema.optional(),
 });
@@ -73,6 +75,8 @@ export interface AgentSession {
   description?: string;
   pinned?: boolean;
   summary?: string;
+  /** Optional session-level model override for subsequent turns. */
+  modelConfig?: ModelConfig;
 }
 
 export interface SessionReference {
@@ -136,6 +140,11 @@ export interface AgentTask {
   workspaceRevision?: string;
   /** Effective SDK model identifier selected from the named-agent tier. */
   model?: string;
+  /** Canonical model settings captured when this task was admitted. */
+  modelConfig?: ModelConfig;
+  /** Bounded untrusted history used only for a cold continuation. */
+  handoffContext?: string;
+  handoffMessageId?: string;
   /** Validated per-dispatch turn cap from the named-agent definition. */
   maxTurns?: number;
   treeId?: string;

@@ -1,4 +1,5 @@
 import type * as NodeFs from 'node:fs';
+import type * as RavenShared from '@raven/shared';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockSendMessage = vi.fn().mockResolvedValue({});
@@ -79,7 +80,8 @@ vi.mock('node:fs', async (importOriginal) => {
   };
 });
 
-vi.mock('@raven/shared', () => ({
+vi.mock('@raven/shared', async (importOriginal) => ({
+  ...(await importOriginal<typeof RavenShared>()),
   generateId: vi.fn(() => `test-id-${++generatedIds.value}`),
   SOURCE_TELEGRAM: 'telegram',
   PROJECT_TELEGRAM_DEFAULT: 'telegram-default',
@@ -784,6 +786,283 @@ describe('telegram-bot service', () => {
       expect(db.get<any>('SELECT status FROM notification_queue WHERE id = ?', queueId)).toEqual({
         status: 'delivered',
       });
+    });
+  });
+
+  describe('Telegram session model commands', () => {
+    const freshCatalog = {
+      models: [
+        {
+          id: 'claude-sonnet-5',
+          aliases: ['sonnet'],
+          displayName: 'Sonnet 5',
+          description: 'Fixture model',
+          supportsEffort: true,
+          supportedEffortLevels: ['low', 'medium', 'high'],
+          supportsAdaptiveThinking: true,
+        },
+      ],
+      fetchedAt: '2026-09-06T00:00:00.000Z',
+      revision: 1,
+      stale: false,
+      error: null,
+    };
+
+    beforeEach(() => {
+      process.env.TELEGRAM_BOT_TOKEN = 'test-token';
+      process.env.TELEGRAM_CHAT_ID = '123';
+      process.env.TELEGRAM_GROUP_ID = '-1001234567890';
+      process.env.TELEGRAM_TOPIC_GENERAL = '1';
+      process.env.TELEGRAM_TOPIC_SYSTEM = '42';
+      delete process.env.TELEGRAM_TOPIC_MAP;
+    });
+
+    async function createModelCommandDb(sessionId: string | null = 'session-current') {
+      const db = await createRealDb();
+      const { bindProjectTopic } = await import('../../../services/notifications/topic-store.ts');
+      const { saveTelegramConversation } =
+        await import('../../../services/notifications/telegram-conversation-store.ts');
+      for (const [id, name] of [
+        ['project-id', 'Project One'],
+        ['project-two', 'Project Two'],
+      ]) {
+        db.run(
+          `INSERT INTO projects (id, name, skills, fs_path, created_at, updated_at)
+           VALUES (?, ?, '[]', ?, 1, 1)`,
+          id,
+          name,
+          id,
+        );
+      }
+      bindProjectTopic(db, {
+        groupId: '-1001234567890',
+        topicId: 7,
+        projectId: 'project-id',
+      });
+      saveTelegramConversation(db, {
+        chatId: '-1001234567890',
+        topicId: 7,
+        projectId: 'project-id',
+        sessionId: sessionId ?? undefined,
+      });
+      return db;
+    }
+
+    function createModelCommandDeps() {
+      const sessions = new Map<string, any>([
+        ['session-current', { id: 'session-current', projectId: 'project-id', status: 'idle' }],
+        ['session-old', { id: 'session-old', projectId: 'project-id', status: 'idle' }],
+      ]);
+      let newSessionCount = 0;
+      const getSession = vi.fn((id: string) => sessions.get(id));
+      const updateSession = vi.fn((id: string, updates: Record<string, any>) => {
+        const session = sessions.get(id);
+        if (!session) return;
+        sessions.set(id, {
+          ...session,
+          modelConfig: updates.modelConfig ?? undefined,
+        });
+      });
+      const createAdditionalSession = vi.fn((projectId: string) => {
+        const id = `session-new-${++newSessionCount}`;
+        const session = { id, projectId, status: 'idle' };
+        sessions.set(id, session);
+        return session;
+      });
+      const getSnapshot = vi.fn(() => freshCatalog);
+      const refresh = vi.fn().mockResolvedValue(freshCatalog);
+      const resolveModel = vi.fn((input: Record<string, any>) => {
+        const stored = input.sessionId ? sessions.get(input.sessionId)?.modelConfig : undefined;
+        const selected = input.session === undefined ? stored : (input.session ?? undefined);
+        return {
+          model: 'claude-sonnet-5',
+          effort: selected?.effort,
+          thinking: selected?.thinking,
+        };
+      });
+      return {
+        sessions,
+        getSession,
+        updateSession,
+        createAdditionalSession,
+        modelCatalog: { getSnapshot, refresh },
+        resolveModel,
+      };
+    }
+
+    function modelProjectRegistry() {
+      return {
+        listProjects: () => [
+          { id: 'project-id', name: 'Project One', metadata: { id: 'project-id' } },
+          { id: 'project-two', name: 'Project Two', metadata: { id: 'project-two' } },
+        ],
+      };
+    }
+
+    async function startModelCommandService(
+      db: any,
+      deps: ReturnType<typeof createModelCommandDeps>,
+    ) {
+      await loadService();
+      await service.start({
+        eventBus: mockEventBus,
+        logger: mockLogger,
+        db,
+        config: {
+          sessionManager: {
+            getSession: deps.getSession,
+            updateSession: deps.updateSession,
+            createAdditionalSession: deps.createAdditionalSession,
+          },
+          modelCatalog: deps.modelCatalog,
+          resolveModel: deps.resolveModel,
+          projectRegistry: modelProjectRegistry(),
+        },
+      });
+    }
+
+    function modelContext(text: string, messageId: number, overrides: Record<string, any> = {}) {
+      return createMockContext({
+        me: { username: 'RavenBot' },
+        message: { text, message_thread_id: 7, message_id: messageId, ...overrides },
+      });
+    }
+
+    it('shows effective choices, then sets and resets the selected session override', async () => {
+      const db = await createModelCommandDb();
+      const deps = createModelCommandDeps();
+      await startModelCommandService(db, deps);
+
+      const show = modelContext('/model', 2001);
+      await messageHandlers[0](show);
+      expect(show.reply).toHaveBeenCalledWith(
+        expect.stringContaining('Effective model: claude-sonnet-5'),
+        { message_thread_id: 7 },
+      );
+      expect(show.reply).toHaveBeenCalledWith(expect.stringContaining('Sonnet 5'), {
+        message_thread_id: 7,
+      });
+
+      await messageHandlers[0](modelContext('/model sonnet high adaptive', 2002));
+      expect(deps.resolveModel).toHaveBeenCalledWith({
+        projectId: 'project-id',
+        sessionId: 'session-current',
+        session: { model: 'sonnet', effort: 'high', thinking: 'adaptive' },
+      });
+      expect(deps.updateSession).toHaveBeenCalledWith('session-current', {
+        modelConfig: { model: 'sonnet', effort: 'high', thinking: 'adaptive' },
+      });
+
+      await messageHandlers[0](modelContext('/model default', 2003));
+      expect(deps.updateSession).toHaveBeenLastCalledWith('session-current', {
+        modelConfig: null,
+      });
+      expect(deps.modelCatalog.refresh).not.toHaveBeenCalled();
+    });
+
+    it('does not refresh or mutate when no Raven session is selected', async () => {
+      const db = await createModelCommandDb(null);
+      const deps = createModelCommandDeps();
+      deps.modelCatalog.getSnapshot.mockReturnValue({ ...freshCatalog, stale: true });
+      await startModelCommandService(db, deps);
+
+      const ctx = modelContext('/model sonnet high', 2010);
+      await messageHandlers[0](ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith(expect.stringContaining('No Raven session'), {
+        message_thread_id: 7,
+      });
+      expect(deps.modelCatalog.refresh).not.toHaveBeenCalled();
+      expect(deps.resolveModel).not.toHaveBeenCalled();
+      expect(deps.updateSession).not.toHaveBeenCalled();
+    });
+
+    it('reports metadata validation rejection without mutating the session', async () => {
+      const db = await createModelCommandDb();
+      const deps = createModelCommandDeps();
+      deps.resolveModel.mockImplementation(() => {
+        throw new Error('Model does not support effort "max"');
+      });
+      await startModelCommandService(db, deps);
+
+      const ctx = modelContext('/model sonnet max', 2020);
+      await messageHandlers[0](ctx);
+
+      expect(ctx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('Model setting rejected: Error: Model does not support effort'),
+        { message_thread_id: 7 },
+      );
+      expect(deps.updateSession).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['/new', 2031],
+      ['/project project-two', 2032],
+    ])('does not mutate a stale session after delayed discovery and %s', async (change, id) => {
+      const db = await createModelCommandDb();
+      const deps = createModelCommandDeps();
+      let finishRefresh!: (snapshot: typeof freshCatalog) => void;
+      deps.modelCatalog.getSnapshot.mockReturnValue({ ...freshCatalog, stale: true });
+      deps.modelCatalog.refresh.mockReturnValue(
+        new Promise((resolve) => {
+          finishRefresh = resolve;
+        }),
+      );
+      await startModelCommandService(db, deps);
+      const model = modelContext('/model sonnet high', 2030);
+
+      const pendingModel = messageHandlers[0](model);
+      await vi.waitFor(() => expect(deps.modelCatalog.refresh).toHaveBeenCalledTimes(1));
+      await messageHandlers[0](modelContext(change, id));
+      finishRefresh(freshCatalog);
+      await pendingModel;
+
+      expect(deps.updateSession).not.toHaveBeenCalled();
+      expect(model.reply).toHaveBeenCalledWith(expect.stringContaining('conversation changed'), {
+        message_thread_id: 7,
+      });
+    });
+
+    it('updates an older session selected through an outgoing reply binding', async () => {
+      const db = await createModelCommandDb();
+      const { saveTelegramMessageBinding } =
+        await import('../../../services/notifications/telegram-conversation-store.ts');
+      saveTelegramMessageBinding(db, {
+        chatId: '-1001234567890',
+        messageId: 777,
+        topicId: 7,
+        projectId: 'project-id',
+        sessionId: 'session-old',
+        direction: 'outgoing',
+      });
+      const deps = createModelCommandDeps();
+      await startModelCommandService(db, deps);
+
+      await messageHandlers[0](
+        modelContext('/model sonnet medium', 2040, { reply_to_message: { message_id: 777 } }),
+      );
+
+      expect(deps.resolveModel).toHaveBeenCalledWith(
+        expect.objectContaining({ projectId: 'project-id', sessionId: 'session-old' }),
+      );
+      expect(deps.updateSession).toHaveBeenCalledWith('session-old', {
+        modelConfig: { model: 'sonnet', effort: 'medium' },
+      });
+    });
+
+    it('accepts its own bot suffix and ignores another bot suffix', async () => {
+      const db = await createModelCommandDb();
+      const deps = createModelCommandDeps();
+      await startModelCommandService(db, deps);
+      const own = modelContext('/model@RavenBot sonnet high', 2050);
+      const other = modelContext('/model@OtherBot sonnet low', 2051);
+
+      await messageHandlers[0](own);
+      await messageHandlers[0](other);
+
+      expect(deps.updateSession).toHaveBeenCalledTimes(1);
+      expect(own.reply).toHaveBeenCalled();
+      expect(other.reply).not.toHaveBeenCalled();
     });
   });
 

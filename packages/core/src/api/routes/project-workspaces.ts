@@ -7,6 +7,16 @@ import {
 } from '@raven/shared';
 import type { ProjectWorkspaceStore } from '../../project-manager/project-workspace.ts';
 import { ProjectMutationError } from '../../project-manager/project-mutation.ts';
+import {
+  effectiveModelConfigProjection,
+  type EffectiveModelConfigResolver,
+  type ModelConfigValidator,
+} from '../model-config-api.ts';
+
+interface ModelConfigRouteDeps {
+  validateModelConfig?: ModelConfigValidator;
+  resolveEffectiveModelConfig?: EffectiveModelConfigResolver;
+}
 
 function requireStore(store?: ProjectWorkspaceStore): ProjectWorkspaceStore {
   if (!store) {
@@ -52,12 +62,22 @@ function registerSourceWrites(app: FastifyInstance, store?: ProjectWorkspaceStor
   );
 }
 
-function registerWorkspaceReads(app: FastifyInstance, store?: ProjectWorkspaceStore): void {
+function registerWorkspaceReads(
+  app: FastifyInstance,
+  store: ProjectWorkspaceStore | undefined,
+  modelConfigDeps: ModelConfigRouteDeps,
+): void {
   app.get<{ Params: { id: string } }>('/api/projects/:id/data-sources', async (req) => {
     return requireStore(store).getDataSources(req.params.id);
   });
   app.get<{ Params: { id: string } }>('/api/projects/:id/workspace', async (req) => {
-    return requireStore(store).getWorkspace(req.params.id);
+    const workspace = requireStore(store).getWorkspace(req.params.id);
+    return {
+      ...workspace,
+      ...effectiveModelConfigProjection(modelConfigDeps.resolveEffectiveModelConfig, {
+        projectId: req.params.id,
+      }),
+    };
   });
   app.put<{ Params: { id: string } }>('/api/projects/:id/workspace', async (req, reply) => {
     const workspace = requireStore(store);
@@ -66,7 +86,25 @@ function registerWorkspaceReads(app: FastifyInstance, store?: ProjectWorkspaceSt
     if (!parsed.success) {
       return reply.status(HTTP_STATUS.BAD_REQUEST).send({ error: parsed.error.message });
     }
-    return workspace.updateWorkspace(req.params.id, parsed.data);
+    if (parsed.data.execution?.modelConfig !== undefined) {
+      try {
+        await modelConfigDeps.validateModelConfig?.(parsed.data.execution.modelConfig, {
+          projectId: req.params.id,
+        });
+      } catch (error) {
+        return reply.status(HTTP_STATUS.BAD_REQUEST).send({
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    const updated = await workspace.updateWorkspace(req.params.id, parsed.data);
+    return {
+      ...updated,
+      ...effectiveModelConfigProjection(modelConfigDeps.resolveEffectiveModelConfig, {
+        projectId: req.params.id,
+        project: updated.execution.modelConfig ?? null,
+      }),
+    };
   });
   registerSourceWrites(app, store);
 }
@@ -74,6 +112,7 @@ function registerWorkspaceReads(app: FastifyInstance, store?: ProjectWorkspaceSt
 export function registerProjectWorkspaceRoutes(
   app: FastifyInstance,
   store?: ProjectWorkspaceStore,
+  modelConfigDeps: ModelConfigRouteDeps = {},
 ): void {
   void app.register(async (workspaceApp) => {
     workspaceApp.setErrorHandler((error, _request, reply) => {
@@ -82,6 +121,6 @@ export function registerProjectWorkspaceRoutes(
       }
       return reply.send(error);
     });
-    registerWorkspaceReads(workspaceApp, store);
+    registerWorkspaceReads(workspaceApp, store, modelConfigDeps);
   });
 }

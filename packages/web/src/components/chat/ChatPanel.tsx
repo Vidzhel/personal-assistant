@@ -1,20 +1,57 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, type ReactNode } from 'react';
+import type { ModelConfig } from '@raven/shared';
 import { useChat, type ChatMessage } from '@/hooks/useChat';
+import { ModelConfigControl } from '@/components/model-config/ModelConfigControl';
 import { Markdown } from '@/components/ui/Markdown';
 
-export function ChatPanel({
-  projectId,
-  sessionId,
-  messagePrefix,
-  onTaskComplete,
-}: {
+interface ChatPanelProps {
   projectId: string;
   sessionId?: string | null;
   messagePrefix?: string;
   onTaskComplete?: () => void;
+  modelConfig?: ModelConfig;
+  effectiveModelConfig?: ModelConfig;
+  modelConfigError?: string;
+  onModelCatalogLoaded?: () => void;
+  onModelConfigSave?: (config: ModelConfig | null) => Promise<boolean | undefined>;
+}
+
+function ComposerModelControl({
+  modelConfig,
+  effectiveModelConfig,
+  modelConfigError,
+  active,
+  onSave,
+  onCatalogLoaded,
+}: Pick<ChatPanelProps, 'modelConfig' | 'effectiveModelConfig' | 'modelConfigError'> & {
+  active: boolean;
+  onSave?: ChatPanelProps['onModelConfigSave'];
+  onCatalogLoaded?: ChatPanelProps['onModelCatalogLoaded'];
 }) {
+  if (!onSave) return null;
+  return (
+    <div className="space-y-2">
+      {modelConfigError && (
+        <p role="alert" className="text-xs" style={{ color: 'var(--error)' }}>
+          Effective model unavailable: {modelConfigError}
+        </p>
+      )}
+      <ModelConfigControl
+        scope="session"
+        value={modelConfig}
+        effectiveValue={effectiveModelConfig}
+        active={active}
+        onSave={onSave}
+        onCatalogLoaded={onCatalogLoaded}
+      />
+    </div>
+  );
+}
+
+export function ChatPanel(props: ChatPanelProps) {
+  const { projectId, sessionId, messagePrefix, onTaskComplete } = props;
   const chat = useChat({ projectId, sessionId });
   useChatCompletion(chat, onTaskComplete);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -46,6 +83,17 @@ export function ChatPanel({
         stopPending={chat.stopPending}
         sendDisabled={
           chat.loading || chat.messages.some((message) => message.delivery === 'pending')
+        }
+        modelControl={
+          <ComposerModelControl
+            key={`${projectId}:${sessionId ?? ''}`}
+            modelConfig={props.modelConfig}
+            effectiveModelConfig={props.effectiveModelConfig}
+            modelConfigError={props.modelConfigError}
+            active={Boolean(chat.activeTaskId)}
+            onSave={props.onModelConfigSave}
+            onCatalogLoaded={props.onModelCatalogLoaded}
+          />
         }
       />
     </div>
@@ -80,6 +128,7 @@ function ChatInput({
   stopTask,
   stopPending,
   sendDisabled,
+  modelControl,
 }: {
   input: string;
   setInput: (v: string) => void;
@@ -88,9 +137,11 @@ function ChatInput({
   stopTask: () => void;
   stopPending: boolean;
   sendDisabled: boolean;
+  modelControl?: ReactNode;
 }) {
   return (
-    <div className="border-t p-4" style={{ borderColor: 'var(--border)' }}>
+    <div className="space-y-3 border-t p-4" style={{ borderColor: 'var(--border)' }}>
+      {modelControl}
       <div className="flex gap-2">
         <input
           type="text"

@@ -103,6 +103,17 @@ describe('SDK backend contract (real subprocess spawn via fake executable)', () 
     expect(entry.argv).not.toContain('--resume');
   });
 
+  it.each(['adaptive', 'disabled'] as const)(
+    'forwards explicit model, effort and %s thinking to the real SDK process',
+    async (thinking) => {
+      await createSdkBackend()(baseOpts({ model: 'claude-sonnet-5', effort: 'high', thinking }));
+      const [entry] = readLogEntries(argvLogPath);
+      expect(entry.argv[entry.argv.indexOf('--model') + 1]).toBe('claude-sonnet-5');
+      expect(entry.argv[entry.argv.indexOf('--effort') + 1]).toBe('high');
+      expect(entry.argv[entry.argv.indexOf('--thinking') + 1]).toBe(thinking);
+    },
+  );
+
   it('passes --resume=<id> through to the subprocess when resuming', async () => {
     // As of SDK 0.3.212, --resume is emitted in equals-form (`--resume=<id>`)
     // rather than as two separate argv entries (`--resume`, `<id>`).

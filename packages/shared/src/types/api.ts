@@ -1,4 +1,4 @@
-import type { AgentMessageEvent, RavenEvent, AgentSession } from './index.ts';
+import type { AgentMessageEvent, RavenEvent, AgentSession, ModelConfig } from './index.ts';
 
 export type WsMessageToClient =
   | {
@@ -20,6 +20,7 @@ export type WsMessageFromClient =
       projectId: string;
       message: string;
       sessionId?: string;
+      modelConfig?: ModelConfig;
     };
 
 export interface ScheduleRecord {

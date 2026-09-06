@@ -6,6 +6,15 @@ import type {
   WorkspaceExecutionResolver,
 } from '../project-manager/workspace-execution.ts';
 
+export function taskResumeRevision(
+  task: AgentTask,
+  workspace?: WorkspaceExecution,
+): string | undefined {
+  if (workspace) return workspace.revision;
+  if (!task.modelConfig) return undefined;
+  return createHash('sha256').update(JSON.stringify(task.modelConfig)).digest('hex');
+}
+
 /** Task context participates in resume identity, but per-turn prompts and memory do not. */
 export function resolveTaskWorkspace(
   task: AgentTask,
@@ -17,6 +26,8 @@ export function resolveTaskWorkspace(
       JSON.stringify({
         workspace: workspace.revision,
         model: task.model ?? getConfig().CLAUDE_MODEL,
+        effort: task.modelConfig?.effort,
+        thinking: task.modelConfig?.thinking,
         maxTurns: task.maxTurns ?? getConfig().RAVEN_AGENT_MAX_TURNS,
         bash: task.bashAccess,
         mcpServers: task.mcpServers,

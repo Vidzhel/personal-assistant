@@ -188,18 +188,23 @@ export function AgentFormModal() {
           {/* Model and Max Turns */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-1">Model</label>
-              <select
+              <label htmlFor="agent-model" className="block text-sm font-medium mb-1">
+                Model
+              </label>
+              <input
+                id="agent-model"
+                list="agent-model-presets"
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
+                placeholder="Default, preset, or model ID"
                 className="w-full px-3 py-2 rounded border text-sm"
                 style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}
-              >
-                <option value="">Default (sonnet)</option>
+              />
+              <datalist id="agent-model-presets">
                 <option value="haiku">Haiku</option>
                 <option value="sonnet">Sonnet</option>
                 <option value="opus">Opus</option>
-              </select>
+              </datalist>
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Max Turns</label>

@@ -6,6 +6,8 @@ import type {
   ExecutionTreeCancelledEvent,
   ExecutionTreeCompletedEvent,
   NamedAgent,
+  SubAgentDefinition,
+  ModelConfig,
 } from '@raven/shared';
 import type { EventBus } from '../event-bus/event-bus.ts';
 import type { TaskExecutionEngine } from './task-execution-engine.ts';
@@ -13,6 +15,9 @@ import type { NamedAgentStore } from '../agent-registry/yaml-named-agent-store.t
 import type { AgentResolver } from '../agent-registry/agent-resolver.ts';
 import { resolveAgentExecutionSettings } from '../agent-registry/agent-resolver.ts';
 import { getConfig } from '../config.ts';
+import type { ModelCatalog } from '../agent-registry/model-catalog.ts';
+import { resolveModelConfig, MODEL_ALIAS_IDS } from '../agent-registry/model-settings.ts';
+import { captureNestedModelSettings } from '../agent-registry/conversation-models.ts';
 import { buildRetryPrompt } from './validation-pipeline.ts';
 import { buildTaskBoardInstructions } from './task-board-protocol.ts';
 
@@ -21,6 +26,7 @@ const log = createLogger('execution-bridge');
 const DEFAULT_RETRY_ATTEMPT = 1;
 
 export interface ExecutionBridgeDeps {
+  modelCatalog?: ModelCatalog;
   eventBus: EventBus;
   executionEngine: TaskExecutionEngine;
   namedAgentStore: NamedAgentStore;
@@ -54,21 +60,51 @@ function resolveAgent(deps: ExecutionBridgeDeps, payload: RunAgentPayload): Name
   return named ?? deps.namedAgentStore.getDefaultAgent(projectId);
 }
 
-function buildAgentTaskRequest(
+async function captureExecutionModels(
   deps: ExecutionBridgeDeps,
-  payload: RunAgentPayload,
-  agentTaskId: string,
-): AgentTaskRequestEvent {
-  const agent = resolveAgent(deps, payload);
-  const capabilities = deps.agentResolver.resolveAgentCapabilities(agent);
-  const executionSettings = resolveAgentExecutionSettings({
-    model: agent.model,
-    maxTurns: agent.maxTurns,
-    defaults: {
-      model: getConfig().CLAUDE_MODEL,
-      maxTurns: getConfig().RAVEN_AGENT_MAX_TURNS,
+  agent: NamedAgent,
+  definitions: Record<string, SubAgentDefinition>,
+): Promise<{
+  modelConfig: ModelConfig & { model: string };
+  agentDefinitions: Record<string, SubAgentDefinition>;
+}> {
+  const catalog = deps.modelCatalog;
+  const requiresMetadata =
+    (agent.model && !(agent.model in MODEL_ALIAS_IDS)) ||
+    Object.values(definitions).some(
+      (worker) =>
+        worker.effort ||
+        (worker.model && worker.model !== 'inherit' && !(worker.model in MODEL_ALIAS_IDS)),
+    );
+  if (catalog && !catalog.getSnapshot().models.length && requiresMetadata) {
+    const refreshed = await catalog.refresh();
+    if (!refreshed.models.length)
+      throw new Error('Model catalog unavailable for explicit agent settings');
+  }
+  const snapshot = catalog?.getSnapshot() ?? {
+    models: [],
+    fetchedAt: null,
+    revision: 0,
+    stale: true,
+    error: null,
+  };
+  const resolved = resolveModelConfig(
+    {
+      agent: agent.model ? { model: agent.model } : undefined,
+      defaults: { model: getConfig().CLAUDE_MODEL },
     },
-  });
+    snapshot,
+  );
+  const modelConfig = {
+    model: resolved.model,
+    effort: resolved.effort,
+    thinking: resolved.thinking,
+  };
+  const agentDefinitions = captureNestedModelSettings(definitions, modelConfig, snapshot);
+  return { modelConfig, agentDefinitions };
+}
+
+function agentPrompt(agent: NamedAgent, payload: RunAgentPayload): string {
   const basePrompt = payload.retryFeedback
     ? buildRetryPrompt(
         payload.prompt,
@@ -79,9 +115,32 @@ function buildAgentTaskRequest(
   // Carry the resolved agent's persona into the dispatch the same way
   // orchestrator.ts does for chat turns (see handleUserChat) — the named
   // agent's own instructions outrank the generic template prompt.
-  const prompt = agent.instructions
+  return agent.instructions
     ? `[Agent Instructions: ${agent.instructions}]\n\n${basePrompt}`
     : basePrompt;
+}
+
+async function buildAgentTaskRequest(
+  deps: ExecutionBridgeDeps,
+  payload: RunAgentPayload,
+  agentTaskId: string,
+): Promise<AgentTaskRequestEvent> {
+  const agent = resolveAgent(deps, payload);
+  const capabilities = deps.agentResolver.resolveAgentCapabilities(agent);
+  const executionSettings = resolveAgentExecutionSettings({
+    model: agent.model,
+    maxTurns: agent.maxTurns,
+    defaults: {
+      model: getConfig().CLAUDE_MODEL,
+      maxTurns: getConfig().RAVEN_AGENT_MAX_TURNS,
+    },
+  });
+  const { modelConfig, agentDefinitions } = await captureExecutionModels(
+    deps,
+    agent,
+    capabilities.agentDefinitions,
+  );
+  const prompt = agentPrompt(agent, payload);
   return {
     id: generateId(),
     timestamp: Date.now(),
@@ -92,11 +151,12 @@ function buildAgentTaskRequest(
       prompt,
       skillName: agent.name,
       mcpServers: capabilities.mcpServers,
-      agentDefinitions: capabilities.agentDefinitions,
+      agentDefinitions,
       plugins: capabilities.plugins,
       namedAgentId: agent.id,
       namedAgentRevision: agent.definitionRevision,
-      model: executionSettings.model,
+      model: modelConfig.model,
+      modelConfig,
       maxTurns: executionSettings.maxTurns,
       bashAccess: agent.bash,
       priority: 'normal',
@@ -213,6 +273,10 @@ function isBoundAttempt(deps: ExecutionBridgeDeps, entry: PendingEntry): boolean
   );
 }
 
+function isCurrentGeneration(state: BridgeState, generation: number): boolean {
+  return state.started && state.generation === generation;
+}
+
 async function dispatchAgent(
   deps: ExecutionBridgeDeps,
   payload: RunAgentPayload,
@@ -222,8 +286,9 @@ async function dispatchAgent(
   const agentTaskId = generateId();
   let request: AgentTaskRequestEvent;
   try {
-    request = buildAgentTaskRequest(deps, payload, agentTaskId);
+    request = await buildAgentTaskRequest(deps, payload, agentTaskId);
   } catch (error) {
+    if (!isCurrentGeneration(state, generation)) return;
     const reason = error instanceof Error ? error.message : String(error);
     await deps.executionEngine.onTaskFailed(
       payload.treeId,
@@ -232,9 +297,10 @@ async function dispatchAgent(
     );
     return;
   }
+  if (!isCurrentGeneration(state, generation)) return;
   if (!(await deps.executionEngine.setAgentTaskId(payload.treeId, payload.taskId, agentTaskId)))
     return;
-  if (!state.started || state.generation !== generation) return;
+  if (!isCurrentGeneration(state, generation)) return;
   const entry = { treeId: payload.treeId, taskId: payload.taskId, agentTaskId };
   if (!isBoundAttempt(deps, entry)) return;
   state.pending.set(agentTaskId, entry);

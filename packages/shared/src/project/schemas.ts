@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ModelIdSchema } from '../types/model-config.ts';
 
 const KEBAB_CASE_RE = /^_?[a-z][a-z0-9-]*$/;
 
@@ -44,7 +45,7 @@ export const AgentYamlSchema = z.object({
   isDefault: z.boolean().default(false),
   skills: z.array(z.string()).default([]),
   instructions: z.string().optional(),
-  model: z.enum(['haiku', 'sonnet', 'opus']).default('sonnet'),
+  model: ModelIdSchema.default('sonnet'),
   maxTurns: z.number().int().min(1).max(MAX_AGENT_TURNS).default(DEFAULT_MAX_TURNS),
   bash: BashAccessSchema.optional(),
   validation: ValidationConfigSchema.optional(),

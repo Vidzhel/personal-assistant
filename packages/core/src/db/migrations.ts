@@ -4,7 +4,7 @@ import type Database from 'better-sqlite3';
 import { createLogger } from '@raven/shared';
 
 const log = createLogger('migrations');
-export const CURRENT_OPERATIONAL_SCHEMA_VERSION = 2;
+export const CURRENT_OPERATIONAL_SCHEMA_VERSION = 3;
 
 function assertCurrentSchemaVersion(version: number): void {
   if (version === CURRENT_OPERATIONAL_SCHEMA_VERSION) return;
