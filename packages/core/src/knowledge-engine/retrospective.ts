@@ -174,6 +174,7 @@ export function createRetrospective(deps: RetrospectiveDeps): Retrospective {
         channel: 'all',
         title: 'Weekly Knowledge Retrospective',
         body: markdown,
+        destination: { kind: 'global', topic: 'general' },
       },
     } as RavenEvent);
 

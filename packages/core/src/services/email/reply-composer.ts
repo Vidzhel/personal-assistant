@@ -95,6 +95,7 @@ function emitNotification(title: string, body: string, options?: NotificationOpt
       title,
       body,
       topicName: options?.topicName ?? 'General',
+      destination: { kind: 'global' as const, topic: 'general' as const },
       actions: options?.actions && options.actions.length > 0 ? options.actions : undefined,
     },
   });

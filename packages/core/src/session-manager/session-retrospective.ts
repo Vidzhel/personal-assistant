@@ -268,6 +268,7 @@ export function createSessionRetrospective(deps: SessionRetrospectiveDeps): Sess
               title: 'Knowledge Draft for Review',
               body: `${bubble.title}\n${bubble.content.slice(0, NOTIFICATION_PREVIEW_LENGTH)}...`,
               topicName: 'System',
+              destination: { kind: 'project', projectId },
             },
           };
           eventBus.emit(notification);

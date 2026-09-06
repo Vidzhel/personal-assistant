@@ -17,6 +17,7 @@ import {
   type NotificationDeliverEvent,
   type NotificationQueuedEvent,
   type NotificationBatchedEvent,
+  type NotificationDestination,
 } from '@raven/shared';
 import type { ServiceContext, RavenService } from '../types.ts';
 import {
@@ -29,6 +30,7 @@ import {
   getReadyNotifications,
   getSnoozedByCategory,
   releaseSnoozed,
+  queuedReplyContext,
 } from '../../notification-engine/notification-queue.ts';
 import type { ClassificationRule } from '../../notification-engine/urgency-classifier.ts';
 import {
@@ -138,12 +140,17 @@ function trySnoozeNotification(notifEvent: NotificationEvent, source: string): b
     source,
     title: notifEvent.payload.title,
     body: notifEvent.payload.body,
+    filePath: notifEvent.payload.filePath,
     topicName: notifEvent.payload.topicName,
     actionsJson: notifEvent.payload.actions
       ? JSON.stringify(notifEvent.payload.actions)
       : undefined,
     channel: notifEvent.payload.channel,
+    destination: notifEvent.payload.destination,
     urgencyTier: notifEvent.payload.urgencyTier ?? 'green',
+    transportOrigin: notifEvent.payload.transportOrigin,
+    sessionId: notifEvent.payload.sessionId,
+    taskId: notifEvent.payload.taskId,
     deliveryMode: notifEvent.payload.deliveryMode ?? 'save-for-later',
     status: 'snoozed',
   });
@@ -173,6 +180,29 @@ function deliverTellNow(
   urgencyTier: UrgencyTier,
   deliveryMode: DeliveryMode,
 ): void {
+  const tracksTelegram =
+    notifEvent.payload.channel === 'telegram' || notifEvent.payload.channel === 'all';
+  const queueId = tracksTelegram
+    ? enqueueNotification(db, {
+        source: notifEvent.source,
+        title: notifEvent.payload.title,
+        body: notifEvent.payload.body,
+        filePath: notifEvent.payload.filePath,
+        topicName: notifEvent.payload.topicName,
+        actionsJson: notifEvent.payload.actions
+          ? JSON.stringify(notifEvent.payload.actions)
+          : undefined,
+        channel: notifEvent.payload.channel,
+        destination: notifEvent.payload.destination,
+        transportOrigin: notifEvent.payload.transportOrigin,
+        sessionId: notifEvent.payload.sessionId,
+        taskId: notifEvent.payload.taskId,
+        urgencyTier,
+        deliveryMode,
+        status: 'pending',
+        scheduledFor: new Date().toISOString(),
+      })
+    : undefined;
   // Immediate passthrough — re-emit as notification:deliver
   eventBus.emit({
     id: generateId(),
@@ -183,6 +213,7 @@ function deliverTellNow(
       ...notifEvent.payload,
       urgencyTier,
       deliveryMode,
+      queueId,
     },
   } as unknown as NotificationDeliverEvent);
   log.info(`tell-now: ${notifEvent.payload.title} [${urgencyTier}]`);
@@ -201,9 +232,14 @@ function queueTellWhenActive(notifEvent: NotificationEvent, ctx: QueueContext): 
     source: notifEvent.source,
     title: notifEvent.payload.title,
     body: notifEvent.payload.body,
+    filePath: notifEvent.payload.filePath,
     topicName: notifEvent.payload.topicName,
     actionsJson: actionsStr,
     channel: notifEvent.payload.channel,
+    destination: notifEvent.payload.destination,
+    transportOrigin: notifEvent.payload.transportOrigin,
+    sessionId: notifEvent.payload.sessionId,
+    taskId: notifEvent.payload.taskId,
     urgencyTier,
     deliveryMode,
     status: 'pending',
@@ -227,9 +263,14 @@ function queueSaveForLater(notifEvent: NotificationEvent, ctx: QueueContext): vo
     source: notifEvent.source,
     title: notifEvent.payload.title,
     body: notifEvent.payload.body,
+    filePath: notifEvent.payload.filePath,
     topicName: notifEvent.payload.topicName,
     actionsJson: actionsStr,
     channel: notifEvent.payload.channel,
+    destination: notifEvent.payload.destination,
+    transportOrigin: notifEvent.payload.transportOrigin,
+    sessionId: notifEvent.payload.sessionId,
+    taskId: notifEvent.payload.taskId,
     urgencyTier,
     deliveryMode,
     status: 'batched',
@@ -244,6 +285,20 @@ function queueSaveForLater(notifEvent: NotificationEvent, ctx: QueueContext): vo
   } as unknown as NotificationBatchedEvent);
 
   log.info(`save-for-later: batched ${queueId}`);
+}
+
+function destinationFromQueue(item: {
+  destinationKind: 'project' | 'global' | null;
+  destinationProjectId: string | null;
+  destinationTopic: 'general' | 'system' | null;
+}): NotificationDestination | undefined {
+  if (item.destinationKind === 'project' && item.destinationProjectId) {
+    return { kind: 'project', projectId: item.destinationProjectId };
+  }
+  if (item.destinationKind === 'global' && item.destinationTopic) {
+    return { kind: 'global', topic: item.destinationTopic };
+  }
+  return undefined;
 }
 
 function handleNotification(event: unknown): void {
@@ -314,11 +369,14 @@ function flushReadyNotifications(): void {
           channel: (item.channel ?? 'telegram') as 'telegram' | 'web' | 'all',
           title: item.title,
           body: item.body,
+          filePath: item.filePath ?? undefined,
           topicName: item.topicName ?? undefined,
           actions,
           urgencyTier: item.urgencyTier,
           deliveryMode: item.deliveryMode,
           queueId: item.id,
+          destination: destinationFromQueue(item),
+          ...queuedReplyContext(item),
         },
       } as unknown as NotificationDeliverEvent);
     }

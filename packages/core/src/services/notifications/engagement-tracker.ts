@@ -14,11 +14,12 @@ import {
   type EngagementState,
   type NotificationDeliverEvent,
   type NotificationEscalatedEvent,
+  type NotificationDestination,
 } from '@raven/shared';
 import type { ServiceContext, RavenService } from '../types.ts';
 import {
   getEscalationCandidates,
-  markEscalated,
+  markDeliveryOutcome,
 } from '../../notification-engine/notification-queue.ts';
 
 const log = createLogger('engagement-tracker');
@@ -197,43 +198,78 @@ function runEscalationCheck(): void {
 
     log.info(`Escalating ${candidates.length} throttled notification(s)`);
 
-    for (const item of candidates) {
-      markEscalated(db, item.id);
-
-      const actions = item.actionsJson ? JSON.parse(item.actionsJson) : undefined;
-
-      eventBus.emit({
-        id: generateId(),
-        timestamp: Date.now(),
-        source: SUITE_NOTIFICATIONS,
-        type: EVENT_NOTIFICATION_DELIVER,
-        payload: {
-          channel: (item.channel ?? 'telegram') as 'telegram' | 'web' | 'all',
-          title: `Reminder: ${item.title}`,
-          body: item.body,
-          topicName: item.topicName ?? undefined,
-          actions,
-          urgencyTier: item.urgencyTier,
-          deliveryMode: item.deliveryMode,
-          queueId: item.id,
-        },
-      } as unknown as NotificationDeliverEvent);
-
-      eventBus.emit({
-        id: generateId(),
-        timestamp: Date.now(),
-        source: SUITE_NOTIFICATIONS,
-        type: EVENT_NOTIFICATION_ESCALATED,
-        payload: {
-          queueId: item.id,
-          originalTitle: item.title,
-          urgencyTier: item.urgencyTier,
-        },
-      } as unknown as NotificationEscalatedEvent);
-    }
+    for (const item of candidates) escalateNotification(item);
   } catch (err) {
     log.error(`Escalation check failed: ${err instanceof Error ? err.message : String(err)}`);
   }
+}
+
+type EscalationCandidate = ReturnType<typeof getEscalationCandidates>[number];
+
+function escalateNotification(item: EscalationCandidate): void {
+  if (item.channel !== 'telegram' && item.channel !== 'all') {
+    markDeliveryOutcome(db, {
+      id: item.id,
+      outcome: 'failed',
+      error: 'No Telegram delivery was requested for this queued notification',
+    });
+    return;
+  }
+  eventBus.emit(buildEscalationDelivery(item));
+  eventBus.emit(buildEscalatedEvent(item));
+}
+
+function buildEscalationDelivery(item: EscalationCandidate): NotificationDeliverEvent {
+  return {
+    id: generateId(),
+    timestamp: Date.now(),
+    source: SUITE_NOTIFICATIONS,
+    type: EVENT_NOTIFICATION_DELIVER,
+    payload: {
+      channel: item.channel as 'telegram' | 'all',
+      title: `Reminder: ${item.title}`,
+      body: item.body,
+      filePath: item.filePath ?? undefined,
+      topicName: item.topicName ?? undefined,
+      actions: parseEscalationActions(item.actionsJson),
+      urgencyTier: item.urgencyTier,
+      deliveryMode: item.deliveryMode,
+      queueId: item.id,
+      destination: escalationDestination(item),
+    },
+  } as NotificationDeliverEvent;
+}
+
+function buildEscalatedEvent(item: EscalationCandidate): NotificationEscalatedEvent {
+  return {
+    id: generateId(),
+    timestamp: Date.now(),
+    source: SUITE_NOTIFICATIONS,
+    type: EVENT_NOTIFICATION_ESCALATED,
+    payload: {
+      queueId: item.id,
+      originalTitle: item.title,
+      urgencyTier: item.urgencyTier,
+    },
+  } as NotificationEscalatedEvent;
+}
+
+function parseEscalationActions(actionsJson: string | null): unknown {
+  return actionsJson ? JSON.parse(actionsJson) : undefined;
+}
+
+function escalationDestination(item: {
+  destinationKind: 'project' | 'global' | null;
+  destinationProjectId: string | null;
+  destinationTopic: 'general' | 'system' | null;
+}): NotificationDestination | undefined {
+  if (item.destinationKind === 'project' && item.destinationProjectId) {
+    return { kind: 'project', projectId: item.destinationProjectId };
+  }
+  if (item.destinationKind === 'global' && item.destinationTopic) {
+    return { kind: 'global', topic: item.destinationTopic };
+  }
+  return undefined;
 }
 
 const service: RavenService = {

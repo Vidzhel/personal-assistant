@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { createRaven, type RavenInstance } from '../raven.ts';
 import { buildTestConfig, createRavenTestFixture } from './fixtures/raven-fixture.ts';
 import type { AgentBackend } from '../agent-manager/agent-backend.ts';
-import type { NotificationDeliverEvent } from '@raven/shared';
+import type { NotificationEvent } from '@raven/shared';
 
 /**
  * The plan's headline E2E: POST /api/scaffold/schedule with a near-term
@@ -20,7 +20,7 @@ import type { NotificationDeliverEvent } from '@raven/shared';
  * *files* hot outside of scaffoldAndActivate's own create_template path —
  * only the SCHEDULE here is created after boot). Its only task is
  * `notify`-type, which task-execution-engine.ts's executeNotifyTask handles
- * synchronously by emitting `notification:deliver` directly — no agent
+ * synchronously by entering ordinary notification admission — no agent
  * dispatch, no fake-backend plumbing, nothing else to make deterministic.
  *
  * Croner (the cron engine schedule-engine.ts uses) accepts an optional
@@ -90,8 +90,8 @@ describe('e2e: POST /api/scaffold/schedule goes live without a restart', () => {
     });
     await raven.start();
 
-    const notifications: NotificationDeliverEvent[] = [];
-    raven.eventBus.on<NotificationDeliverEvent>('notification:deliver', (e) => {
+    const notifications: NotificationEvent[] = [];
+    raven.eventBus.on<NotificationEvent>('notification', (e) => {
       notifications.push(e);
     });
 
@@ -125,6 +125,7 @@ describe('e2e: POST /api/scaffold/schedule goes live without a restart', () => {
 
     expect(notifications[0].payload.channel).toBe('telegram');
     expect(notifications[0].payload.body).toContain('ping fired');
+    expect(notifications[0].payload.destination).toEqual({ kind: 'global', topic: 'general' });
 
     const fireRow = raven.db.get<ScheduleFireRow>(
       'SELECT schedule_name, status, detail FROM schedule_fires WHERE schedule_name = ? ORDER BY fired_at DESC LIMIT 1',

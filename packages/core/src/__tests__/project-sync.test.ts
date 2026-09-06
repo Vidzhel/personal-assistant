@@ -180,13 +180,16 @@ describe('runProjectSync', () => {
 
     const result = await runProjectSync(deps);
 
-    expect(result.created).toBe(2);
+    expect(result.created).toBe(3);
     expect(db.prepare('SELECT fs_path FROM projects WHERE id = ?').get('plain')).toEqual({
       fs_path: 'plain',
     });
     expect(db.prepare('SELECT fs_path FROM projects WHERE id = ?').get('stable-managed')).toEqual({
       fs_path: 'managed',
     });
+    expect(
+      db.prepare('SELECT name, fs_path FROM projects WHERE id = ?').get('telegram-default'),
+    ).toEqual({ name: 'Inbox / Today', fs_path: 'telegram-default' });
   });
 
   it('drops an unreferenced stale row without recreating its directory', async () => {
@@ -271,6 +274,6 @@ describe('runProjectSync', () => {
     await deps.projectRegistry.load(projectsDir);
     await expect(runProjectSync(deps)).resolves.not.toThrow();
 
-    expect(db.prepare('SELECT COUNT(*) AS c FROM projects').get()).toEqual({ c: 1 });
+    expect(db.prepare('SELECT COUNT(*) AS c FROM projects').get()).toEqual({ c: 2 });
   });
 });

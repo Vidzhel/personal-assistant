@@ -168,6 +168,7 @@ function proposeSnoozeForCategory(cat: CategoryStats): void {
       body: `You've been ignoring ${displayName} notifications — snooze for a week?`,
       urgencyTier: 'green' as const,
       deliveryMode: 'tell-when-active' as const,
+      destination: { kind: 'global' as const, topic: 'general' as const },
       actions: [
         { label: 'Snooze 1w', action: 'callback', data: `s:w:${shortcode}` },
         { label: 'Keep', action: 'callback', data: `s:k:${shortcode}` },

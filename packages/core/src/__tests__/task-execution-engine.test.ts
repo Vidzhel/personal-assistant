@@ -480,9 +480,10 @@ describe('TaskExecutionEngine', () => {
       const task = tree.tasks.get(taskId)!;
       expect(task.status).toBe('completed');
 
-      const notifyEvents = eventBus.getByType('notification:deliver');
+      const notifyEvents = eventBus.getByType('notification');
       expect(notifyEvents).toHaveLength(1);
       expect(notifyEvents[0].payload.channel).toBe('telegram');
+      expect(notifyEvents[0].payload.destination).toEqual({ kind: 'global', topic: 'general' });
     });
   });
 

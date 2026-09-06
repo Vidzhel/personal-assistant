@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { createRaven, type RavenInstance } from '../raven.ts';
 import { buildTestConfig, createRavenTestFixture } from './fixtures/raven-fixture.ts';
 import type { AgentBackend, BackendOptions } from '../agent-manager/agent-backend.ts';
-import type { NotificationDeliverEvent } from '@raven/shared';
+import type { NotificationEvent } from '@raven/shared';
 
 /**
  * E2E schedule round-trip over the real composition root: createRaven ->
@@ -21,12 +21,10 @@ import type { NotificationDeliverEvent } from '@raven/shared';
  * project tree. Its three named agents are no-skills fixtures, with no
  * owner schedules, memories, MCPs or integrations loaded.
  *
- * The `notify` task type does NOT emit a `notification` event — reading
- * task-execution-engine.ts's executeNotifyTask shows it emits
- * `notification:deliver` directly (the plain `notification` event is a
- * different, higher-level type used elsewhere — e.g. raven.ts's
- * task:created/task:completed handler, retrospective). This test asserts
- * on the event the runtime actually fires.
+ * The `notify` task enters the ordinary notification admission path. A
+ * configured delivery scheduler may later turn that request into a
+ * `notification:deliver` event; this isolated composition asserts the
+ * durable routing request at the task-engine boundary.
  */
 
 interface TaskTreeTaskView {
@@ -107,8 +105,8 @@ describe('e2e: schedule round-trip over the real composition root', () => {
     });
     await raven.start();
 
-    const notifications: NotificationDeliverEvent[] = [];
-    raven.eventBus.on<NotificationDeliverEvent>('notification:deliver', (e) => {
+    const notifications: NotificationEvent[] = [];
+    raven.eventBus.on<NotificationEvent>('notification', (e) => {
       notifications.push(e);
     });
 
@@ -141,10 +139,11 @@ describe('e2e: schedule round-trip over the real composition root', () => {
     // (not just resolved via the raven MCP's own complete_task tool).
     expect(calls.length).toBe(3);
 
-    // The template's `notify` task fired a real notification:deliver event.
+    // The template's `notify` task entered normal notification admission.
     expect(notifications.length).toBeGreaterThanOrEqual(1);
     expect(notifications[0].payload.channel).toBe('telegram');
     expect(notifications[0].payload.body).toContain('digest');
+    expect(notifications[0].payload.destination).toEqual({ kind: 'global', topic: 'general' });
 
     await raven.stop();
     raven = undefined;

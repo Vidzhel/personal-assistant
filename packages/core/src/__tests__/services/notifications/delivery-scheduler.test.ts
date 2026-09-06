@@ -4,11 +4,19 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
+const cronState = vi.hoisted(() => ({
+  callback: undefined as (() => void) | undefined,
+}));
+
 // Mock croner before any imports
 vi.mock('croner', () => {
   return {
     Cron: class MockCron {
       stop = vi.fn();
+
+      constructor(_expression: string, _options: unknown, callback: () => void) {
+        cronState.callback = callback;
+      }
     },
   };
 });
@@ -45,6 +53,7 @@ describe('delivery-scheduler service', () => {
 
   beforeEach(async () => {
     mockEngagementState = 'normal';
+    cronState.callback = undefined;
     tmpDir = mkdtempSync(join(tmpdir(), 'raven-delivery-test-'));
     const dbPath = join(tmpDir, 'test.db');
     initDatabase(dbPath);
@@ -125,9 +134,10 @@ describe('delivery-scheduler service', () => {
       expect(emittedEvents[0].type).toBe('notification:deliver');
       expect(emittedEvents[0].payload.title).toBe('Test Notification');
 
-      // Should NOT be in database
-      const rows = db.all('SELECT * FROM notification_queue');
-      expect(rows).toHaveLength(0);
+      // Immediate Telegram sends are admitted durably before provider delivery.
+      const rows = db.all<{ id: string }>('SELECT * FROM notification_queue');
+      expect(rows).toHaveLength(1);
+      expect(emittedEvents[0].payload.queueId).toBe(rows[0].id);
     });
 
     it('always delivers tell-now regardless of producer override', async () => {
@@ -284,6 +294,79 @@ describe('delivery-scheduler service', () => {
 
       expect(emittedEvents.length).toBe(1);
       expect(emittedEvents[0].type).toBe('notification:batched');
+    });
+
+    it('flushes deferred and released snoozed notifications with exact reply context', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2026-09-07T14:00:00.000Z'));
+      try {
+        await startService();
+        expect(cronState.callback).toBeTypeOf('function');
+
+        const deferredOrigin = {
+          transport: 'telegram' as const,
+          chatId: '-1001234567890',
+          topicId: 7,
+          messageId: 2001,
+        };
+        triggerNotification(
+          makeNotifEvent('agent:task:complete', {
+            destination: { kind: 'project', projectId: 'project-one' },
+            transportOrigin: deferredOrigin,
+            sessionId: 'deferred-session',
+            taskId: 'deferred-task',
+          }),
+        );
+
+        const snooze = createSnooze(db, { category: 'pipeline:*', duration: '1h' });
+        const snoozedOrigin = {
+          transport: 'telegram' as const,
+          chatId: '-1001234567890',
+          topicId: 8,
+          messageId: 2002,
+        };
+        triggerNotification(
+          makeNotifEvent('pipeline:complete', {
+            destination: { kind: 'project', projectId: 'project-two' },
+            transportOrigin: snoozedOrigin,
+            sessionId: 'snoozed-session',
+            taskId: 'snoozed-task',
+            urgencyTier: 'yellow',
+            deliveryMode: 'tell-when-active',
+          }),
+        );
+        db.run(
+          'UPDATE notification_snooze SET snoozed_until = ? WHERE id = ?',
+          new Date().toISOString(),
+          snooze.id,
+        );
+        emittedEvents.length = 0;
+
+        cronState.callback!();
+
+        const deliveries = emittedEvents.filter((event) => event.type === 'notification:deliver');
+        expect(deliveries).toHaveLength(2);
+        expect(
+          deliveries.find((event) => event.payload.taskId === 'deferred-task')?.payload,
+        ).toMatchObject({
+          destination: { kind: 'project', projectId: 'project-one' },
+          transportOrigin: deferredOrigin,
+          sessionId: 'deferred-session',
+          taskId: 'deferred-task',
+          queueId: expect.any(String),
+        });
+        expect(
+          deliveries.find((event) => event.payload.taskId === 'snoozed-task')?.payload,
+        ).toMatchObject({
+          destination: { kind: 'project', projectId: 'project-two' },
+          transportOrigin: snoozedOrigin,
+          sessionId: 'snoozed-session',
+          taskId: 'snoozed-task',
+          queueId: expect.any(String),
+        });
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

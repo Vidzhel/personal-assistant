@@ -1,5 +1,11 @@
 import { Cron } from 'croner';
-import { createLogger, generateId, type EventBusInterface, type RavenEvent } from '@raven/shared';
+import {
+  createLogger,
+  generateId,
+  type DatabaseInterface,
+  type EventBusInterface,
+  type RavenEvent,
+} from '@raven/shared';
 import type { ServiceContext, RavenService } from '../services/types.ts';
 import type { Intent, IntentStore } from './intent-store.ts';
 
@@ -74,7 +80,15 @@ function buildNotificationBody(intent: Intent, triggerContext: string): string {
 
 const NOTIFICATION_SOURCE = 'intent-matcher';
 
-function emitReminder(eventBus: EventBusInterface, intent: Intent, triggerContext: string): void {
+function emitReminder(deps: MatcherDeps, intent: Intent, triggerContext: string): void {
+  const { eventBus, db } = deps;
+  const project =
+    intent.sourceSession && db
+      ? db.get<{ project_id: string }>(
+          'SELECT project_id FROM sessions WHERE id = ?',
+          intent.sourceSession,
+        )
+      : undefined;
   eventBus.emit({
     id: generateId(),
     timestamp: Date.now(),
@@ -84,6 +98,9 @@ function emitReminder(eventBus: EventBusInterface, intent: Intent, triggerContex
       channel: 'telegram',
       title: 'Reminder',
       body: buildNotificationBody(intent, triggerContext),
+      destination: project
+        ? { kind: 'project', projectId: project.project_id }
+        : { kind: 'global', topic: 'general' },
     },
   });
   log.info(
@@ -94,6 +111,7 @@ function emitReminder(eventBus: EventBusInterface, intent: Intent, triggerContex
 export interface MatcherDeps {
   intentStore: IntentStore;
   eventBus: EventBusInterface;
+  db?: DatabaseInterface;
 }
 
 /** Checks every active kind='event' intent declared against this event's
@@ -101,7 +119,7 @@ export interface MatcherDeps {
  * that succeeded (budget/cooldown/expiry all passed) — emits the
  * notification. Exported for direct unit testing without a live event bus. */
 export function checkEventIntents(deps: MatcherDeps, event: RavenEvent, nowMs = Date.now()): void {
-  const { intentStore, eventBus } = deps;
+  const { intentStore } = deps;
   const text = extractMatchText(event);
   if (text === undefined) return;
 
@@ -112,17 +130,17 @@ export function checkEventIntents(deps: MatcherDeps, event: RavenEvent, nowMs = 
   for (const intent of candidates) {
     if (!matchesAllKeywords(text, intent.keywords)) continue;
     if (!intentStore.tryFire(intent.id, nowMs)) continue;
-    emitReminder(eventBus, intent, `${event.type}: ${truncate(text)}`);
+    emitReminder(deps, intent, `${event.type}: ${truncate(text)}`);
   }
 }
 
 /** Minute sweep: fires any kind='time' intent whose nextFireAt has arrived,
  * then flips stale-expired rows. Exported for direct unit testing. */
 export function runTimeSweep(deps: MatcherDeps, nowMs = Date.now()): void {
-  const { intentStore, eventBus } = deps;
+  const { intentStore } = deps;
   for (const intent of intentStore.listDueTimeIntents(nowMs)) {
     if (!intentStore.tryFire(intent.id, nowMs)) continue;
-    emitReminder(eventBus, intent, 'scheduled reminder');
+    emitReminder(deps, intent, 'scheduled reminder');
   }
 
   const expiredCount = intentStore.expireStale(nowMs);
@@ -148,7 +166,7 @@ const service: RavenService = {
 
     const eventBus = context.eventBus;
     boundEventBus = eventBus;
-    const matcherDeps: MatcherDeps = { intentStore, eventBus };
+    const matcherDeps: MatcherDeps = { intentStore, eventBus, db: context.db };
 
     const handler = (event: unknown): void => {
       checkEventIntents(matcherDeps, event as RavenEvent);

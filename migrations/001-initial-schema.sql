@@ -2,6 +2,7 @@
 -- The migration runner owns _migrations bookkeeping.
 
 PRAGMA foreign_keys = ON;
+PRAGMA user_version = 2;
 
 CREATE TABLE projects (
   id TEXT PRIMARY KEY,
@@ -133,19 +134,54 @@ CREATE TABLE notification_queue (
   source TEXT NOT NULL,
   title TEXT NOT NULL,
   body TEXT NOT NULL,
+  file_path TEXT,
   topic_name TEXT,
   actions_json TEXT,
   channel TEXT,
+  destination_kind TEXT CHECK (destination_kind IN ('project', 'global')),
+  destination_project_id TEXT,
+  destination_topic TEXT CHECK (destination_topic IN ('general', 'system')),
   urgency_tier TEXT NOT NULL,
   delivery_mode TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
   created_at TEXT NOT NULL,
   scheduled_for TEXT,
-  delivered_at TEXT
+  delivered_at TEXT,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  provider_message_id TEXT,
+  last_error TEXT,
+  last_attempt_at TEXT,
+  delivery_claim_id TEXT,
+  dedupe_key TEXT UNIQUE,
+  reply_chat_id TEXT,
+  reply_topic_id INTEGER,
+  reply_message_id INTEGER,
+  reply_session_id TEXT,
+  reply_task_id TEXT
 );
 CREATE INDEX idx_notification_queue_status ON notification_queue(status);
 CREATE INDEX idx_notification_queue_delivery_mode ON notification_queue(delivery_mode);
 CREATE INDEX idx_notification_queue_scheduled_for ON notification_queue(scheduled_for);
+CREATE INDEX idx_notification_queue_delivery_diagnostics
+  ON notification_queue(channel, status, created_at);
+
+CREATE TABLE notification_delivery_attempts (
+  id TEXT PRIMARY KEY,
+  notification_id TEXT NOT NULL REFERENCES notification_queue(id),
+  channel TEXT NOT NULL,
+  part TEXT NOT NULL CHECK (part IN ('text', 'attachment')),
+  attempt_no INTEGER NOT NULL,
+  outcome TEXT NOT NULL CHECK (outcome IN ('sending', 'accepted', 'failed', 'unknown')),
+  destination_chat_id TEXT NOT NULL,
+  destination_topic_id INTEGER,
+  provider_message_id TEXT,
+  error TEXT,
+  started_at TEXT NOT NULL,
+  completed_at TEXT,
+  UNIQUE (notification_id, part, attempt_no)
+);
+CREATE INDEX idx_notification_delivery_attempts_notification
+  ON notification_delivery_attempts(notification_id, started_at);
 
 CREATE TABLE engagement_metrics (
   id TEXT PRIMARY KEY,
@@ -230,7 +266,7 @@ CREATE INDEX idx_session_references_target ON session_references(target_session_
 CREATE TABLE knowledge_rejections (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL,
-  session_id TEXT NOT NULL,
+  session_id TEXT,
   content_hash TEXT NOT NULL,
   reason TEXT,
   created_at TEXT NOT NULL
@@ -239,13 +275,40 @@ CREATE INDEX idx_knowledge_rejections_lookup
   ON knowledge_rejections(project_id, content_hash);
 
 CREATE TABLE telegram_topics (
-  scope TEXT NOT NULL CHECK (scope IN ('agent', 'project')),
-  key TEXT NOT NULL,
+  project_id TEXT NOT NULL,
   group_id TEXT NOT NULL,
   topic_id INTEGER NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  PRIMARY KEY (scope, key, group_id)
+  PRIMARY KEY (project_id, group_id)
 );
+CREATE UNIQUE INDEX idx_telegram_topics_address
+  ON telegram_topics(group_id, topic_id);
+
+CREATE TABLE telegram_conversations (
+  chat_id TEXT NOT NULL,
+  topic_id INTEGER NOT NULL DEFAULT 0,
+  project_id TEXT NOT NULL,
+  session_id TEXT,
+  revision INTEGER NOT NULL DEFAULT 1,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (chat_id, topic_id)
+);
+CREATE INDEX idx_telegram_conversations_session ON telegram_conversations(session_id);
+
+CREATE TABLE telegram_message_bindings (
+  chat_id TEXT NOT NULL,
+  message_id INTEGER NOT NULL,
+  topic_id INTEGER,
+  project_id TEXT NOT NULL,
+  session_id TEXT,
+  request_id TEXT,
+  task_id TEXT,
+  direction TEXT NOT NULL CHECK (direction IN ('incoming', 'outgoing')),
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (chat_id, message_id)
+);
+CREATE INDEX idx_telegram_message_bindings_session
+  ON telegram_message_bindings(project_id, session_id, created_at);
 
 CREATE TABLE schedule_fires (
   id TEXT PRIMARY KEY,

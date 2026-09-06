@@ -5,9 +5,16 @@ import {
   SUITE_DAILY_BRIEFING,
   type EventBusInterface,
   type DatabaseInterface,
+  type NotificationDestination,
 } from '@raven/shared';
 import type { ServiceContext, RavenService } from '../types.ts';
-import { getPendingBatched, markBatched } from '../../notification-engine/notification-queue.ts';
+import {
+  getPendingBatched,
+  markDeliveryOutcome,
+  markIncludedInBriefing,
+  releaseBatchedForDelivery,
+  queuedReplyContext,
+} from '../../notification-engine/notification-queue.ts';
 
 const log = createLogger('briefing-formatter');
 
@@ -114,10 +121,73 @@ function buildEmailSections(emails: BriefingEmail[]): BriefingSection[] {
   return sections;
 }
 
-function getBatchedNotificationSections(): BriefingSection[] {
+type BatchedNotification = ReturnType<typeof getPendingBatched>[number];
+
+function batchedDestination(item: BatchedNotification): NotificationDestination | undefined {
+  if (item.destinationKind === 'project' && item.destinationProjectId) {
+    return { kind: 'project' as const, projectId: item.destinationProjectId };
+  }
+  if (item.destinationKind === 'global' && item.destinationTopic) {
+    return { kind: 'global' as const, topic: item.destinationTopic };
+  }
+  return undefined;
+}
+
+function failBatchedNotification(item: BatchedNotification, error: string): void {
+  markDeliveryOutcome(db, { id: item.id, outcome: 'failed', error });
+}
+
+function releaseDestinationBatch(item: BatchedNotification): void {
+  const destination = batchedDestination(item);
+  if (!destination) {
+    failBatchedNotification(item, 'Batched notification has no valid destination');
+    return;
+  }
+  if (item.channel !== 'telegram' && item.channel !== 'all') {
+    failBatchedNotification(item, 'Batched notification has no Telegram delivery channel');
+    return;
+  }
+  releaseBatchedForDelivery(db, item.id);
+  eventBus.emit({
+    id: generateId(),
+    timestamp: Date.now(),
+    source: SUITE_DAILY_BRIEFING,
+    type: 'notification:deliver',
+    payload: {
+      queueId: item.id,
+      channel: (item.channel ?? 'telegram') as 'telegram' | 'web' | 'all',
+      title: item.title,
+      body: item.body,
+      filePath: item.filePath ?? undefined,
+      actions: item.actionsJson ? JSON.parse(item.actionsJson) : undefined,
+      destination,
+      ...queuedReplyContext(item),
+      urgencyTier: item.urgencyTier,
+      deliveryMode: 'tell-when-active',
+    },
+  });
+}
+
+function getBatchedNotificationSections(): { sections: BriefingSection[]; includedIds: string[] } {
   try {
-    const batched = getPendingBatched(db);
-    if (batched.length === 0) return [];
+    const pending = getPendingBatched(db);
+    pending
+      .filter((item) => item.channel !== 'telegram' && item.channel !== 'all')
+      .forEach(releaseDestinationBatch);
+    pending
+      .filter(
+        (item) =>
+          (item.channel === 'telegram' || item.channel === 'all') &&
+          (item.destinationKind !== 'global' || item.destinationTopic !== 'general'),
+      )
+      .forEach(releaseDestinationBatch);
+    const batched = pending.filter(
+      (item) =>
+        (item.channel === 'telegram' || item.channel === 'all') &&
+        item.destinationKind === 'global' &&
+        item.destinationTopic === 'general',
+    );
+    if (batched.length === 0) return { sections: [], includedIds: [] };
 
     const sections: BriefingSection[] = [];
     for (const item of batched) {
@@ -127,17 +197,10 @@ function getBatchedNotificationSections(): BriefingSection[] {
       });
     }
 
-    // Mark all as delivered
-    markBatched(
-      db,
-      batched.map((b) => b.id),
-    );
-
-    log.info(`Included ${batched.length} batched notification(s) in morning briefing`);
-    return sections;
+    return { sections, includedIds: batched.map((item) => item.id) };
   } catch (err) {
     log.error(`Failed to load batched notifications: ${err}`);
-    return [];
+    return { sections: [], includedIds: [] };
   }
 }
 
@@ -190,7 +253,10 @@ function appendSystemStatus(acc: BriefingAccumulator, systemStatus: string): voi
   }
 }
 
-function buildBriefingMessages(briefing: BriefingResponse): BriefingMessage[] {
+function buildBriefingMessages(briefing: BriefingResponse): {
+  messages: BriefingMessage[];
+  includedIds: string[];
+} {
   const dateStr = formatDateHeader();
   const title = `\u2600\ufe0f Morning Briefing — ${dateStr}`;
   const acc: BriefingAccumulator = { title, messages: [], currentBody: '', currentActions: [] };
@@ -208,9 +274,9 @@ function buildBriefingMessages(briefing: BriefingResponse): BriefingMessage[] {
   }
 
   // Queued updates (batched notifications from notification queue)
-  const batchedItems = getBatchedNotificationSections();
-  if (batchedItems.length > 0) {
-    appendSection(acc, '\ud83d\udce6 Queued Updates', batchedItems);
+  const batched = getBatchedNotificationSections();
+  if (batched.sections.length > 0) {
+    appendSection(acc, '\ud83d\udce6 Queued Updates', batched.sections);
   }
 
   // System status
@@ -223,7 +289,7 @@ function buildBriefingMessages(briefing: BriefingResponse): BriefingMessage[] {
     acc.messages.push({ title: acc.title, body: acc.currentBody, actions: acc.currentActions });
   }
 
-  return acc.messages;
+  return { messages: acc.messages, includedIds: batched.includedIds };
 }
 
 // NOTE: This retry covers event bus emit failures (e.g., broken bus state).
@@ -246,6 +312,7 @@ async function emitNotification(
           title,
           body,
           topicName: 'General',
+          destination: { kind: 'global' as const, topic: 'general' as const },
           actions: actions.length > 0 ? actions : undefined,
         },
       });
@@ -277,23 +344,14 @@ async function emitNotification(
   } catch {
     log.error('Failed to emit system health alert');
   }
+  throw new Error('Briefing delivery failed after all retries');
 }
 
-function handleTaskComplete(event: unknown): void {
+function parseBriefingResult(payload: Record<string, unknown>): BriefingResponse | undefined {
+  if (payload.taskType !== 'morning-digest' || !payload.success) return undefined;
+  const resultStr = payload.result as string;
+  if (!resultStr) return undefined;
   try {
-    const e = event as Record<string, unknown>;
-    const payload = e.payload as Record<string, unknown>;
-
-    // Only process morning-digest task completions
-    if (payload.taskType !== 'morning-digest') return;
-    if (!payload.success) return;
-
-    const resultStr = payload.result as string;
-    if (!resultStr) return;
-
-    // Try to parse JSON from the result (agent may include surrounding text).
-    // Find the outermost balanced JSON object by locating the first '{' and
-    // attempting to parse progressively from the end of the string.
     let jsonStr = resultStr;
     const firstBrace = resultStr.indexOf('{');
     if (firstBrace >= 0) {
@@ -303,27 +361,31 @@ function handleTaskComplete(event: unknown): void {
       }
     }
 
-    let briefingData: unknown;
-    try {
-      briefingData = JSON.parse(jsonStr);
-    } catch {
-      log.error('Failed to parse briefing result as JSON');
-      return;
-    }
-
-    const parsed = BriefingResponseSchema.safeParse(briefingData);
+    const parsed = BriefingResponseSchema.safeParse(JSON.parse(jsonStr));
     if (!parsed.success) {
       log.error(`Invalid briefing response structure: ${parsed.error.message}`);
-      return;
+      return undefined;
     }
+    return parsed.data;
+  } catch {
+    log.error('Failed to parse briefing result as JSON');
+    return undefined;
+  }
+}
 
-    const messages = buildBriefingMessages(parsed.data);
+async function handleTaskComplete(event: unknown): Promise<void> {
+  try {
+    const e = event as Record<string, unknown>;
+    const briefing = parseBriefingResult(e.payload as Record<string, unknown>);
+    if (!briefing) return;
+
+    const { messages, includedIds } = buildBriefingMessages(briefing);
     log.info(`Formatted briefing into ${messages.length} message(s)`);
 
-    for (const msg of messages) {
-      emitNotification(msg.title, msg.body, msg.actions).catch((err) => {
-        log.error(`Briefing emit error: ${err}`);
-      });
+    await Promise.all(messages.map((msg) => emitNotification(msg.title, msg.body, msg.actions)));
+    if (includedIds.length > 0) {
+      markIncludedInBriefing(db, includedIds);
+      log.info(`Included ${includedIds.length} batched notification(s) in morning briefing`);
     }
   } catch (err) {
     log.error(`Failed to process briefing: ${err}`);

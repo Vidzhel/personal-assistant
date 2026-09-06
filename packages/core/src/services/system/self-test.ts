@@ -484,6 +484,7 @@ function notifyViolations(
       title: `Self-test found ${String(newViolations.length)} new issue(s)`,
       body: bodyLines.join('\n'),
       topicName: 'System',
+      destination: { kind: 'global', topic: 'system' },
     },
   });
 }

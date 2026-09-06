@@ -19,6 +19,49 @@ function formatFileSize(bytes: number): string {
   return `${bytes} B`;
 }
 
+function formatMediaMessage(data: {
+  mediaType: 'photo' | 'document';
+  filePath: string;
+  mimeType: string;
+  fileName: string;
+  fileSize?: number;
+  caption?: string;
+}): string {
+  const sizeInfo = data.fileSize ? `, ${formatFileSize(data.fileSize)}` : '';
+  if (data.mediaType === 'photo') {
+    return `[Photo attached: ${data.filePath}, ${data.mimeType}${sizeInfo}]\n\n${data.caption ?? 'User sent a photo for processing'}`;
+  }
+  return `[Document attached: ${data.fileName} at ${data.filePath}, ${data.mimeType}${sizeInfo}]\n\n${data.caption ?? 'User sent a document for processing'}`;
+}
+
+function emitRoutedMedia(
+  data: ReturnType<typeof MediaReceivedPayloadSchema.parse>,
+  message: string,
+): void {
+  eventBus.emit({
+    id: generateId(),
+    timestamp: Date.now(),
+    source: SOURCE_TELEGRAM,
+    type: 'user:chat:message',
+    projectId: data.projectId,
+    payload: {
+      projectId: data.projectId,
+      message,
+      topicId: data.topicId,
+      topicName: data.topicName,
+      transportOrigin: data.transportOrigin,
+      requestId: data.requestId,
+      sessionId: data.sessionId,
+      mediaAttachment: {
+        type: data.mediaType,
+        filePath: data.filePath,
+        mimeType: data.mimeType,
+        fileName: data.fileName,
+      },
+    },
+  });
+}
+
 function handleMediaReceived(event: unknown): void {
   try {
     const parsed = MediaReceivedPayloadSchema.safeParse((event as Record<string, unknown>).payload);
@@ -27,48 +70,20 @@ function handleMediaReceived(event: unknown): void {
       return;
     }
 
-    const {
-      projectId,
+    const { projectId, mediaType, filePath, mimeType, fileName, fileSize, caption } = parsed.data;
+
+    const message = formatMediaMessage({
       mediaType,
       filePath,
       mimeType,
       fileName,
       fileSize,
       caption,
-      topicId,
-      topicName,
-    } = parsed.data;
-
-    const sizeInfo = fileSize ? `, ${formatFileSize(fileSize)}` : '';
-
-    let message: string;
-    if (mediaType === 'photo') {
-      message = `[Photo attached: ${filePath}, ${mimeType}${sizeInfo}]\n\n${caption ?? 'User sent a photo for processing'}`;
-    } else {
-      message = `[Document attached: ${fileName} at ${filePath}, ${mimeType}${sizeInfo}]\n\n${caption ?? 'User sent a document for processing'}`;
-    }
+    });
 
     log.info(`Routing ${mediaType} to orchestrator for project ${projectId}`);
 
-    eventBus.emit({
-      id: generateId(),
-      timestamp: Date.now(),
-      source: SOURCE_TELEGRAM,
-      type: 'user:chat:message',
-      projectId,
-      payload: {
-        projectId,
-        message,
-        topicId,
-        topicName,
-        mediaAttachment: {
-          type: mediaType,
-          filePath,
-          mimeType,
-          fileName,
-        },
-      },
-    });
+    emitRoutedMedia(parsed.data, message);
   } catch (err) {
     log.error(`Failed to route media event: ${err}`);
   }

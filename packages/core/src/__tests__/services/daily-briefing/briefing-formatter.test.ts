@@ -87,10 +87,10 @@ describe('briefing-formatter service', () => {
     service = mod.default;
   });
 
-  async function startService(): Promise<void> {
+  async function startService(db: any = {}): Promise<void> {
     await service.start({
       eventBus: mockEventBus,
-      db: {},
+      db,
       logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
       config: {},
     });
@@ -233,6 +233,80 @@ describe('briefing-formatter service', () => {
       const bodyText = notifCalls.map((c: any) => c[0].payload.body).join('\n');
       expect(bodyText).toContain('John Smith');
       expect(bodyText).toContain('Q1 Results');
+    });
+  });
+
+  describe('batched delivery routing', () => {
+    it.each([
+      { kind: 'project' as const, projectId: 'project-one' },
+      { kind: 'global' as const, topic: 'system' as const },
+    ])('releases a $kind batch to its own destination with full payload', async (destination) => {
+      const { createTestDb } = await import('../notifications/helpers/test-db.ts');
+      const { enqueueNotification } =
+        await import('../../../notification-engine/notification-queue.ts');
+      const db = createTestDb();
+      const id = enqueueNotification(db, {
+        source: 'project-update',
+        title: 'Project update',
+        body: 'Ready',
+        filePath: '/tmp/artifact.pdf',
+        actionsJson: JSON.stringify([{ label: 'Open', action: 'open' }]),
+        channel: 'telegram',
+        destination,
+        transportOrigin: { transport: 'telegram', chatId: '-123', topicId: 42, messageId: 91 },
+        sessionId: 'original-session',
+        taskId: 'original-task',
+        urgencyTier: 'green',
+        deliveryMode: 'save-for-later',
+        status: 'batched',
+      });
+      await startService(db);
+
+      emitTaskComplete(validBriefingResult);
+
+      const delivery = mockEventBus.emit.mock.calls.find(
+        (call: any) => call[0].type === 'notification:deliver',
+      )?.[0];
+      expect(delivery?.payload).toMatchObject({
+        queueId: id,
+        filePath: '/tmp/artifact.pdf',
+        destination,
+        transportOrigin: { transport: 'telegram', chatId: '-123', topicId: 42, messageId: 91 },
+        sessionId: 'original-session',
+        taskId: 'original-task',
+        actions: [{ label: 'Open', action: 'open' }],
+      });
+      expect(db.get<any>('SELECT status FROM notification_queue WHERE id = ?', id)).toEqual({
+        status: 'pending',
+      });
+    });
+
+    it('does not consume a global batch when briefing output cannot be emitted', async () => {
+      const { createTestDb } = await import('../notifications/helpers/test-db.ts');
+      const { enqueueNotification } =
+        await import('../../../notification-engine/notification-queue.ts');
+      const db = createTestDb();
+      const id = enqueueNotification(db, {
+        source: 'global-update',
+        title: 'Global update',
+        body: 'Ready',
+        channel: 'telegram',
+        destination: { kind: 'global', topic: 'general' },
+        urgencyTier: 'green',
+        deliveryMode: 'save-for-later',
+        status: 'batched',
+      });
+      await startService(db);
+      mockEventBus.emit.mockImplementation((event: any) => {
+        if (event.type === 'notification') throw new Error('delivery bus unavailable');
+      });
+
+      emitTaskComplete(validBriefingResult);
+      await vi.advanceTimersByTimeAsync(4000);
+
+      expect(db.get<any>('SELECT status FROM notification_queue WHERE id = ?', id)).toEqual({
+        status: 'batched',
+      });
     });
   });
 

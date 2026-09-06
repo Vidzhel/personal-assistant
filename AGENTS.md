@@ -9,8 +9,13 @@ Keep the custom runtime small; use the existing agent SDK for model execution.
 - This is the canonical development guide for both Claude and Codex. `CLAUDE.md`
   loads it for Claude; `_bmad-output/project-context.md` points BMAD workflows here.
 - Read [ARCHITECTURE.md](ARCHITECTURE.md) for current wiring. The
+  [personal assistant delivery queue](_bmad-output/implementation-artifacts/personal-assistant-next-steps-2026-09-06.md)
+  records the current authorization: project Telegram, session model/thinking
+  controls, readiness/phone access, and the official TickTick MCP. Implement and
+  review these sequentially before planning broader life-assistant features.
+  The completed
   [file-based continuation queue](_bmad-output/implementation-artifacts/file-first-completion-2026-09-05.md)
-  is the active work plan; the earlier
+  records the storage/workspace work; the earlier
   [completion record](_bmad-output/implementation-artifacts/reliability-completion-2026-09-05.md)
   records R0–R7 verification. The
   [deferred ledger](_bmad-output/implementation-artifacts/deferred-work.md)
@@ -81,6 +86,15 @@ versions; do not copy versions from historical planning documents.
 - `createRaven()` in `packages/core/src/raven.ts` is the composition root;
   `index.ts` is the entry point. Chat resumes SDK sessions; execution-bridge owns
   task completion independently of model tool calls.
+- Telegram destinations belong to projects, with Inbox/General and meta/System
+  reserved. Persist conversation selections and message/session bindings in
+  operational SQLite; `/new` preserves older sessions and late acceptance cannot
+  overwrite a newer selection. Revalidate sender and current topic ownership.
+  Notifications enter the existing queue before provider dispatch. Record attempts
+  before calls, preserve accepted IDs and unknown/partial outcomes, and never
+  automatically resend uncertain requests. Deferred and snoozed work retain exact
+  reply origins. Local notification admission and briefing inclusion are not
+  Telegram delivery receipts. Keep diagnostics truthful and mobile-readable.
 - Extend behavior through the existing scaffold-and-activate path: write
   definitions, reload the registry, and commit the specific definition files.
   Intents use the existing SQLite store with budgets, cooldowns and expiry;

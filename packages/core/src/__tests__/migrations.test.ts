@@ -159,7 +159,7 @@ describe('migrations', () => {
     const db = new Database(dbPath);
     writeFileSync(
       join(migrationsDir, '001-initial-schema.sql'),
-      'CREATE TABLE projects (id TEXT PRIMARY KEY); INVALID SQL;',
+      'CREATE TABLE projects (id TEXT PRIMARY KEY); INVALID SQL; PRAGMA user_version = 2;',
     );
     expect(() => runFileMigrations(db, migrationsDir)).toThrow();
     expect(db.prepare('SELECT name FROM _migrations').all()).toEqual([]);
@@ -175,7 +175,7 @@ describe('migrations', () => {
     db.exec('CREATE TABLE existing (id TEXT PRIMARY KEY);');
     writeFileSync(
       join(migrationsDir, '001-initial-schema.sql'),
-      'CREATE TABLE partial (id TEXT); ALTER TABLE existing ADD COLUMN id TEXT;',
+      'CREATE TABLE partial (id TEXT); ALTER TABLE existing ADD COLUMN id TEXT; PRAGMA user_version = 2;',
     );
 
     expect(() => runFileMigrations(db, migrationsDir)).toThrow('duplicate column name');
@@ -191,11 +191,11 @@ describe('migrations', () => {
 
   it('does not expose a database handle after initialization fails and can retry cleanly', () => {
     const schema = join(migrationsDir, '001-initial-schema.sql');
-    writeFileSync(schema, 'CREATE TABLE partial (id TEXT); INVALID SQL;');
+    writeFileSync(schema, 'CREATE TABLE partial (id TEXT); INVALID SQL; PRAGMA user_version = 2;');
     expect(() => initDatabase(dbPath, migrationsDir)).toThrow();
     expect(() => getDb()).toThrow('Database not initialized');
 
-    writeFileSync(schema, 'CREATE TABLE current (id TEXT PRIMARY KEY);');
+    writeFileSync(schema, 'CREATE TABLE current (id TEXT PRIMARY KEY); PRAGMA user_version = 2;');
     const db = initDatabase(dbPath, migrationsDir);
     expect(
       db.prepare("SELECT name FROM sqlite_master WHERE name = 'partial'").get(),
@@ -204,5 +204,67 @@ describe('migrations', () => {
     expect(db.prepare('SELECT name FROM _migrations').all()).toEqual([
       { name: '001-initial-schema' },
     ]);
+  });
+
+  it('rejects an applied initial schema with an old version without modifying it', () => {
+    const db = new Database(dbPath);
+    db.exec(`
+      CREATE TABLE _migrations (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        applied_at INTEGER NOT NULL
+      );
+      INSERT INTO _migrations (name, applied_at) VALUES ('001-initial-schema', 1);
+      CREATE TABLE owner_data (value TEXT);
+      INSERT INTO owner_data (value) VALUES ('keep');
+      PRAGMA user_version = 1;
+    `);
+    writeFileSync(
+      join(migrationsDir, '001-initial-schema.sql'),
+      'CREATE TABLE current (id TEXT PRIMARY KEY); PRAGMA user_version = 2;',
+    );
+
+    expect(() => runFileMigrations(db, migrationsDir)).toThrow(
+      'Unsupported operational database schema version 1; expected 2',
+    );
+    expect(db.prepare('SELECT value FROM owner_data').get()).toEqual({ value: 'keep' });
+    expect(db.pragma('user_version', { simple: true })).toBe(1);
+    db.close();
+  });
+
+  it('rejects a missing schema marker before applying any initial-schema SQL', () => {
+    const db = new Database(dbPath);
+    writeFileSync(
+      join(migrationsDir, '001-initial-schema.sql'),
+      'CREATE TABLE should_not_exist (id TEXT PRIMARY KEY);',
+    );
+
+    expect(() => runFileMigrations(db, migrationsDir)).toThrow(
+      'Unsupported operational database schema version 0; expected 2',
+    );
+    expect(
+      db.prepare("SELECT name FROM sqlite_master WHERE name = 'should_not_exist'").get(),
+    ).toBeUndefined();
+    expect(db.prepare('SELECT name FROM _migrations').all()).toEqual([]);
+    db.close();
+  });
+
+  it('rolls back when initial-schema SQL ends with a different actual version', () => {
+    const db = new Database(dbPath);
+    writeFileSync(
+      join(migrationsDir, '001-initial-schema.sql'),
+      `PRAGMA user_version = 2;
+       CREATE TABLE should_not_exist (id TEXT PRIMARY KEY);
+       PRAGMA user_version = 1;`,
+    );
+
+    expect(() => runFileMigrations(db, migrationsDir)).toThrow(
+      'Unsupported operational database schema version 1; expected 2',
+    );
+    expect(
+      db.prepare("SELECT name FROM sqlite_master WHERE name = 'should_not_exist'").get(),
+    ).toBeUndefined();
+    expect(db.prepare('SELECT name FROM _migrations').all()).toEqual([]);
+    db.close();
   });
 });

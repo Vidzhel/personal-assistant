@@ -114,12 +114,36 @@ the packaged schema atomically; restart preserves its operational state. This
 pre-use schema cleanup does not support databases initialized by the retired
 historical migration chain: startup reports unsupported history instead of
 converting or deleting it. Use a fresh dedicated runtime database for that
-transition. Project files and Git history remain in their volumes.
+transition. The project-based Telegram release requires operational schema
+version 2, including durable conversation bindings and delivery attempts; an
+earlier `001-initial-schema` database is also rejected explicitly. Startup never
+resets the owner's database. Project files and Git history remain in their volumes.
 Review future seed changes explicitly if you want to adopt them. Use one core
 instance for these volumes. If using bind mounts, create dedicated runtime
 directories writable by UID 1000; do not point the initializer at a source Git
 checkout or symlinked roots. Restoring data/history without matching definition
 volumes is not a substitute for restoring a complete backup.
+
+### Telegram project conversations
+
+Set `TELEGRAM_BOT_TOKEN` and the owner's `TELEGRAM_CHAT_ID` in the ignored `.env`.
+Private bot chat starts in Inbox / Today. Send `/project` to list current project
+IDs and `/project <id>` to select one. `/new` starts a fresh session; replying to
+an older Raven message continues that message's session, including after restart.
+
+For a forum group, also configure `TELEGRAM_GROUP_ID`, `TELEGRAM_TOPIC_GENERAL`
+and `TELEGRAM_TOPIC_SYSTEM`. The bot must have permission to manage topics.
+General handles Inbox conversations and general updates; System handles system
+alerts. Run `/project <id>` inside another topic to bind it to that project.
+Only the configured owner can send commands or invoke action buttons. Rebinding
+a topic invalidates replies belonging to its former project. Agent names appear
+within project conversations instead of creating separate agent topics.
+
+Settings shows recent Telegram delivery evidence, including provider message IDs
+and failed, partial or unknown attempts. Unknown means a request may have reached
+Telegram; Raven does not automatically resend it. A local fake-provider test does
+not establish account delivery. After setup, send a harmless message yourself and
+verify its project, response and delivery entry before relying on notifications.
 
 Project mutation recovery is reported by `GET /api/project-recovery`. The
 response contains mutation IDs, paths, operation states and repair messages;

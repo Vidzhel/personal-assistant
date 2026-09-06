@@ -775,10 +775,15 @@ export class TaskExecutionEngine {
       task,
       expectedBytes: record.bytes,
       beforeEvents: () => {
-        this.emitEvent('notification:deliver', {
+        this.emitEvent('notification', {
           channel: node.channel,
           title: node.title,
           body: node.message,
+          destination: record.tree.projectId
+            ? { kind: 'project', projectId: record.tree.projectId }
+            : { kind: 'global', topic: 'general' },
+          urgencyTier: 'green',
+          deliveryMode: 'tell-now',
         });
       },
     });

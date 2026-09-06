@@ -209,6 +209,7 @@ function notifyOwner(eventBus: EventBus, body: string): void {
       title: 'Heartbeat',
       body,
       topicName: 'System',
+      destination: { kind: 'global', topic: 'system' },
     },
   });
 }

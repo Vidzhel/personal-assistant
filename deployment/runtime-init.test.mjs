@@ -66,6 +66,7 @@ test('fresh image restart reconnects real history and preserves definitions and 
     'library/skills/system/repository-work/config.json',
     'library/skills/system/repository-work/skill.md',
     'projects/agents/raven/agent.yaml',
+    'projects/telegram-default/context.md',
   ];
   assert.deepEqual(initial.seededFiles.sort(), seededFiles);
   for (const file of seededFiles) {

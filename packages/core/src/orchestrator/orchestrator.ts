@@ -303,10 +303,31 @@ export class Orchestrator {
           this.sessionManager.updateStatus(session.id, 'idle');
           return;
         }
+        const retrospectiveReply = `**Session Retrospective**\n\n${result.summary}\n\n**Decisions:** ${result.decisions.length ? result.decisions.join(', ') : 'None'}\n**Findings:** ${result.findings.length ? result.findings.join(', ') : 'None'}\n**Action Items:** ${result.actionItems.length ? result.actionItems.join(', ') : 'None'}`;
         this.messageStore.appendMessage(session.id, {
           role: 'assistant',
-          content: `**Session Retrospective**\n\n${result.summary}\n\n**Decisions:** ${result.decisions.length ? result.decisions.join(', ') : 'None'}\n**Findings:** ${result.findings.length ? result.findings.join(', ') : 'None'}\n**Action Items:** ${result.actionItems.length ? result.actionItems.join(', ') : 'None'}`,
+          content: retrospectiveReply,
         });
+        if (event.payload.transportOrigin) {
+          this.eventBus.emit({
+            id: generateId(),
+            timestamp: Date.now(),
+            source: SOURCE_ORCHESTRATOR,
+            type: 'notification',
+            projectId,
+            payload: {
+              channel: 'telegram',
+              title: 'Raven',
+              body: retrospectiveReply,
+              destination: { kind: 'project', projectId },
+              transportOrigin: event.payload.transportOrigin,
+              sessionId: session.id,
+              taskId: `retrospective:${event.payload.requestId ?? stored}`,
+              urgencyTier: 'green',
+              deliveryMode: 'tell-now',
+            },
+          });
+        }
         this.sessionManager.updateStatus(session.id, 'idle');
         return;
       } catch (err) {
@@ -410,6 +431,7 @@ export class Orchestrator {
         model: executionSettings.model,
         maxTurns: executionSettings.maxTurns,
         bashAccess,
+        transportOrigin: event.payload.transportOrigin,
       },
     });
   }

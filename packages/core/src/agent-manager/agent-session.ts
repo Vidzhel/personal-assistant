@@ -501,6 +501,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
             content: text,
             messageId,
             agentName,
+            transportOrigin: task.transportOrigin,
           },
         });
       },
@@ -539,6 +540,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
             content: `${toolName}: ${toolInput}`,
             messageId,
             agentName,
+            transportOrigin: task.transportOrigin,
           },
         });
       },

@@ -161,12 +161,37 @@ The `morning-digest` template (`projects/templates/morning-digest.yaml`) drives 
    TaskExecutionEngine.onTaskCompleted(), advancing the tree
 6. Same pattern for 'fetch-emails' (agent: gmail); once both finish, 'compile-digest'
    (agent: digest) runs with its configured capabilities
-7. A final task of type 'notify' emits 'notification:deliver' and completes locally
+7. A final task of type 'notify' emits 'notification' for ordinary queue admission
+   and completes locally
 ```
 
 The notify task's terminal state is evidence of local dispatch, not a receipt from
 Telegram. Actual account delivery depends on enabled integrations and requires a
 separate account canary.
+
+### Telegram conversations and delivery
+
+Telegram uses projects as conversation destinations. Private messages start in
+the managed Inbox (`telegram-default`); `/project <id>` selects a project. Forum
+topics bind to one project with that command. General is Inbox and System is the
+reserved system project. `/project` lists current project IDs. Agents identify
+their work inside the conversation instead of receiving separate agent topics.
+
+SQLite stores the selected conversation and incoming/outgoing message bindings.
+`/new` starts another Raven session without deleting older sessions. Replying to
+an older bound message resumes its session, subject to current project/topic
+ownership and sender authorization. Delayed completions cannot replace a newer
+conversation selection. Uncertain previously admitted inputs are not replayed as
+new model work after restart.
+
+The notification queue owns delivery admission and records an attempt before a
+provider call. Accepted provider message IDs, definite failures, unknown outcomes
+and partial attachment deliveries remain inspectable through
+`GET /api/notifications/deliveries` and Settings. Only definitely rejected
+formatting requests may retry as plain text. Restart recovers safely unattempted
+work and reconciles interrupted attempts without resending uncertain deliveries.
+Provider acceptance is not proof that the owner read a message. Batched originals
+are marked included in the briefing, not independently delivered to Telegram.
 
 ## Event Bus
 

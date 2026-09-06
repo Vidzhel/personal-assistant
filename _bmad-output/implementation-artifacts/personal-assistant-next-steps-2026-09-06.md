@@ -5,6 +5,29 @@ The owner requested assessment, a creative plan, integration research and SDK
 maintenance. Feature work below is proposed; do not interpret the queue as a
 claim of delivery. F1–F9/W1 stay complete. No legacy migration is required.
 
+## Owner implementation decision
+
+The owner subsequently authorized the first three P0 **product priorities**:
+project Telegram (T0/T1), session model/thinking controls (M0), and readiness/phone
+access (O0), plus the official TickTick MCP and effective usage skills (A2).
+Implement and review these sequentially, committing/pushing completed slices.
+The [Telegram specification](tech-spec-p0-project-telegram.md) starts execution.
+Implementation drafts are prepared for [session controls](tech-spec-p0-session-models.md),
+[readiness and phone access](tech-spec-p0-readiness-phone.md), and the
+[official TickTick integration](tech-spec-p0-official-ticktick.md).
+Plan the remaining product work after these deliverables.
+
+Preserve the owner's clarification for that later planning: TickTick is the
+planning authority, including work-related workload; Raven should help the owner
+plan and manage calendar commitments with an understanding of that workload.
+Linked knowledge should span all areas of life and be created and maintained by
+project agents. Learned planning preferences are one part of that knowledge, not
+a separate planning-only profile. Retrospectives should learn from experience
+and ask useful follow-up questions. Capture represents incoming material awaiting
+processing, not a replacement or competing store for linked knowledge. No inbox,
+workload reorganization or broader memory redesign is implemented under this P0
+scope, and live task changes require the owner's actual planning request.
+
 ## Release sequence
 
 Estimates are focused engineering days including review and relevant tests, with
@@ -15,10 +38,10 @@ may implement independent pieces; the parent reviews the actual diff and outcome
 | Order | Item                                                  | Priority                          | Effort                       | Depends on                                  | State                                                       |
 | ----- | ----------------------------------------------------- | --------------------------------- | ---------------------------- | ------------------------------------------- | ----------------------------------------------------------- |
 | 1     | A0: narrow SDK maintenance                            | P0                                | 1–2 days                     | Existing SDK contract tests                 | Complete; validated review image, not deployed              |
-| 2     | T0: delivery truth and message ownership              | P0                                | 2–4 days                     | Current notification/session paths          | Ready to specify                                            |
-| 3     | T1: project topics and session continuity             | P0                                | 3–5 days                     | T0                                          | Ready to specify                                            |
-| 4     | M0: next-turn model/effort controls                   | P0                                | 3–5 days                     | A0                                          | Ready to specify                                            |
-| 5     | O0: readiness and reliable phone access               | P0                                | 2–4 days                     | T0 for delivery diagnostics                 | Ready to specify                                            |
+| 2     | T0: delivery truth and message ownership              | P0                                | 2–4 days                     | Current notification/session paths          | Complete; reviewed and tested                       |
+| 3     | T1: project topics and session continuity             | P0                                | 3–5 days                     | T0                                          | Complete; reviewed and tested                       |
+| 4     | M0: next-turn model/effort controls                   | P0                                | 3–5 days                     | A0                                          | Specified; next implementation slice                          |
+| 5     | O0: readiness and reliable phone access               | P0                                | 2–4 days                     | T0 for delivery diagnostics                 | Specified; follows Telegram review                          |
 | 6     | A1: repair skills maintenance and integration catalog | P0                                | 1–3 days                     | Capability library                          | Ready to specify                                            |
 | 7     | A2: official TickTick compatibility trial             | P0/P1                             | 2–4 days                     | A1; deliberate account setup for live phase | Official endpoint and tools verified; runtime trial pending |
 | 8     | C0: durable capture inbox and source links            | P1                                | 3–5 days                     | T1, O0                                      | Proposed                                                    |

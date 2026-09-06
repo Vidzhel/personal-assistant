@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { createRaven, type RavenInstance } from '../raven.ts';
 import { buildTestConfig, createRavenTestFixture } from './fixtures/raven-fixture.ts';
 import type { AgentBackend } from '../agent-manager/agent-backend.ts';
-import type { NotificationDeliverEvent } from '@raven/shared';
+import type { NotificationEvent } from '@raven/shared';
 
 /**
  * F1's boot-bricking half: before the fix, a schedule YAML with an invalid
@@ -99,8 +99,8 @@ describe('e2e: boot survives a pre-existing invalid schedule YAML (F1)', () => {
     });
     await raven.start();
 
-    const notifications: NotificationDeliverEvent[] = [];
-    raven.eventBus.on<NotificationDeliverEvent>('notification:deliver', (e) => {
+    const notifications: NotificationEvent[] = [];
+    raven.eventBus.on<NotificationEvent>('notification', (e) => {
       notifications.push(e);
     });
 
@@ -109,5 +109,6 @@ describe('e2e: boot survives a pre-existing invalid schedule YAML (F1)', () => {
     // scheduling for anything after it.
     await waitFor(() => notifications.length >= 1);
     expect(notifications[0].payload.body).toContain('ping fired');
+    expect(notifications[0].payload.destination).toEqual({ kind: 'global', topic: 'general' });
   }, 10000);
 });

@@ -4,6 +4,19 @@ import type Database from 'better-sqlite3';
 import { createLogger } from '@raven/shared';
 
 const log = createLogger('migrations');
+export const CURRENT_OPERATIONAL_SCHEMA_VERSION = 2;
+
+function assertCurrentSchemaVersion(version: number): void {
+  if (version === CURRENT_OPERATIONAL_SCHEMA_VERSION) return;
+  throw new Error(
+    `Unsupported operational database schema version ${String(version)}; expected ${String(CURRENT_OPERATIONAL_SCHEMA_VERSION)}. This build requires a fresh/current operational schema; initialize it explicitly. The runtime will not reset or partially upgrade this file.`,
+  );
+}
+
+function assertInitialSchemaMarker(sql: string): void {
+  const match = /PRAGMA\s+user_version\s*=\s*(\d+)\s*;/i.exec(sql);
+  assertCurrentSchemaVersion(match ? Number(match[1]) : 0);
+}
 
 export function runFileMigrations(db: Database.Database, migrationsDir: string): void {
   if (!existsSync(migrationsDir)) {
@@ -41,13 +54,22 @@ export function runFileMigrations(db: Database.Database, migrationsDir: string):
     }
 
     const sql = readFileSync(join(migrationsDir, file), 'utf-8');
+    if (name === '001-initial-schema') assertInitialSchemaMarker(sql);
 
     log.info(`Running migration: ${name}`);
     const migrate = db.transaction(() => {
       db.exec(sql);
+      if (name === '001-initial-schema') {
+        assertCurrentSchemaVersion(db.pragma('user_version', { simple: true }) as number);
+      }
       db.prepare('INSERT INTO _migrations (name, applied_at) VALUES (?, ?)').run(name, Date.now());
     });
 
     migrate();
+  }
+
+  if (migrationNames.has('001-initial-schema')) {
+    const version = db.pragma('user_version', { simple: true }) as number;
+    assertCurrentSchemaVersion(version);
   }
 }

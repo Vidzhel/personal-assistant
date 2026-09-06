@@ -169,14 +169,21 @@ export function projectFromNode(node: ProjectNode, existing?: Project): Project 
 }
 
 export function projectReferences(db: Database.Database, id: string): string[] {
-  const tables = ['sessions', 'events', 'knowledge_rejections'];
+  const tables = [
+    'sessions',
+    'events',
+    'knowledge_rejections',
+    'telegram_topics',
+    'telegram_conversations',
+    'telegram_message_bindings',
+  ];
   const references = tables.filter((table) =>
     db.prepare(`SELECT 1 FROM ${table} WHERE project_id = ? LIMIT 1`).get(id),
   );
   if (
-    db.prepare("SELECT 1 FROM telegram_topics WHERE scope = 'project' AND key = ? LIMIT 1").get(id)
+    db.prepare('SELECT 1 FROM notification_queue WHERE destination_project_id = ? LIMIT 1').get(id)
   ) {
-    references.push('telegram_topics');
+    references.push('notification_queue');
   }
   return references;
 }

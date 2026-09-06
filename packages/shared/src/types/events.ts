@@ -3,6 +3,7 @@ import type { PermissionTier } from './permissions.ts';
 import { PermissionTierSchema } from './permissions.ts';
 import type { TaskTreeNode } from './task-execution.ts';
 import type { BashAccess } from './project-fs.ts';
+import type { ChatTransportOrigin, NotificationDestination } from './transports.ts';
 
 export interface BaseEvent {
   id: string;
@@ -53,6 +54,7 @@ export interface AgentTaskRequestEvent extends BaseEvent {
     priority: Priority;
     sessionId?: string;
     projectId?: string;
+    transportOrigin?: ChatTransportOrigin;
     namedAgentId?: string;
     namedAgentRevision?: string;
     /** Effective SDK model identifier selected from the named-agent tier. */
@@ -96,6 +98,7 @@ export interface AgentTaskCompleteEvent extends BaseEvent {
      * this field didn't exist before, so that filter always failed silently
      * and no pattern-analysis result was ever processed into an insight. */
     skillName?: string;
+    agentName?: string;
     result: string;
     durationMs: number;
     success: boolean;
@@ -107,6 +110,7 @@ export interface AgentTaskCompleteEvent extends BaseEvent {
     /** True when the task was cancelled (user/tree cancellation) rather than
      * having failed on its own — terminal, must never enter the retry ladder. */
     cancelled?: boolean;
+    transportOrigin?: ChatTransportOrigin;
   };
 }
 
@@ -119,6 +123,7 @@ export interface AgentMessageEvent extends BaseEvent {
     content: string;
     messageId?: string;
     agentName?: string;
+    transportOrigin?: ChatTransportOrigin;
   };
 }
 
@@ -131,6 +136,7 @@ export interface UserChatMessageEvent extends BaseEvent {
     message: string;
     topicId?: number;
     topicName?: string;
+    transportOrigin?: ChatTransportOrigin;
     mediaAttachment?: {
       type: 'photo' | 'document';
       filePath: string;
@@ -175,6 +181,11 @@ export interface NotificationEvent extends BaseEvent {
     urgencyTier?: UrgencyTier;
     deliveryMode?: DeliveryMode;
     filePath?: string;
+    destination?: NotificationDestination;
+    /** Exact trusted Telegram reply address for a durable chat result. */
+    transportOrigin?: ChatTransportOrigin;
+    sessionId?: string;
+    taskId?: string;
   };
 }
 
@@ -190,6 +201,11 @@ export interface NotificationDeliverEvent extends BaseEvent {
     deliveryMode?: DeliveryMode;
     queueId?: string;
     filePath?: string;
+    destination?: NotificationDestination;
+    /** Exact trusted Telegram reply address restored from the delivery queue. */
+    transportOrigin?: ChatTransportOrigin;
+    sessionId?: string;
+    taskId?: string;
   };
 }
 
@@ -298,6 +314,9 @@ export interface VoiceReceivedEvent extends BaseEvent {
     topicId?: number;
     topicName?: string;
     replyMessageId?: number; // message ID of "Transcribing..." reply for editing
+    requestId?: string;
+    sessionId?: string;
+    transportOrigin?: ChatTransportOrigin;
   };
 }
 
@@ -309,6 +328,17 @@ export const VoiceReceivedPayloadSchema = z.object({
   topicId: z.number().optional(),
   topicName: z.string().optional(),
   replyMessageId: z.number().optional(),
+  requestId: z.string().optional(),
+  sessionId: z.string().optional(),
+  transportOrigin: z
+    .object({
+      transport: z.literal('telegram'),
+      chatId: z.string(),
+      topicId: z.number().optional(),
+      messageId: z.number(),
+      replyToMessageId: z.number().optional(),
+    })
+    .optional(),
 });
 
 export interface MediaReceivedEvent extends BaseEvent {
@@ -324,6 +354,9 @@ export interface MediaReceivedEvent extends BaseEvent {
     topicId?: number;
     topicName?: string;
     replyMessageId?: number;
+    requestId?: string;
+    sessionId?: string;
+    transportOrigin?: ChatTransportOrigin;
   };
 }
 
@@ -335,6 +368,17 @@ export const MediaReceivedPayloadSchema = z.object({
   fileName: z.string(),
   fileSize: z.number().optional(),
   caption: z.string().optional(),
+  requestId: z.string().optional(),
+  sessionId: z.string().optional(),
+  transportOrigin: z
+    .object({
+      transport: z.literal('telegram'),
+      chatId: z.string(),
+      topicId: z.number().optional(),
+      messageId: z.number(),
+      replyToMessageId: z.number().optional(),
+    })
+    .optional(),
   topicId: z.number().optional(),
   topicName: z.string().optional(),
   replyMessageId: z.number().optional(),

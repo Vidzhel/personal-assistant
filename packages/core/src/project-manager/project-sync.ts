@@ -1,5 +1,11 @@
 import { join } from 'node:path';
-import { createLogger, gitAutoCommit, META_PROJECT_ID, type ProjectNode } from '@raven/shared';
+import {
+  createLogger,
+  gitAutoCommit,
+  META_PROJECT_ID,
+  PROJECT_TELEGRAM_DEFAULT,
+  type ProjectNode,
+} from '@raven/shared';
 import type Database from 'better-sqlite3';
 import type { ProjectRegistry } from '../project-registry/project-registry.ts';
 import type { ScaffoldingApi } from '../scaffolding/scaffolding-api.ts';
@@ -68,6 +74,28 @@ async function ensureMetaProjectNode(deps: ProjectSyncDeps): Promise<void> {
       'feat(project): scaffold system',
     );
   }
+}
+
+async function ensureTelegramInboxProjectNode(deps: ProjectSyncDeps): Promise<void> {
+  const path = PROJECT_TELEGRAM_DEFAULT;
+  if (pathUnavailable(path, deps.projectRegistry.getInvalidProjectPaths())) return;
+  if (deps.projectRegistry.getProject(path)) return;
+  const project = {
+    id: PROJECT_TELEGRAM_DEFAULT,
+    name: 'Inbox / Today',
+    description:
+      'Default capture and daily coordination project for direct Telegram conversations.',
+    skills: [],
+    systemAccess: 'none' as const,
+    isMeta: false,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+  await deps.scaffoldingApi.createProject({ ...projectMetadata(project), path });
+  await gitAutoCommit(
+    [join(deps.projectsDir, path, 'context.md'), join(deps.projectsDir, path, 'project.yaml')],
+    'feat(project): scaffold Telegram inbox',
+  );
 }
 
 function assertOrdinaryIdentity(node: ProjectNode, existing?: ProjectRow): void {
@@ -172,6 +200,7 @@ export async function runProjectSync(deps: ProjectSyncDeps): Promise<ProjectSync
   return withProjectMutation(deps.projectsDir, async () => {
     deps.projectRegistry.assertHealthy();
     await ensureMetaProjectNode(deps);
+    await ensureTelegramInboxProjectNode(deps);
     const result: ProjectSyncResult = { linked: 0, created: 0, scaffolded: 0, dropped: 0 };
     Object.assign(result, syncProjectCache(deps));
     log.info(`Project sync: ${JSON.stringify(result)}`);

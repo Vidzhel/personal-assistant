@@ -484,9 +484,10 @@ describe('task execution integration', () => {
     const tree2 = engine.getTree(treeId)!;
     expect(tree2.tasks.get(notify)!.status).toBe('completed');
 
-    const notifyEvents = eventBus.getByType('notification:deliver');
+    const notifyEvents = eventBus.getByType('notification');
     expect(notifyEvents).toHaveLength(1);
     expect(notifyEvents[0].payload.channel).toBe('telegram');
+    expect(notifyEvents[0].payload.destination).toEqual({ kind: 'global', topic: 'general' });
 
     // Tree should be completed
     expect(tree2.status).toBe('completed');
@@ -572,8 +573,9 @@ describe('task execution integration', () => {
     expect(tree2.tasks.get(notifyDone)!.status).toBe('completed');
     expect(tree2.status).toBe('completed');
 
-    const notifyEvents = eventBus.getByType('notification:deliver');
+    const notifyEvents = eventBus.getByType('notification');
     expect(notifyEvents).toHaveLength(1);
+    expect(notifyEvents[0].payload.destination).toEqual({ kind: 'global', topic: 'general' });
   });
 
   // ── DB persistence across engine instances ────────────────────────────

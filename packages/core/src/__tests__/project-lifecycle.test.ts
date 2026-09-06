@@ -490,7 +490,7 @@ describe('managed project lifecycle failures and legacy data', () => {
     const topic = await create('Topic');
     deps.db
       .prepare(
-        "INSERT INTO telegram_topics(scope,key,group_id,topic_id) VALUES ('project',?,'fake-group',7)",
+        "INSERT INTO telegram_topics(project_id,group_id,topic_id) VALUES (?,'fake-group',7)",
       )
       .run(topic.id);
     await expect(deleteManagedProject(deps, topic.id)).rejects.toThrow('telegram_topics');

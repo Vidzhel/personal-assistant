@@ -88,6 +88,7 @@ export function sendReportNotification(eventBus: EventBusInterface, report: Comp
       title: `System Maintenance Report — ${report.date}`,
       body,
       topicName: 'System',
+      destination: { kind: 'global' as const, topic: 'system' as const },
     },
   });
 

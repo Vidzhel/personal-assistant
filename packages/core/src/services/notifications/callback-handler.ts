@@ -430,6 +430,7 @@ function handleEmailReplyAction(action: CallbackAction, deps: CallbackDeps): Cal
         title: 'Edit Reply',
         body: 'Please send your corrections or new instructions for this reply.',
         topicName: 'General',
+        destination: { kind: 'global' as const, topic: 'general' as const },
       },
     });
   }
@@ -569,6 +570,7 @@ function handleViewGraphInsightAction(
       title: 'View in Knowledge Graph',
       body: `[Open Knowledge Graph](${deepLink})`,
       topicName: 'General',
+      destination: { kind: 'global' as const, topic: 'general' as const },
     },
   });
 

@@ -149,6 +149,7 @@ export class AgentManager {
         success: false,
         blocked: true,
         errors: [reason],
+        transportOrigin: payload.transportOrigin,
       },
     });
   }
@@ -166,6 +167,7 @@ export class AgentManager {
       id: payload.taskId,
       sessionId: payload.sessionId,
       projectId: payload.projectId,
+      transportOrigin: payload.transportOrigin,
       skillName: payload.skillName,
       prompt: payload.prompt,
       status: 'queued',
@@ -332,6 +334,7 @@ export class AgentManager {
         sessionId: task.sessionId,
         messageType: 'thinking',
         content: thinkingContent,
+        transportOrigin: task.transportOrigin,
       },
     });
 
@@ -474,12 +477,14 @@ export class AgentManager {
         sessionId: task.sessionId,
         sdkSessionId,
         skillName: task.skillName,
+        agentName: task.namedAgentId,
         result: task.result ?? '',
         durationMs: task.durationMs ?? 0,
         success: task.status === 'completed',
         errors: task.errors,
         blocked: task.status === 'blocked',
         cancelled: task.status === 'cancelled',
+        transportOrigin: task.transportOrigin,
       },
     });
   }

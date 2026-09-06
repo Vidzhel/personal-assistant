@@ -117,6 +117,7 @@ function emitNotification(
       title,
       body,
       topicName: 'general',
+      destination: { kind: 'global' as const, topic: 'general' as const },
       actions: actions && actions.length > 0 ? actions : undefined,
     },
   });

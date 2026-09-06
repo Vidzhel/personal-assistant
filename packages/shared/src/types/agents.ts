@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { McpServerConfig, SubAgentDefinition, Priority } from './events.ts';
 import type { BashAccess } from './project-fs.ts';
+import type { ChatTransportOrigin } from './transports.ts';
 import { BashAccessSchema } from '../project/schemas.ts';
 
 const MAX_AGENT_TURNS = 100;
@@ -107,6 +108,8 @@ export interface AgentTask {
   id: string;
   sessionId?: string;
   projectId?: string;
+  /** Trusted reply address captured by an input transport. */
+  transportOrigin?: ChatTransportOrigin;
   skillName: string;
   actionName?: string;
   prompt: string;

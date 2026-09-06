@@ -151,6 +151,36 @@ const control = createServer(async (req, res) => {
     let result;
     if (req.method === 'GET' && req.url === '/workspace') {
       result = await workspaceFixture.state();
+    } else if (req.method === 'POST' && req.url === '/delivery-evidence') {
+      const projectId = 'course/one';
+      const insert = getDb().prepare(`
+        INSERT OR REPLACE INTO notification_queue
+          (id, source, title, body, channel, destination_kind, destination_project_id,
+           urgency_tier, delivery_mode, status, created_at, attempt_count,
+           provider_message_id, last_error, last_attempt_at)
+        VALUES (?, 'browser-delivery-fixture', ?, 'Fixture only', 'telegram', 'project', ?,
+                'green', 'tell-now', ?, ?, ?, ?, ?, ?)
+      `);
+      const now = new Date().toISOString();
+      for (const [status, attempts, providerId, error] of [
+        ['delivered', 1, '101', null],
+        ['failed', 2, null, 'Telegram rejected the configured topic'],
+        ['unknown', 1, null, 'Delivery interrupted before provider outcome was recorded'],
+        ['partial', 2, '104', 'Attachment was rejected after text acceptance'],
+      ]) {
+        insert.run(
+          `browser-delivery-${status}`,
+          `Browser delivery ${status}`,
+          projectId,
+          status,
+          now,
+          attempts,
+          providerId,
+          error,
+          now,
+        );
+      }
+      result = { projectId };
     } else if (req.method === 'GET' && req.url === '/state') {
       result = {
         calls,

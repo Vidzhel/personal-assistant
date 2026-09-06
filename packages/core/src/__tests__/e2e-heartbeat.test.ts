@@ -107,7 +107,14 @@ describe('e2e: heartbeat silence through the real scheduled model boundary', () 
     expect(notifications).toEqual([
       expect.objectContaining({
         source: 'heartbeat',
-        payload: { channel: 'telegram', title: 'Heartbeat', body: reply, topicName: 'System' },
+        type: 'notification',
+        payload: expect.objectContaining({
+          channel: 'telegram',
+          title: 'Heartbeat',
+          body: reply,
+          topicName: 'System',
+          destination: { kind: 'global', topic: 'system' },
+        }),
       }),
     ]);
     expect(completions).toEqual([]);

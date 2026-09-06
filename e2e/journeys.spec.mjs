@@ -50,6 +50,56 @@ test.beforeEach(async ({ context }) => {
   });
 });
 
+test('mobile settings distinguish accepted, failed, uncertain and partial Telegram delivery', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const fixture = await request.post(`${CONTROL}/delivery-evidence`);
+  expect(fixture.ok()).toBeTruthy();
+  const response = await request.get(`${API}/notifications/deliveries?limit=25`);
+  expect(response.ok()).toBeTruthy();
+  const { deliveries } = await response.json();
+  expect(deliveries.filter((item) => item.source === 'browser-delivery-fixture')).toHaveLength(4);
+  await page.goto('/settings');
+  await expect(
+    page.getByRole('heading', { name: 'Notification Delivery', exact: true }),
+  ).toBeVisible();
+  for (const outcome of ['delivered', 'failed', 'unknown', 'partial']) {
+    const card = page.getByRole('article', { name: `Browser delivery ${outcome}`, exact: true });
+    await expect(card).toBeVisible();
+    await expect(card.getByText(outcome, { exact: true })).toBeVisible();
+  }
+  const partial = page.getByRole('article', { name: 'Browser delivery partial', exact: true });
+  await expect(partial.getByText('Telegram ID 104', { exact: false })).toBeVisible();
+  const error = partial.getByText('Attachment was rejected after text acceptance', { exact: true });
+  await error.scrollIntoViewIfNeeded();
+  await expect(error).toBeInViewport({ ratio: 1 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: '.browser-test-output/telegram-deliveries-mobile.png' });
+  await page.reload();
+  await expect(
+    page.getByRole('article', { name: 'Browser delivery unknown', exact: true }),
+  ).toBeVisible();
+});
+
+test('delivery diagnostics show a failed fetch instead of an empty successful history', async ({
+  page,
+}) => {
+  await page.route('**/api/notifications/deliveries?*', (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'Delivery evidence temporarily unavailable' }),
+    }),
+  );
+  await page.goto('/settings');
+  await expect(
+    page.getByText('Delivery evidence temporarily unavailable', { exact: false }),
+  ).toBeVisible();
+  await expect(page.getByText('No deliveries recorded.', { exact: true })).toHaveCount(0);
+});
+
 test('project task board persists completion and displays file-backed task details', async ({
   page,
   request,

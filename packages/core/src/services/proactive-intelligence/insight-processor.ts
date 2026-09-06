@@ -150,6 +150,7 @@ function emitInsightQueuedNotification(insight: InsightRecommendation, id: strin
       title: insight.title,
       body: insight.body,
       topicName: 'General',
+      destination: { kind: 'global' as const, topic: 'general' as const },
       actions: [
         { label: 'Useful', action: `insight:acted:${id}` },
         { label: 'Dismiss', action: `insight:dismissed:${id}` },
@@ -319,6 +320,7 @@ function queueCrossDomainInsight(
       title,
       body,
       topicName: 'General',
+      destination: { kind: 'global' as const, topic: 'general' as const },
       actions: [
         { label: 'View in Graph', action: `ki:v:${id}` },
         { label: 'Interesting', action: `ki:i:${id}` },

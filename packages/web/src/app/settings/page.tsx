@@ -7,6 +7,10 @@ import { useAppStore } from '@/stores/app-store';
 import { usePolling } from '@/hooks/usePolling';
 import { tierBadgeProps, tierRank } from '@/components/ui/badge-helpers';
 import type { ActionCatalogEntry } from '@/lib/api-client';
+import {
+  DeliveryDiagnostics,
+  type DeliveryDiagnostic,
+} from '@/components/dashboard/DeliveryDiagnostics';
 
 const SECONDS_PER_MINUTE = 60;
 const CATALOG_REFRESH_INTERVAL_MS = 30000;
@@ -19,6 +23,13 @@ export default function SettingsPage() {
     loading: catalogLoading,
     error: catalogError,
   } = usePolling<ActionCatalogEntry[]>('/permissions/catalog', CATALOG_REFRESH_INTERVAL_MS);
+  const {
+    data: deliveryData,
+    loading: deliveryLoading,
+    error: deliveryError,
+  } = usePolling<{
+    deliveries: DeliveryDiagnostic[];
+  }>('/notifications/deliveries?limit=25', CATALOG_REFRESH_INTERVAL_MS);
 
   useEffect(() => {
     fetchHealth();
@@ -120,6 +131,11 @@ export default function SettingsPage() {
         catalog={catalog ?? []}
         loading={catalogLoading}
         error={catalogError !== null}
+      />
+      <DeliveryDiagnostics
+        deliveries={deliveryData ? deliveryData.deliveries : []}
+        loading={deliveryLoading}
+        error={deliveryError !== null}
       />
     </div>
   );

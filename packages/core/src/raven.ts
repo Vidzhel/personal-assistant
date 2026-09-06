@@ -346,6 +346,7 @@ export async function createRaven(
     config: {
       intentStore,
       taskStore,
+      projectRegistry,
       RAVEN_PORT: config.RAVEN_PORT,
       neo4j: {
         enabled: config.NEO4J_ENABLED,
@@ -429,13 +430,6 @@ export async function createRaven(
       if (payload.assignedAgentId) parts.push(`Agent: ${payload.assignedAgentId}`);
       if (payload.projectId) parts.push(`Project: ${payload.projectId}`);
 
-      // Route to agent-specific topic if assigned, otherwise fall back to "Tasks"
-      let topicName = 'Tasks';
-      if (payload.assignedAgentId) {
-        const agent = namedAgentStore.getAgent(payload.assignedAgentId);
-        if (agent) topicName = agent.name;
-      }
-
       eventBus.emit({
         id: generateId(),
         timestamp: Date.now(),
@@ -445,7 +439,10 @@ export async function createRaven(
           channel: 'telegram' as const,
           title: `Task ${action}`,
           body: parts.join('\n'),
-          topicName,
+          topicName: 'Tasks',
+          destination: payload.projectId
+            ? { kind: 'project' as const, projectId: payload.projectId }
+            : { kind: 'global' as const, topic: 'general' as const },
         },
       });
     });
@@ -513,7 +510,7 @@ export async function createRaven(
   });
 
   // 10b. Inject agentManager into service context for callback handler
-  Object.assign(baseContext.config, { agentManager });
+  Object.assign(baseContext.config, { agentManager, sessionManager });
 
   // Execution bridge: runtime observes agent:task:complete and drives
   // onTaskCompleted/onTaskBlocked/onTaskFailed on the engine, honoring the

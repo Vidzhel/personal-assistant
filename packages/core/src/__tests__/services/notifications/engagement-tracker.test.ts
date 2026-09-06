@@ -189,8 +189,10 @@ describe('engagement-tracker service', () => {
       // Insert a pending tell-when-active notification that's 5 hours old
       const oldTime = new Date(Date.now() - 5 * 3600 * 1000).toISOString();
       db.run(
-        `INSERT INTO notification_queue (id, source, title, body, urgency_tier, delivery_mode, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO notification_queue
+           (id, source, title, body, channel, destination_kind, destination_topic,
+            urgency_tier, delivery_mode, status, created_at)
+         VALUES (?, ?, ?, ?, 'telegram', 'global', 'general', ?, ?, ?, ?)`,
         'old-notif-1',
         'test',
         'Important Task',
@@ -228,15 +230,16 @@ describe('engagement-tracker service', () => {
       const deliverEvents = emittedEvents.filter((e) => e.type === 'notification:deliver');
       expect(deliverEvents).toHaveLength(1);
       expect(deliverEvents[0].payload.title).toBe('Reminder: Important Task');
+      expect(deliverEvents[0].payload.destination).toEqual({ kind: 'global', topic: 'general' });
 
       // Should have emitted notification:escalated
       const escalatedEvents = emittedEvents.filter((e) => e.type === 'notification:escalated');
       expect(escalatedEvents).toHaveLength(1);
       expect(escalatedEvents[0].payload.queueId).toBe('old-notif-1');
 
-      // Original should be marked as escalated
+      // The delivery consumer still owns the atomic pending -> sending claim.
       const row = db.get<any>(`SELECT status FROM notification_queue WHERE id = 'old-notif-1'`);
-      expect(row.status).toBe('escalated');
+      expect(row.status).toBe('pending');
     });
 
     it('does not record escalation re-deliveries as new deliveries', async () => {

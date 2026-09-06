@@ -14,6 +14,7 @@ import {
   type EventBusInterface,
   type VoiceReceivedEvent,
   type TranscriptionRequestEvent,
+  type UserChatRejectedEvent,
 } from '@raven/shared';
 import type { ServiceContext, RavenService } from '../types.ts';
 import {
@@ -247,12 +248,14 @@ interface VoiceTranscriptionContext {
   projectId: string;
   topicId: number | undefined;
   topicName: string | undefined;
+  transportOrigin: VoiceReceivedEvent['payload']['transportOrigin'];
+  requestId: string | undefined;
+  sessionId: string | undefined;
 }
 
 function emitVoiceNotification(
   bus: TranscriptionLifetime,
-  topicName: string | undefined,
-  body: string,
+  input: { projectId: string; topicName?: string; body: string },
 ): void {
   bus.emit({
     id: generateId(),
@@ -262,8 +265,9 @@ function emitVoiceNotification(
     payload: {
       channel: 'telegram',
       title: 'Voice Transcription',
-      body,
-      topicName,
+      body: input.body,
+      topicName: input.topicName,
+      destination: { kind: 'project', projectId: input.projectId },
     },
   });
 }
@@ -280,6 +284,9 @@ function emitTranscribedChatMessage(ctx: VoiceTranscriptionContext, message: str
       message,
       topicId: ctx.topicId,
       topicName: ctx.topicName,
+      transportOrigin: ctx.transportOrigin,
+      requestId: ctx.requestId,
+      sessionId: ctx.sessionId,
     },
   });
 }
@@ -288,20 +295,34 @@ function handleVoiceTranscriptionError(ctx: VoiceTranscriptionContext, err: unkn
   const isTimeout =
     err instanceof Error && (err.name === 'AbortError' || err.message.includes('aborted'));
 
+  const body = isTimeout
+    ? "Couldn't transcribe that — please type your message"
+    : 'Voice transcription is temporarily unavailable — please type your message';
   if (isTimeout) {
     log.warn(`Transcription timed out for project ${ctx.projectId}`);
-    emitVoiceNotification(
-      ctx.bus,
-      ctx.topicName,
-      "Couldn't transcribe that — please type your message",
-    );
   } else {
     log.error(`Transcription error for project ${ctx.projectId}: ${err}`);
-    emitVoiceNotification(
-      ctx.bus,
-      ctx.topicName,
-      'Voice transcription is temporarily unavailable — please type your message',
-    );
+  }
+  if (ctx.requestId) {
+    ctx.bus.emit({
+      id: generateId(),
+      timestamp: Date.now(),
+      source: SOURCE_GEMINI,
+      type: 'user:chat:rejected',
+      projectId: ctx.projectId,
+      payload: {
+        requestId: ctx.requestId,
+        projectId: ctx.projectId,
+        sessionId: ctx.sessionId,
+        error: body,
+      },
+    } satisfies UserChatRejectedEvent);
+  } else {
+    emitVoiceNotification(ctx.bus, {
+      projectId: ctx.projectId,
+      topicName: ctx.topicName,
+      body,
+    });
   }
 }
 
@@ -311,9 +332,26 @@ async function handleVoiceReceived(
   request: TranscriptionRequest,
 ): Promise<void> {
   const { transcriber, lifetime } = options;
-  const { projectId, audioData, mimeType, topicId, topicName } = event.payload;
+  const {
+    projectId,
+    audioData,
+    mimeType,
+    topicId,
+    topicName,
+    transportOrigin,
+    requestId,
+    sessionId,
+  } = event.payload;
 
-  const ctx: VoiceTranscriptionContext = { bus: lifetime, projectId, topicId, topicName };
+  const ctx: VoiceTranscriptionContext = {
+    bus: lifetime,
+    projectId,
+    topicId,
+    topicName,
+    transportOrigin,
+    requestId,
+    sessionId,
+  };
 
   try {
     const transcription = await transcriber.transcribe(audioData, mimeType, request);
@@ -324,7 +362,11 @@ async function handleVoiceReceived(
     );
 
     // Notify user of transcribed text
-    emitVoiceNotification(ctx.bus, ctx.topicName, `Voice: ${transcription}`);
+    emitVoiceNotification(ctx.bus, {
+      projectId: ctx.projectId,
+      topicName: ctx.topicName,
+      body: `Voice: ${transcription}`,
+    });
 
     // Emit as user:chat:message so orchestrator processes it
     emitTranscribedChatMessage(ctx, transcription);
@@ -375,6 +417,9 @@ function emitTranscriptionSuccess(
       body: `Transcribed: ${basename(filePath)}`,
       filePath: transcriptPath,
       topicName,
+      destination: projectId
+        ? { kind: 'project' as const, projectId }
+        : { kind: 'global' as const, topic: 'general' as const },
     },
   });
 }

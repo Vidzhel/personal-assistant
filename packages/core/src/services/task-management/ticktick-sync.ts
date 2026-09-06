@@ -176,6 +176,7 @@ function emitSyncNotification(state: ServiceState, created: number, updated: num
       title: 'TickTick Sync',
       body: `Synced ${created} new, ${updated} updated tasks from TickTick`,
       topicName: 'Tasks',
+      destination: { kind: 'global' as const, topic: 'general' as const },
     },
   });
 }
