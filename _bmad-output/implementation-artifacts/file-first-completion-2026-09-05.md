@@ -24,7 +24,7 @@ external repositories.
 | F7    | Ordinary schedule absence/staleness detection                                                                    | Complete; 2,200 tests, 14 browser journeys and packaged restart                                                          |
 | F8    | Durable provider upload cleanup/retry after cancellation and restart                                             | Complete; 2,223 tests, 14 browser journeys and packaged restart                                                          |
 | F9    | Remove obsolete storage compatibility/schema paths, reconcile docs, full/browser/compiled/container verification | Complete; 2,342 default / 148 graph tests, 16 browser journeys, builds, packaged restart and offline containers verified |
-| W1    | Review dissertation/teaching and implement flexible repository workspaces with browser artifact access           | In progress; W1a–W1d complete; W1e deployment and final verification next                                                |
+| W1    | Review dissertation/teaching and implement flexible repository workspaces with browser artifact access           | Complete; 2,466 default / 150 graph tests, 19 browser journeys, 10 initializer tests and offline containers verified     |
 
 Legacy metadata migration and prior Neo4j restoration are closed by the owner's
 explicit decision, not by a claim that data was restored. Future runtime writes
@@ -136,7 +136,8 @@ cache-safe project interruption recovery and mobile correction. Required checks,
 pass. F9e completes the current assessment, all 148 disposable graph tests, nine
 deployment initializer tests, both current container images, offline persistence
 and standalone static-asset checks. The required check and definition validators
-pass; the current audit reports no advisories. F1–F9 are complete. W1 is now in progress. Both actual sibling repositories were inspected read-only;
+pass; the current audit reports no advisories. F1–F9 are complete. The subsequent W1 checkpoints below are also complete.
+Both actual sibling repositories were inspected read-only;
 the [W1 specification](tech-spec-w1-project-workspaces.md) records the implementation
 order, direct-execution boundaries and acceptance plan.
 
@@ -180,5 +181,14 @@ records file registration/serving, mobile previews, direct navigation and explic
 graph ownership. The actual shell→file→Git push→browser journey passes, including
 rendered PDFs and Unicode downloads. All 2,466 default tests, 19 browser journeys,
 40 disposable graph route tests, required checks, validators, production builds
-and packaged restart pass. W1e now packages mounts, runtime tools and public
-default capabilities, then verifies offline container persistence and final graphs.
+and packaged restart pass.
+
+W1e is complete. [Deployment and final verification](tech-spec-w1e-workspace-deployment.md)
+records public native capability seeds, runtime tools and an optional explicit
+repository mount. All 150 disposable graph tests, ten initializer tests, required
+checks, definition validators, the context allowlist and both image builds pass.
+Offline container replacement preserves attached artifacts, project memory/settings
+and actual Git history after native commands and a local push; standalone PDF
+worker serving also passes. F1–F9 and W1 are complete. Live provider canaries,
+repository-specific tool installation and optional transcription integration have
+explicit follow-up criteria in the deferred ledger and deployment guide.

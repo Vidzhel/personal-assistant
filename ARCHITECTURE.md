@@ -18,9 +18,9 @@ tracks delivery and verification; the
 remaining limitations and their resolution plans. The
 [W1 specification](_bmad-output/implementation-artifacts/tech-spec-w1-project-workspaces.md)
 implements the owner's flexible-layout and direct-repository requirements after
-completed F1–F9. Workspace configuration and project memory are file-owned. Direct repository
-execution, browser file access and project-scoped graph views are implemented;
-W1e completes deployment packaging and final verification.
+completed F1–F9. W1 is complete: workspace configuration and project memory are
+file-owned; direct repository execution, browser file access and project-scoped
+graph views have passed deployment verification.
 Keep the runtime small by extending existing paths; remove a predecessor in the
 same change that replaces it.
 
@@ -575,15 +575,26 @@ backups and optional integrations. Node.js 22.22.0 or newer is required.
 
 Default Compose uses dedicated named volumes for data, projects, library, config
 and Claude authentication/resume files. It seeds only empty definition roots with
-minimal account-free definitions. Definition/memory Git history is persisted;
+a native repository-work capability explicitly bound to the default agent, without
+external MCP/vendor dependencies. The seed is checked against its canonical public
+library definition. Definition/memory Git history is persisted;
 interrupted bootstrap uses a hash-checked journal and refuses conflicting edits.
 The image excludes owner definitions, credentials, runtime data and vendor trees.
 Install and bind optional integrations deliberately. Browser API/WS endpoints are
 web build arguments and must be reachable by the user's browser.
 
-R4 verified both images, offline container restart persistence, static assets and
-real Git history. R5's checkpoint passed 1971 tests with 6 explicit skips, 11 browser
-journeys, required checks, production builds and compiled restart verification.
-These use temporary roots and fake model boundaries; they do not prove live model
-quality, account delivery or attached-repository behavior. Exact evidence and
-remaining work are maintained in the completion record and deferred ledger.
+The core image includes Bash, Git/SSH, Python/venv, common build/search/archive
+utilities, Pandoc, Poppler and FFmpeg. Repository-specific render engines and
+packages remain in that repository's environment or an operator image extension.
+The optional `docker-compose.workspace.yml` binds an explicitly selected existing
+host directory at `/workspace`; repository files/history remain outside Raven's
+named volumes and definition history. Full SDK mode still runs as UID 1000.
+
+W1d/W1e passed 2,466 default tests (6 explicit live skips), 19 browser journeys,
+150 disposable graph tests, required checks, production builds and compiled
+restart verification. Ten initializer tests and offline replacement-container
+checks verify actual native commands, a local Git push, project settings/memory,
+attached-file reads and standalone assets including the PDF worker. Tests use
+temporary roots and fake model boundaries; live authentication, model quality and
+account delivery remain separate canaries. Exact evidence and concrete follow-ups
+are recorded in the W1 specifications and deferred ledger.

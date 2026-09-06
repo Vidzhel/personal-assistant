@@ -1,4 +1,5 @@
 # Capabilities
 
-This installation starts with no external capability bindings. Create a skill
-and explicitly bind it to an agent after configuring its dependencies.
+This installation includes the credential-free `repository-work` baseline for
+direct repository workflows. It has no external MCP or vendor bindings; add
+those explicitly only after configuring their dependencies.

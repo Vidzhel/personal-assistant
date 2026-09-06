@@ -12,7 +12,9 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, test } from 'node:test';
+import yaml from 'js-yaml';
 import { gitAutoCommit } from '../packages/shared/src/utils/git-commit.ts';
 import { initializeRuntime } from './runtime-init.mjs';
 
@@ -24,6 +26,7 @@ for (const key of Object.keys(process.env)) {
 process.env.GIT_CONFIG_GLOBAL = '/dev/null';
 process.env.GIT_CONFIG_NOSYSTEM = '1';
 const temporaryRoots = [];
+const seedRoot = fileURLToPath(new URL('./seeds/', import.meta.url));
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'raven-runtime-init-'));
   temporaryRoots.push(root);
@@ -36,22 +39,49 @@ afterEach(() => {
   for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
+test('fresh native capability is explicit and matches the public repository workflow', () => {
+  const relative = 'library/skills/system/repository-work';
+  for (const filename of ['config.json', 'skill.md']) {
+    assert.equal(
+      readFileSync(join(seedRoot, relative, filename), 'utf8'),
+      readFileSync(new URL(`../${relative}/${filename}`, import.meta.url), 'utf8'),
+      `Public deployment seed differs from its canonical workflow: ${filename}`,
+    );
+  }
+  const skill = JSON.parse(readFileSync(join(seedRoot, relative, 'config.json'), 'utf8'));
+  assert.deepEqual(skill.mcps, []);
+  assert.deepEqual(skill.vendorSkills, []);
+  assert.deepEqual([...skill.tools].sort(), ['Bash', 'Edit', 'Glob', 'Grep', 'Read', 'Write']);
+  const agent = yaml.load(readFileSync(join(seedRoot, 'projects/agents/raven/agent.yaml'), 'utf8'));
+  assert.deepEqual(agent.skills, ['repository-work']);
+});
+
 test('fresh image restart reconnects real history and preserves definitions and memory', async () => {
   const root = fixture();
   const initial = initializeRuntime({ root });
-  assert(initial.seededFiles.includes('projects/agents/raven/agent.yaml'));
-  assert.match(
-    readFileSync(join(root, 'projects/agents/raven/agent.yaml'), 'utf8'),
-    /skills: \[\]/,
-  );
+  const seededFiles = [
+    'config/.gitkeep',
+    'library/mcps/.gitkeep',
+    'library/skills/_index.md',
+    'library/skills/system/repository-work/config.json',
+    'library/skills/system/repository-work/skill.md',
+    'projects/agents/raven/agent.yaml',
+  ];
+  assert.deepEqual(initial.seededFiles.sort(), seededFiles);
+  for (const file of seededFiles) {
+    assert.equal(
+      readFileSync(join(root, file), 'utf8'),
+      readFileSync(join(seedRoot, file), 'utf8'),
+    );
+  }
   assert.equal(git(root, 'rev-list', '--count', 'HEAD'), '1');
   assert.equal(git(root, 'rev-parse', '--absolute-git-dir'), initial.historyDir);
 
   const definition = 'projects/agents/raven/agent.yaml';
   const updatedDefinition = `${readFileSync(join(root, definition), 'utf8')}# Owner customization\n`;
   writeFileSync(join(root, definition), updatedDefinition);
-  const memory = 'projects/agents/raven/memory/preference.md';
-  mkdirSync(join(root, 'projects/agents/raven/memory'), { recursive: true });
+  const memory = 'projects/system/memory/preference.md';
+  mkdirSync(join(root, 'projects/system/memory'), { recursive: true });
   writeFileSync(join(root, memory), 'Prefer brief, concrete updates.\n');
   const unrelated = 'config/unrelated.json';
   writeFileSync(join(root, unrelated), '{"pending":true}\n');

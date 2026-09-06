@@ -26,10 +26,10 @@ Keep the custom runtime small; use the existing agent SDK for model execution.
   owner's flexible-layout, direct-repository execution and mobile artifact
   requirements there before designing them. The
   [W1 specification](_bmad-output/implementation-artifacts/tech-spec-w1-project-workspaces.md)
-  is the current implementation plan; the earlier workspace proposal is superseded.
+  records the completed implementation; the earlier workspace proposal is superseded.
 - Updated owner decision: Raven has not been used; legacy runtime data may be
   discarded. Do not build legacy exports, migrations or restoration flows.
-  Task state is moving to validated YAML inside each project. Use cheaper
+  Task state lives in validated YAML inside each project. Use cheaper
   implementation agents when delegated work is appropriate; the parent reviews.
 - The sole `migrations/001-initial-schema.sql` initializes current operational
   SQLite atomically. Retired task/tree/run/pipeline/definition tables and old
@@ -265,3 +265,9 @@ staging to the files changed for the task. Commit/push when requested by the use
 or the established session workflow. A read-only review or delegated no-Git task
 does not authorize publication. Keep task-specific restrictions and the user's
 current instructions ahead of historical workflow text.
+
+Public deployment seeds contain a standalone native repository-work skill, checked
+against its canonical library source. Update both copies when that shared workflow
+changes. The image context deliberately excludes the owner's actual library,
+projects and repositories. `docker-compose.workspace.yml` is an optional explicit
+host-folder mount; test it with temporary directories, never the owner's repositories.

@@ -1,0 +1,11 @@
+{
+  "name": "repository-work",
+  "displayName": "Repository Work",
+  "description": "Inspects repositories and produces verified project-managed artifacts through their documented workflows",
+  "mcps": [],
+  "vendorSkills": [],
+  "tools": ["Read", "Write", "Edit", "Glob", "Grep", "Bash"],
+  "model": "sonnet",
+  "maxTurns": 25,
+  "actions": []
+}

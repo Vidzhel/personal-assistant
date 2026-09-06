@@ -1,6 +1,7 @@
 # Raven reliability assessment — September 5–6, 2026
 
-This document is the current assessment of the F1–F9 continuation work. The
+This document assesses the completed F1–F9 reliability work and W1 repository
+workspaces. The
 [R0–R7 completion record](../../_bmad-output/implementation-artifacts/reliability-completion-2026-09-05.md)
 remains the historical evidence for the earlier reliability checkpoint; it is
 not a status report for F9. The [active continuation queue](../../_bmad-output/implementation-artifacts/file-first-completion-2026-09-05.md)
@@ -10,8 +11,8 @@ The owner confirmed that Raven has not been used and authorized discarding
 legacy runtime data. No legacy export, migration or restoration path is being
 built. New runtime state still receives interruption-safe handling because
 unused historical data does not justify losing work created now. The owner
-also authorized flexible repository workspaces after F1–F9; that work is W1 and
-is now in progress in the [W1 specification](../../_bmad-output/implementation-artifacts/tech-spec-w1-project-workspaces.md).
+also authorized flexible repository workspaces after F1–F9; W1 is complete with
+reviewed evidence in the [W1 specification](../../_bmad-output/implementation-artifacts/tech-spec-w1-project-workspaces.md).
 
 ## Current architecture
 
@@ -67,7 +68,7 @@ operation stopped.
 
 F9a–F9e evidence, limits and exact log paths are recorded in the [F9 storage
 and runtime specification](../../_bmad-output/implementation-artifacts/tech-spec-f9-storage-runtime-cleanup.md).
-F1–F9 are complete; W1 implementation is in progress.
+F1–F9 and W1 are complete; their linked specifications record verification.
 
 ## Reliability limits that remain explicit
 
@@ -109,12 +110,13 @@ All postponed F1–F9 improvements are complete. Remaining dependency/account
 limits have explicit resolution criteria in the deferred ledger; they do not
 stand in for missing local implementation or tests.
 
-W1 is now in progress. Read-only inspection of the actual dissertation and teaching
+W1 is complete. Read-only inspection of the actual dissertation and teaching
 repositories confirmed different, explicit agent workflows and repository-owned
 scripts. Workspace configuration, local agent selection, project-owned memory,
 direct shell/file/Git execution, linked context indexes, shared runtime skills and
-mobile artifact access are implemented. W1e packages deployment tools/defaults and
-repository mounts, then completes final container verification. The agent may evolve each repository's scripts and structure
+mobile artifact access are implemented and verified. W1e packages native deployment
+tools/defaults and explicit repository mounts, with passing replacement-container
+checks. The agent may evolve each repository's scripts and structure
 under the owner's configured autonomy. No private repository content is copied
 into Raven's public source. No repository embedding pipeline or graph replacement
 is required for this implementation.
@@ -133,17 +135,16 @@ Parent review narrowed capability invalidation to actual bindings so creating an
 reloading unrelated skills remains useful. Actual temporary command/file/Git push
 and restart tests complement the SDK subprocess option contract; 2,431 default
 tests pass. Full native access is trusted host execution, while Raven integration
-permissions remain enforced through pre-tool hooks. Repository overview links,
-shared file skills, mobile artifacts and project-scoped graph views remain in
-ordered W1c/d work; final deployment verification is W1e.
+permissions remain enforced through pre-tool hooks. Subsequent W1c/d/e checkpoints
+complete repository context, browser artifacts and deployment verification.
 
 The W1c checkpoint supplies current project instructions to chat, execution and
 nested skill agents, and bounded repository overview links without content
 ingestion. Explicit nested project anchors let agents reorganize ordinary folders
 without accidentally changing Raven’s project registry. Shared runtime document
-and media skills follow repository pipelines and output conventions. Browser
-workspace/artifact controls and project graph filtering are W1d; deployment and
-final acceptance remain W1e.
+and media skills follow repository pipelines and output conventions. W1d adds
+browser workspace/artifact controls and project graph filtering; W1e verifies
+the deployed workflow.
 
 The W1d checkpoint adds mobile workspace configuration, actual file previews and
 source-bound task artifacts. The full 2,466-test regression suite, 19 browser
@@ -154,3 +155,21 @@ The graph uses explicit current project membership while preserving existing lin
 W1e completes deployment tools, default native capability bindings, mounts and
 container verification. Runtime filesystem changes remain repository-owned; no
 parallel artifact storage database or repository embedding pipeline was added.
+
+The final checkpoint passes all 150 disposable graph tests, ten deployment
+initializer tests, the Docker context allowlist, current image builds and offline
+container replacement. The container executes real Git/Pandoc commands, creates a
+Python virtual environment, reads an attached artifact through HTTP and preserves
+project memory/settings plus both Git histories. The dashboard serves its bundled
+PDF worker. Parent review caught and corrected a truncated seed workflow and added
+an exact public-source parity check. Required checks and both definition validators
+pass; W1e changes no application TypeScript or npm dependencies.
+
+This fits Raven's philosophy by keeping coordination, identity and shared context
+central while repository-specific scripts, layouts and outputs stay with their
+projects. Small managed anchors preserve task and memory discovery without fixing
+ordinary directory structure. Reusable tools extend the existing SDK runtime;
+repository attachments introduce no second execution engine. The remaining limits
+are explicit: trusted full mode is process-user access, format-specific engines
+may require an image extension, and live authentication/account behavior needs a
+separate chosen canary. The deferred ledger records their verification plans.

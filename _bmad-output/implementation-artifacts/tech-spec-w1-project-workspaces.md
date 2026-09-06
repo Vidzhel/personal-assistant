@@ -2,7 +2,7 @@
 title: Flexible project workspaces and direct repository execution
 type: feature
 created: 2026-09-06
-status: in-progress
+status: complete
 baseline_commit: 60459bb
 context:
   - AGENTS.md
@@ -14,8 +14,8 @@ context:
 
 ## Intent
 
-Raven currently stores project context and URI records, but executes agents in its
-own checkout. The owner authorized project-specific working directories, attached
+At the baseline, Raven stored project context and URI records but executed agents
+in its own checkout. The owner authorized project-specific working directories, attached
 repositories, shell/file/Git operations and browser/mobile artifact access after
 F1–F9. Those prerequisites are complete. The earlier September 5 workspace proposal
 is superseded by this implementation plan and the owner's subsequent requirements.
@@ -91,7 +91,7 @@ link to these entrypoints and use the existing SDK and orchestration paths.
       server-side project filtering for knowledge graph views. Discover generated files directly; reuse
       repository render pipelines for other document previews. Test mobile attachment
       management and command→file→commit/push→browser using a real temporary repository.
-- [ ] **W1e — complete review and deployment verification.** Update architecture,
+- [x] **W1e — complete review and deployment verification.** Update architecture,
       guides and deployment mounts/tools. Run required checks, default suite, relevant
       graph tests, production builds, browser journeys, compiled restart and offline
       container checks. Record concrete remaining limits and resolution plans.
@@ -204,4 +204,19 @@ by current project membership. Parent review resolved descriptor races, stale
 forms/searches, blank native PDF frames and the duplicate source editor.
 2,466 default tests (six explicit skips), 40 disposable graph route tests, all 19
 browser journeys, required checks, validators, production builds and compiled
-restart pass. W1e deployment packaging and final container verification are next.
+restart pass.
+
+## W1e checkpoint — deployment and final verification
+
+[W1e](tech-spec-w1e-workspace-deployment.md) is complete. The public image includes
+an explicitly bound native repository-work seed, general shell/document tools and
+an optional explicit host repository mount. Seed/source parity, ten initializer
+tests, the public build-context allowlist, both images and offline container
+replacement pass. Actual native commands and a local Git push produce artifacts
+that remain available through HTTP after replacement; project memory/settings and
+both Git histories persist. The standalone dashboard serves its local PDF worker.
+All 150 disposable graph tests, required checks and both definition validators pass.
+The 2,466-test default baseline, 19 browser journeys, production builds and compiled
+restart from W1d cover the unchanged application source. No live provider account
+was exercised. W1 and its F1–F9 prerequisites are complete; concrete environment,
+provider and optional integration follow-ups remain in the deferred ledger.

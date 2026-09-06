@@ -1,0 +1,8 @@
+services:
+  raven-core:
+    volumes:
+      - type: bind
+        source: ${RAVEN_WORKSPACE_ROOT:?Set RAVEN_WORKSPACE_ROOT to an absolute host path}
+        target: /workspace
+        bind:
+          create_host_path: false

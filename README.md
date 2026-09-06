@@ -9,6 +9,8 @@ dashboard. Claude and Codex can both develop the project using the same guide.
 
 - **Project chats** — persistent sessions, streaming replies, recoverable drafts,
   task controls and approval decisions.
+- **Repository workspaces** — flexible project folders, native shell/file/Git work,
+  shared project memory, linked repository instructions and mobile artifact previews.
 - **Learning** — interactive retrospectives produce candidate files; consolidation
   promotes durable project memory and retains candidates when an operation fails.
 - **Extension from chat** — create and activate skills, agents, templates and
@@ -21,10 +23,11 @@ dashboard. Claude and Codex can both develop the project using the same guide.
   chat and file-based project memory work with the graph disabled.
 
 Integrations require their definitions, executables and credentials to be configured
-and explicitly bound where used. A fresh Docker install starts with no external
-capability bindings or schedules. Projects support local agents, shared project
-memory, direct repository execution, context links and mobile file previews.
-Final workspace deployment verification remains in progress.
+and explicitly bound where used. A fresh Docker install binds the native
+`repository-work` skill and starts without external integrations or schedules.
+Attach server folders through each project's Workspace tab; the
+[deployment guide](docs/deployment.md#attach-repository-folders) explains container
+mounts, tool dependencies and Git setup.
 
 ## Quick Start
 
@@ -150,22 +153,26 @@ preserves R0–R7 evidence. The
 [deferred ledger](_bmad-output/implementation-artifacts/deferred-work.md) records
 concrete remaining fixes. March and August plans are historical snapshots.
 
-The F9d checkpoint passed **2,342 tests with 6 explicit skips**, **16 browser
-journeys**, required checks, production builds and compiled restart verification.
-Current F9 verification images pass offline persistence/static-asset checks,
-including real Git history. The current lockfile audit reports no advisories.
-These checks use isolated roots; live Claude
-authentication, model quality and account delivery remain separate canaries.
+The completed workspace checkpoints passed **2,466 default tests with 6 explicit
+live skips**, **19 browser journeys**, **150 disposable graph tests**, required
+checks, production builds and compiled restart verification. Ten deployment
+initializer tests and both container images pass offline persistence checks,
+including an attached repository, native commands, a real local Git push and the
+bundled PDF worker. The W1d lockfile audit reported no advisories; W1e changes no
+npm dependencies. These checks use isolated roots; live Claude authentication,
+model quality and account delivery remain separate canaries.
 
 The [W1 implementation](./_bmad-output/implementation-artifacts/tech-spec-w1-project-workspaces.md)
-is in progress after completed F1–F9. Workspace settings and sources now live in
+is complete after F1–F9. Workspace settings and sources live in
 project YAML. Agents share their project’s nested memory notes; local definitions
 override inherited agents. Project tasks run in the selected folder (or managed
 home), with default, SDK auto, or full native execution modes. Full mode grants
 trusted host access, including shell and Git operations. Current-grant checks
 and revision-bound resumes prevent stale configuration from continuing work.
-Current context links, mobile workspace controls and file previews are implemented. Project layouts may evolve around the small Raven
-anchors; repository indexes link to existing instructions without embeddings.
+Project layouts may evolve around the small Raven anchors; repository indexes
+link to existing instructions without embeddings. Mobile file navigation supports
+text, images, PDFs, static HTML and downloads. The optional graph retains knowledge
+links and filters each view by explicit project membership.
 
 Useful verification commands:
 

@@ -1,7 +1,8 @@
 # Deploying Raven
 
 Raven runs as a core service and a Next.js dashboard. The default Compose setup
-starts with graph knowledge disabled and a minimal Raven agent with `skills: []`.
+starts with graph knowledge disabled and a Raven agent explicitly bound to the
+credential-free `repository-work` skill.
 The dashboard, project definitions and local memory work without external
 integrations; model responses require deliberate Claude authentication.
 
@@ -22,9 +23,13 @@ Core's health response reports graph availability separately from service health
 
 The core image builds shared/core from the lockfile and includes the compiled
 services and the current SQL schema. It also includes the in-repo TickTick server source,
-which runs using Node's `--experimental-strip-types`. The image contains Git for
-definition and memory commits. The web image serves the monorepo standalone
-output and its static files. Images run as the unprivileged `node` user (UID 1000).
+which runs using Node's `--experimental-strip-types`. Its native baseline includes
+Bash, Git/SSH, curl, Python/venv, make/g++, ripgrep, jq, file, unzip, Pandoc,
+Poppler and FFmpeg. It supports shell work, repository commits and common document
+pipelines; repository-specific packages and render engines remain separately
+installed in the repository environment or an extended image. The web image serves
+the monorepo standalone output and its static files. Images run as the unprivileged
+`node` user (UID 1000).
 
 ## Persistent inputs and upgrades
 
@@ -42,7 +47,9 @@ Compose creates named volumes; it does not mount the checkout's working data.
 On first startup, the entrypoint copies only the explicit
 [`deployment/seeds`](../deployment/seeds) into each **empty** projects/library/config
 root. A nonempty root is left intact; seed files are never merged into existing
-definitions. The starter has no external MCP bindings or schedules and makes no
+definitions. A nonempty library does not receive newly added starter skills; review
+the public seed and copy/bind it deliberately if wanted. The native starter has no
+external MCP/vendor dependencies or schedules and makes no
 automatic vendor downloads. Definitions authored in a development checkout are
 not included in the build context.
 
@@ -114,7 +121,8 @@ variable into core. Never copy credentials into an image or capability definitio
 
 ## Add capabilities
 
-Fresh installations start with no external skill bindings. Add definitions under
+Fresh installations bind `repository-work` for native repository tools and start
+with no external skill bindings. Add definitions under
 `/app/library/skills/<path>/config.json` and `skill.md`, and MCP definitions under
 `/app/library/mcps/`, using Raven's existing scaffold-and-activate tools where
 appropriate. Add each intended skill name to the agent's explicit `skills` list.
@@ -203,8 +211,41 @@ HTTP services and temporary roots. It exercises packaged migrations, restart,
 definitions, memory and real Git history. Deployment initializer tests exercise
 the actual Git helper in disposable repositories with owner Git configuration
 disabled. Container smoke uses isolated temporary volumes and `--network none`;
-it checks core restart persistence and the actual standalone web page/static
-asset. None of these checks starts the owner's assistant or uses owner accounts.
+it checks core restart persistence, a temporary attached repository, actual native
+commands and a local Git push, project memory/settings, file API bytes and the
+standalone web page/static assets including the PDF worker. None of these checks
+starts the owner's assistant or uses owner accounts.
+
+## Attach repository folders
+
+The optional workspace override exposes an existing host directory at `/workspace`.
+Use a dedicated parent containing the repositories you want to attach; their internal
+layouts remain unchanged. The container process needs write permission as UID 1000.
+The mount option rejects a missing directory instead of creating one implicitly.
+
+```sh
+export RAVEN_WORKSPACE_ROOT=/srv/raven-repositories
+docker compose --env-file /dev/null -f docker-compose.yml -f docker-compose.workspace.yml config --quiet
+docker compose --env-file /dev/null -f docker-compose.yml -f docker-compose.workspace.yml up -d
+```
+
+In each Raven project's **Workspace** tab, attach its container path, for example
+`/workspace/disertation` or `/workspace/teaching`. Add relative paths to existing
+instructions/index files under **Context files**, select the working folder and
+execution mode, and save. Agents read those indexes when needed; Raven does not
+embed or copy the repository. The managed home remains available for project
+anchors, shared memory and task YAML. Repositories keep their own output layouts.
+
+Use the same override when recreating containers so persisted attachments retain
+their paths. For repositories in different host locations, a private override can
+bind each to a distinct container path. Detaching in Raven leaves the repository
+untouched. Host-mounted repositories and their Git history need their own backups;
+Raven's named volumes contain the source descriptors, not those files.
+
+Git can use HTTPS or SSH. Configure the repository's remote, commit identity and
+intended credentials inside this runtime environment; the mount does not transfer
+host credential helpers, SSH agents or keys automatically. The default image has
+no Git remote or private credentials.
 
 ## Repository execution
 
@@ -218,8 +259,13 @@ Workspace modes are `default`, `auto` and `full`. Auto delegates native permissi
 decisions to the installed Claude SDK classifier (subject to SDK/account support);
 full enables SDK bypass with trusted host access. Integration permissions remain
 under Raven's pre-tool policy. This is the owner's trusted execution machine, not
-a filesystem sandbox. Grant changes reject subsequent local dispatch/tool work;
-already executing commands or remote operations can still finish.
+a filesystem sandbox or a change of OS user. Full mode cannot grant root access
+to the unprivileged container process. Install system tools in an image extension
+(as root during its build, then restore `USER node`); Python/Node project packages
+can use writable repository environments. Quarto, TeX, .NET and LibreOffice are
+examples of repository-specific additions, not bundled tools. Grant changes reject
+subsequent local dispatch/tool work; already executing commands or remote operations
+can still finish.
 
 Attached repositories load their SDK project/local settings and instructions.
 Managed homes exclude filesystem settings to avoid Raven development settings.
