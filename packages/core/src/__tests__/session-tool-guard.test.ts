@@ -16,6 +16,28 @@ function call(toolName = 'Bash'): PreToolUseHookInput {
 }
 
 describe('SDK hook and permission callback guard', () => {
+  it('explicitly allows policy-approved MCP calls before background permission prompting', async () => {
+    const guard = createSessionToolGuard({
+      lifetime: createToolCallLifetime(),
+      assertCurrent: () => {},
+      policy: async (_tool, input) => ({ behavior: 'allow', updatedInput: input }),
+    });
+    expect(
+      await guard.preToolUse(call('mcp__ticktick__list_projects'), 'tool-1', {
+        signal: new AbortController().signal,
+      }),
+    ).toMatchObject({ hookSpecificOutput: { permissionDecision: 'allow' } });
+    const withoutPolicy = createSessionToolGuard({
+      lifetime: createToolCallLifetime(),
+      assertCurrent: () => {},
+    });
+    expect(
+      await withoutPolicy.preToolUse(call('mcp__ticktick__list_projects'), 'tool-1', {
+        signal: new AbortController().signal,
+      }),
+    ).toEqual({});
+  });
+
   it('checks policy in the hook and avoids duplicate callback side effects', async () => {
     const policy = vi.fn<CanUseTool>(async (_tool, input) => ({
       behavior: 'allow',

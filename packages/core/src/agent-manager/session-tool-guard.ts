@@ -65,7 +65,15 @@ export function createSessionToolGuard(deps: GuardDeps): {
             permissionDecisionReason: result.message,
           },
         }
-      : {};
+      : deps.policy && input.tool_name.startsWith('mcp__')
+        ? {
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'allow',
+              updatedInput: result.updatedInput ?? args,
+            },
+          }
+        : {};
   };
   const canUseTool: CanUseTool = async (...args) => {
     try {

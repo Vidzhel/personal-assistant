@@ -67,6 +67,9 @@ export function createSdkBackend(): AgentBackend {
     delete env.CLAUDECODE;
     delete env.CLAUDE_CODE_ENTRYPOINT;
     env.CLAUDE_CODE_DISABLE_AUTO_MEMORY = '1';
+    // Raven owns asynchronous task lifetime. CLI-default background subagents
+    // cannot reliably request permission for external MCP calls.
+    if (Object.keys(opts.agents).length > 0) env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = '1';
 
     // Bridge the caller's AbortSignal (agent-manager.ts's cancelTask, via
     // agent-session.ts) into an SDK-native AbortController. Previously
@@ -76,6 +79,17 @@ export function createSdkBackend(): AgentBackend {
     // sit unnoticed for the query's full duration. Passing the SDK's own
     // abortController lets it cancel deterministically, including killing
     // the underlying subprocess.
+    for (const [name, definition] of Object.entries(opts.agents)) {
+      for (const server of definition.mcpServers ?? []) {
+        if (!Object.hasOwn(opts.mcpServers, server)) {
+          return {
+            result: '',
+            success: false,
+            errors: [`Subagent ${name} references unavailable MCP server ${server}`],
+          };
+        }
+      }
+    }
     const abortController = new AbortController();
     if (opts.signal?.aborted) return { result: '', success: false, errors: ['cancelled'] };
     const onAbort = (): void => abortController.abort();
@@ -124,7 +138,15 @@ export function createSdkBackend(): AgentBackend {
     }
 
     if (Object.keys(opts.agents).length > 0) {
-      queryOptions.agents = opts.agents;
+      // All Raven MCPs are connected in the strict parent configuration.
+      // Re-declaring name references on SDK subagents triggers strict-config
+      // rejection in the CLI. Inherit those connections through explicit tools.
+      queryOptions.agents = Object.fromEntries(
+        Object.entries(opts.agents).map(([name, definition]) => {
+          const { mcpServers: _mcpServers, ...agent } = definition;
+          return [name, { ...agent, tools: agent.tools ?? [] }];
+        }),
+      );
     }
 
     if (opts.plugins && opts.plugins.length > 0) {

@@ -454,11 +454,13 @@ describe('Permission Gate', () => {
       await runAgentTask({
         task,
         eventBus,
-        mcpServers: {},
+        mcpServers: { ticktick: { command: 'fake-ticktick', args: [] } },
         agentDefinitions: {},
         actionName: 'ticktick:get-tasks',
         permissionDeps: { permissionEngine: engine, auditLog, pendingApprovals },
       });
+
+      expect(vi.mocked(query).mock.calls[0][0].options?.allowedTools).toContain('mcp__ticktick__*');
 
       expect(vi.mocked(query)).toHaveBeenCalled();
       const callArgs = vi.mocked(query).mock.calls[0][0] as { options: { canUseTool?: unknown } };

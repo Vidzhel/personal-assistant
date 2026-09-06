@@ -444,6 +444,11 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
     // PreToolUse still checks current ownership and Raven policy for every call.
     // Native mutations and integrations retain the SDK's mode/callback behavior.
     const allowedTools = ['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch'];
+    // Background SDK agents can reject prompt-requiring MCP calls before the
+    // permission callback. Raven's mandatory PreToolUse policy remains the gate.
+    if (permissionDeps) {
+      for (const name of Object.keys(mcpServers)) allowedTools.push(`mcp__${name}__*`);
+    }
 
     if (opts.ravenMcpDeps) {
       allowedTools.push('mcp__raven__*');

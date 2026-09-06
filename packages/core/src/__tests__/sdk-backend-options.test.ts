@@ -33,6 +33,16 @@ beforeEach(() => {
 });
 
 describe('SDK backend execution options', () => {
+  it('rejects missing nested MCP bindings before starting the SDK', async () => {
+    const result = await createSdkBackend()(
+      baseOptions({
+        agents: { helper: { description: 'helper', prompt: 'help', mcpServers: ['missing'] } },
+      }),
+    );
+    expect(result.success).toBe(false);
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
   it('isolates settings and MCP configuration by default', async () => {
     await createSdkBackend()(baseOptions());
 
@@ -78,6 +88,23 @@ describe('SDK backend execution options', () => {
     expect(options.settingSources).toEqual(['project', 'local']);
     expect(options.hooks).toBe(hooks);
     expect(options.mcpServers).toBe(mcpServers);
-    expect(options.agents).toBe(agents);
+    expect(options.agents).toEqual({ helper: { ...agents.helper, tools: [] } });
+  });
+
+  it('uses strict parent MCP connections with explicit nested tool scope', async () => {
+    const tools = ['Read', 'mcp__ticktick__*'];
+    await createSdkBackend()(
+      baseOptions({
+        mcpServers: { ticktick: { type: 'http', url: 'https://example.test/mcp' } },
+        agents: {
+          planner: { description: 'planner', prompt: 'plan', tools, mcpServers: ['ticktick'] },
+        },
+      }),
+    );
+    const options = mockQuery.mock.calls[0][0].options!;
+    expect(options.strictMcpConfig).toBe(true);
+    expect(options.agents?.planner.tools).toEqual(tools);
+    expect(options.agents?.planner.mcpServers).toBeUndefined();
+    expect(options.env?.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS).toBe('1');
   });
 });

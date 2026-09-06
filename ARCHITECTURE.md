@@ -153,7 +153,7 @@ Named agent (projects/agents/<name>/agent.yaml, skills: [...])
   │   - a project-scoped memory MCP
   │
   └── if agentDefinitions are non-empty, the session may use the `Agent` tool to
-      delegate to a sub-agent — sub-agents can declare their own mcpServers subset
+      delegate to a sub-agent — explicit tool lists scope inherited MCP connections
       (SubAgentDefinition.mcpServers) rather than inheriting everything
 ```
 
@@ -162,6 +162,12 @@ Named agent (projects/agents/<name>/agent.yaml, skills: [...])
 1. A named agent gets only the capabilities its explicit `skills:` list resolves to; an empty list means none. Resolution failure rejects the turn instead of granting the full library.
 2. The Raven MCP's tool set is filtered by role before it reaches the model — `isToolAllowed()` denies out-of-scope tools outright.
 3. SDK sub-agent definitions receive their scoped capabilities and runtime permission checks; delegation must preserve those boundaries.
+   The SDK boundary validates their MCP references against the parent configuration,
+   then passes explicit tool lists without redundant child MCP declarations. Strict
+   MCP configuration stays enabled. Raven's pre-tool hook enforces integration
+   policy even for task-bound MCPs listed in SDK `allowedTools`. Queries containing
+   Raven sub-agents disable SDK background tasks so external MCP permissions remain
+   available; `AgentManager` owns the outer asynchronous task lifetime instead.
 4. MCP server subprocesses are only started when a `query()` session actually needs them.
 5. Carried over from v1: don't overload any one context with capability it doesn't need — the mechanism is per-agent resolution + role scoping, not "orchestrator has zero MCPs, only sub-agents do."
 
