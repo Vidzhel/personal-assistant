@@ -227,6 +227,13 @@ npm run validate:projects
 dashboard. The dev commands start the actual assistant; choose configuration
 deliberately rather than using them as test isolation.
 
+`scripts/raven.sh start` is the local Docker launcher. It reads the ignored `.env`
+through Compose, builds images, checks/prompts for Claude authentication and waits
+for the configured graph before starting core/web. It starts the actual assistant;
+use `node --test scripts/development-scripts.test.mjs` to verify launcher behavior
+with fake Docker and temporary inputs. `check:strip-types` parses production source
+with Node's strip-only API; never import the entry point for a syntax check.
+
 `npm run check` is required after each task. Run relevant behavioral tests for
 code changes; the default test suite must pass before claiming a green baseline.
 Neo4j integration tests are opt-in with `npm run test:knowledge` and need Docker.

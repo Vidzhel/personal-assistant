@@ -71,10 +71,19 @@ npm run dev:web     # Start the dashboard (separate terminal)
 
 ### Docker
 
+Configure the ignored `.env` using [.env.example](.env.example), including the
+optional Compose/workspace settings, then use the launcher:
+
 ```sh
-docker compose --env-file /dev/null build
-docker compose --env-file /dev/null up -d
+./scripts/raven.sh start
+./scripts/raven.sh logs
+./scripts/raven.sh stop
 ```
+
+Start builds the images, checks Claude authentication (opening the login flow
+when needed), waits for the configured graph and starts core/dashboard. `status`
+shows containers; `login` explicitly refreshes Claude authentication. Stop retains
+the volumes. Environment settings persist between terminal sessions.
 
 Follow [the deployment guide](docs/deployment.md) for persistent volumes, deliberate
 Claude authentication, optional graph/integrations, backups and browser endpoints.

@@ -8,6 +8,44 @@ integrations; model responses require deliberate Claude authentication.
 
 ## Build and start
 
+For local testing, save settings in the ignored `.env` and use the launcher:
+
+```sh
+./scripts/raven.sh start
+./scripts/raven.sh status
+./scripts/raven.sh logs
+./scripts/raven.sh stop
+```
+
+Start builds the images and checks authentication in the persistent Claude
+volume. If needed, it runs the interactive login flow. It then waits for Neo4j
+when the knowledge profile is enabled and starts core/dashboard. A failed build,
+login or graph startup stops the command before starting Raven. Stop retains
+volumes. `./scripts/raven.sh login` explicitly refreshes authentication. The
+launcher requires Bash, Docker and Compose v2, and works from any directory.
+It passes `.env` to Compose without executing its contents as shell code. An
+alternate file can be selected with `RAVEN_ENV_FILE=/absolute/path/deployment.env`.
+Compose still gives already exported shell variables precedence over file values.
+
+To persist a local test stack with repositories and graph knowledge, configure:
+
+```dotenv
+COMPOSE_PROJECT_NAME=raven-test
+COMPOSE_FILE=docker-compose.yml:docker-compose.workspace.yml
+COMPOSE_PROFILES=knowledge
+RAVEN_WORKSPACE_ROOT=/absolute/path/to/repositories
+RAVEN_TIMEZONE=Europe/Kyiv
+NEO4J_ENABLED=true
+NEO4J_PASSWORD=choose-and-save-your-graph-password
+```
+
+Preserve existing credentials/settings when editing `.env`. Keep the graph
+password with its volume across restarts. Omit the workspace override/root to
+work only in managed homes, or omit the knowledge profile and use
+`NEO4J_ENABLED=false` to run without graph knowledge. Docker receives only the
+variables wired by the Compose configuration; integration credentials in `.env`
+are not automatically passed to every container.
+
 Use Docker Compose v2. Run commands from the repository root. These examples use
 `--env-file /dev/null` so Compose does not automatically read a development `.env`.
 
@@ -223,10 +261,17 @@ Use a dedicated parent containing the repositories you want to attach; their int
 layouts remain unchanged. The container process needs write permission as UID 1000.
 The mount option rejects a missing directory instead of creating one implicitly.
 
+Save the mount settings in `.env`:
+
+```dotenv
+COMPOSE_FILE=docker-compose.yml:docker-compose.workspace.yml
+RAVEN_WORKSPACE_ROOT=/srv/raven-repositories
+```
+
+Then start or recreate the stack with:
+
 ```sh
-export RAVEN_WORKSPACE_ROOT=/srv/raven-repositories
-docker compose --env-file /dev/null -f docker-compose.yml -f docker-compose.workspace.yml config --quiet
-docker compose --env-file /dev/null -f docker-compose.yml -f docker-compose.workspace.yml up -d
+./scripts/raven.sh start
 ```
 
 In each Raven project's **Workspace** tab, attach its container path, for example
