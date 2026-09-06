@@ -281,6 +281,18 @@ execution mode, and save. Agents read those indexes when needed; Raven does not
 embed or copy the repository. The managed home remains available for project
 anchors, shared memory and task YAML. Repositories keep their own output layouts.
 
+If attachment returns `400` for an existing host folder, check the container path.
+For example, a parent mounted at `/workspace` makes its `disertation` folder
+available as `/workspace/disertation`, even if its host path is different. The
+Workspace form shows folder errors in a banner that remains visible when scrolled;
+correct the path and attach again. Dismissing an error preserves the form draft.
+
+If an agent reports `Bash access is disabled (access: none)`, select the attached
+repository under **Working folder**, choose **Auto** or **Full** for autonomous
+repository commands, and click **Save execution settings**. Default mode retains
+the agent's configured native-tool policy. Send a new chat message after saving;
+the changed execution settings start a fresh SDK session automatically.
+
 Use the same override when recreating containers so persisted attachments retain
 their paths. For repositories in different host locations, a private override can
 bind each to a distinct container path. Detaching in Raven leaves the repository

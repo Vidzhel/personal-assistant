@@ -652,6 +652,61 @@ test('mobile agent memory requires a project and keeps nested project notes sepa
   await expect(page.getByText('Nested project memory sentinel.', { exact: true })).toBeVisible();
 });
 
+test('attachment errors stay in view after scrolling and preserve the source draft for correction', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const fixture = await (await request.get(`${CONTROL}/workspace`)).json();
+  const created = await project(request, 'Attachment error visibility');
+  const sourcesUrl = `${API}${projectPath(created.id)}/data-sources`;
+  for (let index = 0; index < 4; index++) {
+    const response = await request.post(sourcesUrl, {
+      data: {
+        label: `Existing reference ${index}`,
+        uri: `https://example.invalid/${index}`,
+        sourceType: 'url',
+      },
+    });
+    expect(response.status()).toBe(201);
+  }
+  await page.goto(projectPath(created.id));
+  await page.getByRole('button', { name: 'Workspace', exact: true }).click();
+  const workspace = page.getByRole('region', { name: 'Project workspace', exact: true });
+  const form = workspace.locator('section').filter({
+    has: page.getByRole('heading', { name: 'Attach source', exact: true }),
+  });
+  const label = form.getByPlaceholder('Label', { exact: true });
+  const folder = form.getByPlaceholder('Server folder path or URL');
+  const context = workspace.getByPlaceholder('Context files, one relative path per line');
+  await label.fill('Repository to attach');
+  await folder.fill(`${fixture.repository}/missing`);
+  await context.fill('AGENTS.md\nREADME.md');
+  const response = page.waitForResponse(
+    (r) => r.url() === sourcesUrl && r.request().method() === 'POST',
+  );
+  await workspace.getByRole('button', { name: 'Attach source', exact: true }).click();
+  expect((await response).status()).toBe(400);
+  const alert = workspace.getByRole('alert');
+  await expect(alert).toContainText(`${fixture.repository}/missing`);
+  await expect(alert).toContainText('/workspace/<repository>');
+  await expect(alert).toBeInViewport({ ratio: 1 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: '.browser-test-output/attachment-error-mobile.png' });
+  await expect(label).toHaveValue('Repository to attach');
+  await expect(folder).toHaveValue(`${fixture.repository}/missing`);
+  await expect(context).toHaveValue('AGENTS.md\nREADME.md');
+  await alert.getByRole('button', { name: 'Dismiss error' }).click();
+  await expect(alert).toHaveCount(0);
+  await expect(folder).toHaveValue(`${fixture.repository}/missing`);
+  await folder.fill(fixture.repository);
+  await workspace.getByRole('button', { name: 'Attach source', exact: true }).click();
+  await expect(
+    workspace.getByRole('listitem').filter({ hasText: 'Repository to attach' }),
+  ).toBeVisible();
+  await expect(alert).toHaveCount(0);
+});
+
 test('mobile workspace runs a command, pushes real artifacts, and previews and downloads the outputs', async ({
   page,
   request,
@@ -680,6 +735,10 @@ test('mobile workspace runs a command, pushes real artifacts, and previews and d
   await workspace.getByRole('button', { name: 'Attach source', exact: true }).click();
   const sourceRow = workspace.getByRole('listitem').filter({ hasText: 'Attached repository' });
   await expect(sourceRow).toBeVisible();
+  const executionReminder = workspace
+    .getByRole('status')
+    .filter({ hasText: 'For autonomous repository commands' });
+  await expect(executionReminder).toBeVisible();
   const config = await (await request.get(`${API}${projectPath(created.id)}/workspace`)).json();
   const sourceId = config.sources[0].id;
   expect(config.sources[0].contextFiles).toEqual(['AGENTS.md', 'README.md']);
@@ -694,6 +753,7 @@ test('mobile workspace runs a command, pushes real artifacts, and previews and d
         (await (await request.get(`${API}${projectPath(created.id)}/workspace`)).json()).execution,
     )
     .toEqual({ mode: 'full', sourceId });
+  await expect(executionReminder).toHaveCount(0);
   await page.getByRole('button', { name: 'New Chat', exact: true }).click();
   await expect(page.getByPlaceholder('Ask Raven...')).toBeVisible();
   await send(

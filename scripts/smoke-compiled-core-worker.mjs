@@ -73,7 +73,16 @@ assert.equal(config.NEO4J_ENABLED, false);
 let backendCalls = 0;
 const agentBackend = async (options) => {
   backendCalls++;
-  assert.deepEqual(Object.keys(options.agents), []);
+  assert.deepEqual(Object.keys(options.agents), ['repository-work']);
+  assert.deepEqual([...options.agents['repository-work'].tools].sort(), [
+    'Bash',
+    'Edit',
+    'Glob',
+    'Grep',
+    'Read',
+    'Write',
+  ]);
+  assert.equal(options.agents['repository-work'].mcpServers, undefined);
   assert.deepEqual(Object.keys(options.mcpServers).sort(), ['memory', 'raven']);
   options.onAssistantMessage('Compiled smoke response.');
   return {

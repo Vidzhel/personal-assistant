@@ -102,3 +102,49 @@ Evidence: `/tmp/raven-w1d-full-final.log`, `/tmp/raven-w1d-browser-final.log`,
 reported no vulnerabilities. Tests use fake model/provider responses and isolated
 filesystems; no live Claude/account operation or production deployment is claimed.
 W1e remains responsible for deployment mounts/tools/defaults and final containers.
+
+## Workspace setup follow-up — 2026-09-06
+
+The owner's first attachment attempt used a host path that was absent inside the
+container. Its HTTP 400 appeared above the scrolled form, so the existing DOM
+visibility assertion missed the actual problem. A new mobile regression reproduced
+an alert with viewport intersection ratio zero. Folder errors now distinguish
+missing paths, non-directories and access failures, preserve symlink rejection,
+and explain the default `/workspace/<repository>` container path. The sticky alert
+stays in view, can be dismissed, and preserves the draft for correction. Folder
+forms also display the path guidance before submission.
+
+Attaching a repository did not select it as the execution working folder or change
+Default mode. The reported exploration's first explicit denial was the existing
+`Bash access is disabled (access: none)` policy. The Workspace tab now explains how
+to select the working folder and save Auto or Full mode for autonomous commands.
+The owner had already authorized Full repository execution; the idle test project's
+saved settings were corrected accordingly. Saving changed workspace settings
+invalidates the prior SDK resume grant. No policy defaults or unrelated project
+permissions were broadened.
+
+Verification passes: 242 default test files / 2,467 tests (six explicit live skips),
+all three affected browser journeys, the required check, core build, dashboard
+type-check, both Docker image builds and the compiled restart smoke. The mobile
+regression asserts the entire alert is in the viewport, no horizontal overflow,
+draft preservation, dismissal and successful correction. The repository journey
+also verifies that the execution reminder clears after saving Full mode and the
+source. Its commands, commit, push and artifact previews use temporary repositories
+and a fake model backend. Review of the screenshot confirms the error is readable.
+
+The compiled smoke initially exposed an outdated pre-W1e assertion expecting no
+nested agents. It now checks the seeded `repository-work` agent's exact native tools
+and absence of external MCP bindings; both compiled process runs pass. The existing
+idle local core and web containers were refreshed with the tested images, preserving
+volumes and the running graph. Subsequent checks confirm healthy core, HTTP 200 from
+web, updated UI assets, saved Full execution with the attached working folder, and
+runtime read/write access to the repository and managed context. No live model
+exploration was rerun; the owner can retry with a new chat message.
+
+Evidence: `/tmp/raven-attachment-repro.log`,
+`/tmp/raven-attachment-full-tests.log`, `/tmp/raven-attachment-browser.log`,
+`/tmp/raven-attachment-check.log`, `/tmp/raven-attachment-build-core.log`,
+`/tmp/raven-attachment-compiled.log`, `/tmp/raven-attachment-images.log`,
+`/tmp/raven-workspace-refresh.log`,
+`/tmp/raven-workspace-refresh-verification.json`, and
+`.browser-test-output/attachment-error-mobile.png`.

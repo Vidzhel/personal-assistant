@@ -290,15 +290,27 @@ function SourceContextFiles({
 }) {
   if (source.sourceType !== 'folder') return null;
   return (
-    <textarea
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      disabled={disabled}
-      aria-label={`${source.id} context files`}
-      placeholder="Context files, one relative path per line"
-      rows={2}
-      className="w-full rounded border px-2 py-1.5 text-sm"
-    />
+    <>
+      <FolderPathHint />
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
+        aria-label={`${source.id} context files`}
+        placeholder="Context files, one relative path per line"
+        rows={2}
+        className="w-full rounded border px-2 py-1.5 text-sm"
+      />
+    </>
+  );
+}
+
+function FolderPathHint() {
+  return (
+    <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+      Use a folder path visible to Raven. With the default Docker workspace mount, use{' '}
+      <code>{'/workspace/<repository>'}</code>.
+    </p>
   );
 }
 
@@ -631,14 +643,17 @@ function AddSourceContext({
 }) {
   if (sourceType !== 'folder') return null;
   return (
-    <textarea
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      disabled={disabled}
-      placeholder="Context files, one relative path per line"
-      rows={2}
-      className="w-full rounded border px-2 py-1.5 text-sm"
-    />
+    <>
+      <FolderPathHint />
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
+        placeholder="Context files, one relative path per line"
+        rows={2}
+        className="w-full rounded border px-2 py-1.5 text-sm"
+      />
+    </>
   );
 }
 
@@ -768,7 +783,15 @@ function useWorkspaceController(projectId: string) {
     },
     [load, setError],
   );
-  return { workspace, loading, error, saving, load, mutate };
+  return {
+    workspace,
+    loading,
+    error,
+    saving,
+    load,
+    mutate,
+    dismissError: () => setError(undefined),
+  };
 }
 
 function WorkspacePanels({
@@ -796,6 +819,7 @@ function WorkspacePanels({
           onSave={(id, input) => mutate(() => updateWorkspaceSource(projectId, id, input))}
           onDelete={(id) => mutate(() => deleteWorkspaceSource(projectId, id))}
         />
+        <ExecutionReminder workspace={workspace} />
         <AddSource
           disabled={saving}
           onCreate={(input) => mutate(() => createWorkspaceSource(projectId, input))}
@@ -810,11 +834,57 @@ function WorkspacePanels({
   );
 }
 
+function ExecutionReminder({ workspace }: { workspace: ProjectWorkspace }) {
+  if (!workspace.sources.some((source) => source.sourceType === 'folder')) return null;
+  if (workspace.execution.sourceId && workspace.execution.mode !== 'default') return null;
+  return (
+    <p
+      role="status"
+      className="rounded border p-3 text-sm"
+      style={{ borderColor: 'var(--accent)' }}
+    >
+      For autonomous repository commands, choose the repository under Working folder, select Auto or
+      Full mode in Execution, and click Save execution settings.
+    </p>
+  );
+}
+
 function WorkspaceRetry({ disabled, onRetry }: { disabled: boolean; onRetry: () => void }) {
   return (
     <Button size="sm" onClick={onRetry} disabled={disabled} loading={disabled}>
       Retry
     </Button>
+  );
+}
+
+function WorkspaceErrorBanner({
+  message,
+  disabled,
+  onRetry,
+  onDismiss,
+}: {
+  message: string;
+  disabled: boolean;
+  onRetry: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div
+      role="alert"
+      className="sticky top-0 z-20 mb-3 flex flex-wrap items-center gap-2 rounded border p-3 shadow"
+      style={{ background: 'var(--bg-card)', borderColor: 'var(--error)' }}
+    >
+      <p
+        className="min-w-0 max-h-40 overflow-y-auto break-words text-sm"
+        style={{ color: 'var(--error)' }}
+      >
+        {message}
+      </p>
+      <WorkspaceRetry disabled={disabled} onRetry={onRetry} />
+      <Button size="sm" onClick={onDismiss} disabled={disabled}>
+        Dismiss error
+      </Button>
+    </div>
   );
 }
 
@@ -839,15 +909,12 @@ export function ProjectWorkspaceTab({ projectId }: ProjectTabProps) {
   return (
     <div role="region" aria-label="Project workspace" className="h-full overflow-y-auto p-4 sm:p-6">
       {controller.error && (
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <p role="alert" className="text-sm" style={{ color: 'var(--error)' }}>
-            {controller.error}
-          </p>
-          <WorkspaceRetry
-            disabled={controller.loading || controller.saving}
-            onRetry={() => void controller.load()}
-          />
-        </div>
+        <WorkspaceErrorBanner
+          message={controller.error}
+          disabled={controller.loading || controller.saving}
+          onRetry={() => void controller.load()}
+          onDismiss={controller.dismissError}
+        />
       )}
       <WorkspacePanels
         projectId={projectId}

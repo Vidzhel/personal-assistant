@@ -284,14 +284,33 @@ function resolveFolder(root: string, uri: string): string {
   try {
     assertNoSymlinkComponents(candidate);
     const stat = lstatSync(candidate);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('not a directory');
+    if (stat.isSymbolicLink()) throw mutationError(`Folder is a symbolic link: ${uri}`);
+    if (!stat.isDirectory())
+      throw mutationError(`Folder source is not a directory: ${uri}`, HTTP_STATUS.BAD_REQUEST);
     const canonical = realpathSync(candidate);
     assertNoSymlinkComponents(canonical);
     return canonical;
   } catch (error) {
-    if (error instanceof ProjectMutationError) throw error;
-    throw mutationError(`Folder source is missing or unsafe: ${uri}`, HTTP_STATUS.BAD_REQUEST);
+    throw folderSourceError(uri, error);
   }
+}
+
+function folderSourceError(uri: string, error: unknown): ProjectMutationError {
+  const hint =
+    'Choose a folder visible to Raven. In Docker, use its container path; ' +
+    'the default workspace mount is /workspace/<repository>.';
+  if (error instanceof ProjectMutationError) {
+    return mutationError(`${error.message}. ${hint}`, error.statusCode);
+  }
+  const reasons: Record<string, string> = {
+    ENOENT: 'does not exist',
+    ENOTDIR: 'is not a directory',
+    EACCES: 'cannot be accessed by Raven',
+    EPERM: 'cannot be accessed by Raven',
+  };
+  const reason =
+    reasons[(error as NodeJS.ErrnoException).code ?? ''] ?? 'cannot be inspected safely';
+  return mutationError(`Folder source ${reason}: ${uri}. ${hint}`, HTTP_STATUS.BAD_REQUEST);
 }
 
 function normalizeSource(root: string, source: ProjectWorkspaceSource): ProjectWorkspaceSource {

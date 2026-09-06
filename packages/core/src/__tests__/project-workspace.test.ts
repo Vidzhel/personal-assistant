@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parse, stringify } from 'yaml';
@@ -140,7 +140,10 @@ describe('project workspace file store', () => {
         label: 'Missing',
         sourceType: 'folder',
       }),
-    ).rejects.toMatchObject({ statusCode: 400 });
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      message: expect.stringMatching(/does not exist.*visible to Raven.*workspace/i),
+    });
     await expect(
       store.createDataSource('alpha', {
         uri: 'https://example.test',
@@ -150,6 +153,44 @@ describe('project workspace file store', () => {
       }),
     ).rejects.toMatchObject({ statusCode: 400 });
     expect(() => readFileSync(join(fixture.projectsDir, 'alpha', 'project.yaml'))).toThrow();
+  });
+
+  it('distinguishes non-directories and rejects symlinked folder sources with guidance', async () => {
+    const fixture = await fixtureWithProjects('alpha');
+    const store = storeFor(fixture);
+    writeFileSync(join(fixture.root, 'plain-file'), 'not a folder');
+    await expect(
+      store.createDataSource('alpha', {
+        uri: 'plain-file',
+        label: 'File',
+        sourceType: 'folder',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      message: expect.stringMatching(/not a directory.*visible to Raven/i),
+    });
+    await expect(
+      store.createDataSource('alpha', {
+        uri: 'plain-file/child',
+        label: 'File parent',
+        sourceType: 'folder',
+      }),
+    ).rejects.toMatchObject({
+      statusCode: 400,
+      message: expect.stringMatching(/not a directory.*visible to Raven/i),
+    });
+
+    mkdirSync(join(fixture.root, 'real-folder'));
+    symlinkSync(join(fixture.root, 'real-folder'), join(fixture.root, 'linked-folder'));
+    await expect(
+      store.createDataSource('alpha', {
+        uri: 'linked-folder',
+        label: 'Linked',
+        sourceType: 'folder',
+      }),
+    ).rejects.toMatchObject({
+      message: expect.stringMatching(/symlink.*visible to Raven/i),
+    });
   });
 
   it('returns detached values and preserves manual manifest edits on the next read', async () => {
