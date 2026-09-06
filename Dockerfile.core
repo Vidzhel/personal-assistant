@@ -32,6 +32,12 @@ COPY --from=builder /app/packages/core/dist packages/core/dist
 COPY --from=builder /app/packages/core/package.json packages/core/
 COPY deployment/ deployment/
 
+# Fail the build if the context allowlist drops a runtime/setup entrypoint.
+RUN test -s deployment/entrypoint.mjs \
+    && test -s deployment/runtime-init.mjs \
+    && mkdir -p /app/library \
+    && node deployment/install-ticktick.mjs --check
+
 RUN mkdir -p /app/data /app/projects /app/library /app/config /home/node/.claude \
     && chown node:node /app /app/data /app/projects /app/library /app/config /home/node/.claude
 USER node

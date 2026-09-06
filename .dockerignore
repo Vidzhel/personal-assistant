@@ -40,6 +40,7 @@ scripts/*
 deployment/*
 !deployment/runtime-init.mjs
 !deployment/entrypoint.mjs
+!deployment/install-ticktick.mjs
 !deployment/seeds/
 !deployment/seeds/**
 # Tests and generated/cache files are not production source inputs.

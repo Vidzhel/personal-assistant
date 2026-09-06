@@ -83,3 +83,18 @@ Tests use isolated roots, fake tokens, local protocol servers and fake model
 backends. Real account authentication, provider argument schemas and delivery
 remain an explicit operator canary after token setup. Docker is unavailable in
 this WSL runner; script/Git/protocol checks do not establish container deployment.
+
+### Packaging correction after owner setup report
+
+The owner exposed a missed container input: `.dockerignore` excluded
+`deployment/install-ticktick.mjs`, so setup failed with `MODULE_NOT_FOUND` after a
+successful image build. Added the installer to the explicit context allowlist.
+The context check now requires all three deployment entrypoints and all five
+TickTick seed inputs; the core image runs the installer's read-only validation
+against its empty library during build. Independent review identified the seed
+coverage gap and it was fixed before completion.
+
+Docker became accessible for this follow-up: the actual 409-file context export,
+core image build, and network-disabled installer check as the image's non-root
+user passed. All 22 setup tests passed. These checks use no owner mounts or
+credentials and do not establish live TickTick authentication.

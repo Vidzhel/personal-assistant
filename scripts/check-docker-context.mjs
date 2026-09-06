@@ -14,7 +14,7 @@ const allowed = [
   /^packages\/core\/scripts\/copy-build-assets\.mjs$/,
   /^migrations\/[^/]+\.sql$/,
   /^scripts\/smoke-compiled-core(?:-worker)?\.mjs$/,
-  /^deployment\/(runtime-init|entrypoint)\.mjs$/,
+  /^deployment\/(runtime-init|entrypoint|install-ticktick)\.mjs$/,
   /^deployment\/seeds\/.+$/,
 ];
 const forbidden =
@@ -37,6 +37,18 @@ try {
   });
   const files = list();
   assert(files.length > 0, 'Build context must contain deliberate source inputs');
+  for (const required of [
+    'deployment/entrypoint.mjs',
+    'deployment/runtime-init.mjs',
+    'deployment/install-ticktick.mjs',
+    'deployment/seeds/library/mcps/ticktick.json',
+    'deployment/seeds/library/skills/productivity/_index.md',
+    'deployment/seeds/library/skills/productivity/task-management/_index.md',
+    'deployment/seeds/library/skills/productivity/task-management/ticktick/config.json',
+    'deployment/seeds/library/skills/productivity/task-management/ticktick/skill.md',
+  ]) {
+    assert(files.includes(required), `Build context is missing required setup input: ${required}`);
+  }
   const invalid = files.filter(
     (path) => forbidden.test(path) || !allowed.some((rule) => rule.test(path)),
   );
