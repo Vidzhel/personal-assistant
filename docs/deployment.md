@@ -12,11 +12,19 @@ integrations; model responses require deliberate Claude authentication.
 For local testing, save settings in the ignored `.env` and use the launcher:
 
 ```sh
+# Optional before first start; see the TickTick token instructions below
+./scripts/raven.sh setup-ticktick
 ./scripts/raven.sh start
 ./scripts/raven.sh status
 ./scripts/raven.sh logs
 ./scripts/raven.sh stop
 ```
+
+If `.env` does not exist yet, copy `.env.example` to `.env` and review its settings
+first. Do not overwrite an existing `.env`. To use TickTick, follow
+[Configure the official TickTick MCP](#configure-the-official-ticktick-mcp) before
+starting; otherwise skip that setup command. Setup requires Node.js 22.22.0 or
+newer on the host as well as Docker and Compose.
 
 Start builds the images and checks authentication in the persistent Claude
 volume. If needed, it runs the interactive login flow. It then waits for Neo4j
@@ -183,8 +191,10 @@ variable into core. Never copy credentials into an image or capability definitio
 
 ## Configure the official TickTick MCP
 
+Follow the [official TickTick MCP guide](https://help.ticktick.com/articles/7438129581631995904).
 In TickTick on the web, open **Settings → Account → API Token** and create a
-dedicated MCP token. This token is separate from the retired Open API client and
+dedicated MCP token. Copy it and paste it into the launcher's hidden prompts;
+Raven saves it in `.env` for you. This token is separate from the retired Open API client and
 access-token credentials. Stop Raven, then run the setup action and enter the same
 token twice at its hidden prompts:
 
@@ -193,6 +203,11 @@ token twice at its hidden prompts:
 ./scripts/raven.sh setup-ticktick
 ./scripts/raven.sh start
 ```
+
+On a fresh installation that has never started, omit the `stop` command. After
+startup, open the project's **Workspace** tab and inspect readiness. Confirm the
+TickTick connection and tools checks succeed, then ask the agent to list your
+TickTick projects without changing anything.
 
 The setup action refuses to change the durable capability volume while any Compose
 service is running. It builds the current core image, checks that the bundled files
