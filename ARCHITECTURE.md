@@ -24,6 +24,13 @@ graph views have passed deployment verification.
 Keep the runtime small by extending existing paths; remove a predecessor in the
 same change that replaces it.
 
+The [September 6 personal assistant roadmap](docs/assessments/2026-09-06-personal-assistant-roadmap.md)
+assesses the next product phase: project-based Telegram, model controls, personal
+context, daily planning and adaptive routines. Its
+[delivery queue](_bmad-output/implementation-artifacts/personal-assistant-next-steps-2026-09-06.md)
+distinguishes proposed features, source-confirmed gaps and completed maintenance.
+It does not describe those proposed features as current runtime behavior.
+
 ## System Diagram
 
 ```
@@ -206,8 +213,8 @@ User types in web dashboard
   → WebSocket sends 'chat:send'
   → API handler emits 'user:chat:message'
   → ownership, capability and transcript checks accept or reject the correlated send
-  → orchestrator creates an agent task for the global default named agent and
-    injects the project's inherited context (project-local selection remains a gap)
+  → orchestrator resolves the project's nearest default named agent, falling back
+    through its ancestors, and injects the project's inherited context
   → agent manager spawns that agent's session: its skill-resolved mcpServers + the
     chat-scoped Raven MCP (classify_request / create_task_tree / send_message) + memory MCP
   → the agent either answers directly, delegates via the Agent tool, or calls
