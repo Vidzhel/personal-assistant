@@ -346,27 +346,6 @@ export class Orchestrator {
       updatedAt: 0,
     };
 
-    // Project context chain from filesystem-based project hierarchy
-    let projectContextChain: string | undefined;
-    if (this.projectRegistry && projectRow) {
-      try {
-        // fs_path is the authoritative link (see project-manager/project-sync.ts).
-        const fsProject = projectRow.fs_path
-          ? this.projectRegistry.getProject(projectRow.fs_path)
-          : undefined;
-        if (fsProject) {
-          const resolved = this.projectRegistry.resolveProjectContext(fsProject.id);
-          const contexts = [...resolved.contextChain];
-          const chain = contexts.filter(Boolean).join('\n\n---\n\n');
-          if (chain) {
-            projectContextChain = chain;
-          }
-        }
-      } catch (err) {
-        log.warn(`Project context chain resolution failed: ${err}`);
-      }
-    }
-
     // Audit log: record system access configuration (only for non-default access levels)
     if (systemAccess !== 'none') {
       try {
@@ -421,7 +400,6 @@ export class Orchestrator {
         mcpServers,
         agentDefinitions,
         plugins,
-        projectContextChain,
         namedAgentInstructions,
         systemAccessInstructions,
         priority: 'high',

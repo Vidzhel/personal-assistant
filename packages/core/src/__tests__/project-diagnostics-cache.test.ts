@@ -22,6 +22,7 @@ describe('definition diagnostics preserve inactive project cache evidence', () =
   function define(path: string, id = path): void {
     mkdirSync(join(root, path), { recursive: true });
     writeFileSync(context(path), writeProjectDefinition(`# ${path}\n`, { version: 1, id }));
+    writeFileSync(join(root, path, 'project.yaml'), 'version: 1\n');
   }
 
   beforeEach(async () => {

@@ -24,7 +24,7 @@ import type {
   WorkspaceExecution,
   WorkspaceExecutionResolver,
 } from '../project-manager/workspace-execution.ts';
-import { resolveTaskWorkspace } from './workspace-task.ts';
+import { resolveTaskWorkspace, applyWorkspaceContext } from './workspace-task.ts';
 import { createSessionToolGuard } from './session-tool-guard.ts';
 import { createToolCallLifetime } from '../mcp-server/tool-call-lifetime.ts';
 
@@ -375,11 +375,17 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       });
     }
 
-    let systemPrompt = buildSystemPrompt(task, undefined, {
+    const promptTask = workspace
+      ? { ...task, projectContextChain: workspace.projectContextChain }
+      : task;
+    let systemPrompt = buildSystemPrompt(promptTask, undefined, {
       chatMcpAvailable: Boolean(opts.ravenMcpDeps) && scope.role === 'chat',
       hasSubAgents: Object.keys(agentDefinitions).length > 0,
       knowledgeTools: opts.ravenMcpDeps ? getAvailableKnowledgeTools(opts.ravenMcpDeps, scope) : [],
     });
+    if (workspace?.workspaceContext) {
+      systemPrompt = `${systemPrompt}\n\n${workspace.workspaceContext}`;
+    }
     if (opts.memoryStore && memoryProjectId) {
       const memoryIndex = await opts.memoryStore.readIndex(memoryProjectId);
       if (memoryIndex) {
@@ -462,7 +468,7 @@ export async function runAgentTask(opts: RunOptions): Promise<AgentSessionResult
       model: opts.model ?? config.CLAUDE_MODEL,
       maxTurns: opts.maxTurns ?? config.RAVEN_AGENT_MAX_TURNS,
       mcpServers: sdkMcpServers,
-      agents: agentDefinitions,
+      agents: applyWorkspaceContext(agentDefinitions, workspace),
       plugins: opts.plugins,
       canUseTool: canUseTool ? toolGuard.canUseTool : undefined,
       hooks: { PreToolUse: [{ hooks: [toolGuard.preToolUse] }] },

@@ -30,7 +30,6 @@ import {
 } from '@raven/shared';
 import { ProjectMutationError, withProjectMutation } from './project-mutation.ts';
 import { readProjectTextFile } from './project-file-read.ts';
-import { formatProjectDataSources } from './project-data-sources.ts';
 import type { ProjectRegistry } from '../project-registry/project-registry.ts';
 import { readProjectDefinition } from '../project-registry/project-definition.ts';
 
@@ -50,7 +49,6 @@ export interface ProjectWorkspaceStore {
   getWorkspace(projectId: string): ProjectWorkspace;
   getDataSources(projectId: string): ProjectDataSource[];
   getDataSource(projectId: string, id: string): ProjectDataSource | undefined;
-  buildDataSourcesContext(projectId: string): string | undefined;
   getProjectHome(projectId: string): string;
   listProjectIds(): string[];
   updateWorkspace(projectId: string, patch: WorkspaceUpdate): Promise<ProjectWorkspace>;
@@ -480,11 +478,6 @@ export function createProjectWorkspaceStore(
         (candidate) => candidate.id === id,
       );
       return source ? runtimeSource(projectId, source) : undefined;
-    },
-    buildDataSourcesContext(projectId) {
-      return formatProjectDataSources(
-        runtimeSources(projectId, readStoreWorkspace(deps, projectId).workspace),
-      );
     },
     getProjectHome(projectId) {
       return locateProject(deps, projectId).directory;

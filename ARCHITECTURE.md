@@ -354,8 +354,10 @@ known project paths is not silently recreated at startup.
 
 `project.yaml` owns workspace execution settings and labeled data sources;
 `context.md` keeps project identity and human context. Existing source projects
-without a manifest use defaults. New project staging and recovery include both
-anchors. Workspace CRUD uses the current registry identity and atomic YAML writes;
+without a manifest use defaults at the top level. Nested project discovery
+requires both anchors; unmarked working directories are not recursively scanned.
+Malformed marked projects produce diagnostics. New project staging and recovery
+include both anchors. Workspace CRUD uses the current registry identity and atomic YAML writes;
 the previous SQL source table is removed. Folder inputs store canonical server
 paths with optional links to repository instructions/indexes. HTTP configuration
 and direct execution are available without Neo4j; browser artifacts follow in W1d. Graph views currently remain global; W1d adds explicit project
@@ -380,8 +382,18 @@ lineage. Attached cwd enables SDK project/local instructions, settings, skills a
 hooks; managed-home execution uses explicit empty settings sources. Strict MCP
 configuration excludes ambient servers, and native SDK automatic memory is
 disabled in favor of Raven project memory. Auxiliary learning and validators do
-not inherit autonomous project execution. Repository context indexes and shared
-file skills remain the next W1c checkpoint.
+not inherit autonomous project execution.
+
+Chat, execution and nested SDK skill agents receive current ancestor `context.md`
+bodies and configured instructions through the workspace resolver. This replaces
+the former cached chat-only context path. Combined instructions over 64 KiB fail
+admission with an actionable error. A separate 24 KiB workspace overview lists
+home, cwd, mode, source metadata and links to configured context files or a small
+set of existing root instruction/index files. It reads no repository file bodies
+and does not crawl or embed repositories. Selected sources come first; missing
+links and omitted entries are reported. Shared document/media skills use local
+pipelines and project-owned output conventions; the shipped Raven agent explicitly
+binds `repository-work`. Custom empty skill bindings remain empty.
 
 Memory lives under each managed project's `memory/` directory. All its named
 agents share this store; internal validators have no memory tools. Project YAML

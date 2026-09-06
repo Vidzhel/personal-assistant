@@ -20,6 +20,7 @@ function write(relative, content) {
 }
 write('projects/course/context.md', '# Course\n\nBrowser fixture parent.\n');
 write('projects/course/one/context.md', '# Nested Course\n\nBrowser fixture only.\n');
+write('projects/course/one/project.yaml', { version: 1 });
 write('projects/course/memory/research/notes.md', 'Course private memory sentinel.');
 write('projects/course/one/memory/MEMORY.md', 'Nested project memory sentinel.');
 const treeTime = new Date().toISOString();

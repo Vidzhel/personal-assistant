@@ -12,9 +12,11 @@ import type { ProjectRegistry } from '../project-registry/project-registry.ts';
 import type { ProjectWorkspaceStore } from './project-workspace.ts';
 import { readProjectTextFile } from './project-file-read.ts';
 import { readProjectDefinition } from '../project-registry/project-definition.ts';
+import { buildWorkspaceContext } from './workspace-context.ts';
 
 const MAX_CONTEXT_BYTES = 1_048_576;
 const MAX_PROJECT_DEPTH = 100;
+const MAX_PROMPT_CONTEXT_BYTES = 65_536;
 
 export interface WorkspaceExecution {
   cwd: string;
@@ -22,6 +24,8 @@ export interface WorkspaceExecution {
   mode: 'default' | 'auto' | 'full';
   settingSources: ('project' | 'local')[];
   revision: string;
+  projectContextChain?: string;
+  workspaceContext?: string;
 }
 
 export interface WorkspaceExecutionResolver {
@@ -73,14 +77,26 @@ function ancestorNodes(registry: ProjectRegistry, node: ProjectNode): ProjectNod
   return chain;
 }
 
-function contextRevision(registry: ProjectRegistry, node: ProjectNode): string {
+function readProjectContext(
+  registry: ProjectRegistry,
+  node: ProjectNode,
+): { revision: string; content: string } {
   const hash = createHash('sha256');
+  const parts: string[] = [];
   for (const ancestor of ancestorNodes(registry, node)) {
     const bytes = readProjectTextFile(join(ancestor.path, 'context.md'), MAX_CONTEXT_BYTES);
     assertAncestorIdentity(ancestor, bytes);
+    const definition = readProjectDefinition(bytes ?? '');
+    parts.push(definition.body, definition.metadata?.systemPrompt ?? '');
     hash.update(ancestor.id + '\0' + (bytes ?? '') + '\0');
   }
-  return hash.digest('hex');
+  const content = parts.filter(Boolean).join('\n\n---\n\n');
+  if (Buffer.byteLength(content) > MAX_PROMPT_CONTEXT_BYTES) {
+    throw new Error(
+      'Project instructions exceed 64 KiB; keep context concise and link supporting files',
+    );
+  }
+  return { revision: hash.digest('hex'), content };
 }
 
 function assertAncestorIdentity(ancestor: ProjectNode, bytes: string | undefined): void {
@@ -248,14 +264,17 @@ export function createWorkspaceExecutionResolver(
       const allDirectories = uniqueDirectories(folders.records);
       const records = allDirectories.filter((record) => record.path !== folders.cwd);
       const agent = agentRevision(deps, task, projectId);
+      const context = readProjectContext(deps.projectRegistry, node);
       return {
         cwd: folders.cwd,
         additionalDirectories: records.map((record) => record.path),
         mode: workspace.execution.mode,
         settingSources: folders.selected ? ['project', 'local'] : [],
+        projectContextChain: context.content,
+        workspaceContext: buildWorkspaceContext({ workspace, home, cwd: folders.cwd }),
         revision: revisionHash({
           workspace,
-          context: contextRevision(deps.projectRegistry, node),
+          context: context.revision,
           directories: allDirectories,
           cwd: folders.cwd,
           agent,

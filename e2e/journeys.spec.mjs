@@ -137,7 +137,7 @@ test('create project, persist instructions, and manage data sources with knowled
   expect(errors).toEqual([]);
 });
 
-test('nested legacy project links work in both grid and tree', async ({ page, request }) => {
+test('nested project links work in both grid and tree', async ({ page, request }) => {
   const projects = await (await request.get(`${API}/projects`)).json();
   const nested = projects.find((item) => item.fsPath === 'course/one');
   expect(nested).toBeTruthy();

@@ -24,7 +24,7 @@ external repositories.
 | F7    | Ordinary schedule absence/staleness detection                                                                    | Complete; 2,200 tests, 14 browser journeys and packaged restart                                                          |
 | F8    | Durable provider upload cleanup/retry after cancellation and restart                                             | Complete; 2,223 tests, 14 browser journeys and packaged restart                                                          |
 | F9    | Remove obsolete storage compatibility/schema paths, reconcile docs, full/browser/compiled/container verification | Complete; 2,342 default / 148 graph tests, 16 browser journeys, builds, packaged restart and offline containers verified |
-| W1    | Review dissertation/teaching and implement flexible repository workspaces with browser artifact access           | In progress; W1a and W1b complete; W1c repository context/skills next                                                    |
+| W1    | Review dissertation/teaching and implement flexible repository workspaces with browser artifact access           | In progress; W1a–W1c complete; W1d browser workspace/artifacts next                                                      |
 
 Legacy metadata migration and prior Neo4j restoration are closed by the owner's
 explicit decision, not by a claim that data was restored. Future runtime writes
@@ -165,3 +165,12 @@ The required check, 2,431 default tests, real SDK subprocess contracts, actual
 temporary shell/file/commit/push, core build and compiled restart pass. W1c adds
 repository context links/shared skills and flexible managed layouts; W1d adds
 mobile artifacts and explicit graph project selection/filtering.
+
+W1c is complete. [Current context and repository workflows](tech-spec-w1c-workspace-context.md)
+replaces stale chat-only context with current shared project instructions and bounded
+links to existing repository entrypoints. Explicit nested anchors leave ordinary
+working folders flexible. Shared document/media skills follow repository pipelines
+and output conventions. Parent review, required checks, definition validation,
+2,443 default tests, 17 browser journeys, core build and compiled restart pass.
+W1d now implements browser workspace/artifact access and explicit graph project
+selection with server-side filtering.

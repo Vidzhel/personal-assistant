@@ -18,5 +18,6 @@ skills:
   - config-management
   - orchestration
   - pattern-analysis
+  - repository-work
 model: sonnet
 maxTurns: 20

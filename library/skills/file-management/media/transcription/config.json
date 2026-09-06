@@ -4,7 +4,7 @@
   "description": "Transcribes audio and video files using Google Gemini, handling files up to 9.5 hours long",
   "mcps": [],
   "vendorSkills": [],
-  "tools": ["Bash", "Read", "Write", "Glob"],
+  "tools": ["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
   "model": "sonnet",
   "maxTurns": 10,
   "actions": [

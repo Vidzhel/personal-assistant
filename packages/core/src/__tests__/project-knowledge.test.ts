@@ -161,40 +161,6 @@ describe('Project Knowledge (10.9)', () => {
     });
   });
 
-  describe('buildProjectDataSourcesContext', () => {
-    it('returns formatted markdown with all data sources', async () => {
-      // Create a fresh project for this test
-      const db = getDb();
-      const now = Date.now();
-      db.prepare(
-        'INSERT INTO projects (id, name, description, skills, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-      ).run('proj-ctx', 'Context Test', '', '[]', now, now);
-
-      await workspaceStore.createDataSource('proj-ctx', {
-        uri: 'https://drive.google.com/file/abc',
-        label: 'Design Doc',
-        description: 'Architecture design',
-        sourceType: 'gdrive',
-      });
-      await workspaceStore.createDataSource('proj-ctx', {
-        uri: '/data/logs.csv',
-        label: 'Log Data',
-        sourceType: 'file',
-      });
-
-      const ctx = workspaceStore.buildDataSourcesContext('proj-ctx');
-      expect(ctx).toContain('**Design Doc**');
-      expect(ctx).toContain('(gdrive)');
-      expect(ctx).toContain('Architecture design');
-      expect(ctx).toContain('**Log Data**');
-      expect(ctx).toContain('(file)');
-    });
-
-    it('returns undefined when no data sources', () => {
-      expect(workspaceStore.buildDataSourcesContext('proj-empty')).toBeUndefined();
-    });
-  });
-
   describe('Rejection Tracking (SQLite)', () => {
     it('records rejection and checks isContentRejected', () => {
       const hash = 'abc123hash';

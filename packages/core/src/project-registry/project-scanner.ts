@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { lstat, readdir, readFile, stat } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 
 import yaml from 'js-yaml';
@@ -37,6 +37,7 @@ const SKIP_DIRS = new Set([
   '.git',
 ]);
 const MAX_WORKSPACE_BYTES = 1_048_576;
+const MAX_CONTEXT_BYTES = 1_048_576;
 
 export interface ProjectScanOptions {
   knownSkills?: ReadonlySet<string>;
@@ -49,15 +50,6 @@ export interface ScannedProjectIndex extends ProjectIndex {
 
 function shouldSkipDir(name: string): boolean {
   return name.startsWith('.') || SKIP_DIRS.has(name);
-}
-
-async function readTextFile(path: string): Promise<string | null> {
-  try {
-    return await readFile(path, 'utf-8');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    throw error;
-  }
 }
 
 function relativePath(root: string, path: string): string {
@@ -276,6 +268,28 @@ interface ScanContext {
   projectIdentities: Map<string, string>;
 }
 
+interface DefinitionReadRequest {
+  dirPath: string;
+  rel: string;
+  ctx: ScanContext;
+  requireContext: boolean;
+}
+
+interface ContextAnchorRequest {
+  id: string;
+  rel: string;
+  contextMd: string | null;
+  ctx: ScanContext;
+  requireContext: boolean;
+}
+
+interface ScanDirectoryRequest {
+  dirPath: string;
+  parentId: string | null;
+  ctx: ScanContext;
+  requireContext: boolean;
+}
+
 function deriveProjectName(rel: string): string {
   if (rel === '_global') throw new Error('The _global project path is reserved');
   const parts = rel.split('/');
@@ -302,9 +316,20 @@ async function scanSubdirectories(dirPath: string, id: string, ctx: ScanContext)
   }
 
   for (const entry of entries) {
-    if (entry.isDirectory() && !shouldSkipDir(entry.name)) {
-      await scanDir(join(dirPath, entry.name), id, ctx);
-    }
+    if (!entry.isDirectory() || shouldSkipDir(entry.name)) continue;
+    const childPath = join(dirPath, entry.name);
+    const marked = await hasWorkspaceMarker(childPath);
+    if (id !== '_global' && !marked) continue;
+    await scanDir({ dirPath: childPath, parentId: id, ctx, requireContext: marked });
+  }
+}
+
+async function hasWorkspaceMarker(dirPath: string): Promise<boolean> {
+  try {
+    await lstat(join(dirPath, 'project.yaml'));
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ENOENT';
   }
 }
 
@@ -319,11 +344,41 @@ function metadataFields(
   };
 }
 
-async function readDefinition(
-  dirPath: string,
-  rel: string,
-  ctx: ScanContext,
-): Promise<
+function reportMissingContext(rel: string, ctx: ScanContext): void {
+  ctx.invalidProjectPaths.add(rel);
+  addDiagnostic(ctx.diagnostics, {
+    source: 'project',
+    path: `${rel}/context.md`,
+    code: 'missing-project-context',
+    message: 'Project is missing its context.md anchor',
+    severity: 'error',
+  });
+}
+
+function hasContextAnchor({
+  id,
+  rel,
+  contextMd,
+  ctx,
+  requireContext,
+}: ContextAnchorRequest): boolean {
+  if (id === '_global' || contextMd !== null) return true;
+  if (
+    id !== '_global' &&
+    requireContext &&
+    !ctx.diagnostics.some((diagnostic) => diagnostic.path === `${rel}/context.md`)
+  ) {
+    reportMissingContext(rel, ctx);
+  }
+  return false;
+}
+
+async function readDefinition({
+  dirPath,
+  rel,
+  ctx,
+  requireContext,
+}: DefinitionReadRequest): Promise<
   { contextMd: string; definition: ReturnType<typeof readProjectDefinition> } | undefined
 > {
   const id = rel || '_global';
@@ -332,7 +387,7 @@ async function readDefinition(
     return undefined;
   }
   const contextMd = await readProjectContext(dirPath, rel, ctx);
-  if (id !== '_global' && contextMd === null) return undefined;
+  if (!hasContextAnchor({ id, rel, contextMd, ctx, requireContext })) return undefined;
 
   try {
     const definition = readProjectDefinition(contextMd ?? '');
@@ -364,9 +419,9 @@ async function readProjectContext(
 ): Promise<string | null> {
   const id = rel || '_global';
   try {
-    const contextMd = await readTextFile(join(dirPath, 'context.md'));
-    if (id !== '_global' && contextMd === null) return null;
-    return contextMd;
+    const contextMd = readProjectTextFile(join(dirPath, 'context.md'), MAX_CONTEXT_BYTES);
+    if (id !== '_global' && contextMd === undefined) return null;
+    return contextMd ?? null;
   } catch (error) {
     if (id === '_global') throw error;
     ctx.invalidProjectPaths.add(rel);
@@ -477,9 +532,19 @@ function registerNode(registration: NodeRegistration): ProjectNode | undefined {
   return node;
 }
 
-async function scanDir(dirPath: string, parentId: string | null, ctx: ScanContext): Promise<void> {
+async function scanDir({
+  dirPath,
+  parentId,
+  ctx,
+  requireContext,
+}: ScanDirectoryRequest): Promise<void> {
   const rel = relative(ctx.projectsDir, dirPath);
-  const result = await readDefinition(dirPath, rel, ctx);
+  const result = await readDefinition({
+    dirPath,
+    rel,
+    ctx,
+    requireContext,
+  });
   if (!result) return;
 
   const agents = await loadAgentYamls(
@@ -517,7 +582,7 @@ export async function scanProjects(
     projectIdentities: new Map(),
   };
 
-  await scanDir(projectsDir, null, ctx);
+  await scanDir({ dirPath: projectsDir, parentId: null, ctx, requireContext: false });
 
   const rootProjects = [...ctx.projects.values()]
     .filter((p) => p.parentId === '_global')

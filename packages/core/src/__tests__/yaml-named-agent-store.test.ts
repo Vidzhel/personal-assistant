@@ -246,6 +246,7 @@ describe('YamlNamedAgentStore', () => {
       'name: writer\ndisplayName: Writer\nisDefault: true\nskills: []\n',
     );
     mkdirSync(join(projectsDir, 'alpha', 'child', 'agents', 'writer'), { recursive: true });
+    writeFileSync(join(projectsDir, 'alpha', 'child', 'project.yaml'), 'version: 1\n');
     writeFileSync(
       join(projectsDir, 'alpha', 'child', 'context.md'),
       '---\nravenProject:\n  version: 1\n  id: child-stable\n---\n# Child\n',

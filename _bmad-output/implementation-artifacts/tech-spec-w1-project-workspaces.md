@@ -79,7 +79,7 @@ link to these entrypoints and use the existing SDK and orchestration paths.
       before admission and revalidate before execution/tool calls. Persist SDK resume
       revision with sessions. Test native SDK
       option forwarding, local defaults, stale queued/running tasks and interruption.
-- [ ] **W1c — repository context and skills.** Project memory moved to the first W1b
+- [x] **W1c — repository context and skills.** Project memory moved to the first W1b
       checkpoint alongside agent selection. Provide bounded overview/index links and
       source locations in project prompts.
       Update existing document runtime skills and add reusable repository/rendering
@@ -183,3 +183,12 @@ production core build and compiled restart. This supersedes the earlier W1a and
 first-W1b notes above that configuration does not yet affect execution.
 Repository context links/shared skills are next, followed by mobile artifacts and
 explicit graph project scope.
+
+## W1c checkpoint — current context and repository workflows
+
+[W1c](tech-spec-w1c-workspace-context.md) is complete. Current project instructions
+and bounded repository links reach chat, execution and SDK skill agents. Explicit
+nested anchors preserve flexible working layouts; generic document/media workflows
+follow local scripts and project output conventions. Parent review, the required
+check, both definition validators, 2,443 default tests, 17 browser journeys,
+production core build and compiled restart pass. W1d is next.

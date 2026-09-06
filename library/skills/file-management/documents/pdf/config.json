@@ -4,7 +4,7 @@
   "description": "Read, create, merge, split, OCR, watermark, and encrypt PDF files",
   "mcps": ["markdownify"],
   "vendorSkills": ["anthropic-skills/pdf"],
-  "tools": ["Bash", "Read", "Write", "Glob", "Grep"],
+  "tools": ["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
   "model": "sonnet",
   "maxTurns": 25,
   "actions": [

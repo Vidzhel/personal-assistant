@@ -24,6 +24,13 @@ function mkProject(relPath: string, contextMd = 'Project context'): string {
   return dir;
 }
 
+function markNestedProject(relPath: string): void {
+  writeFileSync(
+    join(tmpDir, relPath, 'project.yaml'),
+    yamlDump({ version: 1, execution: { mode: 'default' }, sources: [] }),
+  );
+}
+
 function mkAgent(relPath: string, agent: Record<string, unknown>): void {
   const agentsDir = join(tmpDir, relPath, 'agents');
   mkdirSync(agentsDir, { recursive: true });
@@ -56,6 +63,8 @@ describe('scanProjects', () => {
     mkProject('uni', 'University');
     mkProject('uni/calculus', 'Calculus');
     mkProject('uni/physics', 'Physics');
+    markNestedProject('uni/calculus');
+    markNestedProject('uni/physics');
 
     const index = await scanProjects(tmpDir);
 
@@ -137,6 +146,8 @@ describe('scanProjects', () => {
     mkProject('uni', 'Uni');
     mkProject('uni/calculus', 'Calc');
     mkProject('uni/calculus/homework', 'HW');
+    markNestedProject('uni/calculus');
+    markNestedProject('uni/calculus/homework');
 
     const index = await scanProjects(tmpDir);
 

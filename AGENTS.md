@@ -166,8 +166,13 @@ versions; do not copy versions from historical planning documents.
   have no memory tools or autonomous workspace grant. SDK automatic memory is
   disabled. Exact workspace/agent/capability revisions govern chat session resume.
   Attached cwd loads project/local SDK settings; managed homes use explicit empty
-  setting sources. MCP configuration is always strict. W1c/d finish repository
-  overview links, shared runtime skills and browser artifacts.
+  setting sources. MCP configuration is always strict. Chat, execution and nested
+  SDK skill agents receive current ancestor context and configured instructions,
+  capped at 64 KiB. Workspace overviews link existing repository entrypoints within
+  24 KiB without reading their bodies or recursively crawling folders. Nested
+  projects require both context.md and project.yaml; unmarked working directories
+  remain ordinary files. Shared runtime skills follow local pipelines and output
+  conventions. W1d adds browser artifacts and explicit graph project filtering.
 - Preserve knowledge links and project membership before changing graph storage.
   Permission checks must be enforced in tools/runtime, not only prompt text.
 - Stop admission and own listeners, timers and in-flight local work across

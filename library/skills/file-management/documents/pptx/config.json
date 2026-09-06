@@ -4,7 +4,7 @@
   "description": "Read, create, and edit PowerPoint presentations",
   "mcps": [],
   "vendorSkills": ["anthropic-skills/pptx"],
-  "tools": ["Bash", "Read", "Write", "Glob", "Grep"],
+  "tools": ["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
   "model": "sonnet",
   "maxTurns": 25,
   "actions": [

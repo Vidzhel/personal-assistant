@@ -23,6 +23,7 @@ function mkProject(relPath: string, contextMd = 'Project context'): void {
   const dir = join(tmpDir, relPath);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'context.md'), contextMd);
+  writeFileSync(join(dir, 'project.yaml'), 'version: 1\n');
 }
 
 function mkAgent(relPath: string, agent: Record<string, unknown>): void {

@@ -274,10 +274,21 @@ describe('workspace execution resolution', () => {
     );
     mkdirSync(join(fixture.projectsDir, 'alpha/child'));
     writeFileSync(join(fixture.projectsDir, 'alpha/child/context.md'), '# Child\n');
+    writeFileSync(join(fixture.projectsDir, 'alpha/child/project.yaml'), 'version: 1\n');
     await fixture.registry.load(fixture.projectsDir);
     const get = () => resolver(fixture, fakeAgents().store).resolve({ projectId: 'alpha/child' });
     expect(get().cwd).toBe(join(fixture.projectsDir, 'alpha/child'));
     writeFileSync(join(fixture.projectsDir, 'alpha/context.md'), '# Removed managed identity\n');
     expect(get).toThrow(/identity/);
+  });
+
+  it('rejects oversized inherited instructions before model admission', async () => {
+    const fixture = await makeFixture();
+    writeFileSync(join(fixture.projectsDir, 'context.md'), 'я'.repeat(20_000));
+    writeFileSync(join(fixture.projectsDir, 'alpha/context.md'), 'я'.repeat(20_000));
+    const get = () => resolver(fixture, fakeAgents().store).resolve({ projectId: 'alpha' });
+    expect(get).toThrow(/Project instructions exceed 64 KiB/);
+    writeFileSync(join(fixture.projectsDir, 'alpha/context.md'), '# Concise project instructions');
+    expect(get().projectContextChain).toContain('Concise project instructions');
   });
 });

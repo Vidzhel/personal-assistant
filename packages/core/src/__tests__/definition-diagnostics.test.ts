@@ -24,6 +24,7 @@ function project(rootDir: string, path: string, context: string): void {
   const dir = join(rootDir, path);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'context.md'), context);
+  writeFileSync(join(dir, 'project.yaml'), 'version: 1\n');
 }
 
 describe('definition diagnostics', () => {

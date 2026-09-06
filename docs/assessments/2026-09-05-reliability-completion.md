@@ -118,8 +118,9 @@ under the owner's configured autonomy. No private repository content is copied
 into Raven's public source. No repository embedding pipeline or graph replacement
 is required for this implementation.
 
-The original definitions retain their recorded hashes except for the explicit
-summary-only maintenance template change in F9b. Unrelated owner work is preserved.
+Original definition changes are limited to the explicit summary-only maintenance
+template in F9b and W1c runtime skill instructions/tools plus the shipped Raven
+agent’s repository-work binding. Unrelated owner work is preserved.
 The owner decision waiving legacy migration/restoration is retained here as a
 scope decision, while new task, project, knowledge and provider records remain
 subject to the current persistence and recovery contracts.
@@ -133,3 +134,11 @@ tests pass. Full native access is trusted host execution, while Raven integratio
 permissions remain enforced through pre-tool hooks. Repository overview links,
 shared file skills, mobile artifacts and project-scoped graph views remain in
 ordered W1c/d work; final deployment verification is W1e.
+
+The W1c checkpoint supplies current project instructions to chat, execution and
+nested skill agents, and bounded repository overview links without content
+ingestion. Explicit nested project anchors let agents reorganize ordinary folders
+without accidentally changing Raven’s project registry. Shared runtime document
+and media skills follow repository pipelines and output conventions. Browser
+workspace/artifact controls and project graph filtering are W1d; deployment and
+final acceptance remain W1e.

@@ -4,7 +4,7 @@
   "description": "Read, create, and edit Excel spreadsheets with formulas and charts",
   "mcps": [],
   "vendorSkills": ["anthropic-skills/xlsx"],
-  "tools": ["Bash", "Read", "Write", "Glob", "Grep"],
+  "tools": ["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
   "model": "sonnet",
   "maxTurns": 25,
   "actions": [

@@ -4,7 +4,7 @@
   "description": "Read, create, and edit Word documents with full formatting",
   "mcps": [],
   "vendorSkills": ["anthropic-skills/docx"],
-  "tools": ["Bash", "Read", "Write", "Glob", "Grep"],
+  "tools": ["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
   "model": "sonnet",
   "maxTurns": 25,
   "actions": [

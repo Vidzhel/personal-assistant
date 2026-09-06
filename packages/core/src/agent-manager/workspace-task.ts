@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { AgentTask } from '@raven/shared';
+import type { AgentTask, SubAgentDefinition } from '@raven/shared';
 import { getConfig } from '../config.ts';
 import type {
   WorkspaceExecution,
@@ -32,4 +32,26 @@ export function resolveTaskWorkspace(
     throw new Error('Project execution grant changed; submit a new task');
   }
   return { ...workspace, revision };
+}
+
+/** SDK skill agents start with their own prompt; share the same project context explicitly. */
+export function applyWorkspaceContext(
+  definitions: Record<string, SubAgentDefinition>,
+  workspace?: WorkspaceExecution,
+): Record<string, SubAgentDefinition> {
+  if (!workspace) return definitions;
+  const context = [
+    workspace.projectContextChain
+      ? `## Project Context (Inherited)\n${workspace.projectContextChain}`
+      : '',
+    workspace.workspaceContext,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+  return Object.fromEntries(
+    Object.entries(definitions).map(([name, definition]) => [
+      name,
+      { ...definition, prompt: `${definition.prompt}\n\n${context}` },
+    ]),
+  );
 }
