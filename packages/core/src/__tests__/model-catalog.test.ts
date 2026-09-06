@@ -197,6 +197,50 @@ describe('ModelCatalog', () => {
 });
 
 describe('catalog normalization', () => {
+  it('refreshes SDK extended-context aliases and resolved IDs', async () => {
+    const catalog = new ModelCatalog({
+      discover: async () => [
+        {
+          value: 'default',
+          resolvedModel: 'claude-opus-5[1m]',
+          displayName: 'Default',
+          description: '',
+        },
+        {
+          value: 'opus[1m]',
+          resolvedModel: 'claude-opus-5[1m]',
+          displayName: 'Opus',
+          description: '',
+          supportsEffort: true,
+          supportedEffortLevels: ['max'],
+        },
+        {
+          value: 'claude-fable-5[1m]',
+          resolvedModel: 'claude-fable-5',
+          displayName: 'Fable',
+          description: '',
+          supportsAdaptiveThinking: true,
+        },
+      ],
+    });
+    const snapshot = await catalog.refresh();
+    expect(snapshot).toMatchObject({ stale: false, error: null });
+    expect(snapshot.models).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'claude-opus-5[1m]',
+          aliases: ['default', 'opus[1m]'],
+          supportedEffortLevels: ['max'],
+        }),
+        expect.objectContaining({
+          id: 'claude-fable-5',
+          aliases: ['claude-fable-5[1m]'],
+          supportsAdaptiveThinking: true,
+        }),
+      ]),
+    );
+  });
+
   it('merges alias and canonical rows without inventing capabilities', () => {
     expect(
       normalizeCatalogEntries([

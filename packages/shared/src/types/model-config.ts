@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
-const MODEL_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:-]*$/;
+// The SDK uses [1m] on both aliases and canonical extended-context model IDs.
+const MODEL_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._:-]*(?:\[1m\])?$/;
 const MAX_MODEL_ID_LENGTH = 128;
 
 export const MODEL_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;

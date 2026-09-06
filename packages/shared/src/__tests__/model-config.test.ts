@@ -19,6 +19,15 @@ describe('model config schema', () => {
     expect(() => ModelConfigSchema.parse({ thinking: 'fixed' })).toThrow();
   });
 
+  it('accepts the SDK extended-context suffix without allowing arbitrary brackets', () => {
+    for (const model of ['opus[1m]', 'claude-opus-5[1m]', 'claude-fable-5[1m]']) {
+      expect(ModelIdSchema.parse(model)).toBe(model);
+    }
+    for (const model of ['opus[]', 'opus[other]', 'opus[1m][1m]', 'opus[1m]/file']) {
+      expect(ModelIdSchema.safeParse(model).success).toBe(false);
+    }
+  });
+
   it('uses null only as a whole-override reset', () => {
     expect(ModelConfigOverrideSchema.parse(null)).toBeNull();
     expect(() => ModelConfigSchema.parse({ model: null })).toThrow();

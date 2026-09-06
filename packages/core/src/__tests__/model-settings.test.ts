@@ -30,6 +30,16 @@ function snapshot(models: ModelCatalogEntry[] = [entry()]): ModelCatalogSnapshot
 }
 
 describe('model settings resolution', () => {
+  it('preserves extended context through selection and mandatory-thinking policy', () => {
+    const resolved = resolveModelConfig(
+      { session: { model: 'opus[1m]', effort: 'high' }, defaults: { model: 'sonnet' } },
+      snapshot([entry({ id: 'claude-opus-5[1m]', aliases: ['opus[1m]'] })]),
+    );
+    expect(resolved.model).toBe('claude-opus-5[1m]');
+    expect(resolved.effort).toBe('high');
+    expect(getMandatoryThinkingPolicy('claude-fable-5-1[1m]')).not.toBeNull();
+  });
+
   it('merges fields by turn, session, project, agent, installation precedence', () => {
     const resolved = resolveModelConfig(
       {

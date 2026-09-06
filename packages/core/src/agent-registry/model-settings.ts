@@ -59,7 +59,7 @@ const FABLE_POLICY: MandatoryThinkingPolicy = {
   documentationUrl: 'https://platform.claude.com/docs/en/models/fable-5-1/overview',
 };
 
-const FABLE_MODEL_PATTERN = /^claude-fable-5-1(?:$|[-.:])/;
+const FABLE_MODEL_PATTERN = /^claude-fable-5-1(?:$|[-.:]|\[1m\]$)/;
 
 export function normalizeModelId(model: string): string {
   const parsed = ModelIdSchema.parse(model);
